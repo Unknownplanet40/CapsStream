@@ -2395,6 +2395,71 @@ const SettingsPage = {
       }
     }
 
+    // ─── Updates ──────────────────────────────────────────────
+    const sysInfo = ref(null);
+    const updateState = ref({
+      status: "idle",
+      current: "",
+      latest: "",
+      changelog: "",
+      last_checked: "",
+      message: "",
+    });
+    const updateChecking = ref(false);
+    const updateInstalling = ref(false);
+
+    async function loadSystemInfo() {
+      try {
+        sysInfo.value = await API.get("/api/system/info");
+      } catch (e) {}
+    }
+
+    async function checkUpdates() {
+      updateChecking.value = true;
+      updateState.value = { ...updateState.value, status: "checking", message: "Checking for updates..." };
+      try {
+        await loadSystemInfo();
+        const r = await API.get("/api/system/check-update");
+        updateState.value = {
+          status: r.status || "error",
+          current: r.current || (sysInfo.value?.version || ""),
+          latest: r.latest || "",
+          changelog: r.changelog || "",
+          last_checked: r.last_checked || "",
+          message:
+            r.status === "available" ? `Update available — v${r.latest}` :
+            r.status === "up_to_date" ? "You're up to date." :
+            "Could not check for updates. Is GITHUB_REPO configured in backend/updater.py?",
+        };
+      } catch (e) {
+        updateState.value = { ...updateState.value, status: "error", message: "Update check failed: " + (e.message || "unknown error") };
+      } finally {
+        updateChecking.value = false;
+      }
+    }
+
+    async function installUpdate() {
+      updateInstalling.value = true;
+      try {
+        const r = await API.post("/api/system/apply-update", {});
+        if (r.success && r.ui_only) {
+          updateState.value = { ...updateState.value, status: "up_to_date", message: "Update installed — reloading…" };
+          setTimeout(() => {
+            // Hard, cache-busting reload so the new UI appears immediately
+            location.href = location.origin + location.pathname + "?v=" + Date.now();
+          }, 900);
+        } else if (r.success) {
+          updateState.value = { ...updateState.value, status: "up_to_date", message: r.message };
+        } else {
+          updateState.value = { ...updateState.value, status: "error", message: r.message || "Install failed" };
+        }
+      } catch (e) {
+        addToast(e.message || "Install failed", "error");
+      } finally {
+        updateInstalling.value = false;
+      }
+    }
+
     onMounted(() => {
       if (store.profile?.is_kids) {
         addToast("Settings is locked in Kids Mode 🔒", "warning");
