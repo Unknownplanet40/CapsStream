@@ -1,0 +1,1564 @@
+"""
+app.py — CapsStream main Flask application.
+
+Run with: python app.py
+Or double-click start.bat
+"""
+
+import os
+import json
+import hashlib
+import threading
+import subprocess
+from flask import (
+    Flask, jsonify, request, send_file,
+    render_template, session, abort, Response
+)
+
+from backend.db import (
+    init_db, get_all_media, get_media_by_id, get_media_by_tmdb, get_best_media_source, get_media_quality_options,
+    search_media, get_unique_shows, get_recently_added, get_top_rated,
+    get_by_genre, get_all_genres, get_random_pick,
+    get_all_profiles, get_profile, create_profile, update_profile, delete_profile, verify_pin,
+    get_progress, save_progress, delete_progress, get_continue_watching,
+    get_favorites, toggle_favorite, is_favorite,
+    get_collections, create_collection, delete_collection,
+    add_to_collection, remove_from_collection,
+    get_unmatched, upsert_media
+)
+from backend.streamer import stream_file
+from backend.subtitles import find_subtitles, get_vtt_path
+from backend.scanner import scan_library, get_scan_status
+from backend.settings import load_config, save_config, test_api_key, apply_system_file_hiding
+
+# ─── App Setup ────────────────────────────────────────────────────────────────
+
+import time
+SERVER_START_TIME = time.time()
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+app = Flask(__name__, template_folder="templates", static_folder="static")
+app.secret_key = "capsstream_secret_key_fixed_v1"
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10MB max upload
+
+
+def load_config():
+    # Delegate so .env / environment secrets are included
+    from backend.settings import load_config as _load
+    return _load()
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+def _hash_pin(pin):
+    return hashlib.sha256(pin.encode()).hexdigest()
+
+
+def _current_profile():
+    return session.get("profile_id")
+
+
+def _require_profile():
+    pid = _current_profile()
+    if not pid:
+        abort(401, description="No profile selected")
+    return pid
+
+
+def _jsonify_rows(rows):
+    return jsonify(rows)
+
+
+_GITHUB_PROFILE_CACHE = {"data": None, "fetched_at": 0.0}
+
+def _get_github_profile():
+    """Cached GitHub profile — refreshed at most once per hour, falls back to defaults offline."""
+    import time as _time
+    now = _time.time()
+    if _GITHUB_PROFILE_CACHE["data"] and now - _GITHUB_PROFILE_CACHE["fetched_at"] < 3600:
+        return _GITHUB_PROFILE_CACHE["data"]
+
+    profile = {
+        "login": "Unknownplanet40",
+        "name": "<Caps />",
+        "avatar_url": "https://avatars.githubusercontent.com/u/57881134?v=4",
+        "html_url": "https://github.com/Unknownplanet40",
+        "bio": "I debug life the same way I debug code with patience, caffeine, and a bit of panic.",
+        "location": "Philippines",
+        "public_repos": 20,
+        "followers": 13,
+        "following": 8,
+        "created_year": "2019"
+    }
+    try:
+        import urllib.request
+        req = urllib.request.Request("https://api.github.com/users/Unknownplanet40", headers={"User-Agent": "CapsStream"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            gh_data = json.loads(resp.read().decode())
+            if gh_data and "avatar_url" in gh_data:
+                profile["name"] = gh_data.get("name") or gh_data.get("login") or "<Caps />"
+                profile["login"] = gh_data.get("login") or "Unknownplanet40"
+                profile["avatar_url"] = gh_data.get("avatar_url") or profile["avatar_url"]
+                profile["html_url"] = gh_data.get("html_url") or profile["html_url"]
+                profile["bio"] = gh_data.get("bio") or profile["bio"]
+                profile["location"] = gh_data.get("location") or profile["location"]
+                profile["public_repos"] = gh_data.get("public_repos", 20)
+                profile["followers"] = gh_data.get("followers", 13)
+                profile["following"] = gh_data.get("following", 8)
+                created_raw = gh_data.get("created_at") or ""
+                if len(created_raw) >= 4:
+                    profile["created_year"] = created_raw[:4]
+    except Exception:
+        pass
+
+    _GITHUB_PROFILE_CACHE["data"] = profile
+    _GITHUB_PROFILE_CACHE["fetched_at"] = now
+    return profile
+
+
+# ─── Main Page ────────────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/.well-known/appspecific/com.chrome.devtools.json")
+def chrome_devtools_json():
+    return jsonify({})
+
+
+# ─── Static Media (images) ────────────────────────────────────────────────────
+
+# Post-scan the UI can request hundreds of posters at once. Without limits,
+# each miss held a Flask thread for up to 10s of TMDb download -> thread
+# starvation froze every other API. Identical in-flight downloads are deduped,
+# network fetches are capped, and total queued requests are capped.
+_IMAGE_INFLIGHT_LOCK = threading.Lock()
+_IMAGE_INFLIGHT = set()                               # filenames downloading now
+_IMAGE_DOWNLOAD_SEM = threading.BoundedSemaphore(4)   # max parallel TMDb fetches
+_IMAGE_WAITER_SEM = threading.BoundedSemaphore(16)    # max queued requests
+
+@app.route("/metadata/images/<path:filename>")
+def serve_metadata_image(filename):
+    img_dir = os.path.join(BASE_DIR, "data", "metadata", "images")
+    img_path = os.path.join(img_dir, filename)
+
+    if not os.path.isfile(img_path):
+        parts = filename.split("_", 1)
+        if len(parts) == 2 and _IMAGE_WAITER_SEM.acquire(blocking=False):
+            size, tmdb_file = parts[0], parts[1]
+            is_owner = False
+            try:
+                # Collapse duplicate concurrent requests into one download
+                while True:
+                    with _IMAGE_INFLIGHT_LOCK:
+                        if filename not in _IMAGE_INFLIGHT:
+                            _IMAGE_INFLIGHT.add(filename)
+                            is_owner = True
+                            break
+                    time.sleep(0.2)
+                    if os.path.isfile(img_path):
+                        break
+
+                with _IMAGE_DOWNLOAD_SEM:
+                    deadline = time.time() + 20
+                    while not os.path.isfile(img_path) and time.time() < deadline:
+                        if is_owner:
+                            try:
+                                url = f"https://image.tmdb.org/t/p/{size}/{tmdb_file}"
+                                r = requests.get(url, timeout=10)
+                                if r.status_code == 200:
+                                    os.makedirs(img_dir, exist_ok=True)
+                                    with open(img_path, "wb") as f:
+                                        f.write(r.content)
+                            except Exception as e:
+                                print(f"[Image Server] On-demand download failed for {filename}: {e}")
+                            break
+                        time.sleep(0.25)
+            finally:
+                if is_owner:
+                    with _IMAGE_INFLIGHT_LOCK:
+                        _IMAGE_INFLIGHT.discard(filename)
+                _IMAGE_WAITER_SEM.release()
+
+        if os.path.isfile(img_path):
+            resp = send_file(img_path, conditional=True)
+            resp.headers["Cache-Control"] = "public, max-age=604800"
+            return resp
+
+        # Fallback inline SVG placeholder — no-store so a transient failure
+        # (download queue full / TMDb down) is retried on the next view
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">
+          <rect width="300" height="450" fill="#181824"/>
+          <text x="50%" y="48%" dominant-baseline="middle" text-anchor="middle" fill="#666" font-size="48">🎬</text>
+          <text x="50%" y="58%" dominant-baseline="middle" text-anchor="middle" fill="#888" font-family="sans-serif" font-size="14">No Poster Available</text>
+        </svg>"""
+        return Response(svg, mimetype="image/svg+xml", headers={"Cache-Control": "no-store"})
+
+    resp = send_file(img_path, conditional=True)
+    # Posters/backdrops rarely change — cache aggressively so large libraries
+    # don't re-fetch thousands of images after a scan or page reload
+    resp.headers["Cache-Control"] = "public, max-age=604800"
+    return resp
+
+
+# ─── Profiles API ─────────────────────────────────────────────────────────────
+
+@app.route("/api/profiles", methods=["GET"])
+def api_get_profiles():
+    return jsonify(get_all_profiles())
+
+
+@app.route("/api/profiles", methods=["POST"])
+def api_create_profile():
+    data = request.json or {}
+    name = (data.get("name") or "").strip()
+    raw_pin = data.get("pin")
+    pin = str(raw_pin).strip() if raw_pin is not None else ""
+    avatar = data.get("avatar", "🎬")
+    color  = data.get("color", "#e50914")
+
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+    if pin and len(pin) != 4:
+        return jsonify({"error": "PIN must be exactly 4 digits"}), 400
+
+    is_kids = bool(data.get("is_kids", False))
+    pin_hash = _hash_pin(pin) if pin else None
+    pid = create_profile(name, pin_hash, avatar, color, is_kids=is_kids)
+    return jsonify({"id": pid, "name": name, "avatar": avatar, "color": color, "is_kids": is_kids}), 201
+
+
+@app.route("/api/profiles/<int:profile_id>", methods=["PUT"])
+def api_update_profile(profile_id):
+    data = request.json or {}
+    name = (data.get("name") or "").strip()
+    raw_pin = data.get("pin")
+    is_kids = bool(data.get("is_kids", False))
+    avatar = data.get("avatar", "🎬")
+    color  = data.get("color", "#e50914")
+    update_pin = bool(data.get("update_pin", False))
+
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+
+    if is_kids:
+        pin_hash = None
+        update_pin = True
+    else:
+        if update_pin:
+            pin = str(raw_pin).strip() if raw_pin is not None else ""
+            if pin and len(pin) != 4:
+                return jsonify({"error": "PIN must be exactly 4 digits"}), 400
+            pin_hash = _hash_pin(pin) if pin else None
+        else:
+            pin_hash = None
+
+    update_profile(profile_id, name, pin_hash, avatar, color, is_kids, update_pin=update_pin)
+
+    return jsonify({
+        "id": profile_id,
+        "name": name,
+        "avatar": avatar,
+        "color": color,
+        "is_kids": is_kids,
+        "has_pin": bool(pin_hash)
+    })
+
+
+@app.route("/api/profiles/<int:profile_id>", methods=["DELETE", "POST"])
+def api_delete_profile(profile_id):
+    # 1. Kids profile lockout check
+    active_pid = _current_profile()
+    if active_pid:
+        active_prof = get_profile(active_pid)
+        if active_prof and active_prof.get("is_kids"):
+            return jsonify({"error": "Kids profiles cannot delete profiles"}), 403
+
+    # 2. Last profile guard
+    all_profiles = get_all_profiles()
+    if len(all_profiles) <= 1:
+        return jsonify({"error": "Cannot delete the only profile"}), 400
+
+    target = get_profile(profile_id)
+    if not target:
+        return jsonify({"error": "Profile not found"}), 404
+
+    # 3. PIN verification for profiles with PIN
+    data = request.json if (request.data and request.is_json) else {}
+    raw_pin = data.get("pin") if data else request.args.get("pin")
+    pin = str(raw_pin).strip() if raw_pin is not None else ""
+    pin_hash = _hash_pin(pin) if pin else None
+
+    if target.get("pin_hash") and target.get("pin_hash") != "":
+        if not verify_pin(profile_id, pin_hash):
+            return jsonify({"error": "Incorrect PIN"}), 401
+
+    delete_profile(profile_id)
+    if session.get("profile_id") == profile_id:
+        session.pop("profile_id", None)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/profiles/auth", methods=["POST"])
+def api_auth_profile():
+    data = request.json or {}
+    profile_id = data.get("profile_id")
+    raw_pin = data.get("pin")
+    pin = str(raw_pin).strip() if raw_pin is not None else ""
+
+    if not profile_id:
+        return jsonify({"error": "profile_id required"}), 400
+
+    profile = get_profile(profile_id)
+    if not profile:
+        return jsonify({"error": "Profile not found"}), 404
+
+    pin_hash = _hash_pin(pin) if pin else ""
+    if not verify_pin(profile_id, pin_hash if pin else None):
+        return jsonify({"error": "Incorrect PIN"}), 401
+
+    session["profile_id"] = profile_id
+    return jsonify({"ok": True, "profile": {
+        "id":      profile["id"],
+        "name":    profile["name"],
+        "avatar":  profile["avatar"],
+        "color":   profile["color"],
+        "is_kids": bool(profile.get("is_kids", 0)),
+    }})
+
+
+@app.route("/api/profiles/me", methods=["GET"])
+def api_me():
+    pid = _current_profile()
+    if not pid:
+        return jsonify(None)
+    profile = get_profile(pid)
+    if not profile:
+        session.pop("profile_id", None)
+        return jsonify(None)
+    return jsonify({
+        "id":      profile["id"],
+        "name":    profile["name"],
+        "avatar":  profile["avatar"],
+        "color":   profile["color"],
+        "is_kids": bool(profile.get("is_kids", 0)),
+    })
+
+
+@app.route("/api/profiles/logout", methods=["POST"])
+def api_logout():
+    session.pop("profile_id", None)
+    return jsonify({"ok": True})
+
+
+# ─── Settings API ─────────────────────────────────────────────────────────────
+
+from backend.settings import load_config, save_config, test_api_key
+
+@app.route("/api/settings", methods=["GET"])
+def api_get_settings():
+    return jsonify(load_config())
+
+
+@app.route("/api/settings", methods=["POST"])
+def api_post_settings():
+    data = request.json or {}
+    ok, result = save_config(data)
+    if ok:
+        return jsonify({"ok": True, "config": result})
+    return jsonify({"error": result}), 500
+
+
+@app.route("/api/settings/test-api", methods=["POST"])
+def api_test_api_key():
+    data = request.json or {}
+    provider = data.get("provider", "")
+    key = data.get("key", "")
+    ok, message = test_api_key(provider, key)
+    return jsonify({"ok": ok, "message": message})
+
+
+@app.route("/api/system/cache", methods=["GET"])
+def api_cache_info():
+    from backend.settings import get_cache_info
+    return jsonify(get_cache_info())
+
+
+@app.route("/api/system/cache", methods=["DELETE"])
+def api_clear_cache():
+    from backend.settings import clear_cache
+    cleared = clear_cache()
+    return jsonify({"ok": True, "cleared": cleared})
+
+
+@app.route("/api/system/reset", methods=["POST"])
+def api_system_reset():
+    data = request.json or {}
+    clear_media = data.get("clear_media_files", False)
+    from backend.settings import reset_application
+    reset_application(clear_media_files=clear_media)
+    session.clear()
+    return jsonify({"ok": True, "message": "Application reset complete"})
+
+
+# ─── Library / Home API ───────────────────────────────────────────────────────
+
+@app.route("/api/home", methods=["GET"])
+def api_home():
+    pid = _current_profile()
+    rows = []
+
+    # Continue Watching (profile-specific)
+    if pid:
+        cw = get_continue_watching(pid, limit=15)
+        if cw:
+            rows.append({"title": "Continue Watching", "type": "continue", "items": cw})
+
+    # Recently Added
+    recent = get_recently_added(limit=20)
+    if recent:
+        rows.append({"title": "Recently Added", "type": "row", "items": recent})
+
+    # Top Rated
+    top = get_top_rated(limit=20)
+    if top:
+        rows.append({"title": "Top Rated", "type": "row", "items": top})
+
+    # Movies
+    movies = get_top_rated(limit=20, media_type="movie")
+    if not movies:
+        movies = get_unique_shows("movie")[:20]
+    if movies:
+        rows.append({"title": "Movies", "type": "row", "items": movies})
+
+    # Series
+    series = get_unique_shows("series")
+    if series:
+        rows.append({"title": "Series", "type": "row", "items": series[:20]})
+
+    # Anime
+    anime = get_unique_shows("anime")
+    if anime:
+        rows.append({"title": "Anime", "type": "row", "items": anime[:20]})
+
+    # Random Pick
+    random_picks = get_random_pick(limit=10)
+    if random_picks:
+        rows.append({"title": "Discover Something New", "type": "row", "items": random_picks})
+
+    # Genre rows
+    genres = get_all_genres()
+    priority_genres = ["Action", "Comedy", "Drama", "Horror", "Sci-Fi", "Science Fiction",
+                       "Romance", "Thriller", "Animation", "Documentary", "Fantasy"]
+    shown_genres = [g for g in priority_genres if g in genres]
+    if not shown_genres:
+        shown_genres = genres[:5]
+
+    for genre in shown_genres[:4]:  # Max 4 genre rows
+        items = get_by_genre(genre, limit=15)
+        if items:
+            rows.append({"title": genre, "type": "row", "items": items})
+
+    return jsonify(rows)
+
+
+@app.route("/api/library", methods=["GET"])
+def api_library():
+    media_type = request.args.get("type")
+    return _jsonify_rows(get_unique_shows(media_type if media_type else None))
+
+
+@app.route("/api/media/<int:media_id>", methods=["GET"])
+def api_media_detail(media_id):
+    media = get_best_media_source(media_id)
+    if not media:
+        return jsonify({"error": "Not found"}), 404
+
+    if not media.get("logo_path"):
+        from backend.matcher import ensure_media_logo
+        ensure_media_logo(media)
+
+    if media.get("tmdb_id") and not media.get("imdb_id"):
+        from backend.matcher import fetch_imdb_id
+        imdb_id = fetch_imdb_id(media["tmdb_id"], media.get("type", "movie"))
+        if imdb_id:
+            media["imdb_id"] = imdb_id
+            try:
+                from backend.db import get_conn
+                conn = get_conn()
+                conn.execute("UPDATE media SET imdb_id=? WHERE tmdb_id=?", (imdb_id, media["tmdb_id"]))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+
+    pid = _current_profile()
+    if pid:
+        progress = get_progress(pid, media_id)
+        media["progress"] = dict(progress) if progress else None
+        media["is_favorite"] = is_favorite(pid, media_id)
+    else:
+        media["progress"] = None
+        media["is_favorite"] = False
+
+    # For series/anime, also return all episodes grouped by season
+    if media["type"] in ("series", "anime") and media.get("tmdb_id"):
+        all_eps = get_media_by_tmdb(media["tmdb_id"], media["type"])
+        from backend.matcher import fetch_season_episodes
+
+        local_map = {}
+        for ep_row in all_eps:
+            ep = dict(ep_row)
+            try:
+                s_int = int(ep.get("season") or 1)
+            except Exception:
+                s_int = 1
+            try:
+                ep_int = int(ep.get("episode") or 1)
+            except Exception:
+                ep_int = 1
+            local_map[(s_int, ep_int)] = ep
+
+        from backend.matcher import fetch_season_episodes, get_show_seasons_list
+
+        seasons = {}
+        s_nums_set = set(k[0] for k in local_map.keys())
+        tmdb_seasons = get_show_seasons_list(media["tmdb_id"], media["type"])
+        if tmdb_seasons:
+            for ts in tmdb_seasons:
+                if ts > 0:
+                    s_nums_set.add(ts)
+
+        s_nums = sorted(list(s_nums_set))
+        if not s_nums:
+            s_nums = [1]
+
+        for s_num in s_nums:
+            tmdb_eps = fetch_season_episodes(media["tmdb_id"], s_num)
+            merged_list = []
+            if tmdb_eps:
+                seen_ep_nums = set()
+                for meta in tmdb_eps:
+                    ep_num = meta["episode_number"]
+                    seen_ep_nums.add(ep_num)
+                    if (s_num, ep_num) in local_map:
+                        ep = dict(local_map[(s_num, ep_num)])
+                        ep["is_local"] = True
+                        if not ep.get("ep_title") or ep.get("ep_title") == ep.get("title"):
+                            ep["ep_title"] = meta.get("name")
+                        ep["overview"] = meta.get("overview") or ep.get("overview")
+                        ep["still_path"] = meta.get("still_path") or ep.get("backdrop_path")
+                        if meta.get("runtime"):
+                            ep["duration"] = meta.get("runtime") * 60
+                        if pid and ep.get("id"):
+                            ep_progress = get_progress(pid, ep["id"])
+                            ep["progress"] = dict(ep_progress) if ep_progress else None
+                        merged_list.append(ep)
+                    else:
+                        merged_list.append({
+                            "id": None,
+                            "is_local": False,
+                            "season": s_num,
+                            "episode": ep_num,
+                            "ep_title": meta.get("name"),
+                            "overview": meta.get("overview"),
+                            "still_path": meta.get("still_path") or media.get("backdrop_path"),
+                            "duration": (meta.get("runtime") * 60) if meta.get("runtime") else None,
+                            "title": media.get("title"),
+                            "progress": None
+                        })
+                for (ls, le), ep in local_map.items():
+                    if ls == s_num and le not in seen_ep_nums:
+                        ep_dict = dict(ep)
+                        ep_dict["is_local"] = True
+                        if pid and ep_dict.get("id"):
+                            ep_progress = get_progress(pid, ep_dict["id"])
+                            ep_dict["progress"] = dict(ep_progress) if ep_progress else None
+                        merged_list.append(ep_dict)
+            else:
+                for (ls, le), ep in local_map.items():
+                    if ls == s_num:
+                        ep_dict = dict(ep)
+                        ep_dict["is_local"] = True
+                        if pid and ep_dict.get("id"):
+                            ep_progress = get_progress(pid, ep_dict["id"])
+                            ep_dict["progress"] = dict(ep_progress) if ep_progress else None
+                        merged_list.append(ep_dict)
+
+            seasons[str(s_num)] = sorted(merged_list, key=lambda e: e.get("episode") or 0)
+
+        media["seasons"] = seasons
+
+    # Parse cast_json
+    if media.get("cast_json"):
+        try:
+            media["cast"] = json.loads(media["cast_json"])
+        except Exception:
+            media["cast"] = []
+    else:
+        media["cast"] = []
+
+    # Find subtitles (external, Subs/ subfolders, and embedded)
+    from backend.subtitles import get_all_subtitles
+    media["subtitles"] = get_all_subtitles(media["file_path"], media_id)
+
+    # Probe audio tracks for Multi-Audio indicator badge
+    from backend.audio_probe import probe_audio_tracks
+    media["audio_tracks"] = probe_audio_tracks(media["file_path"])
+    media["has_multi_audio"] = len(media["audio_tracks"]) > 1
+
+    return jsonify(media)
+
+
+@app.route("/api/media/<int:media_id>/trailer", methods=["GET"])
+def api_media_trailer(media_id):
+    media = get_media_by_id(media_id)
+    if not media:
+        return jsonify({"error": "Media not found"}), 404
+
+    from backend.matcher import get_media_trailer
+    trailer = get_media_trailer(media.get("tmdb_id"), media.get("type", "movie"))
+    if not trailer:
+        return jsonify({"error": "Trailer not available for this title"}), 404
+
+    return jsonify(trailer)
+
+
+@app.route("/api/show/<int:tmdb_id>", methods=["GET"])
+def api_show_detail(tmdb_id):
+    """Get show detail by TMDb ID (or fallback to media ID)."""
+    media_type = request.args.get("type", "series")
+    episodes = get_media_by_tmdb(tmdb_id, media_type)
+    if not episodes:
+        # Fallback: check if tmdb_id is a media ID
+        single = get_media_by_id(tmdb_id)
+        if single:
+            if single.get("tmdb_id"):
+                episodes = get_media_by_tmdb(single["tmdb_id"], single.get("type", media_type))
+            else:
+                episodes = [single]
+
+    if not episodes:
+        return jsonify({"error": "Not found"}), 404
+
+    # Use first episode's show-level metadata
+    show = dict(episodes[0])
+    show["is_mounted"] = any(ep.get("is_mounted", False) for ep in episodes)
+    # Remove episode-specific fields for the show object
+    for f in ["season", "episode", "ep_title", "file_path", "file_size", "duration"]:
+        show.pop(f, None)
+
+    if show.get("cast_json"):
+        try:
+            show["cast"] = json.loads(show["cast_json"])
+        except Exception:
+            show["cast"] = []
+
+    pid = _current_profile()
+    from backend.matcher import fetch_season_episodes
+
+    local_map = {}
+    for ep_row in episodes:
+        ep = dict(ep_row)
+        try:
+            s_int = int(ep.get("season") or 1)
+        except Exception:
+            s_int = 1
+        try:
+            ep_int = int(ep.get("episode") or 1)
+        except Exception:
+            ep_int = 1
+        local_map[(s_int, ep_int)] = ep
+
+    seasons = {}
+    tmdb_id = show.get("tmdb_id")
+    s_nums = set(k[0] for k in local_map.keys())
+    if not s_nums:
+        s_nums = {1}
+
+    for s_num in s_nums:
+        tmdb_eps = fetch_season_episodes(tmdb_id, s_num) if tmdb_id else []
+        merged_list = []
+        if tmdb_eps:
+            seen_ep_nums = set()
+            for meta in tmdb_eps:
+                ep_num = meta["episode_number"]
+                seen_ep_nums.add(ep_num)
+                if (s_num, ep_num) in local_map:
+                    ep = dict(local_map[(s_num, ep_num)])
+                    ep["is_local"] = True
+                    if not ep.get("ep_title") or ep.get("ep_title") == ep.get("title"):
+                        ep["ep_title"] = meta.get("name")
+                    ep["overview"] = meta.get("overview") or ep.get("overview")
+                    ep["still_path"] = meta.get("still_path") or ep.get("backdrop_path")
+                    if meta.get("runtime"):
+                        ep["duration"] = meta.get("runtime") * 60
+                    if pid and ep.get("id"):
+                        ep_progress = get_progress(pid, ep["id"])
+                        ep["progress"] = dict(ep_progress) if ep_progress else None
+                    merged_list.append(ep)
+                else:
+                    merged_list.append({
+                        "id": None,
+                        "is_local": False,
+                        "season": s_num,
+                        "episode": ep_num,
+                        "ep_title": meta.get("name"),
+                        "overview": meta.get("overview"),
+                        "still_path": meta.get("still_path") or show.get("backdrop_path"),
+                        "duration": (meta.get("runtime") * 60) if meta.get("runtime") else None,
+                        "title": show.get("title"),
+                        "progress": None
+                    })
+            # Add any extra local files not in TMDb list
+            for (ls, le), ep in local_map.items():
+                if ls == s_num and le not in seen_ep_nums:
+                    ep_dict = dict(ep)
+                    ep_dict["is_local"] = True
+                    if pid and ep_dict.get("id"):
+                        ep_progress = get_progress(pid, ep_dict["id"])
+                        ep_dict["progress"] = dict(ep_progress) if ep_progress else None
+                    merged_list.append(ep_dict)
+        else:
+            # Fallback to local files only
+            for (ls, le), ep in local_map.items():
+                if ls == s_num:
+                    ep_dict = dict(ep)
+                    ep_dict["is_local"] = True
+                    if pid and ep_dict.get("id"):
+                        ep_progress = get_progress(pid, ep_dict["id"])
+                        ep_dict["progress"] = dict(ep_progress) if ep_progress else None
+                    merged_list.append(ep_dict)
+
+        seasons[str(s_num)] = sorted(merged_list, key=lambda e: e.get("episode") or 0)
+
+    show["seasons"] = seasons
+    if pid and episodes:
+        show["is_favorite"] = is_favorite(pid, episodes[0]["id"])
+    else:
+        show["is_favorite"] = False
+
+    # Probe first local episode for Multi-Audio badge
+    if episodes:
+        first_local = next((ep for ep in episodes if ep.get("file_path")), None)
+        if first_local:
+            from backend.audio_probe import probe_audio_tracks
+            show["audio_tracks"] = probe_audio_tracks(first_local["file_path"])
+            show["has_multi_audio"] = len(show.get("audio_tracks", [])) > 1
+
+    return jsonify(show)
+
+
+@app.route("/api/search", methods=["GET"])
+def api_search():
+    q = request.args.get("q", "").strip()
+    media_type = request.args.get("type", "all")
+    genre = request.args.get("genre", "all")
+    sort_by = request.args.get("sort", "relevance")
+
+    from backend.db import search_media
+    results = search_media(query=q, media_type=media_type, genre=genre, sort_by=sort_by)
+    return jsonify(results)
+
+
+@app.route("/api/genres", methods=["GET"])
+def api_genres():
+    return jsonify(get_all_genres())
+
+
+# ─── Streaming ────────────────────────────────────────────────────────────────
+
+@app.route("/api/skip-times/<int:media_id>")
+def api_skip_times(media_id):
+    from backend.skip_times import fetch_skip_times
+    skip_data = fetch_skip_times(media_id)
+    return jsonify(skip_data)
+
+@app.route("/api/quality-options/<int:media_id>")
+def api_quality_options(media_id):
+    options = get_media_quality_options(media_id)
+    return jsonify(options)
+
+
+@app.route("/api/audio-tracks/<int:media_id>")
+def api_audio_tracks(media_id):
+    media = get_best_media_source(media_id)
+    if not media:
+        abort(404)
+    from backend.audio_probe import probe_audio_tracks
+    tracks = probe_audio_tracks(media["file_path"])
+    return jsonify(tracks)
+
+
+@app.route("/api/stream/<int:media_id>")
+def api_stream(media_id):
+    media = get_best_media_source(media_id)
+    if not media:
+        abort(404)
+
+    # Audio-only mode: the player keeps video native (muted) and streams just
+    # the chosen track to a synced <audio> element.
+    if request.args.get("audio_only") in ("1", "true"):
+        audio_track = request.args.get("audio_track", "")
+        at = request.args.get("at", type=float, default=0.0)
+        if not audio_track.isdigit():
+            abort(400, description="audio_track required for audio-only mode")
+        from backend.streamer import stream_audio_only
+        return stream_audio_only(media["file_path"], int(audio_track), start_time=at)
+
+    # Hardware-accelerated full conversion (compatibility playback)
+    if request.args.get("transcode") in ("1", "true"):
+        audio_track = request.args.get("audio_track", "")
+        track_idx = int(audio_track) if audio_track.isdigit() else 0
+        start_time = request.args.get("start", type=float, default=0.0)
+        max_height = request.args.get("max_height", type=int, default=1080)
+        from backend.streamer import stream_video_convert
+        return stream_video_convert(
+            media["file_path"], audio_track_index=track_idx,
+            start_time=start_time, max_height=max_height,
+        )
+
+    audio_track = request.args.get("audio_track")
+    start_time = request.args.get("start", type=float, default=0.0)
+
+    if audio_track is not None and audio_track != "" and str(audio_track).isdigit():
+        track_idx = int(audio_track)
+        from backend.streamer import stream_transcoded
+        return stream_transcoded(media["file_path"], audio_track_index=track_idx, start_time=start_time)
+
+    return stream_file(media["file_path"])
+
+
+@app.route("/api/transcode-caps", methods=["GET"])
+def api_transcode_caps():
+    """Reports the best available video encoder for compatibility playback."""
+    from backend.streamer import describe_hw_encoder
+    return jsonify(describe_hw_encoder())
+
+
+@app.route("/api/stream-start/<int:media_id>")
+def api_stream_start(media_id):
+    """
+    Returns the keyframe-aligned start position for a requested content time.
+    The player calls this before switching to a transcoded audio track so the
+    stream begins exactly where video and audio can start in sync.
+    """
+    media = get_best_media_source(media_id)
+    if not media:
+        abort(404)
+    start_time = request.args.get("start", type=float, default=0.0)
+    from backend.streamer import find_keyframe_before
+    aligned = find_keyframe_before(media["file_path"], start_time)
+    return jsonify({"requested": start_time, "start": aligned})
+
+
+# ─── Subtitles ────────────────────────────────────────────────────────────────
+
+@app.route("/api/subtitles/<int:media_id>/embedded/<int:stream_index>.vtt")
+def api_embedded_subtitles(media_id, stream_index):
+    media = get_best_media_source(media_id)
+    if not media:
+        abort(404)
+
+    from backend.subtitles import extract_embedded_vtt
+    vtt_path = extract_embedded_vtt(media["file_path"], stream_index, media_id)
+    if not vtt_path or not os.path.exists(vtt_path):
+        abort(404)
+
+    return send_file(vtt_path, mimetype="text/vtt")
+
+
+@app.route("/api/subtitles/<int:media_id>/<path:filename>")
+def api_subtitles(media_id, filename):
+    media = get_best_media_source(media_id)
+    if not media:
+        abort(404)
+
+    video_dir = os.path.dirname(media["file_path"])
+    sub_path  = os.path.normpath(os.path.join(video_dir, filename))
+
+    video_dir_norm = os.path.normpath(video_dir).lower()
+    parent_dir_norm = os.path.normpath(os.path.dirname(video_dir)).lower()
+    sub_path_norm  = os.path.normpath(sub_path).lower()
+
+    if not sub_path_norm.startswith(video_dir_norm) and not sub_path_norm.startswith(parent_dir_norm):
+        abort(403)
+
+    from backend.subtitles import get_vtt_path
+    vtt_path = get_vtt_path(sub_path)
+    if not vtt_path:
+        abort(404)
+
+    return send_file(vtt_path, mimetype="text/vtt")
+
+
+@app.route("/api/subtitles/online/search", methods=["GET"])
+def api_search_online_subtitles():
+    media_id = request.args.get("media_id")
+    if not media_id:
+        return jsonify({"error": "media_id is required"}), 400
+    media = get_media_by_id(int(media_id))
+    if not media:
+        return jsonify({"error": "Media not found"}), 404
+
+    from backend.subtitles import search_online_subtitles
+    results = search_online_subtitles(
+        title=media.get("title") or media.get("original_title") or "",
+        imdb_id=media.get("imdb_id"),
+        season=media.get("season"),
+        episode=media.get("episode")
+    )
+    return jsonify(results)
+
+
+@app.route("/api/subtitles/online/download", methods=["POST"])
+def api_download_online_subtitle():
+    data = request.json or {}
+    slug = data.get("slug") or data.get("id")
+    media_id = data.get("media_id")
+    if not slug or not media_id:
+        return jsonify({"error": "slug and media_id are required"}), 400
+
+    from backend.subtitles import download_online_subtitle
+    sub_meta = download_online_subtitle(slug, int(media_id))
+    if not sub_meta:
+        return jsonify({"error": "Failed to download subtitle"}), 500
+
+    return jsonify(sub_meta)
+
+
+# ─── Watch Progress ───────────────────────────────────────────────────────────
+
+@app.route("/api/stats", methods=["GET"])
+def api_get_profile_stats():
+    pid = _require_profile()
+    from backend.db import get_profile_watch_stats
+    stats = get_profile_watch_stats(pid)
+    return jsonify(stats)
+
+
+@app.route("/api/achievements/unlock", methods=["POST"])
+def api_unlock_custom_achievement():
+    pid = _require_profile()
+    data = request.json or {}
+    achievement_id = data.get("achievement_id")
+    if not achievement_id:
+        return jsonify({"error": "achievement_id required"}), 400
+    from backend.db import unlock_achievement
+    unlocked_ach = unlock_achievement(pid, achievement_id)
+    return jsonify({"ok": True, "unlocked": unlocked_ach})
+
+
+@app.route("/api/progress", methods=["POST"])
+def api_save_progress():
+    pid = _require_profile()
+    data = request.json or {}
+    media_id = data.get("media_id")
+    position = data.get("position", 0)
+    duration = data.get("duration", 0)
+    completed = data.get("completed", False)
+
+    if not media_id:
+        return jsonify({"error": "media_id required"}), 400
+
+    save_progress(pid, media_id, position, duration, completed)
+    from backend.db import check_and_unlock_achievements, ACHIEVEMENTS
+    newly_unlocked_ids = check_and_unlock_achievements(pid)
+    unlocked_items = [a for a in ACHIEVEMENTS if a["id"] in newly_unlocked_ids]
+    return jsonify({"ok": True, "unlocked_achievements": unlocked_items})
+
+
+@app.route("/api/progress/<int:media_id>", methods=["GET"])
+def api_get_progress(media_id):
+    pid = _require_profile()
+    progress = get_progress(pid, media_id)
+    return jsonify(dict(progress) if progress else {})
+
+
+@app.route("/api/progress/<int:media_id>", methods=["DELETE"])
+def api_delete_progress(media_id):
+    pid = _require_profile()
+    delete_progress(pid, media_id)
+    return jsonify({"ok": True})
+
+
+# ─── Favorites ────────────────────────────────────────────────────────────────
+
+@app.route("/api/favorites", methods=["GET"])
+def api_get_favorites():
+    pid = _require_profile()
+    return _jsonify_rows(get_favorites(pid))
+
+
+@app.route("/api/favorites/toggle", methods=["POST"])
+@app.route("/api/favorites/<int:media_id>", methods=["POST"])
+def api_toggle_favorite(media_id=None):
+    pid = _require_profile()
+    if media_id is None:
+        data = request.json or {}
+        media_id = data.get("media_id")
+    if not media_id:
+        return jsonify({"error": "media_id is required"}), 400
+    is_fav = toggle_favorite(pid, media_id)
+    return jsonify({"is_favorite": is_fav})
+
+
+# ─── Collections ─────────────────────────────────────────────────────────────
+
+@app.route("/api/collections", methods=["GET"])
+def api_get_collections():
+    pid = _require_profile()
+    return jsonify(get_collections(pid))
+
+
+@app.route("/api/collections", methods=["POST"])
+def api_create_collection():
+    pid = _require_profile()
+    data = request.json or {}
+    name = data.get("name", "").strip()
+    desc = data.get("description", "")
+    if not name:
+        return jsonify({"error": "Name required"}), 400
+    cid = create_collection(pid, name, desc)
+    return jsonify({"id": cid, "name": name, "description": desc, "items": []}), 201
+
+
+@app.route("/api/collections/<int:collection_id>", methods=["DELETE"])
+def api_delete_collection(collection_id):
+    pid = _require_profile()
+    delete_collection(collection_id, pid)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/collections/<int:collection_id>/items", methods=["POST"])
+def api_add_to_collection(collection_id):
+    pid = _require_profile()
+    data = request.json or {}
+    media_id = data.get("media_id")
+    if not media_id:
+        return jsonify({"error": "media_id required"}), 400
+    add_to_collection(collection_id, media_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/collections/<int:collection_id>/items/<int:media_id>", methods=["DELETE"])
+def api_remove_from_collection(collection_id, media_id):
+    pid = _require_profile()
+    remove_from_collection(collection_id, media_id)
+    return jsonify({"ok": True})
+
+
+# ─── Library Scan ─────────────────────────────────────────────────────────────
+
+_scan_thread = None
+
+
+@app.route("/api/scan", methods=["POST"])
+def api_scan():
+    global _scan_thread
+    status = get_scan_status()
+    if status["running"]:
+        return jsonify({"error": "Scan already in progress", "status": status}), 409
+
+    def run_scan():
+        scan_library()
+
+    _scan_thread = threading.Thread(target=run_scan, daemon=True)
+    _scan_thread.start()
+    return jsonify({"ok": True, "message": "Library scan started"})
+
+
+@app.route("/api/scan/status", methods=["GET"])
+def api_scan_status():
+    return jsonify(get_scan_status())
+
+
+@app.route("/api/unmatched", methods=["GET"])
+def api_unmatched():
+    return _jsonify_rows(get_unmatched())
+
+
+@app.route("/api/override", methods=["POST"])
+def api_override():
+    """Manually set a TMDb ID for an unmatched media item."""
+    data = request.json or {}
+    media_id  = data.get("media_id")
+    tmdb_id   = data.get("tmdb_id")
+    mtype     = data.get("type", "movie")
+
+    if not media_id or not tmdb_id:
+        return jsonify({"error": "media_id and tmdb_id required"}), 400
+
+    from backend.matcher import override_match
+    meta = override_match(media_id, tmdb_id, mtype)
+    if not meta:
+        return jsonify({"error": "TMDb ID not found"}), 404
+
+    existing = get_media_by_id(media_id)
+    if not existing:
+        return jsonify({"error": "Media not found"}), 404
+
+    upsert_media({**existing, **meta, "file_path": existing["file_path"],
+                  "manually_overridden": 1})
+    return jsonify({"ok": True})
+
+
+@app.route("/api/recache", methods=["POST"])
+def api_recache_media():
+    """
+    Re-cache a title: deletes its cached TMDb metadata JSONs, season caches,
+    external-ID cache and ALL downloaded artwork files, then re-downloads
+    fresh metadata + images and updates every library row of the title
+    (episode-specific fields like season/episode/markers are preserved).
+    Body: { "tmdb_id": <int>, "type": "movie"|"series"|"anime" }
+    """
+    data = request.json or {}
+    tmdb_id = data.get("tmdb_id")
+    mtype = data.get("type", "movie")
+
+    if not tmdb_id:
+        return jsonify({"error": "This title has no TMDb match. Use 'Fix Match' first."}), 400
+
+    import glob as _glob
+    from backend.db import get_conn
+    from backend.matcher import (
+        METADATA_DIR, match_movie_by_id, match_show_by_id, fetch_imdb_id,
+    )
+
+    removed = 0
+
+    # ── 1) Delete cached metadata JSONs (title + seasons + external ids) ──
+    delete_paths = [
+        os.path.join(METADATA_DIR, f"{mtype}_{tmdb_id}.json"),
+        os.path.join(METADATA_DIR, f"external_ids_{mtype}_{tmdb_id}.json"),
+    ]
+    delete_paths.extend(_glob.glob(os.path.join(METADATA_DIR, f"season_{tmdb_id}_*.json")))
+    for p in delete_paths:
+        if os.path.isfile(p):
+            try:
+                os.remove(p)
+                removed += 1
+            except OSError:
+                pass
+
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM media WHERE tmdb_id=? AND type=?", (tmdb_id, mtype)
+    ).fetchall()
+    if not rows:
+        conn.close()
+        return jsonify({"error": "No library rows found for this title"}), 404
+
+    # ── 2) Delete downloaded artwork referenced by any row of this title ──
+    for r in rows:
+        for key in ("poster_path", "backdrop_path", "logo_path"):
+            rel = r[key]
+            if not rel or not str(rel).startswith("images/"):
+                continue
+            p = os.path.join(METADATA_DIR, str(rel).replace("/", os.sep))
+            if os.path.isfile(p):
+                try:
+                    os.remove(p)
+                    removed += 1
+                except OSError:
+                    pass
+
+    # ── 3) Fresh fetch from TMDb (re-downloads images, rewrites caches) ──
+    meta = (
+        match_show_by_id(tmdb_id, mtype)
+        if mtype in ("series", "anime")
+        else match_movie_by_id(tmdb_id)
+    )
+    if not meta:
+        conn.close()
+        return jsonify({"error": "TMDb refresh failed — check connection/API key and retry"}), 502
+
+    try:
+        fetch_imdb_id(tmdb_id, mtype)
+    except Exception:
+        pass
+
+    # ── 4) Update every row of the title, preserving episode-specific fields.
+    #       upsert_media does not touch skip markers or duration. ──
+    for r in rows:
+        upsert_media({
+            **meta,
+            "file_path":   r["file_path"],
+            "file_size":   r["file_size"] or 0,
+            "season":      r["season"],
+            "episode":     r["episode"],
+            "ep_title":    r["ep_title"],
+            "tmdb_matched": 1,
+        })
+    conn.close()
+
+    return jsonify({
+        "ok": True,
+        "removed_files": removed,
+        "updated_rows": len(rows),
+        "title": meta.get("title"),
+        "year": meta.get("year"),
+    })
+
+
+@app.route("/api/tmdb/search", methods=["GET"])
+def api_tmdb_search():
+    query = request.args.get("query", "")
+    mtype = request.args.get("type", "movie")
+    from backend.matcher import search_tmdb
+    results = search_tmdb(query, mtype)
+    return jsonify(results)
+
+
+def _media_duration_seconds(file_path):
+    """Best-effort stream duration via ffprobe (0 if unavailable)."""
+    ffprobe = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe")
+    if not file_path or not os.path.isfile(ffprobe):
+        return 0.0
+    try:
+        out = subprocess.run(
+            [ffprobe, "-v", "quiet", "-print_format", "json", "-show_format", file_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        info = json.loads(out.stdout)
+        return round(float(info.get("format", {}).get("duration") or 0), 3)
+    except Exception:
+        return 0.0
+
+
+@app.route("/api/media/<int:media_id>/skip-timestamps", methods=["POST"])
+def api_update_skip_timestamps(media_id):
+    """
+    Save manual skip markers with AniSkip-style validation:
+      - recap / intro:            max 5 min
+      - outro / preview:          max 15 min
+      - all segments:             at least 5s long
+      - 0/0 sentinel:             "confirmed — no segment of this type"
+      - outro end omitted or within 10s of duration → snapped to duration
+    """
+    data = request.json or {}
+
+    media = get_media_by_id(media_id)
+    if not media:
+        return jsonify({"error": "Media not found"}), 404
+
+    try:
+        duration = float(media.get("duration") or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    if duration <= 0 and media.get("file_path"):
+        duration = _media_duration_seconds(media["file_path"])
+
+    MAX_MIN = {"recap": 5, "intro": 5, "outro": 15, "preview": 15}
+    cleaned = {}
+    errors = []
+
+    for seg, max_min in MAX_MIN.items():
+        s = data.get(f"{seg}_start")
+        e = data.get(f"{seg}_end")
+
+        # Normalize to int-or-None
+        def _to_int(v):
+            if v is None or v == "":
+                return None
+            try:
+                return int(round(float(v)))
+            except (TypeError, ValueError):
+                return None
+
+        s_i, e_i = _to_int(s), _to_int(e)
+
+        # Unsubmitted segment → leave existing value untouched
+        if s_i is None and e_i is None:
+            continue
+
+        # Sentinel: 0/0 = "confirmed — this episode has no segment of this type"
+        if s_i == 0 and e_i == 0:
+            cleaned[f"{seg}_start"] = 0
+            cleaned[f"{seg}_end"] = 0
+            continue
+
+        if s_i is None:
+            errors.append(f"{seg}: start time is required")
+            continue
+        if s_i < 0:
+            errors.append(f"{seg}: start cannot be negative")
+            continue
+
+        # Outro end omitted or zero → runs to the end of the stream
+        # (checked BEFORE the required-end validation)
+        if seg == "outro" and (e_i is None or e_i == 0) and duration > 0:
+            e_i = int(duration)
+
+        if e_i is None:
+            msg = f"{seg}: end time is required"
+            if seg == "outro":
+                msg += " (video duration could not be determined — is the file available?)"
+            errors.append(msg)
+            continue
+
+        length = e_i - s_i
+        if length <= 0:
+            errors.append(f"{seg}: end must come after start")
+            continue
+        if length < 5:
+            errors.append(f"{seg}: segments must be at least 5 seconds long")
+            continue
+        if length > max_min * 60:
+            errors.append(f"{seg}: cannot exceed {max_min} minutes")
+            continue
+        # Snap an end within 10s of the stream duration to the exact duration
+        if duration > 0 and abs(e_i - duration) <= 10:
+            e_i = int(duration)
+        if duration > 0 and e_i > duration + 1:
+            errors.append(f"{seg}: end exceeds the video duration")
+            continue
+
+        cleaned[f"{seg}_start"] = s_i
+        cleaned[f"{seg}_end"] = e_i
+
+    if errors:
+        return jsonify({"error": "; ".join(errors[:3])}), 400
+
+    from backend.db import update_skip_timestamps
+    ok = update_skip_timestamps(media_id, cleaned)
+    if ok:
+        return jsonify({"ok": True, "saved": cleaned})
+    return jsonify({"error": "Failed to update skip timestamps"}), 400
+
+
+@app.route("/favicon.ico")
+def favicon():
+    fav_path = os.path.join(BASE_DIR, "static", "img", "favicon.png")
+    if os.path.exists(fav_path):
+        return send_file(fav_path, mimetype="image/png")
+    return "", 204
+
+
+@app.route("/api/system/browse-folder", methods=["POST"])
+def api_system_browse_folder():
+    from backend.settings import browse_folder_dialog
+    folder_path = browse_folder_dialog()
+    if folder_path:
+        return jsonify({"ok": True, "path": folder_path})
+    return jsonify({"ok": False, "cancelled": True}), 200
+
+
+@app.route("/api/system/validate-paths", methods=["POST"])
+def api_system_validate_paths():
+    data = request.json or {}
+    paths_list = data.get("paths", [])
+    from backend.settings import validate_media_paths
+    results = validate_media_paths(paths_list)
+    return jsonify(results)
+
+
+@app.route("/api/system/info", methods=["GET"])
+def api_system_info():
+    import sys
+    import platform
+    import json
+    from backend.db import DB_PATH, get_conn
+
+    db_size_str = "0 KB"
+    if os.path.exists(DB_PATH):
+        sz = os.path.getsize(DB_PATH)
+        if sz >= 1024 * 1024:
+            db_size_str = f"{sz / (1024 * 1024):.1f} MB"
+        else:
+            db_size_str = f"{sz / 1024:.1f} KB"
+
+    ffmpeg_path = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffmpeg.exe")
+    ffprobe_path = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe")
+    has_ffmpeg = os.path.exists(ffmpeg_path)
+    has_ffprobe = os.path.exists(ffprobe_path)
+
+    # Fast SQL counts — never load the whole media table into memory here
+    movies_count = series_count = anime_count = 0
+    skip_markers_count = 0
+    try:
+        conn = get_conn()
+        for r in conn.execute("SELECT type, COUNT(*) FROM media GROUP BY type").fetchall():
+            if r[0] == "movie":
+                movies_count = r[1]
+            elif r[0] == "series":
+                series_count = r[1]
+            elif r[0] == "anime":
+                anime_count = r[1]
+        skip_markers_count = conn.execute(
+            "SELECT COUNT(*) FROM media WHERE intro_start IS NOT NULL OR outro_start IS NOT NULL OR recap_start IS NOT NULL"
+        ).fetchone()[0] or 0
+        conn.close()
+    except Exception:
+        pass
+    total_count = movies_count + series_count + anime_count
+
+    github_profile = _get_github_profile()
+
+    # Calculate media storage sizes via instant SQL aggregation
+    total_bytes, movies_bytes, series_bytes, anime_bytes = 0, 0, 0, 0
+    try:
+        from backend.db import get_conn
+        conn = get_conn()
+        res = conn.execute("""
+            SELECT 
+                COALESCE(SUM(file_size), 0) as total_bytes,
+                COALESCE(SUM(CASE WHEN type='movie' THEN file_size ELSE 0 END), 0) as movies_bytes,
+                COALESCE(SUM(CASE WHEN type='series' THEN file_size ELSE 0 END), 0) as series_bytes,
+                COALESCE(SUM(CASE WHEN type='anime' THEN file_size ELSE 0 END), 0) as anime_bytes
+            FROM media
+        """).fetchone()
+        conn.close()
+        if res:
+            total_bytes = res[0] or 0
+            movies_bytes = res[1] or 0
+            series_bytes = res[2] or 0
+            anime_bytes = res[3] or 0
+    except Exception:
+        pass
+
+    def format_bytes(b):
+        if not b or b <= 0:
+            return "0 GB"
+        tb = b / (1024 ** 4)
+        if tb >= 1.0:
+            return f"{tb:.2f} TB" if tb < 10 else f"{tb:.1f} TB"
+        gb = b / (1024 ** 3)
+        if gb >= 1.0:
+            return f"{gb:.2f} GB" if gb < 10 else f"{gb:.1f} GB"
+        mb = b / (1024 ** 2)
+        if mb >= 1.0:
+            return f"{mb:.1f} MB"
+        return f"{b / 1024:.0f} KB"
+
+    storage_info = {
+        "total_size": format_bytes(total_bytes),
+        "total_bytes": total_bytes,
+        "movies_size": format_bytes(movies_bytes),
+        "series_size": format_bytes(series_bytes),
+        "anime_size": format_bytes(anime_bytes),
+        "movies_pct": round((movies_bytes / total_bytes * 100), 1) if total_bytes > 0 else 0,
+        "series_pct": round((series_bytes / total_bytes * 100), 1) if total_bytes > 0 else 0,
+        "anime_pct": round((anime_bytes / total_bytes * 100), 1) if total_bytes > 0 else 0,
+    }
+
+    # Uptime calculation
+    uptime_sec = int(time.time() - SERVER_START_TIME)
+    uptime_h = uptime_sec // 3600
+    uptime_m = (uptime_sec % 3600) // 60
+    uptime_s = uptime_sec % 60
+    uptime_str = f"{uptime_h}h {uptime_m}m {uptime_s}s" if uptime_h > 0 else f"{uptime_m}m {uptime_s}s"
+
+    # Native System RAM Load calculation
+    ram_info = {"load_pct": 0, "total_gb": 0, "free_gb": 0, "used_gb": 0}
+    try:
+        import ctypes
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ('dwLength', ctypes.c_ulong),
+                ('dwMemoryLoad', ctypes.c_ulong),
+                ('ullTotalPhys', ctypes.c_ulonglong),
+                ('ullAvailPhys', ctypes.c_ulonglong),
+                ('ullTotalPageFile', ctypes.c_ulonglong),
+                ('ullAvailPageFile', ctypes.c_ulonglong),
+                ('ullTotalVirtual', ctypes.c_ulonglong),
+                ('ullAvailVirtual', ctypes.c_ulonglong),
+                ('ullAvailExtendedVirtual', ctypes.c_ulonglong)
+            ]
+        ms = MEMORYSTATUSEX()
+        ms.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+            tot_gb = round(ms.ullTotalPhys / (1024**3), 1)
+            free_gb = round(ms.ullAvailPhys / (1024**3), 1)
+            used_gb = round(tot_gb - free_gb, 1)
+            ram_info = {
+                "load_pct": ms.dwMemoryLoad,
+                "total_gb": tot_gb,
+                "free_gb": free_gb,
+                "used_gb": used_gb
+            }
+    except Exception:
+        pass
+
+    # Database Table Metrics
+    db_metrics = {
+        "profiles_count": len(get_all_profiles() or []),
+        "favorites_count": 0,
+        "progress_count": 0,
+        "skip_markers_count": skip_markers_count
+    }
+    try:
+        from backend.db import get_db
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM progress")
+            db_metrics["progress_count"] = c.fetchone()[0] or 0
+            c.execute("SELECT COUNT(*) FROM favorites")
+            db_metrics["favorites_count"] = c.fetchone()[0] or 0
+    except Exception:
+        pass
+
+    # External API Health
+    config = load_config()
+    tmdb_key = config.get("tmdb_api_key", "")
+    api_statuses = {
+        "tmdb": "🟢 Active (Configured)" if tmdb_key else "🟡 Free / Backup Mode",
+        "omdb": "🟢 Active (Backup Ratings)",
+        "aniskip": "🟢 Connected (Free AniSkip)",
+        "poster_proxy": "🟢 Active (Image Proxy)"
+    }
+
+    return jsonify({
+        "version": "2.0.0.0",
+        "app_name": "CapsStream",
+        "engine_name": "CapsStream High-Perf Core v2.0.0.0",
+        "engine_features": "SQLite WAL Mode • Synced Audio Remux • Drive-Mount Cache",
+        "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        "platform": platform.platform(),
+        "os_name": os.name,
+        "server_uptime": uptime_str,
+        "database_size": db_size_str,
+        "has_ffmpeg": has_ffmpeg,
+        "has_ffprobe": has_ffprobe,
+        "ram_info": ram_info,
+        "db_metrics": db_metrics,
+        "api_statuses": api_statuses,
+        "github_profile": github_profile,
+        "storage_info": storage_info,
+        "media_counts": {
+            "total": total_count,
+            "movies": movies_count,
+            "series": series_count,
+            "anime": anime_count
+        }
+    })
+
+
+# ─── Entry Point ──────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("  CapsStream — Starting up")
+    print("=" * 50)
+
+    # Initialize database
+    init_db()
+
+    # Load config and apply system file hiding
+    cfg = load_config()
+    apply_system_file_hiding()
+    host = cfg.get("host", "127.0.0.1")
+    port = cfg.get("port", 8000)
+
+    # Library scanning is intentionally NOT started here.
+    # The scan waits until the user logs into a profile (frontend triggers POST /api/scan after login).
+
+    print(f"\n  ==========================================================")
+    print(f"   CapsStream Server running at: http://{host}:{port}")
+    print(f"   TO STOP THE SERVER: Press Ctrl+C in this window")
+    print(f"  ==========================================================\n")
+
+    app.run(host=host, port=port, debug=False, threaded=True)

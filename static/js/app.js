@@ -1,0 +1,8535 @@
+/* ============================================================
+   CapsStream — Vue 3 SPA (No Build Step)
+   All components defined inline using Vue.defineComponent
+   ============================================================ */
+
+const { createApp, ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } = Vue;
+const { createRouter, createWebHashHistory } = VueRouter;
+
+// ─── API Helper ──────────────────────────────────────────────
+
+const API = {
+  async get(url) {
+    const r = await fetch(url);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || `API error: ${r.status}`);
+    }
+    return r.json();
+  },
+  async post(url, data) {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || `API error: ${r.status}`);
+    }
+    return r.json();
+  },
+  async put(url, data) {
+    const r = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || `API error: ${r.status}`);
+    }
+    return r.json();
+  },
+  async patch(url, data) {
+    const r = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || `API error: ${r.status}`);
+    }
+    return r.json();
+  },
+  async del(url) {
+    const r = await fetch(url, { method: "DELETE" });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || `API error: ${r.status}`);
+    }
+    return r.json();
+  },
+};
+
+// ─── Global State ─────────────────────────────────────────────
+
+const store = reactive({
+  profile: null,
+  toasts: [],
+  achievementQueue: [],
+  scanRunning: false,
+  scanPhase: "",        // "scanning" | "matching" | "complete"
+  scanProgress: "",
+  scanCount: 0,
+  scanTotal: 0,
+  scanPercent: 0,
+  scanItem: null,       // rich info about the file currently being processed
+  scanMatched: 0,
+  scanElapsed: 0,
+  serverOnline: true,
+});
+
+let isServerOfflineToastActive = false;
+
+async function checkServerHealth() {
+  try {
+    const res = await fetch("/api/system/info", { method: "GET" });
+    if (res.ok) {
+      if (store.serverOnline === false) {
+        store.serverOnline = true;
+        isServerOfflineToastActive = false;
+        // Only auto-rescan on reconnect when a profile is logged in
+        if (store.profile) {
+          startLibraryScan(true);
+        }
+      } else {
+        store.serverOnline = true;
+      }
+      const info = await res.json().catch(() => null);
+      checkRamUsage(info);
+    } else {
+      handleServerOffline();
+    }
+  } catch (err) {
+    handleServerOffline();
+  }
+}
+
+// ─── High RAM Usage Alerts ─────────────────────────────────────
+// Thresholds on the server's memory-load percentage:
+//   ≥85% → warning   ≥95% → critical
+// Alerts fire on level escalation and re-remind at most every 10 minutes
+// while the condition persists; a recovery notice fires once when it clears.
+let ramAlertLevel = "ok";
+let ramLastNotifyTs = 0;
+const RAM_REMIND_COOLDOWN = 10 * 60 * 1000;
+
+function checkRamUsage(info) {
+  const ram = info && info.ram_info;
+  const pct = Number(ram && ram.load_pct) || 0;
+
+  let level = "ok";
+  if (pct >= 95) level = "critical";
+  else if (pct >= 85) level = "warn";
+
+  if (level === "ok") {
+    if (ramAlertLevel !== "ok") {
+      ramAlertLevel = "ok";
+      addToast(`🟢 System memory back to normal (${pct}% in use).`, "success", 5000);
+    }
+    return;
+  }
+
+  const escalated = level !== ramAlertLevel;
+  const dueForRemind = Date.now() - ramLastNotifyTs > RAM_REMIND_COOLDOWN;
+  if (!escalated && !dueForRemind) return;
+
+  ramAlertLevel = level;
+  ramLastNotifyTs = Date.now();
+
+  const usedGb = Number(ram && ram.used_gb) || 0;
+  const totalGb = Number(ram && ram.total_gb) || 0;
+  const usage = `${usedGb.toFixed(1)} GB / ${totalGb.toFixed(1)} GB used`;
+
+  if (level === "critical") {
+    addToast(
+      `🔴 System memory almost full — ${pct}% (${usage}). Close other applications to avoid playback stutters or crashes.`,
+      "error",
+      10000
+    );
+  } else {
+    addToast(
+      `🟡 High RAM usage — ${pct}% (${usage}). Playback quality may degrade if it rises further.`,
+      "warning",
+      7000
+    );
+  }
+}
+
+function handleServerOffline() {
+  if (store.serverOnline !== false) {
+    store.serverOnline = false;
+    if (!isServerOfflineToastActive) {
+      isServerOfflineToastActive = true;
+      addToast("⚠️ Server Disconnected — CapsStream backend is unreachable or offline.", "error", 6000);
+    }
+  }
+}
+
+setInterval(checkServerHealth, 6000);
+
+function addToast(message, type = "info", duration = 3000) {
+  const id = Date.now() + Math.random();
+  store.toasts.push({ id, message, type });
+  setTimeout(() => {
+    store.toasts = store.toasts.filter((t) => t.id !== id);
+  }, duration);
+}
+
+function playAchievementSound() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc1.type = "sine";
+    osc2.type = "triangle";
+
+    osc1.frequency.setValueAtTime(587.33, now);
+    osc1.frequency.setValueAtTime(880.00, now + 0.12);
+
+    osc2.frequency.setValueAtTime(1174.66, now + 0.12);
+
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.18, now + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.65);
+    osc2.stop(now + 0.65);
+  } catch (e) {}
+}
+
+// ─── Custom Global Confirm Modal System ───────────────────────
+
+const confirmState = reactive({
+  show: false,
+  title: "Confirmation Required",
+  message: "",
+  icon: "ph ph-question",
+  okText: "Confirm",
+  cancelText: "Cancel",
+  danger: false,
+  resolve: null
+});
+
+function customConfirm({ title = "Confirmation Required", message, icon = "ph ph-question", okText = "Confirm", cancelText = "Cancel", danger = false }) {
+  return new Promise((resolve) => {
+    confirmState.title = title;
+    confirmState.message = message;
+    confirmState.icon = icon;
+    confirmState.okText = okText;
+    confirmState.cancelText = cancelText;
+    confirmState.danger = danger;
+    confirmState.resolve = resolve;
+    confirmState.show = true;
+  });
+}
+
+function handleConfirmOk() {
+  confirmState.show = false;
+  if (confirmState.resolve) {
+    confirmState.resolve(true);
+    confirmState.resolve = null;
+  }
+}
+
+function handleConfirmCancel() {
+  confirmState.show = false;
+  if (confirmState.resolve) {
+    confirmState.resolve(false);
+    confirmState.resolve = null;
+  }
+}
+
+function triggerAchievementUnlock(ach) {
+  if (!ach) return;
+  playAchievementSound();
+  const item = {
+    id: Date.now() + Math.random(),
+    icon: ach.icon || "🏆",
+    title: ach.title || "Achievement Unlocked!",
+    description: ach.description || "You earned a new trophy in your Trophy Case!",
+    rarity: ach.rarity || "Gold",
+    category: ach.category || "General"
+  };
+  store.achievementQueue.push(item);
+  setTimeout(() => {
+    store.achievementQueue = store.achievementQueue.filter((a) => a.id !== item.id);
+  }, 4800);
+}
+
+// ─── Kids Mode Content Filter ─────────────────────────────────
+
+const KIDS_BLOCKED_GENRES = ["horror", "thriller", "crime", "action"];
+
+function kidsFilter(items) {
+  if (!store.profile?.is_kids) return items;
+  return (items || []).filter(item => {
+    const genres = (item.genres || "").toLowerCase();
+    if (KIDS_BLOCKED_GENRES.some(g => genres.includes(g))) return false;
+    if (item.vote_average !== undefined && item.vote_average !== null && Number(item.vote_average) > 0) {
+      if (Number(item.vote_average) < 6.0) return false;
+    }
+    return true;
+  });
+}
+
+let scanPollTimer = null;
+let sessionScanStarted = false;
+
+function applyScanStatus(status) {
+  store.scanRunning = !!status.running;
+  store.scanPhase = status.phase || "";
+  store.scanProgress = status.progress || "";
+  store.scanCount = status.count || 0;
+  store.scanTotal = status.total || 0;
+  store.scanPercent = status.percent || 0;
+  store.scanItem = status.current_item || null;
+  store.scanMatched = status.matched || 0;
+  store.scanElapsed = status.elapsed || 0;
+}
+
+// Starts the library scan at most once per session (unless forced).
+// Used after profile login — never before.
+async function startLibraryScan(force = false) {
+  if (!store.profile && !force) return false;
+  if (!force && (sessionScanStarted || store.scanRunning)) return false;
+  sessionScanStarted = true;
+  try {
+    await API.post("/api/scan", {});
+    store.scanRunning = true;
+    pollScanStatus();
+    return true;
+  } catch (e) {
+    if (e.message && e.message.includes("409")) {
+      // Scan already running elsewhere — just follow its status
+      store.scanRunning = true;
+      pollScanStatus();
+      return true;
+    }
+    sessionScanStarted = false;
+    return false;
+  }
+}
+
+async function pollScanStatus() {
+  clearInterval(scanPollTimer);
+  scanPollTimer = setInterval(async () => {
+    try {
+      const status = await API.get("/api/scan/status");
+      applyScanStatus(status);
+      if (!status.running) {
+        clearInterval(scanPollTimer);
+        // Completion is surfaced by the scan widget — no toast
+      }
+    } catch (e) {
+      clearInterval(scanPollTimer);
+      store.scanRunning = false;
+    }
+  }, 1500);
+}
+
+function imgUrl(path) {
+  if (!path) return null;
+  if (path.startsWith("http")) return path;
+  if (path.startsWith("/")) return `https://image.tmdb.org/t/p/w185${path}`;
+  if (path.startsWith("images/")) return `/metadata/${path}`;
+  if (!path.startsWith("metadata/")) return `/metadata/images/${path}`;
+  return `/${path}`;
+}
+
+function formatRating(r) {
+  return r ? r.toFixed(1) : "—";
+}
+
+function formatDuration(seconds) {
+  if (!seconds) return "";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function getCodecInfo(path) {
+  if (!path) return { hasWarning: false, tags: [], note: "" };
+  const p = path.toLowerCase();
+  const tags = [];
+
+  if (p.includes("x265") || p.includes("hevc") || p.includes("h265") || p.includes("h.265")) {
+    tags.push("HEVC / x265");
+  }
+  if (p.includes("10bit") || p.includes("10-bit") || p.includes("10 bit")) {
+    tags.push("10-Bit Color");
+  }
+  if (p.includes("dts") || p.includes("atmos") || p.includes("truehd")) {
+    tags.push("DTS / Atmos Audio");
+  }
+  if (p.includes("av1")) {
+    tags.push("AV1 Codec");
+  }
+
+  const hasWarning = tags.length > 0;
+  const note = hasWarning
+    ? "This media file uses advanced video/audio encoding. Direct browser HTML5 playback requires hardware decoding support (recommended browser: Microsoft Edge or Safari)."
+    : "";
+
+  return { hasWarning, tags, note };
+}
+
+function getPosDur(item) {
+  if (!item) return { pos: 0, dur: 0 };
+  const pos = Number(item.position !== undefined && item.position !== null ? item.position : item.progress?.position || 0);
+  let dur = Number(item.duration !== undefined && item.duration !== null ? item.duration : item.progress?.duration || 0);
+  // If duration is 0/missing but position exists, estimate duration (45m for TV, 2h for movies) so progress bar & badge display
+  if (!dur && pos > 0) {
+    dur = item.type === "movie" ? 7200 : 2700;
+  }
+  return { pos, dur };
+}
+
+function calcProgressPercent(item) {
+  const { pos, dur } = getPosDur(item);
+  if (!dur || !pos) return 0;
+  return Math.min(100, Math.round((pos / dur) * 100));
+}
+
+function calcTimeLeft(item) {
+  const { pos, dur } = getPosDur(item);
+  if (!dur || !pos || pos >= dur) return "";
+  const remaining = dur - pos;
+  const m = Math.ceil(remaining / 60);
+  if (m < 60) return `${m}m left`;
+  const h = Math.floor(m / 60);
+  const remM = m % 60;
+  return remM > 0 ? `${h}h ${remM}m left` : `${h}h left`;
+}
+
+// ─── Media Card Component ─────────────────────────────────────
+
+const MediaCard = {
+  props: ["item", "media", "showBadge", "isContinue"],
+  emits: ["click", "remove-continue"],
+  template: `
+    <div class="media-card"
+         :class="{ 'continue-card': isContinue, 'is-unmounted': cardItem.is_mounted === false }"
+         @mouseenter="showTooltip = true"
+         @mouseleave="showTooltip = false"
+         @click="$emit('click', cardItem)"
+         :id="'card-' + (cardItem.id || 'card')">
+
+      <div v-if="cardItem.is_mounted === false && showTooltip" class="unmounted-tooltip">
+        <i class="ph ph-warning" style="margin-right:4px;color:#ffb703"></i> Source drive not mounted. Please connect drive to watch this title.
+      </div>
+
+      <div class="card-inner">
+        <img
+          v-if="posterSrc"
+          :src="posterSrc"
+          :alt="cardItem.title"
+          class="card-poster"
+          loading="lazy"
+          @error="handleImgError"
+        >
+        <div v-else class="card-poster-placeholder">
+          <span class="placeholder-icon">🎬</span>
+          <span class="placeholder-title">{{ cardItem.title }}</span>
+        </div>
+
+        <div v-if="cardItem.is_mounted === false" class="unmounted-badge">
+          <i class="ph ph-hard-drive"></i> Unmounted
+        </div>
+
+        <span v-if="showBadge !== false && cardItem.is_mounted !== false" class="card-badge" :class="cardItem.type">
+          {{ cardItem.type === 'anime' ? '🎌 Anime' : cardItem.type === 'series' ? '📺 Series' : '🎬 Movie' }}
+        </span>
+
+        <span v-if="isContinue && calcTimeLeft(cardItem)" class="card-badge" style="right:var(--space-sm);left:auto;background:rgba(10,10,15,0.85);border:1px solid var(--border-strong)">
+          {{ calcTimeLeft(cardItem) }}
+        </span>
+
+        <button v-if="isContinue"
+                class="card-remove-btn"
+                @click.stop="$emit('remove-continue', cardItem)"
+                title="Remove from Continue Watching"
+                :id="'remove-btn-' + (cardItem.id || '')">
+          <i class="ph ph-x"></i>
+        </button>
+
+        <div v-if="calcProgressPercent(cardItem) > 0" class="card-progress">
+          <div class="card-progress-fill" :style="{ width: calcProgressPercent(cardItem) + '%' }"></div>
+        </div>
+
+        <div class="card-overlay">
+          <div class="card-play-btn">
+            <i class="ph-fill ph-play" style="color:white;font-size:1rem;margin-left:2px"></i>
+          </div>
+          <div class="card-title">{{ cardItem.title }}</div>
+          <div v-if="isContinue && (cardItem.season || cardItem.ep_title)" class="card-meta" style="color:var(--text-secondary);font-weight:600">
+            <span v-if="cardItem.season">S{{ cardItem.season.toString().padStart(2,'0') }}E{{ (cardItem.episode||'').toString().padStart(2,'0') }}</span>
+            <span v-if="cardItem.ep_title"> — {{ cardItem.ep_title }}</span>
+          </div>
+          <div v-else class="card-meta">
+            <span v-if="cardItem.year">{{ cardItem.year }}</span>
+            <span v-if="cardItem.rating" class="card-rating">
+              ⭐ {{ formatRating(cardItem.rating) }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `,
+  setup(props) {
+    const showTooltip = ref(false);
+    const imgError = ref(false);
+    const cardItem = computed(() => props.item || props.media || {});
+
+    const posterSrc = computed(() => {
+      if (imgError.value) return null;
+      const item = cardItem.value;
+      if (props.isContinue && item.backdrop_path) return imgUrl(item.backdrop_path);
+      if (item.poster_path) return imgUrl(item.poster_path);
+      if (item.backdrop_path) return imgUrl(item.backdrop_path);
+      if (item.still_path) return imgUrl(item.still_path);
+      return null;
+    });
+
+    function handleImgError() {
+      imgError.value = true;
+    }
+
+    return { cardItem, posterSrc, handleImgError, imgUrl, formatRating, calcProgressPercent, calcTimeLeft, showTooltip };
+  },
+};
+
+// ─── Content Row Component ────────────────────────────────────
+
+const ContentRow = {
+  props: ["row"],
+  emits: ["card-click", "remove-continue"],
+  components: { MediaCard },
+  template: `
+    <div class="content-row">
+      <div class="row-header">
+        <div class="row-title">
+          {{ row.title }}
+          <span class="row-arrow">›</span>
+        </div>
+        <div class="row-header-controls">
+          <button class="row-control-btn" :disabled="!canScrollLeft" @click="scrollLeft" title="Scroll Left" id="row-prev-btn">
+            <i class="ph ph-caret-left"></i>
+          </button>
+          <button class="row-control-btn" :disabled="!canScrollRight" @click="scrollRight" title="Scroll Right" id="row-next-btn">
+            <i class="ph ph-caret-right"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="row-scroller-wrapper">
+        <div class="cards-scroller" ref="scrollerRef" @scroll="checkScroll">
+          <media-card
+            v-for="item in row.items"
+            :key="item.id || item.tmdb_id"
+            :item="item"
+            :is-continue="row.type === 'continue'"
+            @click="$emit('card-click', item, row)"
+            @remove-continue="$emit('remove-continue', item)"
+          />
+        </div>
+      </div>
+    </div>
+  `,
+  setup() {
+    const scrollerRef = ref(null);
+    const canScrollLeft = ref(false);
+    const canScrollRight = ref(true);
+
+    function checkScroll() {
+      if (!scrollerRef.value) return;
+      const el = scrollerRef.value;
+      canScrollLeft.value = el.scrollLeft > 10;
+      canScrollRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 10;
+    }
+
+    function scrollLeft() {
+      if (!scrollerRef.value) return;
+      scrollerRef.value.scrollBy({ left: -600, behavior: "smooth" });
+      setTimeout(checkScroll, 350);
+    }
+
+    function scrollRight() {
+      if (!scrollerRef.value) return;
+      scrollerRef.value.scrollBy({ left: 600, behavior: "smooth" });
+      setTimeout(checkScroll, 350);
+    }
+
+    onMounted(() => {
+      nextTick(() => {
+        checkScroll();
+      });
+    });
+
+    return { scrollerRef, canScrollLeft, canScrollRight, checkScroll, scrollLeft, scrollRight };
+  },
+};
+
+const TrailerModal = {
+  props: ["url", "title"],
+  emits: ["close"],
+  setup() {
+    onMounted(async () => {
+      try {
+        const res = await API.post("/api/achievements/unlock", { achievement_id: "trailer_buff" });
+        if (res && res.unlocked) {
+          addToast(`🏆 Achievement Unlocked: ${res.unlocked.icon} ${res.unlocked.title}!`, "success");
+        }
+      } catch (e) {}
+    });
+  },
+  template: `
+    <div class="modal-backdrop" @click.self="$emit('close')" style="z-index:9999">
+      <div class="modal-card" style="max-width:880px;width:92%;padding:0;overflow:hidden;background:#0d0e15;border:1px solid rgba(255,255,255,0.15);box-shadow:0 20px 60px rgba(0,0,0,0.8)">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:rgba(255,255,255,0.06);border-bottom:1px solid rgba(255,255,255,0.1)">
+          <div style="font-weight:700;font-size:1.05rem;display:flex;align-items:center;gap:8px;color:#fff">
+            <i class="ph ph-film-strip" style="color:var(--accent);font-size:1.2rem"></i>
+            <span>{{ title || 'Official Trailer' }}</span>
+          </div>
+          <button class="btn btn-ghost btn-sm" @click="$emit('close')" style="padding:4px 8px;font-size:1.2rem;color:var(--text-secondary)">
+            ✕
+          </button>
+        </div>
+        <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;background:#000">
+          <iframe
+            v-if="url"
+            :src="url"
+            style="position:absolute;top:0;left:0;width:100%;height:100%;border:0"
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowfullscreen
+          ></iframe>
+        </div>
+      </div>
+    </div>
+  `
+};
+
+// ─── Hero Banner Component ────────────────────────────────────
+
+const HeroBanner = {
+  props: ["items"],
+  emits: ["play", "detail", "trailer"],
+  template: `
+    <div class="hero" v-if="current">
+      <div class="hero-backdrop-container">
+        <transition name="banner-slide">
+          <div :key="currentIdx" class="hero-backdrop">
+            <img
+              v-if="current.backdrop_path"
+              :src="imgUrl(current.backdrop_path)"
+              class="hero-backdrop-img"
+              :alt="current.title"
+              @error="e => e.target.style.display='none'"
+            >
+          </div>
+        </transition>
+      </div>
+
+      <div class="hero-gradient"></div>
+
+      <div class="hero-content">
+        <div class="hero-badge">
+          {{ current.type === 'anime' ? '🎌 Anime' : current.type === 'series' ? '📺 Series' : '🎬 Movie' }}
+        </div>
+        <div class="hero-title-container">
+          <img v-if="current.logo_path" :src="imgUrl(current.logo_path)" :alt="current.title" class="hero-logo-img" />
+          <h1 v-else class="hero-title">{{ current.title }}</h1>
+        </div>
+        <div class="hero-meta">
+          <span v-if="current.year">{{ current.year }}</span>
+          <span v-if="current.rating" class="hero-rating">⭐ {{ formatRating(current.rating) }}</span>
+          <span v-if="current.genres">{{ current.genres.split(',').slice(0,3).join(' · ') }}</span>
+        </div>
+        <p class="hero-overview">{{ current.overview }}</p>
+        <div class="hero-actions">
+          <button class="btn btn-primary btn-lg" @click="$emit('play', current)" id="hero-play-btn">
+            <span>Play Now</span>
+            <div class="btn-icon-wrapper">
+              <i class="ph-fill ph-play" style="font-size:0.9rem"></i>
+            </div>
+          </button>
+          <button class="btn btn-secondary btn-lg" @click="$emit('trailer', current)" id="hero-trailer-btn">
+            <span>Trailer</span>
+            <div class="btn-icon-wrapper">
+              <i class="ph ph-film-strip" style="font-size:0.95rem"></i>
+            </div>
+          </button>
+          <button class="btn btn-secondary btn-lg" @click="$emit('detail', current)" id="hero-info-btn">
+            <span>More Info</span>
+            <div class="btn-icon-wrapper">
+              <i class="ph ph-info" style="font-size:0.95rem"></i>
+            </div>
+          </button>
+        </div>
+      </div>
+      <div class="hero-indicators">
+        <div
+          v-for="(item, i) in items.slice(0, 6)"
+          :key="i"
+          class="hero-indicator"
+          :class="{ active: i === currentIdx }"
+          @click="currentIdx = i"
+        ></div>
+      </div>
+    </div>
+  `,
+  setup(props) {
+    const currentIdx = ref(0);
+    const current = computed(() => props.items?.[currentIdx.value] || null);
+    let timer = null;
+
+    onMounted(() => {
+      timer = setInterval(() => {
+        if (props.items?.length > 1) {
+          currentIdx.value = (currentIdx.value + 1) % Math.min(props.items.length, 6);
+        }
+      }, 7000);
+    });
+
+    onUnmounted(() => clearInterval(timer));
+
+    return { currentIdx, current, imgUrl, formatRating };
+  },
+};
+
+// ─── Home Page ────────────────────────────────────────────────
+
+const HomePage = {
+  components: { HeroBanner, ContentRow, MediaCard, TrailerModal },
+  template: `
+    <div>
+      <trailer-modal
+        v-if="trailerModalUrl"
+        :url="trailerModalUrl"
+        :title="trailerModalTitle"
+        @close="trailerModalUrl = null"
+      />
+
+      <hero-banner
+        v-if="heroItems.length"
+        :items="heroItems"
+        @play="handlePlay"
+        @detail="handleDetail"
+        @trailer="handleTrailer"
+      />
+
+      <div class="home-content">
+        <div v-if="loading" class="cards-scroller" style="margin-bottom:2.5rem">
+          <div v-for="i in 6" :key="i" class="skeleton skeleton-card"></div>
+        </div>
+
+        <div v-else-if="!loading && rows.length === 0" class="empty-state" style="padding-top: calc(var(--nav-height) + 2rem); text-align: center; max-width: 600px; margin: 0 auto;">
+          <div class="empty-icon" style="font-size: 3.5rem; margin-bottom: 1rem;">🎬</div>
+          <div class="empty-title" style="font-size: 1.5rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem;">
+            No Media Found in Library
+          </div>
+          <div class="empty-subtitle" style="color: var(--text-secondary); line-height: 1.6; margin-bottom: 1.75rem;">
+            Welcome to CapsStream! No media sources configured yet — open <strong>Settings → Media Scanner Paths</strong> and add the folders where your movies, series, or anime live.
+          </div>
+          <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-primary" @click="triggerScanFromHome" :disabled="store.scanRunning" id="home-empty-scan-btn">
+              <i class="ph ph-arrows-clockwise" :style="{ animation: store.scanRunning ? 'spin 1s linear infinite' : 'none' }" style="margin-right:6px"></i>
+              {{ store.scanRunning ? 'Scanning Library...' : 'Scan Library' }}
+            </button>
+            <button v-if="!store.profile?.is_kids" class="btn btn-secondary" @click="router.push('/settings')" id="home-empty-settings-btn">
+              <i class="ph ph-gear" style="margin-right:6px"></i> Settings & Media Paths
+            </button>
+          </div>
+        </div>
+
+        <template v-else>
+          <content-row
+            v-for="row in rows"
+            :key="row.title"
+            :row="row"
+            @card-click="handleCardClick"
+            @remove-continue="handleRemoveContinue"
+          />
+        </template>
+      </div>
+    </div>
+  `,
+  setup() {
+    const router = VueRouter.useRouter();
+    const rows = ref([]);
+    const loading = ref(true);
+
+    const heroItems = computed(() => {
+      const topRatedRow = rows.value.find((r) => r.title === "Top Rated");
+      const recentRow = rows.value.find((r) => r.title === "Recently Added");
+      const source = topRatedRow || recentRow || rows.value[1];
+      return source?.items?.filter((i) => i.backdrop_path)?.slice(0, 6) || [];
+    });
+
+    async function loadHome() {
+      try {
+        loading.value = true;
+        const data = await API.get("/api/home");
+        if (store.profile?.is_kids) {
+          const allRaw = [];
+          (data || []).forEach(r => (r.items || []).forEach(item => allRaw.push(item)));
+          const uniqueItems = Array.from(new Map(allRaw.map(i => [i.id || i.tmdb_id, i])).values());
+          const filtered = kidsFilter(uniqueItems);
+
+          const animationItems = filtered.filter(i => (i.genres || '').toLowerCase().includes('animation') || i.type === 'anime');
+          const familyItems = filtered.filter(i => (i.genres || '').toLowerCase().includes('family') || (i.genres || '').toLowerCase().includes('fantasy'));
+          const comedyItems = filtered.filter(i => (i.genres || '').toLowerCase().includes('comedy'));
+
+          const kidsRows = [];
+          if (animationItems.length) kidsRows.push({ title: "🎨 Animation & Cartoons", items: animationItems });
+          if (familyItems.length) kidsRows.push({ title: "🪄 Family & Fantasy", items: familyItems });
+          if (comedyItems.length) kidsRows.push({ title: "😄 Fun Comedies", items: comedyItems });
+          if (filtered.length && kidsRows.length === 0) kidsRows.push({ title: "✨ Kids Movies & Shows", items: filtered });
+
+          rows.value = kidsRows;
+        } else {
+          rows.value = (data || []).map(row => ({
+            ...row,
+            items: kidsFilter(row.items),
+          })).filter(row => row.items && row.items.length > 0);
+        }
+      } catch (e) {
+        addToast("Failed to load home page", "error");
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    onMounted(loadHome);
+
+    const route = VueRouter.useRoute();
+    watch(
+      () => route.path,
+      (newPath) => {
+        if (newPath === "/") {
+          loadHome();
+        }
+      },
+    );
+
+    watch(
+      () => store.profile,
+      (newProfile) => {
+        if (newProfile) {
+          loadHome();
+        }
+      },
+    );
+
+    watch(
+      () => store.scanRunning,
+      (running, prev) => {
+        if (!running && prev === true) {
+          loadHome();
+        }
+      },
+    );
+
+    function handleCardClick(item, row) {
+      if (item.is_mounted === false && (row?.type === "continue" || item.position > 0 || item.type === "movie")) {
+        addToast("Source drive not mounted. Please connect drive to watch this title.", "error");
+        return;
+      }
+      if (row?.type === "continue" || item.position > 0) {
+        if (item.id) {
+          router.push(`/watch/${item.id}`);
+          return;
+        }
+      }
+      if (item.type === "movie" && item.id) {
+        router.push(`/title/movie/${item.id}`);
+      } else if (item.tmdb_id) {
+        router.push(`/title/${item.type || "series"}/${item.tmdb_id}`);
+      } else if (item.id) {
+        router.push(`/title/${item.type || "series"}/${item.id}`);
+      }
+    }
+
+    async function handleRemoveContinue(item) {
+      if (!item.id) return;
+      try {
+        await API.del(`/api/progress/${item.id}`);
+        const cwRow = rows.value.find((r) => r.type === "continue");
+        if (cwRow) {
+          cwRow.items = cwRow.items.filter((i) => i.id !== item.id);
+          if (cwRow.items.length === 0) {
+            rows.value = rows.value.filter((r) => r.type !== "continue");
+          }
+        }
+        addToast("Removed from Continue Watching", "success");
+      } catch (e) {
+        addToast("Failed to remove item", "error");
+      }
+    }
+
+    function handlePlay(item) {
+      if (item.is_mounted === false) {
+        addToast("Source drive not mounted. Please connect drive to watch this title.", "error");
+        return;
+      }
+      if (item.type === "movie" && item.id) {
+        router.push(`/watch/${item.id}`);
+      } else {
+        handleCardClick(item);
+      }
+    }
+
+    function handleDetail(item) {
+      handleCardClick(item);
+    }
+
+    async function triggerScanFromHome() {
+      try {
+        await API.post("/api/scan", {});
+        store.scanRunning = true;
+      } catch (e) {
+        if (e.message && e.message.includes("409")) {
+          addToast("Scan already in progress", "info");
+        } else {
+          addToast("Failed to start scan", "error");
+        }
+      }
+    }
+
+    const trailerModalUrl = ref(null);
+    const trailerModalTitle = ref("");
+
+    async function handleTrailer(item) {
+      if (!item) return;
+      try {
+        const id = item.id || item.tmdb_id;
+        const res = await API.get(`/api/media/${id}/trailer`);
+        if (res && res.embed_url) {
+          trailerModalUrl.value = res.embed_url;
+          trailerModalTitle.value = `${item.title} — ${res.title || 'Official Trailer'}`;
+        } else {
+          addToast("No trailer found for this title", "info");
+        }
+      } catch (e) {
+        addToast("No trailer available for this title", "info");
+      }
+    }
+
+    return {
+      store,
+      router,
+      rows,
+      loading,
+      heroItems,
+      trailerModalUrl,
+      trailerModalTitle,
+      handleCardClick,
+      handleRemoveContinue,
+      handlePlay,
+      handleDetail,
+      handleTrailer,
+      triggerScanFromHome,
+    };
+  },
+};
+
+// ─── Title Detail Page ────────────────────────────────────────
+
+const DetailPage = {
+  components: { MediaCard, TrailerModal },
+  template: `
+    <div class="detail-page" v-if="media">
+      <trailer-modal
+        v-if="trailerModalUrl"
+        :url="trailerModalUrl"
+        :title="trailerModalTitle"
+        @close="trailerModalUrl = null"
+      />
+
+      <!-- Backdrop -->
+      <div class="detail-backdrop">
+        <img
+          v-if="media.backdrop_path && !backdropFailed"
+          :src="imgUrl(media.backdrop_path)"
+          class="detail-backdrop-img"
+          :alt="media.title"
+          @error="backdropFailed = true"
+        >
+        <!-- Fallback when the backdrop can't load (server down / file missing) -->
+        <div v-else class="detail-backdrop-fallback">
+          <i class="ph ph-film-strip"></i>
+        </div>
+        <div class="detail-backdrop-overlay"></div>
+      </div>
+
+      <!-- Body -->
+      <div class="detail-body">
+        <!-- Poster -->
+        <div>
+          <img
+            v-if="media.poster_path"
+            :src="imgUrl(media.poster_path)"
+            class="detail-poster"
+            :alt="media.title"
+          >
+          <div v-else class="detail-poster" style="background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:3rem;">🎬</div>
+        </div>
+
+        <!-- Info -->
+        <div class="detail-info">
+          <div class="detail-type-badge">
+            {{ media.type === 'anime' ? '🎌 Anime' : media.type === 'series' ? '📺 Series' : '🎬 Movie' }}
+          </div>
+
+          <div class="detail-title-container">
+            <img v-if="media.logo_path" :src="imgUrl(media.logo_path)" :alt="media.title" class="detail-logo-img" />
+            <h1 v-else class="detail-title">{{ media.title }}</h1>
+          </div>
+
+          <div class="detail-meta">
+            <span v-if="media.year">{{ media.year }}</span>
+            <span v-if="media.rating" class="detail-rating">⭐ {{ formatRating(media.rating) }}</span>
+            <span v-if="media.vote_count" style="font-size:0.8rem;color:var(--text-muted)">{{ media.vote_count.toLocaleString() }} votes</span>
+            <span v-if="media.runtime">{{ formatDuration(media.runtime * 60) }}</span>
+            <a v-if="media.imdb_id" :href="'https://www.imdb.com/title/' + media.imdb_id" target="_blank" class="imdb-link-badge" title="Open IMDb Page">
+              <span class="imdb-badge-logo">IMDb</span>
+              <span class="imdb-id-text">{{ media.imdb_id }}</span>
+            </a>
+            <span v-if="media.has_multi_audio" class="multi-audio-badge" :title="media.audio_tracks ? media.audio_tracks.map(t => t.title).join(', ') : 'Multiple audio tracks available'">
+              🎙️ Multi-Audio
+            </span>
+          </div>
+
+          <div v-if="media.genres" class="detail-genres">
+            <span
+              v-for="genre in media.genres.split(',')"
+              :key="genre.trim()"
+              class="genre-tag"
+              @click="browseGenre(genre.trim())"
+            >{{ genre.trim() }}</span>
+          </div>
+
+          <p v-if="media.tagline" style="font-style:italic;color:var(--text-muted);margin-bottom:0.75rem;font-size:0.9rem">"{{ media.tagline }}"</p>
+
+          <p class="detail-overview">{{ media.overview }}</p>
+
+          <!-- Actions -->
+          <div class="detail-actions" style="display:flex;align-items:center;gap:1.25rem;flex-wrap:wrap;margin-top:1.75rem;margin-bottom:2rem">
+            <button class="btn btn-primary btn-lg" @click="playMedia" id="detail-play-btn">
+              <span>{{ resumeLabel }}</span>
+              <div class="btn-icon-wrapper">
+                <i class="ph-fill ph-play" style="font-size:0.9rem"></i>
+              </div>
+            </button>
+            <button class="btn btn-secondary btn-lg" @click="watchTrailer" id="detail-trailer-btn">
+              <span>Trailer</span>
+              <div class="btn-icon-wrapper">
+                <i class="ph ph-film-strip" style="font-size:0.95rem"></i>
+              </div>
+            </button>
+            <button class="btn btn-secondary btn-lg" @click="toggleFav" id="detail-fav-btn">
+              <span>{{ media.is_favorite ? 'In Watchlist' : 'Watchlist' }}</span>
+              <div class="btn-icon-wrapper">
+                <i :class="media.is_favorite ? 'ph-fill ph-heart' : 'ph ph-heart'" style="font-size:0.95rem"></i>
+              </div>
+            </button>
+            <button class="btn btn-ghost btn-lg" @click="showCollectionModal = true" id="detail-collection-btn">
+              <i class="ph ph-plus-circle"></i> Add to List
+            </button>
+            <button class="btn btn-ghost btn-lg" @click="openFixMatchModal" id="detail-fix-match-btn">
+              <i class="ph ph-wrench"></i> Fix Match
+            </button>
+            <button class="btn btn-ghost btn-lg" @click="recacheInfo" :disabled="recaching" id="detail-recache-btn">
+              <i :class="recaching ? 'ph ph-circle-notch' : 'ph ph-database'" :style="recaching ? 'animation:spin 1s linear infinite' : ''"></i>
+              {{ recaching ? 'Re-caching...' : 'Re-cache' }}
+            </button>
+          </div>
+
+          <!-- Codec Compatibility Warning Card -->
+          <div class="codec-warning-card" v-if="codecInfo.hasWarning">
+            <div class="codec-warning-icon">⚠️</div>
+            <div class="codec-warning-content">
+              <div class="codec-warning-title">
+                Codec Compatibility Notice
+                <span v-for="tag in codecInfo.tags" :key="tag" class="codec-badge">{{ tag }}</span>
+              </div>
+              <div class="codec-warning-note">
+                {{ codecInfo.note }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Cast Section -->
+          <div class="detail-section" v-if="media.cast && media.cast.length">
+            <div class="detail-section-header">
+              <div class="detail-section-title">
+                <i class="ph ph-users"></i> Cast & Crew
+              </div>
+              <div class="row-header-controls" v-if="media.cast.length > 5">
+                <button class="row-control-btn" @click="scrollCast(-400)" title="Scroll Left">
+                  <i class="ph ph-caret-left"></i>
+                </button>
+                <button class="row-control-btn" @click="scrollCast(400)" title="Scroll Right">
+                  <i class="ph ph-caret-right"></i>
+                </button>
+              </div>
+            </div>
+            <div class="cast-scroll-container" ref="castScrollerRef">
+              <div
+                v-for="member in media.cast.slice(0, 20)"
+                :key="member.name"
+                class="cast-card cast-card-clickable"
+                :title="'Find more titles with ' + member.name"
+                @click="searchCast(member.name)"
+              >
+                <div class="card-inner">
+                  <div class="cast-portrait-wrap">
+                    <img
+                      v-if="member && member.profile"
+                      :src="'https://image.tmdb.org/t/p/w185' + member.profile"
+                      :alt="member.name"
+                      class="cast-portrait-img"
+                      loading="lazy"
+                      @error="e => e.target.style.display='none'"
+                    >
+                    <div v-else class="cast-portrait-placeholder">🎭</div>
+                  </div>
+                  <div class="cast-info-wrap">
+                    <div class="cast-name" :title="member.name">{{ member.name }}</div>
+                    <div class="cast-character" :title="member.character">{{ member.character || 'Role' }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- File Details Bento Container -->
+          <div class="detail-section" v-if="media.file_path">
+            <div class="detail-section-title">
+              <i class="ph ph-file-video" style="color:var(--accent)"></i> Media File Details
+            </div>
+            <div class="file-details-card">
+              <div class="card-inner file-details-inner">
+                <!-- File Path Header -->
+                <div class="file-path-header">
+                  <div class="file-path-info">
+                    <span class="file-path-label">STORAGE LOCATION</span>
+                    <div class="file-path-text" :title="media.file_path">{{ media.file_path }}</div>
+                  </div>
+                  <button class="btn btn-secondary btn-sm" @click="copyFilePath" title="Copy file path to clipboard" id="btn-copy-filepath">
+                    <i class="ph ph-copy" style="font-size:0.95rem"></i> Copy Path
+                  </button>
+                </div>
+
+                <!-- Badges Row -->
+                <div class="file-details-pills">
+                  <a v-if="media.imdb_id" :href="'https://www.imdb.com/title/' + media.imdb_id" target="_blank" class="file-pill imdb-pill" title="View on IMDb">
+                    <i class="ph ph-arrow-square-out"></i>
+                    <span>IMDb: {{ media.imdb_id }}</span>
+                  </a>
+                  <div class="file-pill" v-if="media.file_size">
+                    <i class="ph ph-hard-drive"></i>
+                    <span>{{ formatFileSize(media.file_size) }}</span>
+                  </div>
+                  <div class="file-pill" v-if="getFileExtension(media.file_path)">
+                    <i class="ph ph-film-strip"></i>
+                    <span>{{ getFileExtension(media.file_path) }}</span>
+                  </div>
+                  <div class="file-pill" :class="media.is_mounted !== false ? 'mounted' : 'unmounted'">
+                    <i :class="media.is_mounted !== false ? 'ph ph-check-circle' : 'ph ph-plugs-connected'"></i>
+                    <span>{{ media.is_mounted !== false ? 'Drive Mounted' : 'Drive Unmounted' }}</span>
+                  </div>
+                  <div class="file-pill" v-if="media.has_multi_audio">
+                    <i class="ph ph-speaker-high"></i>
+                    <span>Multi-Audio Track</span>
+                  </div>
+                </div>
+
+                <!-- Audio Tracks Detail List -->
+                <div class="file-audio-tracks" v-if="media.audio_tracks && media.audio_tracks.length">
+                  <div class="file-audio-label">AUDIO TRACKS DETECTED</div>
+                  <div class="audio-track-list">
+                    <div v-for="(track, idx) in media.audio_tracks" :key="idx" class="audio-track-pill">
+                      <span class="audio-track-index">#{{ idx + 1 }}</span>
+                      <span class="audio-track-title">{{ track.title }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Seasons / Episodes -->
+          <div class="seasons-section" v-if="media.seasons && Object.keys(media.seasons).length">
+            <div class="season-tabs-header">
+              <h3>Episodes</h3>
+              <div v-if="sortedSeasons.length > 3" class="season-select-container">
+                <select v-model="activeSeason" class="season-dropdown-select" id="season-dropdown-select">
+                  <option v-for="season in sortedSeasons" :key="season" :value="season">
+                    Season {{ season }} ({{ getSeasonMeta(season).localCount }}/{{ getSeasonMeta(season).totalCount }})
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div class="season-tabs-container">
+              <button class="season-scroll-btn left" @click="scrollSeasonTabs(-250)" title="Scroll seasons left">
+                <i class="ph ph-caret-left"></i>
+              </button>
+              <div class="season-tabs" ref="seasonTabsRef" @wheel="onSeasonTabsWheel">
+                <button
+                  v-for="season in sortedSeasons"
+                  :key="season"
+                  class="season-tab"
+                  :class="{ active: activeSeason === season, 'season-missing': getSeasonMeta(season).isMissing }"
+                  @click="activeSeason = season"
+                  :id="'season-tab-' + season"
+                >
+                  Season {{ season }}
+                  <span class="season-tab-count">
+                    ({{ getSeasonMeta(season).localCount }}/{{ getSeasonMeta(season).totalCount }})
+                  </span>
+                </button>
+              </div>
+              <button class="season-scroll-btn right" @click="scrollSeasonTabs(250)" title="Scroll seasons right">
+                <i class="ph ph-caret-right"></i>
+              </button>
+            </div>
+
+            <div class="episodes-list">
+              <div
+                v-for="ep in media.seasons[activeSeason]"
+                :key="ep.id || ('missing-' + ep.season + '-' + ep.episode)"
+                class="episode-card"
+                :class="{ 'missing-episode': ep.is_local === false || ep.is_mounted === false }"
+                @click="playEpisode(ep)"
+                :id="'ep-' + (ep.id || ('missing-' + ep.episode))"
+              >
+                <!-- 16:9 Thumbnail -->
+                <div class="episode-thumb-container">
+                  <img
+                    v-if="ep.still_path"
+                    :src="imgUrl(ep.still_path)"
+                    class="episode-thumb-img"
+                    @error="e => e.target.style.display = 'none'"
+                  />
+                  <img
+                    v-else-if="media.backdrop_path"
+                    :src="imgUrl(media.backdrop_path)"
+                    class="episode-thumb-img"
+                  />
+                  <div class="episode-thumb-overlay" v-if="ep.is_local !== false && ep.is_mounted !== false">
+                    <i class="ph-fill ph-play episode-play-icon"></i>
+                  </div>
+                  <!-- Missing / Unmounted Overlay Badge -->
+                  <div class="episode-thumb-overlay" v-else style="opacity:1;background:rgba(10,10,15,0.65)">
+                    <span class="missing-badge">{{ ep.is_mounted === false ? '🔌 Unmounted' : '⚠️ Not Downloaded' }}</span>
+                  </div>
+                  <!-- Red watch progress bar -->
+                  <div v-if="calcProgressPercent(ep) > 0" class="episode-thumb-progress">
+                    <div class="episode-thumb-progress-fill" :style="{ width: calcProgressPercent(ep) + '%' }"></div>
+                  </div>
+                  <!-- Per-episode skip marker editor -->
+                  <button
+                    v-if="ep.id"
+                    class="episode-skip-btn"
+                    :class="{ 'has-markers': episodeHasMarkers(ep) }"
+                    @click.stop="openEpisodeSkipModal(ep)"
+                    :title="'Edit skip markers for S' + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0')"
+                  >
+                    <i class="ph ph-timer"></i>
+                  </button>
+                </div>
+
+                <!-- Episode Info & Summary -->
+                <div class="episode-card-body">
+                  <div class="episode-card-header">
+                    <div class="episode-card-number">
+                      S{{ activeSeason.toString().padStart(2,'0') }}E{{ (ep.episode || '?').toString().padStart(2,'0') }}
+                      <span class="episode-card-title">• {{ ep.ep_title || ep.title }}</span>
+                      <span v-if="ep.is_local === false" class="missing-badge" style="margin-left:8px">Missing</span>
+                    </div>
+                    <div class="episode-card-runtime" v-if="ep.duration">
+                      {{ formatDuration(ep.duration) }}
+                    </div>
+                  </div>
+                  <div class="episode-card-overview">
+                    {{ ep.overview || 'No description available for this episode.' }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add to Collection Modal -->
+      <div class="modal-backdrop" v-if="showCollectionModal" @click.self="showCollectionModal = false">
+        <div class="modal-card" style="max-width:460px">
+          <div class="modal-title">Add to Collection</div>
+
+          <!-- Inline Create Collection Row -->
+          <div style="margin-top:1rem;margin-bottom:0.75rem;padding:0.75rem;background:var(--bg-secondary);border-radius:8px">
+            <div v-if="!showInlineCreate" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" @click="showInlineCreate = true" id="btn-inline-create-col">
+              <span style="font-weight:600;font-size:0.9rem;color:var(--accent)">
+                <i class="ph ph-plus-circle" style="margin-right:4px"></i> Create New Collection
+              </span>
+            </div>
+            <div v-else style="display:flex;gap:6px">
+              <input type="text" v-model="inlineColName" class="form-input" placeholder="Collection name..." @keyup.enter="createAndAddInlineCollection" autofocus id="input-inline-col-name" />
+              <button class="btn btn-primary btn-sm" @click="createAndAddInlineCollection" id="btn-save-inline-col">Create & Add</button>
+            </div>
+          </div>
+
+          <div style="max-height:260px;overflow-y:auto">
+            <div v-if="collections.length === 0" style="color:var(--text-muted);text-align:center;padding:1rem">
+              No collections created yet. Type a name above to create one!
+            </div>
+            <div v-for="col in collections" :key="col.id"
+              style="padding:0.75rem;cursor:pointer;border-radius:8px;transition:background 0.15s;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between"
+              :style="{ background: inCollection(col) ? 'var(--accent-dim)' : 'var(--bg-secondary)' }"
+              @click="toggleCollection(col)"
+            >
+              <div>
+                <div style="font-weight:600;font-size:0.9rem">{{ col.name }}</div>
+                <div style="font-size:0.75rem;color:var(--text-muted)">{{ col.items.length }} items</div>
+              </div>
+              <i :class="inCollection(col) ? 'ph-fill ph-check-circle' : 'ph ph-circle'" :style="{ color: inCollection(col) ? 'var(--accent)' : 'var(--text-muted)', fontSize: '1.2rem' }"></i>
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-full" style="margin-top:1rem" @click="showCollectionModal = false">Close</button>
+        </div>
+      </div>
+
+      <!-- Fix Match Modal -->
+      <div class="modal-backdrop" v-if="showFixMatchModal" @click.self="showFixMatchModal = false">
+        <div class="modal-card" style="max-width:550px">
+          <div class="modal-title">Fix Match / Search TMDb</div>
+          <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:1rem">
+            Search by Movie/Show title, or enter an IMDb ID (e.g. tt36304003) or TMDb ID:
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:1rem">
+            <input type="text" v-model="fixQuery" class="form-input" placeholder="e.g. Huo Zhe Yan or tt36304003" @keyup.enter="searchFixMatch" />
+            <button class="btn btn-primary" @click="searchFixMatch">Search</button>
+          </div>
+          <div v-if="searchingFix" class="loading-spinner" style="margin:2rem auto"></div>
+          <div v-else-if="fixResults.length" style="max-height:350px;overflow-y:auto">
+            <div v-for="res in fixResults" :key="res.tmdb_id"
+                 style="display:flex;gap:12px;padding:8px;border-radius:8px;background:var(--bg-secondary);margin-bottom:8px;cursor:pointer;align-items:center"
+                 @click="applyFixMatch(res)">
+              <img v-if="res.poster_path" :src="imgUrl(res.poster_path)" style="width:45px;height:65px;object-fit:cover;border-radius:4px" />
+              <div v-else style="width:45px;height:65px;background:var(--bg-tertiary);display:flex;align-items:center;justify-content:center;border-radius:4px">🎬</div>
+              <div style="flex:1;overflow:hidden">
+                <div style="font-weight:700;font-size:0.95rem">{{ res.title }} <span v-if="res.year" style="color:var(--text-muted)">({{ res.year }})</span></div>
+                <div style="font-size:0.75rem;color:var(--text-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">{{ res.overview || 'No overview available' }}</div>
+              </div>
+              <button class="btn btn-primary btn-sm">Match</button>
+            </div>
+          </div>
+          <div v-else-if="fixSearched" style="text-align:center;padding:2rem 0;color:var(--text-muted)">
+            No results found for "{{ fixQuery }}". Try an IMDb ID like tt36304003.
+          </div>
+          <button class="btn btn-ghost btn-full" style="margin-top:1rem" @click="showFixMatchModal = false">Close</button>
+        </div>
+      </div>
+
+      <!-- Skip Timestamps Editor Modal (per-episode) -->
+      <skip-timestamps-modal
+        v-if="showSkipModal"
+        :media="skipEditTarget || media"
+        :inPlayer="false"
+        @close="showSkipModal = false"
+        @saved="handleSkipSaved"
+      />
+    </div>
+
+    <div v-else-if="loading" class="detail-page" style="display:flex;align-items:center;justify-content:center;min-height:100vh">
+      <div class="loading-spinner"></div>
+    </div>
+
+    <div v-else class="empty-state" style="padding-top:calc(var(--nav-height) + 4rem);min-height:80vh">
+      <div class="empty-icon">⚠️</div>
+      <div class="empty-title">Title Not Found</div>
+      <div class="empty-subtitle" style="margin-bottom:1.5rem">Could not load details for this media item.</div>
+      <button class="btn btn-primary" @click="router.back()">Go Back</button>
+    </div>
+  `,
+  setup() {
+    const route = VueRouter.useRoute();
+    const router = VueRouter.useRouter();
+    const media = ref(null);
+    const loading = ref(true);
+    const activeSeason = ref("1");
+    const seasonTabsRef = ref(null);
+    const showCollectionModal = ref(false);
+    const collections = ref([]);
+
+    const showFixMatchModal = ref(false);
+    const fixQuery = ref("");
+    const fixResults = ref([]);
+    const searchingFix = ref(false);
+    const fixSearched = ref(false);
+
+    const sortedSeasons = computed(() => {
+      if (!media.value?.seasons) return [];
+      return Object.keys(media.value.seasons).sort((a, b) => Number(a) - Number(b));
+    });
+
+    const resumeLabel = computed(() => {
+      const p = media.value?.progress;
+      if (p && p.position > 30) return "▶ Resume";
+      return "▶ Play";
+    });
+
+    const codecInfo = computed(() => {
+      const path = media.value?.file_path || media.value?.seasons?.[sortedSeasons.value[0]]?.[0]?.file_path;
+      return getCodecInfo(path);
+    });
+
+    const backdropFailed = ref(false);
+
+    async function load() {
+      loading.value = true;
+      backdropFailed.value = false;   // reset fallback when loading a title
+      try {
+        const { type, id } = route.params;
+        let url;
+        if (type === "movie") {
+          url = `/api/media/${id}`;
+        } else {
+          url = `/api/show/${id}?type=${type}`;
+        }
+        media.value = await API.get(url);
+        if (sortedSeasons.value.length) {
+          activeSeason.value = sortedSeasons.value[0];
+        }
+        if (store.profile) {
+          collections.value = await API.get("/api/collections");
+        }
+      } catch (e) {
+        media.value = null;
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    onMounted(load);
+    watch(() => route.params.id, load);
+
+    function copyFilePath() {
+      if (!media.value?.file_path) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(media.value.file_path);
+        addToast('File path copied to clipboard!', 'success');
+      } else {
+        const input = document.createElement('input');
+        input.value = media.value.file_path;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        addToast('File path copied to clipboard!', 'success');
+      }
+    }
+
+    function formatFileSize(bytes) {
+      if (!bytes || isNaN(bytes) || bytes <= 0) return '0 MB';
+      const tb = bytes / (1024 * 1024 * 1024 * 1024);
+      if (tb >= 1.0) return `${tb < 10 ? tb.toFixed(2) : tb.toFixed(1)} TB`;
+      const gb = bytes / (1024 * 1024 * 1024);
+      if (gb >= 1.0) return `${gb < 10 ? gb.toFixed(2) : gb.toFixed(1)} GB`;
+      const mb = bytes / (1024 * 1024);
+      return `${mb.toFixed(1)} MB`;
+    }
+
+    function getFileExtension(path) {
+      if (!path) return '';
+      const parts = path.split('.');
+      if (parts.length < 2) return '';
+      return parts[parts.length - 1].toUpperCase();
+    }
+
+    function playMedia() {
+      if (!media.value) return;
+      if (media.value.is_mounted === false) {
+        addToast("Source drive not mounted. Please connect drive to watch this title.", "error");
+        return;
+      }
+      if (media.value.type === "movie") {
+        router.push(`/watch/${media.value.id}`);
+      } else {
+        const seasonEps = media.value.seasons?.[activeSeason.value] || [];
+        const playableEp = seasonEps.find((e) => e.is_local !== false && e.is_mounted !== false);
+        if (playableEp) {
+          router.push(`/watch/${playableEp.id}`);
+        } else {
+          addToast("Source drive not mounted. Please connect drive to watch this title.", "error");
+        }
+      }
+    }
+
+    function playEpisode(ep) {
+      if (ep.is_local === false) {
+        addToast("Episode not downloaded in library", "info");
+        return;
+      }
+      if (ep.is_mounted === false) {
+        addToast("Source drive not mounted. Please connect drive to watch this title.", "error");
+        return;
+      }
+      router.push(`/watch/${ep.id}`);
+    }
+
+    async function toggleFav() {
+      if (!media.value || !store.profile) return;
+      const idToFav = media.value.id || media.value.seasons?.[sortedSeasons.value[0]]?.[0]?.id;
+      if (!idToFav) return;
+      const res = await API.post("/api/favorites/toggle", { media_id: idToFav });
+      media.value.is_favorite = res.is_favorite;
+      addToast(res.is_favorite ? "Added to Favorites" : "Removed from Favorites", "info");
+    }
+
+    function browseGenre(genre) {
+      router.push(`/browse?genre=${encodeURIComponent(genre)}`);
+    }
+
+    function inCollection(col) {
+      if (!media.value) return false;
+      const mediaId = media.value.id || media.value.seasons?.[sortedSeasons.value[0]]?.[0]?.id;
+      return col.items.some((i) => i.id === mediaId);
+    }
+
+    const inlineColName = ref("");
+    const showInlineCreate = ref(false);
+
+    async function createAndAddInlineCollection() {
+      const name = inlineColName.value.trim();
+      if (!name) return;
+      try {
+        const col = await API.post("/api/collections", { name });
+        col.items = [];
+        collections.value.unshift(col);
+        inlineColName.value = "";
+        showInlineCreate.value = false;
+        await toggleCollection(col);
+        addToast(`Created "${name}" & added title!`, "success");
+      } catch (e) {
+        addToast("Failed to create collection", "error");
+      }
+    }
+
+    async function toggleCollection(col) {
+      const mediaId = media.value.id || media.value.seasons?.[sortedSeasons.value[0]]?.[0]?.id;
+      if (!mediaId) return;
+      if (inCollection(col)) {
+        await API.del(`/api/collections/${col.id}/items/${mediaId}`);
+        col.items = col.items.filter((i) => i.id !== mediaId);
+      } else {
+        await API.post(`/api/collections/${col.id}/items`, { media_id: mediaId });
+        col.items.push({ id: mediaId });
+      }
+    }
+
+    function openFixMatchModal() {
+      fixQuery.value = media.value?.title || "";
+      fixResults.value = [];
+      fixSearched.value = false;
+      showFixMatchModal.value = true;
+      if (fixQuery.value) {
+        searchFixMatch();
+      }
+    }
+
+    async function searchFixMatch() {
+      if (!fixQuery.value.trim()) return;
+      searchingFix.value = true;
+      fixSearched.value = true;
+      try {
+        const mtype = media.value?.type || route.params.type || "movie";
+        fixResults.value = await API.get(`/api/tmdb/search?query=${encodeURIComponent(fixQuery.value.trim())}&type=${mtype}`);
+      } catch (e) {
+        addToast("Search failed", "error");
+      } finally {
+        searchingFix.value = false;
+      }
+    }
+
+    async function applyFixMatch(result) {
+      const mediaId = media.value?.id || media.value?.seasons?.[sortedSeasons.value[0]]?.[0]?.id;
+      if (!mediaId) return;
+      try {
+        await API.post("/api/override", {
+          media_id: mediaId,
+          tmdb_id: result.tmdb_id,
+          type: media.value?.type || route.params.type || "movie",
+        });
+        addToast(`Matched to ${result.title}!`, "success");
+        showFixMatchModal.value = false;
+        await load();
+      } catch (e) {
+        addToast("Failed to apply match", "error");
+      }
+    }
+
+    function getSeasonMeta(seasonNum) {
+      const eps = media.value?.seasons?.[seasonNum] || [];
+      const localCount = eps.filter(e => e.is_local !== false && e.is_mounted !== false).length;
+      const totalCount = eps.length;
+      return { localCount, totalCount, isMissing: localCount === 0 };
+    }
+
+    const trailerModalUrl = ref(null);
+    const trailerModalTitle = ref("");
+    const showSkipModal = ref(false);
+    // Which episode's markers are being edited (per-episode skip markers)
+    const skipEditTarget = ref(null);
+
+    function openEpisodeSkipModal(ep) {
+      if (!ep || !ep.id) {
+        addToast("Skip markers need a local media file", "info");
+        return;
+      }
+      skipEditTarget.value = ep;
+      showSkipModal.value = true;
+    }
+
+    function episodeHasMarkers(ep) {
+      if (!ep) return false;
+      return !!(
+        (ep.recap_end || 0) > (ep.recap_start || 0) ||
+        (ep.intro_end || 0) > (ep.intro_start || 0) ||
+        (ep.outro_end || 0) > (ep.outro_start || 0)
+      );
+    }
+
+    function handleSkipSaved(updatedData) {
+      // Write the new markers onto the exact episode object being edited so
+      // reopening the editor (and the has-markers badge) reflects them live.
+      if (skipEditTarget.value) {
+        Object.assign(skipEditTarget.value, updatedData);
+      } else if (media.value) {
+        Object.assign(media.value, updatedData);
+      }
+    }
+
+    // ─── Re-cache: wipe this title's metadata/artwork, re-download ──
+    const recaching = ref(false);
+    async function recacheInfo() {
+      if (!media.value || recaching.value) return;
+      const tmdbId = media.value.tmdb_id;
+      if (!tmdbId) {
+        addToast("This title has no TMDb match — use 'Fix Match' first", "warning");
+        return;
+      }
+      const ok = await customConfirm({
+        title: "Re-cache this title?",
+        message: "Deletes the current metadata, artwork, and episode info for this title and re-downloads everything from TMDb. Skip markers you set manually are kept.",
+        icon: "ph ph-database",
+        okText: "Delete & Re-download",
+        danger: true,
+      });
+      if (!ok) return;
+
+      recaching.value = true;
+      try {
+        const res = await API.post("/api/recache", {
+          tmdb_id: tmdbId,
+          type: media.value.type,
+        });
+        addToast(
+          `Re-cached "${res.title}" — ${res.removed_files} old files replaced across ${res.updated_rows} entries`,
+          "success",
+          5000
+        );
+        await load();
+      } catch (e) {
+        addToast(e.message || "Re-cache failed", "error");
+      } finally {
+        recaching.value = false;
+      }
+    }
+
+    async function watchTrailer() {
+      if (!media.value) return;
+      const mediaId = media.value.id || media.value.seasons?.[sortedSeasons.value[0]]?.[0]?.id;
+      if (!mediaId) return;
+      try {
+        const res = await API.get(`/api/media/${mediaId}/trailer`);
+        if (res && res.embed_url) {
+          trailerModalUrl.value = res.embed_url;
+          trailerModalTitle.value = `${media.value.title} — ${res.title || 'Official Trailer'}`;
+        } else {
+          addToast("No trailer found for this title", "info");
+        }
+      } catch (e) {
+        addToast("No trailer available for this title", "info");
+      }
+    }
+
+    const castScrollerRef = ref(null);
+    function scrollCast(offset) {
+      if (castScrollerRef.value) {
+        castScrollerRef.value.scrollBy({ left: offset, behavior: "smooth" });
+      }
+    }
+
+    // Click a cast member → jump to Search pre-filled with their name.
+    // The backend deep-search matches cast_json, so results are titles
+    // featuring that actor across the whole library.
+    function searchCast(name) {
+      if (!name) return;
+      router.push({ path: "/search", query: { q: name } });
+    }
+
+    function copyFilePath() {
+      if (!media.value?.file_path) return;
+      navigator.clipboard.writeText(media.value.file_path).then(() => {
+        addToast("Storage location copied to clipboard!", "success");
+      }).catch(() => {
+        addToast("Failed to copy path", "error");
+      });
+    }
+
+    function scrollSeasonTabs(offset) {
+      if (seasonTabsRef.value) {
+        seasonTabsRef.value.scrollBy({ left: offset, behavior: "smooth" });
+      }
+    }
+
+    function onSeasonTabsWheel(e) {
+      if (seasonTabsRef.value && e.deltaY) {
+        seasonTabsRef.value.scrollLeft += e.deltaY;
+      }
+    }
+
+    return {
+      store,
+      media,
+      loading,
+      activeSeason,
+      sortedSeasons,
+      getSeasonMeta,
+      seasonTabsRef,
+      scrollSeasonTabs,
+      onSeasonTabsWheel,
+      castScrollerRef,
+      scrollCast,
+      searchCast,
+      backdropFailed,
+      skipEditTarget,
+      openEpisodeSkipModal,
+      episodeHasMarkers,
+      recaching,
+      recacheInfo,
+      copyFilePath,
+      resumeLabel,
+      codecInfo,
+      showCollectionModal,
+      collections,
+      inlineColName,
+      showInlineCreate,
+      createAndAddInlineCollection,
+      showFixMatchModal,
+      fixQuery,
+      fixResults,
+      searchingFix,
+      fixSearched,
+      openFixMatchModal,
+      searchFixMatch,
+      applyFixMatch,
+      router,
+      imgUrl,
+      formatRating,
+      formatDuration,
+      calcProgressPercent,
+      playMedia,
+      playEpisode,
+      toggleFav,
+      browseGenre,
+      inCollection,
+      toggleCollection,
+      copyFilePath,
+      formatFileSize,
+      getFileExtension,
+      watchTrailer,
+      trailerModalUrl,
+      trailerModalTitle,
+      showSkipModal,
+      handleSkipSaved,
+    };
+  },
+};
+
+// ─── Settings Page ────────────────────────────────────────────
+
+const SettingsPage = {
+  template: `
+    <div class="settings-page">
+      <div class="settings-header">
+        <div class="settings-title">
+          <i class="ph ph-gear" style="color:var(--accent)"></i>
+          <span>Application Settings</span>
+        </div>
+      </div>
+
+      <div v-if="loading" style="display:flex;justify-content:center;padding:4rem">
+        <div class="loading-spinner"></div>
+      </div>
+
+      <template v-else>
+        <!-- 1. Metadata Providers -->
+        <div class="settings-section">
+          <div class="settings-section-title">
+            <i class="ph ph-database" style="color:var(--accent)"></i>
+            <span>Metadata Providers & API Keys</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start">
+              <div class="settings-label-container">
+                <div class="settings-label">TMDb API Key (Main Metadata Provider)</div>
+                <div class="settings-desc">Used for fetching movie/series posters, backdrops, ratings, overviews, and cast info.</div>
+              </div>
+              <div style="display:flex;gap:8px;width:100%;margin-top:8px">
+                <input type="password" v-model="form.tmdb_api_key" class="form-input" placeholder="Enter TMDb API key..." style="flex:1" />
+                <button class="btn btn-secondary" @click="testApi('tmdb', form.tmdb_api_key)" :disabled="testingApi === 'tmdb'">
+                  {{ testingApi === 'tmdb' ? 'Testing...' : 'Test API' }}
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;margin-top:8px">
+              <div class="settings-label-container">
+                <div class="settings-label">OMDb API Key</div>
+                <div class="settings-desc">Fallback provider to look up TMDb / IMDb IDs from title names.</div>
+              </div>
+              <div style="display:flex;gap:8px;width:100%;margin-top:8px">
+                <input type="password" v-model="form.omdb_api_key" class="form-input" placeholder="Enter OMDb API key..." style="flex:1" />
+                <button class="btn btn-secondary" @click="testApi('omdb', form.omdb_api_key)" :disabled="testingApi === 'omdb'">
+                  {{ testingApi === 'omdb' ? 'Testing...' : 'Test API' }}
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Enable Jikan API (Anime Metadata Fallback)</div>
+                <div class="settings-desc">Use MyAnimeList/Jikan API for fallback anime metadata matching.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.metadata_sources.enable_jikan" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Enable OMDb Fallback</div>
+                <div class="settings-desc">Enable OMDb API for fallback title searches if TMDb matching yields no results.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.metadata_sources.enable_omdb" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. System Files, Web Browser & Media Paths -->
+        <div class="settings-section">
+          <div class="settings-section-title">
+            <i class="ph ph-globe-hemisphere-west" style="color:var(--accent)"></i>
+            <span>Web Browser & System Configuration</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Default Web Browser</div>
+                <div class="settings-desc">Choose preferred browser for launching media streaming. Microsoft Edge is recommended for native 4K HEVC and Dolby AC-3 decoding.</div>
+              </div>
+              <select v-model="form.browser" class="form-input" style="width:280px" id="setting-browser-select">
+                <option value="edge">🌐 Microsoft Edge (Recommended)</option>
+                <option value="chrome">🌐 Google Chrome</option>
+                <option value="system">💻 System Default Browser</option>
+              </select>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Hide System Files & Folders</div>
+                <div class="settings-desc">When enabled, hides all files and folders in the root project except media folders and start.bat.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.hide_system_files" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Hide Unmounted Media Items</div>
+                <div class="settings-desc">When enabled, automatically hides media files located on disconnected external drives or unmounted storage paths.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.hide_unmounted_items" id="setting-hide-unmounted-toggle" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div style="margin-top:1rem">
+              <div class="settings-label">Media Scanner Paths</div>
+              <div class="settings-desc">Local directories scanned for video files, grouped by category. Order sets scan priority.</div>
+
+              <div class="paths-grid">
+                <div v-for="cat in ['movies', 'series', 'anime']" :key="cat" class="path-cat-card" :id="'paths-card-' + cat">
+                  <!-- Category header -->
+                  <div class="path-cat-header">
+                    <div
+                      class="path-cat-icon"
+                      :class="'cat-' + cat"
+                    >
+                      <i :class="cat === 'movies' ? 'ph ph-film-strip' : cat === 'series' ? 'ph ph-television' : 'ph ph-sparkle'"></i>
+                    </div>
+                    <div class="path-cat-title">
+                      <span class="path-cat-name">{{ cat === 'anime' ? 'Anime' : cat.charAt(0).toUpperCase() + cat.slice(1) }}</span>
+                      <span class="path-cat-count">
+                        {{ (form.media_paths[cat] || []).length }} {{ (form.media_paths[cat] || []).length === 1 ? 'path' : 'paths' }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- Path list -->
+                  <div class="path-list">
+                    <div
+                      v-for="(p, idx) in (form.media_paths[cat] || [])"
+                      :key="idx"
+                      class="path-list-item"
+                    >
+                      <span
+                        class="path-status-dot"
+                        :class="pathStatuses[p] ? (pathStatuses[p].accessible ? 'ok' : 'bad') : 'unknown'"
+                        :title="pathStatuses[p] ? (pathStatuses[p].accessible ? 'Connected — ' + pathStatuses[p].video_count + ' videos found' : 'Unmounted / Not Found') : 'Checking...'"
+                      ></span>
+                      <span class="path-text" :title="p">{{ p }}</span>
+                      <span
+                        v-if="pathStatuses[p]"
+                        class="path-videos"
+                        :class="pathStatuses[p].accessible ? 'ok' : 'bad'"
+                      >
+                        {{ pathStatuses[p].accessible ? pathStatuses[p].video_count + ' vids' : 'n/a' }}
+                      </span>
+                      <div class="path-actions">
+                        <button class="path-act-btn" @click.stop="movePath(cat, idx, -1)" :disabled="idx === 0" title="Move Up">
+                          <i class="ph ph-caret-up"></i>
+                        </button>
+                        <button class="path-act-btn" @click.stop="movePath(cat, idx, 1)" :disabled="idx === (form.media_paths[cat]?.length || 0) - 1" title="Move Down">
+                          <i class="ph ph-caret-down"></i>
+                        </button>
+                        <button class="path-act-btn danger" @click.stop="removePath(cat, idx)" title="Remove Path">
+                          <i class="ph ph-trash"></i>
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Empty state -->
+                    <div v-if="!(form.media_paths[cat] || []).length" class="path-empty">
+                      <i class="ph ph-folder-plus"></i> No paths yet — add your first folder below
+                    </div>
+                  </div>
+
+                  <!-- Add path row -->
+                  <div class="path-add-row">
+                    <input
+                      type="text"
+                      v-model="newPaths[cat]"
+                      class="form-input path-add-input"
+                      :placeholder="'D:/Entertainment/' + cat + '...'"
+                      @keyup.enter="addPath(cat)"
+                    />
+                    <button class="path-add-btn" @click="handleBrowseFolder(cat)" :disabled="browsingFolder === cat" :id="'btn-browse-' + cat" title="Browse folders">
+                      <i :class="browsingFolder === cat ? 'ph ph-circle-notch' : 'ph ph-folder-open'" :style="browsingFolder === cat ? 'animation:spin 1s linear infinite' : ''"></i>
+                    </button>
+                    <button class="path-add-btn primary" @click="addPath(cat)" title="Add Path">
+                      <i class="ph ph-plus"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Subtitles & Player Defaults -->
+        <div class="settings-section">
+          <div class="settings-section-title">
+            <i class="ph ph-subtitles" style="color:var(--accent)"></i>
+            <span>Player & Subtitle Defaults</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Subtitles — Auto Load</div>
+                <div class="settings-desc">Automatically enable and show subtitles on video start if available.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.subtitles.auto_load" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Subtitles — Preferred Language</div>
+                <div class="settings-desc">Default language track selected when loading video subtitles.</div>
+              </div>
+              <select v-model="form.subtitles.preferred_language" class="form-input" style="width:160px">
+                <option value="Auto">Auto (Default)</option>
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="ja">Japanese</option>
+                <option value="de">German</option>
+              </select>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Auto Play Next Episode</div>
+                <div class="settings-desc">Automatically play the next episode when the current one finishes.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.playback.auto_play_next" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Auto-Skip Intro & Recap</div>
+                <div class="settings-desc">Automatically skip intro, recap, and outro ranges when video playback enters their timestamp window.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.playback.auto_skip_intro" id="setting-auto-skip-toggle" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Subtitles — Font Size</div>
+                <div class="settings-desc">Default font size scaling for subtitle text in the player.</div>
+              </div>
+              <select v-model="form.subtitles.font_size" class="form-input" style="width:160px">
+                <option value="small">Small (75%)</option>
+                <option value="normal">Normal (100%)</option>
+                <option value="large">Large (125%)</option>
+                <option value="extra-large">Extra Large (150%)</option>
+              </select>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Playback — Auto Play Next Episode</div>
+                <div class="settings-desc">Automatically show 5s countdown and advance to the next episode on video end.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.playback.auto_play_next" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Playback — Seek Step (Seconds)</div>
+                <div class="settings-desc">Time in seconds skipped when pressing Arrow Left/Right or skip buttons.</div>
+              </div>
+              <input type="number" v-model.number="form.playback.seek_step" min="1" max="60" class="form-input" style="width:120px" />
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Playback — Default Volume</div>
+                <div class="settings-desc">Initial volume level when launching the video player.</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;width:240px">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  :value="volumePercent"
+                  @input="setVolumePercent($event.target.value)"
+                  class="form-range-slider"
+                  id="setting-default-volume-slider"
+                  :style="{ flex: 1, '--range-progress': volumePercent + '%' }"
+                />
+                <span style="min-width:48px;font-weight:700;font-size:0.85rem;color:var(--accent);text-align:right">
+                  {{ volumePercent }}%
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Cache & Storage Management -->
+        <div class="settings-section">
+          <div class="settings-section-title">
+            <i class="ph ph-hard-drive" style="color:var(--accent)"></i>
+            <span>Cache & Storage Management</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Cached Metadata & Images</div>
+                <div class="settings-desc">Cached posters, backdrops, and JSON metadata stored on disk.</div>
+                <div style="font-size:0.85rem;color:var(--text-primary);font-weight:700;margin-top:4px">
+                  Current Cache Usage: <span style="color:var(--accent)">{{ cacheInfo.size_formatted || '0 KB' }}</span> ({{ cacheInfo.file_count || 0 }} files)
+                </div>
+              </div>
+              <button class="btn btn-secondary" @click="handleClearCache" :disabled="clearingCache" id="btn-clear-cache">
+                <i class="ph ph-trash-simple" style="margin-right:6px"></i>
+                {{ clearingCache ? 'Clearing...' : 'Clear Cache' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. Fresh Start (Full System Reset) -->
+        <div class="settings-section" style="border:1px solid rgba(229,9,20,0.3);background:rgba(229,9,20,0.04)">
+          <div class="settings-section-title">
+            <i class="ph ph-warning-circle" style="color:var(--accent)"></i>
+            <span style="color:var(--accent)">Fresh Start & System Reset</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label" style="color:var(--accent)">Full Application Reset</div>
+                <div class="settings-desc">Unlinks external drive locations (e.g. E:/MOVIES, D:/Entertainment), resets media paths to local defaults, clears metadata cache, and wipes database.</div>
+              </div>
+              <button class="btn btn-primary danger" @click="showResetModal = true" :disabled="resetting" id="btn-fresh-start">
+                <i class="ph ph-arrows-counter-clockwise" style="margin-right:6px"></i>
+                Fresh Start Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Fresh Start Warning & Confirmation Modal -->
+      <div v-if="showResetModal" class="modal-backdrop" style="z-index:500;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showResetModal = false">
+        <div class="shortcuts-modal-card" style="max-width:520px" @click.stop>
+          <div class="shortcuts-modal-inner" style="text-align:left">
+            <div class="shortcuts-modal-header" style="margin-bottom:1rem;border-bottom-color:rgba(229,9,20,0.3)">
+              <div class="shortcuts-header-title" style="color:var(--accent)">
+                <i class="ph ph-warning-octagon" style="font-size:1.6rem"></i>
+                <span>⚠️ Fresh Start Warning</span>
+              </div>
+              <button class="shortcuts-close-btn" @click="showResetModal = false">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+
+            <div style="font-size:0.9rem;color:var(--text-secondary);line-height:1.5;margin-bottom:1rem">
+              This action will perform a complete system reset of CapsStream. Please review the changes below:
+            </div>
+
+            <div class="settings-group" style="background:rgba(0,0,0,0.3);padding:1rem;border-radius:8px;margin-bottom:1.25rem">
+              <div style="font-size:0.85rem;color:var(--text-primary);margin-bottom:6px"><strong>What will be done:</strong></div>
+              <ul style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6;list-style:disc;padding-left:1.25rem">
+                <li><strong>Clears media paths</strong> — you'll re-add your own media sources afterwards.</li>
+                <li><strong>Wipes database</strong>, deleting profiles, watch progress, watchlists, and custom collections.</li>
+                <li><strong>Clears metadata cache</strong> (cached poster images and JSON files).</li>
+              </ul>
+
+              <div style="margin-top:1rem;padding-top:0.75rem;border-top:1px dashed rgba(255,255,255,0.1)">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:var(--accent);font-weight:700">
+                  <input type="checkbox" v-model="clearMediaFiles" style="width:18px;height:18px;cursor:pointer">
+                  <span>Also delete leftover files inside the local <code>media</code> folder</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1.25rem">
+              <label class="form-label" style="font-size:0.85rem">To confirm, type <strong style="color:var(--accent)">RESET</strong> below:</label>
+              <input type="text" v-model="resetConfirmText" class="form-input" placeholder="Type RESET to confirm" style="text-transform:uppercase" id="reset-confirm-input" />
+            </div>
+
+            <div style="display:flex;gap:0.75rem;justify-content:flex-end">
+              <button class="btn btn-ghost" @click="showResetModal = false">Cancel</button>
+              <button class="btn btn-primary danger" :disabled="resetConfirmText.trim().toUpperCase() !== 'RESET' || resetting" @click="confirmFreshStart" id="btn-confirm-reset">
+                {{ resetting ? 'Wiping & Resetting...' : 'Confirm Fresh Start & Reset' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Floating Bottom-Right Save Action Bar (only when changes are pending) -->
+      <transition name="fade">
+        <div class="settings-floating-bar" id="settings-floating-bar" v-if="isDirty || saving">
+          <div class="settings-floating-status">
+            <span :class="isDirty ? 'settings-pulse-dot warning' : 'settings-pulse-dot success'"></span>
+            <span style="font-size:0.85rem;font-weight:700;color:var(--text-primary)">
+              {{ saving ? 'Saving configuration...' : 'Unsaved Settings Changes' }}
+            </span>
+          </div>
+          <button class="btn btn-primary" @click="saveSettings" :disabled="saving" id="floating-save-settings-btn">
+            <i class="ph ph-floppy-disk" style="margin-right:6px"></i>
+            {{ saving ? 'Saving...' : 'Save Settings' }}
+          </button>
+        </div>
+      </transition>
+    </div>
+  `,
+  setup() {
+    const loading = ref(true);
+    const saving = ref(false);
+    const testingApi = ref(null);
+    const newPaths = ref({ movies: "", series: "", anime: "" });
+
+    const form = ref({
+      browser: "edge",
+      tmdb_api_key: "264a7dcdd8291a83c4a51727755343bc",
+      omdb_api_key: "11361685",
+      hide_system_files: false,
+      metadata_sources: { enable_jikan: true, enable_omdb: true },
+      media_paths: {
+        movies: [],
+        series: [],
+        anime: [],
+      },
+      subtitles: { auto_load: true, preferred_language: "Auto", font_size: "normal" },
+      playback: { auto_play_next: true, seek_step: 10, default_volume: 1 },
+    });
+
+    // Built-in default media folders were removed — all paths are user-provided.
+
+    const initialFormJson = ref("");
+    const showUnsavedModal = ref(false);
+    const pendingNextRoute = ref(null);
+
+    const isDirty = computed(() => {
+      if (loading.value || !initialFormJson.value) return false;
+      return JSON.stringify(form.value) !== initialFormJson.value;
+    });
+
+    const browsingFolder = ref(null);
+    const pathStatuses = ref({});
+
+    async function validatePaths() {
+      const allPaths = [
+        ...(form.value.media_paths.movies || []),
+        ...(form.value.media_paths.series || []),
+        ...(form.value.media_paths.anime || []),
+      ];
+      if (!allPaths.length) return;
+      try {
+        const res = await API.post("/api/system/validate-paths", { paths: allPaths });
+        if (res) pathStatuses.value = res;
+      } catch (e) {}
+    }
+
+    async function handleBrowseFolder(cat) {
+      browsingFolder.value = cat;
+      try {
+        const res = await API.post("/api/system/browse-folder");
+        if (res && res.ok && res.path) {
+          newPaths.value[cat] = res.path;
+          addPath(cat);
+          await validatePaths();
+        }
+      } catch (e) {
+        addToast("Failed to open folder picker", "error");
+      } finally {
+        browsingFolder.value = null;
+      }
+    }
+
+    async function loadSettings() {
+      loading.value = true;
+      try {
+        const data = await API.get("/api/settings");
+        if (data) {
+          form.value = {
+            ...form.value,
+            ...data,
+            metadata_sources: { ...form.value.metadata_sources, ...(data.metadata_sources || {}) },
+            media_paths: { ...form.value.media_paths, ...(data.media_paths || {}) },
+            subtitles: { ...form.value.subtitles, ...(data.subtitles || {}) },
+            playback: { ...form.value.playback, ...(data.playback || {}) },
+          };
+        }
+        initialFormJson.value = JSON.stringify(form.value);
+        await validatePaths();
+      } catch (e) {
+        addToast("Failed to load settings", "error");
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    async function saveSettings() {
+      saving.value = true;
+      try {
+        await API.post("/api/settings", form.value);
+        initialFormJson.value = JSON.stringify(form.value);
+        addToast("Settings saved successfully ✓", "success");
+        return true;
+      } catch (e) {
+        addToast("Failed to save settings", "error");
+        return false;
+      } finally {
+        saving.value = false;
+      }
+    }
+
+    async function saveAndLeave() {
+      const ok = await saveSettings();
+      if (ok) {
+        showUnsavedModal.value = false;
+        const target = pendingNextRoute.value;
+        pendingNextRoute.value = null;
+        if (target) {
+          router.push(target);
+        }
+      }
+    }
+
+    function discardAndLeave() {
+      initialFormJson.value = JSON.stringify(form.value);
+      showUnsavedModal.value = false;
+      const target = pendingNextRoute.value;
+      pendingNextRoute.value = null;
+      if (target) {
+        router.push(target);
+      }
+    }
+
+    function cancelLeave() {
+      showUnsavedModal.value = false;
+      pendingNextRoute.value = null;
+    }
+
+    if (typeof VueRouter !== "undefined" && VueRouter.onBeforeRouteLeave) {
+      VueRouter.onBeforeRouteLeave((to, from) => {
+        if (isDirty.value && !saving.value) {
+          showUnsavedModal.value = true;
+          pendingNextRoute.value = to;
+          return false;
+        }
+        return true;
+      });
+    }
+
+    function handleBeforeUnload(e) {
+      if (isDirty.value) {
+        e.preventDefault();
+        e.returnValue = "You have unsaved settings changes.";
+      }
+    }
+
+    onMounted(() => {
+      if (store.profile?.is_kids) {
+        addToast("Settings is locked in Kids Mode 🔒", "warning");
+        router.push("/");
+        return;
+      }
+      loadSettings();
+      loadCacheInfo();
+      window.addEventListener("beforeunload", handleBeforeUnload);
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    });
+
+    async function testApi(provider, key) {
+      if (!key || !key.trim()) {
+        addToast("Please enter an API key to test", "warning");
+        return;
+      }
+      testingApi.value = provider;
+      try {
+        const res = await API.post("/api/settings/test-api", { provider, key: key.trim() });
+        if (res.ok) {
+          addToast(res.message, "success");
+        } else {
+          addToast(res.message || "API key test failed", "error");
+        }
+      } catch (e) {
+        addToast("API key test request failed", "error");
+      } finally {
+        testingApi.value = null;
+      }
+    }
+
+    async function addPath(cat) {
+      let val = newPaths.value[cat]?.trim();
+      if (!val) {
+        addToast("Please enter or browse a folder path to add", "warning");
+        return;
+      }
+      val = val.replace(/\\/g, "/");
+      if (!form.value.media_paths[cat]) form.value.media_paths[cat] = [];
+      if (form.value.media_paths[cat].includes(val)) {
+        addToast("Path is already in list", "info");
+        return;
+      }
+      form.value.media_paths[cat].push(val);
+      newPaths.value[cat] = "";
+      addToast(`Added path to ${cat} ✓`, "success");
+      await validatePaths();
+    }
+
+    async function removePath(cat, idx) {
+      const p = form.value.media_paths[cat][idx];
+      const ok = await customConfirm({
+        title: "Remove Media Path",
+        message: `Remove path "${p}" from ${cat} scanner list?`,
+        icon: "ph ph-folder-minus",
+        danger: true,
+        okText: "Remove Path"
+      });
+      if (!ok) return;
+      form.value.media_paths[cat].splice(idx, 1);
+    }
+
+    function movePath(cat, idx, direction) {
+      const target = idx + direction;
+      const list = form.value.media_paths[cat];
+      if (!list || target < 0 || target >= list.length) return;
+      const item = list.splice(idx, 1)[0];
+      list.splice(target, 0, item);
+    }
+
+    const cacheInfo = ref({ file_count: 0, size_formatted: "0 KB" });
+    const clearingCache = ref(false);
+    const resetting = ref(false);
+    const showResetModal = ref(false);
+    const clearMediaFiles = ref(false);
+    const resetConfirmText = ref("");
+
+    async function loadCacheInfo() {
+      try {
+        const res = await API.get("/api/system/cache");
+        if (res) cacheInfo.value = res;
+      } catch (e) {}
+    }
+
+    async function handleClearCache() {
+      clearingCache.value = true;
+      try {
+        const res = await API.del("/api/system/cache");
+        addToast(`Cache cleared! (${res.cleared || 0} files removed)`, "success");
+        await loadCacheInfo();
+      } catch (e) {
+        addToast("Failed to clear cache", "error");
+      } finally {
+        clearingCache.value = false;
+      }
+    }
+
+    const volumePercent = computed(() => {
+      const vol = form.value?.playback?.default_volume;
+      if (vol === undefined || vol === null) return 100;
+      const num = Number(vol);
+      return num <= 1 ? Math.round(num * 100) : Math.round(num);
+    });
+
+    function setVolumePercent(val) {
+      const pct = Number(val);
+      form.value.playback.default_volume = pct / 100;
+    }
+
+    async function confirmFreshStart() {
+      if (resetConfirmText.value.trim().toUpperCase() !== "RESET" || resetting.value) return;
+      resetting.value = true;
+      try {
+        await API.post("/api/system/reset", { clear_media_files: clearMediaFiles.value });
+        store.profile = null;
+        addToast("Unlinked external paths & reset complete! Restarting...", "success");
+        setTimeout(() => {
+          window.location.reload();
+        }, 1200);
+      } catch (e) {
+        addToast("Failed to reset application", "error");
+      } finally {
+        resetting.value = false;
+        showResetModal.value = false;
+      }
+    }
+
+    onMounted(() => {
+      if (store.profile?.is_kids) {
+        addToast("Settings is locked in Kids Mode 🔒", "warning");
+        router.push("/");
+        return;
+      }
+      loadSettings();
+      loadCacheInfo();
+    });
+
+    return {
+      store,
+      loading,
+      saving,
+      testingApi,
+      form,
+      newPaths,
+      saveSettings,
+      testApi,
+      addPath,
+      removePath,
+      movePath,
+      cacheInfo,
+      clearingCache,
+      resetting,
+      handleClearCache,
+      showResetModal,
+      clearMediaFiles,
+      resetConfirmText,
+      confirmFreshStart,
+      saveAndLeave,
+      discardAndLeave,
+      cancelLeave,
+      showUnsavedModal,
+      isDirty,
+      browsingFolder,
+      pathStatuses,
+      handleBrowseFolder,
+      validatePaths,
+      volumePercent,
+      setVolumePercent,
+    };
+  },
+};
+
+// ─── Shortcuts Modal Component ───────────────────────────────
+
+const ShortcutsModal = {
+  emits: ["close"],
+  setup(props, { emit }) {
+    // Esc closes the cheatsheet (both App-level and in-player instances)
+    function onKey(e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        emit("close");
+      }
+    }
+    onMounted(() => window.addEventListener("keydown", onKey));
+    onUnmounted(() => window.removeEventListener("keydown", onKey));
+  },
+  template: `
+    <div class="modal-backdrop" style="z-index: 500; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(16px);" @click.self="$emit('close')">
+      <div class="shortcuts-modal-card" @click.stop>
+        <div class="shortcuts-modal-inner">
+          <div class="shortcuts-modal-header">
+            <div class="shortcuts-header-title">
+              <i class="ph ph-keyboard" style="color:var(--accent);font-size:1.5rem"></i>
+              <span>Keyboard Shortcuts</span>
+            </div>
+            <button class="shortcuts-close-btn" @click="$emit('close')" title="Close (Esc)">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+
+          <div class="shortcuts-bento-grid">
+            <!-- Player Shortcuts -->
+            <div class="shortcuts-group">
+              <div class="shortcuts-group-title">🎬 Video Player</div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Play / Pause</span>
+                <div class="kbd-group"><kbd class="shortcut-kbd">Space</kbd> <kbd class="shortcut-kbd">K</kbd></div>
+              </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Toggle Fullscreen</span>
+                <kbd class="shortcut-kbd">F</kbd>
+              </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Mute / Unmute</span>
+                <kbd class="shortcut-kbd">M</kbd>
+              </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Seek 10s Backward / Forward</span>
+                <div class="kbd-group"><kbd class="shortcut-kbd">←</kbd> <kbd class="shortcut-kbd">→</kbd></div>
+              </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Volume Up / Down</span>
+                <div class="kbd-group"><kbd class="shortcut-kbd">↑</kbd> <kbd class="shortcut-kbd">↓</kbd></div>
+              </div>
+            </div>
+
+            <!-- Navigation & Global -->
+            <div class="shortcuts-group">
+              <div class="shortcuts-group-title">🌐 Navigation & Global</div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Quick Search</span>
+                <kbd class="shortcut-kbd">/</kbd>
+              </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Shortcuts Cheatsheet</span>
+                <kbd class="shortcut-kbd">?</kbd>
+              </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Close Modal</span>
+                <kbd class="shortcut-kbd">Esc</kbd>
+              </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Subtitle Menu Switcher</span>
+                <kbd class="shortcut-kbd">S</kbd>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `
+};
+
+// ─── Player Page ──────────────────────────────────────────────
+
+const PlayerPage = {
+  components: { ShortcutsModal },
+  template: `
+    <div class="custom-player-wrapper" @mousemove="showControls" @click="handleContainerClick" @dblclick="toggleFullscreen">
+      <!-- Shortcuts Modal -->
+      <shortcuts-modal v-if="showShortcuts" @close="showShortcuts = false" />
+      <!-- Native Video Surface -->
+      <video
+        ref="videoRef"
+        class="custom-player-video"
+        crossorigin="anonymous"
+        playsinline
+        @timeupdate="onTimeUpdate"
+        @loadedmetadata="onLoadedMetadata"
+        @ended="onEnded"
+        @waiting="isBuffering = true"
+        @playing="onVideoPlaying"
+        @pause="onVideoPause"
+        @seeked="onVideoSeeked"
+        @error="onVideoError"
+      >
+        <track
+          v-for="sub in subtitles"
+          :key="sub.url"
+          kind="subtitles"
+          :src="sub.url"
+          :srclang="(sub.language || 'en').toLowerCase().slice(0,2)"
+          :label="sub.label"
+          @load="() => { syncTextTracks(); updateActiveCueText(); }"
+        />
+      </video>
+
+      <!-- Custom High-Reliability Subtitle Overlay -->
+      <div v-if="activeCueText" class="caps-sub-overlay" :style="customCueStyle">
+        {{ activeCueText }}
+      </div>
+
+      <!-- Minimal Achievement Pill (left side, never covers controls) -->
+      <transition name="fade">
+        <div v-if="playerAch" class="player-achv-pill" :style="{ bottom: controlsHidden ? '40px' : '120px' }">
+          <i class="ph-fill ph-trophy"></i>
+          <span>{{ playerAch.title }}</span>
+        </div>
+      </transition>
+
+      <!-- 4K HEVC Playback Risk Advisory (left-aligned, dismissible) -->
+      <transition name="fade">
+        <div v-if="playbackWarning && !warningDismissed" class="player-compat-banner" :id="'compat-banner'">
+          <i :class="playbackWarning.icon"></i>
+          <div class="player-compat-text">
+            <strong>{{ playbackWarning.title }}</strong>
+            <span>{{ playbackWarning.msg }}</span>
+            <div class="player-compat-actions">
+              <button
+                v-if="!streamState.transcode && compatInfo && compatInfo.available"
+                class="player-compat-btn"
+                @click.stop="enableCompatPlayback"
+              >
+                <i class="ph ph-lightning"></i> Play converted (1080p)
+              </button>
+              <button
+                v-else-if="streamState.transcode"
+                class="player-compat-btn on"
+                @click.stop="disableCompatPlayback"
+              >
+                <i class="ph ph-check-circle"></i> Converted — play original
+              </button>
+            </div>
+          </div>
+          <button class="player-compat-dismiss" @click.stop="dismissPlaybackWarning" title="Dismiss">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+      </transition>
+
+      <!-- Buffering Spinner -->
+      <div v-if="isBuffering" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;pointer-events:none">
+        <div class="loading-spinner" style="width:56px;height:56px;border-width:4px"></div>
+      </div>
+
+      <!-- Backdrop Blocker overlay when Resume Prompt is active (Blocks all clicks outside top bar) -->
+      <div v-if="showResumeModal" class="resume-backdrop-blocker" @click.stop.prevent></div>
+
+      <!-- Controls Overlay -->
+      <div class="custom-player-controls" :class="{ hidden: controlsHidden && !showResumeModal }" @click.stop>
+        <!-- Top Bar (Always Clickable) -->
+        <div class="custom-player-top" style="z-index: 220; position: relative; pointer-events: auto;">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="player-back" @click="goBack" title="Back" id="player-back-btn">
+              <i class="ph ph-arrow-left" style="font-size:1.25rem"></i>
+            </div>
+            <div class="player-back" @click="goHome" title="Home" id="player-home-btn">
+              <i class="ph ph-house" style="font-size:1.25rem"></i>
+            </div>
+            <div class="player-back" @click="showShortcuts = true" title="Keyboard Shortcuts (?)" id="player-shortcuts-btn">
+              <i class="ph ph-keyboard" style="font-size:1.25rem"></i>
+            </div>
+          </div>
+          <div>
+            <div class="player-title">{{ media?.title }}</div>
+            <div v-if="media?.ep_title" class="player-episode">
+              S{{ (media.season||'').toString().padStart(2,'0') }}E{{ (media.episode||'').toString().padStart(2,'0') }} — {{ media.ep_title }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Bar (Disabled when showResumeModal is true) -->
+        <div class="custom-player-bottom" :class="{ 'resume-active-disabled': showResumeModal }">
+          <!-- Side-by-Side Row above Seekbar: Show Info (LEFT), Auto-Advance Countdown (RIGHT) -->
+          <div class="player-overlay-row" v-if="(showNextEp && isEnded) || (!isPlaying && media)">
+            <!-- Paused Media Info (LEFT SIDE: Logo/Title & Description, strictly when paused) -->
+            <div v-if="!isPlaying && media" class="player-paused-info">
+              <div class="player-paused-logo-container">
+                <img v-if="media.logo_path" :src="imgUrl(media.logo_path)" :alt="media.title" class="player-paused-logo" />
+                <h2 v-else class="player-paused-title">{{ media.title }}</h2>
+              </div>
+              <p v-if="media.overview" class="player-paused-overview">{{ media.overview }}</p>
+            </div>
+            <div v-else></div>
+
+            <!-- Next Episode Auto-Advance Card (RIGHT SIDE: Strictly when isEnded) -->
+            <div v-if="showNextEp && isEnded" class="next-ep-bottom-container">
+              <button class="btn-next-ep-bottom is-ended" @click="handleNextEpClick" id="player-next-btn">
+                <div class="next-ep-thumb">
+                  <img
+                    v-if="nextEp && (nextEp.still_path || nextEp.backdrop_path || media.backdrop_path)"
+                    :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || media.backdrop_path)"
+                    @error="e => e.target.style.display = 'none'"
+                  />
+                  <div v-else class="next-ep-thumb-fallback"><i class="ph ph-television"></i></div>
+                  <div class="next-ep-ring-wrapper">
+                    <svg class="next-ep-ring-svg" viewBox="0 0 36 36">
+                      <path
+                        class="next-ep-ring-bg"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                      <path
+                        class="next-ep-ring-fill"
+                        :style="{ strokeDasharray: nextEpProgressPercent + ', 100' }"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                    </svg>
+                    <span class="next-ep-countdown-text">{{ Math.ceil(nextEpCountdownSeconds) }}</span>
+                  </div>
+                </div>
+                <div class="next-ep-meta">
+                  <span class="next-ep-label">Up Next in {{ Math.ceil(nextEpCountdownSeconds) }}s</span>
+                  <span class="next-ep-title" :title="nextEp.ep_title || nextEp.title">
+                    {{ nextEp.ep_title || nextEp.title }}
+                  </span>
+                  <span class="next-ep-code" v-if="nextEp.season || nextEp.episode">
+                    S{{ (nextEp.season||1).toString().padStart(2,'0') }}E{{ (nextEp.episode||1).toString().padStart(2,'0') }}
+                  </span>
+                  <span class="next-ep-dur" v-if="nextEp.duration">{{ formatDuration(nextEp.duration) }}</span>
+                </div>
+              </button>
+
+              <button class="btn-next-ep-cancel" @click.stop="cancelAutoAdvance" title="Cancel Auto-Advance">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Seekbar -->
+          <div class="seekbar-wrapper"
+               ref="seekbarRef"
+               @click="seekToClick"
+               @mousemove="hoverSeekbar"
+               @mouseleave="showHoverTooltip = false"
+               id="player-seekbar">
+            <div v-if="showHoverTooltip" class="seekbar-tooltip" :style="{ left: hoverTooltipPos + 'px' }">
+              {{ formatTime(hoverTooltipTime) }}
+            </div>
+            <div class="seekbar-track">
+              <!-- Seekbar Segment Markers (Recap / Intro / Outro) -->
+              <div v-if="skipTimes.recap" class="seekbar-segment recap-segment" :style="getSegmentStyle(skipTimes.recap)"></div>
+              <div v-if="skipTimes.op" class="seekbar-segment op-segment" :style="getSegmentStyle(skipTimes.op)"></div>
+              <div v-if="skipTimes.ed" class="seekbar-segment ed-segment" :style="getSegmentStyle(skipTimes.ed)"></div>
+              <div v-if="skipTimes.preview" class="seekbar-segment preview-segment" :style="getSegmentStyle(skipTimes.preview)"></div>
+              <div class="seekbar-fill" :style="{ width: progressPercent + '%' }">
+                <div class="seekbar-handle"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Controls Bar -->
+          <div class="controls-bar">
+            <div class="controls-left">
+              <!-- Play / Pause -->
+              <button class="ctrl-btn" @click="togglePlay" :title="isPlaying ? 'Pause (Space)' : 'Play (Space)'" id="ctrl-play">
+                <i :class="isPlaying ? 'ph-fill ph-pause' : 'ph-fill ph-play'"></i>
+              </button>
+
+              <!-- Skip -10s -->
+              <button class="ctrl-btn" @click="skip(-10)" title="Rewind 10s (Left Arrow)" id="ctrl-rewind">
+                <i class="ph ph-arrow-counter-clockwise"></i>
+              </button>
+
+              <!-- Skip +10s -->
+              <button class="ctrl-btn" @click="skip(10)" title="Forward 10s (Right Arrow)" id="ctrl-forward">
+                <i class="ph ph-arrow-clockwise"></i>
+              </button>
+
+              <!-- Volume -->
+              <div class="volume-group" style="position:relative">
+                <div v-if="volume > 1.0" class="volume-boost-badge">{{ Math.round(volume * 100) }}% ⚡</div>
+                <button class="ctrl-btn" @click="toggleMute" :title="isMuted ? 'Unmute (M)' : 'Mute (M)'" id="ctrl-volume">
+                  <i :class="isMuted || volume === 0 ? 'ph-fill ph-speaker-x' : volume < 0.5 ? 'ph-fill ph-speaker-low' : 'ph-fill ph-speaker-high'"></i>
+                </button>
+                <div class="volume-slider-container">
+                  <input type="range" class="volume-slider" min="0" max="2" step="0.05" :value="isMuted ? 0 : volume" @input="onVolumeInput" id="ctrl-volume-slider" />
+                </div>
+              </div>
+
+              <!-- Time Display (content time vs real title duration) -->
+              <div class="ctrl-time">
+                {{ formatTime(displayTime) }} / {{ formatTime(displayDuration) }}
+              </div>
+            </div>
+
+            <!-- Ends-At Clock (center of control bar) -->
+            <div class="ctrl-end-time" v-if="endClockTime" :id="'ctrl-end-time'">
+              <i class="ph ph-moon-stars"></i>
+              <span>Ends at <strong>{{ endClockTime }}</strong></span>
+            </div>
+
+            <div class="controls-right">
+              <!-- Next Episode Button (right side) + hover preview card -->
+              <div
+                v-if="hasNextEp"
+                class="ctrl-next-wrap"
+                @mouseenter="showNextPreview"
+                @mouseleave="hideNextPreview"
+              >
+                <button class="ctrl-btn" @click="handleNextEpClick" title="Next Episode (N)" id="ctrl-next-ep">
+                  <i class="ph-fill ph-skip-forward"></i>
+                </button>
+                <transition name="fade">
+                  <div
+                    v-if="nextEpHover && !activeSkipAction"
+                    class="ctrl-next-preview"
+                    @mouseenter="showNextPreview"
+                    @mouseleave="hideNextPreview"
+                    @click.stop="handleNextEpClick"
+                  >
+                    <div class="next-ep-thumb wide">
+                      <img
+                        v-if="nextEp && (nextEp.still_path || nextEp.backdrop_path || media.backdrop_path)"
+                        :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || media.backdrop_path)"
+                        @error="e => e.target.style.display = 'none'"
+                      />
+                      <div v-else class="next-ep-thumb-fallback"><i class="ph ph-television"></i></div>
+                      <span class="next-ep-dur" v-if="nextEp.duration">{{ formatDuration(nextEp.duration) }}</span>
+                    </div>
+                    <div class="next-ep-meta">
+                      <span class="next-ep-label">Next Episode</span>
+                      <span class="next-ep-title" :title="nextEp.ep_title || nextEp.title">
+                        S{{ (nextEp.season||1).toString().padStart(2,'0') }} E{{ (nextEp.episode||1).toString().padStart(2,'0') }}
+                        <template v-if="nextEp.ep_title"> · {{ nextEp.ep_title }}</template>
+                      </span>
+                      <span class="next-ep-overview" v-if="nextEp.overview">{{ nextEp.overview }}</span>
+                    </div>
+                  </div>
+                </transition>
+              </div>
+
+              <!-- Audio Track Menu (Only shown if video has multiple audio tracks) -->
+              <div v-if="audioTracks && audioTracks.length > 1" style="position:relative">
+                <button class="ctrl-btn" @click="showAudioMenu = !showAudioMenu; showSubMenu = false; showSpeedMenu = false; showQualityMenu = false" title="Audio Track" id="ctrl-audio" style="font-size:0.85rem;font-weight:700">
+                  <i class="ph ph-microphone-stage" style="font-size:1.35rem"></i>
+                </button>
+                <div v-if="showAudioMenu" class="player-popup-menu" @click.stop style="min-width:200px">
+                  <div v-for="track in audioTracks" :key="track.index" class="player-menu-item" :class="{ active: (streamState.audioTrack ?? defaultAudioIndex) === track.index }" @click="selectAudioTrack(track.index)">
+                    {{ track.title }}<span v-if="track.index === defaultAudioIndex" style="opacity:0.6;font-weight:400"> · Default</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Subtitles Menu -->
+              <div style="position:relative">
+                <button class="ctrl-btn" @click="showSubMenu = !showSubMenu; showSpeedMenu = false; showAudioMenu = false; showQualityMenu = false" title="Subtitles" id="ctrl-subs" style="font-size:0.85rem;font-weight:700">
+                  <i class="ph ph-closed-captioning" style="font-size:1.35rem"></i>
+                </button>
+                <div v-if="showSubMenu" class="player-popup-menu" @click.stop style="min-width:200px">
+                  <div class="player-menu-item" :class="{ active: selectedSub === -1 }" @click="selectSub(-1)">
+                    Off
+                  </div>
+                  <div v-if="!subtitles || !subtitles.length" class="player-menu-item" style="color:var(--text-muted);cursor:default">
+                    No Subtitles Found
+                  </div>
+                  <div v-for="(sub, i) in subtitles" :key="sub.url" class="player-menu-item" :class="{ active: selectedSub === i }" @click="selectSub(i)" :title="sub.label || sub.raw_filename || sub.filename">
+                    {{ sub.label }}
+                  </div>
+                  <div class="profile-dropdown-divider"></div>
+                  <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="openOnlineSubModal">
+                    <i class="ph ph-magnifying-glass" style="margin-right:4px"></i> Search Online Subtitles
+                  </div>
+                  <label class="player-menu-item" style="cursor:pointer;color:var(--accent);font-weight:600">
+                    <i class="ph ph-plus" style="margin-right:4px"></i> Load .srt / .vtt
+                    <input type="file" accept=".vtt,.srt" @change="handleCustomSubFile" style="display:none" />
+                  </label>
+
+                  <!-- Subtitle Appearance Customizer Panel -->
+                  <div class="sub-style-panel" @click.stop>
+                    <div class="sub-style-title">Subtitle Appearance</div>
+                    <div class="sub-style-row">
+                      <span class="sub-style-label">Color</span>
+                      <div class="sub-color-dots">
+                        <div class="sub-color-dot" style="background:#ffffff" :class="{ active: subStyle.textColor === '#ffffff' }" @click="updateSubStyle('textColor', '#ffffff')" title="White"></div>
+                        <div class="sub-color-dot" style="background:#ffd700" :class="{ active: subStyle.textColor === '#ffd700' }" @click="updateSubStyle('textColor', '#ffd700')" title="Yellow"></div>
+                        <div class="sub-color-dot" style="background:#00f2fe" :class="{ active: subStyle.textColor === '#00f2fe' }" @click="updateSubStyle('textColor', '#00f2fe')" title="Cyan"></div>
+                        <div class="sub-color-dot" style="background:#00ff87" :class="{ active: subStyle.textColor === '#00ff87' }" @click="updateSubStyle('textColor', '#00ff87')" title="Green"></div>
+                      </div>
+                    </div>
+                    <div class="sub-style-row">
+                      <span class="sub-style-label">Size</span>
+                      <div style="display:flex;gap:4px">
+                        <button class="sub-size-btn" :class="{ active: subStyle.fontSize === '0.85rem' }" @click="updateSubStyle('fontSize', '0.85rem')">S</button>
+                        <button class="sub-size-btn" :class="{ active: subStyle.fontSize === '1.1rem' }" @click="updateSubStyle('fontSize', '1.1rem')">M</button>
+                        <button class="sub-size-btn" :class="{ active: subStyle.fontSize === '1.4rem' }" @click="updateSubStyle('fontSize', '1.4rem')">L</button>
+                        <button class="sub-size-btn" :class="{ active: subStyle.fontSize === '1.8rem' }" @click="updateSubStyle('fontSize', '1.8rem')">XL</button>
+                      </div>
+                    </div>
+                    <div class="sub-style-row">
+                      <span class="sub-style-label">Box Opacity</span>
+                      <div style="display:flex;gap:4px">
+                        <button class="sub-size-btn" :class="{ active: subStyle.bgOpacity === 0 }" @click="updateSubStyle('bgOpacity', 0)">Off</button>
+                        <button class="sub-size-btn" :class="{ active: subStyle.bgOpacity === 0.5 }" @click="updateSubStyle('bgOpacity', 0.5)">50%</button>
+                        <button class="sub-size-btn" :class="{ active: subStyle.bgOpacity === 0.85 }" @click="updateSubStyle('bgOpacity', 0.85)">Solid</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Video Quality Resolution Menu (Gear Icon ⚙️) — always shown for Skip Markers, quality section only for movies with duplicates -->
+              <div style="position:relative">
+                <button class="ctrl-btn" @click="showQualityMenu = !showQualityMenu; showSpeedMenu = false; showSubMenu = false; showAudioMenu = false" title="Player Options & Quality" id="ctrl-quality" style="font-size:0.85rem;font-weight:700">
+                  <i class="ph ph-gear-six" style="font-size:1.35rem"></i>
+                </button>
+                <div v-if="showQualityMenu" class="player-popup-menu" @click.stop style="min-width:210px">
+                  <div style="font-size:0.75rem;color:var(--text-muted);padding:6px 12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">
+                    Player Options
+                  </div>
+                  <div class="player-menu-item" @click="showSkipModal = true; showQualityMenu = false" id="player-menu-skip-markers">
+                    <span>⏱️ Edit Skip Markers</span>
+                  </div>
+                  <!-- Video Quality: always visible; clickable only when an
+                       alternative quality source actually exists -->
+                  <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0"></div>
+                  <div style="font-size:0.75rem;color:var(--text-muted);padding:6px 12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">
+                    Video Quality
+                  </div>
+                  <div
+                    v-for="opt in (qualityOptions.length ? qualityOptions : [{ display_label: 'Default', media_id: selectedQualityMediaId }])"
+                    :key="opt.media_id"
+                    class="player-menu-item"
+                    :class="{ active: selectedQualityMediaId === opt.media_id, disabled: !canSwitchQuality }"
+                    @click="canSwitchQuality && selectQuality(opt)"
+                    style="display:flex;align-items:center;justify-content:space-between;gap:12px"
+                  >
+                    <span>{{ opt.display_label }}</span>
+                    <span v-if="opt.size_str" style="font-size:0.75rem;color:var(--text-muted)">{{ opt.size_str }}</span>
+                  </div>
+                  <div v-if="!canSwitchQuality" style="font-size:0.68rem;color:var(--text-muted);padding:4px 12px 6px">
+                    No alternative quality sources
+                  </div>
+                </div>
+              </div>
+
+              <!-- Playback Speed Menu -->
+              <div style="position:relative">
+                <button class="ctrl-btn" @click="showSpeedMenu = !showSpeedMenu; showSubMenu = false; showAudioMenu = false; showQualityMenu = false" title="Playback Speed" style="font-size:0.85rem;font-weight:700" id="ctrl-speed">
+                  {{ playbackRate }}x
+                </button>
+                <div v-if="showSpeedMenu" class="player-popup-menu" @click.stop>
+                  <div v-for="rate in [0.5, 0.75, 1, 1.25, 1.5, 2]" :key="rate" class="player-menu-item" :class="{ active: playbackRate === rate }" @click="selectSpeed(rate)">
+                    {{ rate }}x
+                  </div>
+                </div>
+              </div>
+
+              <!-- Picture-in-Picture (PiP) -->
+              <button
+                v-if="isPipSupported"
+                class="ctrl-btn"
+                :class="{ active: isPipActive }"
+                @click="togglePip"
+                title="Picture-in-Picture (P)"
+                id="ctrl-pip"
+              >
+                <i :class="isPipActive ? 'ph-fill ph-screencast' : 'ph ph-screencast'"></i>
+              </button>
+
+              <!-- Fullscreen -->
+              <button class="ctrl-btn" @click="toggleFullscreen" title="Fullscreen (F)" id="ctrl-fullscreen">
+                <i :class="isFullscreen ? 'ph ph-arrows-in-simple' : 'ph ph-arrows-out-simple'"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Floating Skip Intro / Recap / Outro Pill Button -->
+      <div v-if="activeSkipAction" class="player-skip-container" @click.stop>
+        <button class="player-skip-btn" @click="executeSkipAction" id="player-skip-btn">
+          <!-- Next Episode: thumbnail + episode details -->
+          <template v-if="activeSkipAction.type === 'Next' && nextEp">
+            <div class="next-ep-thumb skip">
+              <img
+                v-if="nextEp.still_path || nextEp.backdrop_path || media.backdrop_path"
+                :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || media.backdrop_path)"
+                @error="e => e.target.style.display = 'none'"
+              />
+              <div v-else class="next-ep-thumb-fallback"><i class="ph ph-television"></i></div>
+              <span class="next-ep-dur" v-if="nextEp.duration">{{ formatDuration(nextEp.duration) }}</span>
+            </div>
+            <div class="player-skip-meta">
+              <span class="player-skip-label">Up Next</span>
+              <span class="player-skip-title">Next Episode</span>
+              <span class="player-skip-sub" v-if="nextEp.season || nextEp.episode">
+                S{{ (nextEp.season||1).toString().padStart(2,'0') }}E{{ (nextEp.episode||1).toString().padStart(2,'0') }}
+                <template v-if="nextEp.ep_title"> · {{ nextEp.ep_title }}</template>
+              </span>
+            </div>
+          </template>
+
+          <!-- Other segments: icon chip -->
+          <template v-else>
+            <div class="player-skip-icon">
+              <i class="ph ph-fast-forward"></i>
+            </div>
+            <div class="player-skip-meta">
+              <span class="player-skip-label">Skip</span>
+              <span class="player-skip-title">{{ activeSkipAction.type }}</span>
+              <span class="player-skip-sub">Jump to {{ formatSecToTime(activeSkipAction.end) }}</span>
+            </div>
+          </template>
+        </button>
+      </div>
+
+      <!-- Skip Timestamps Editor Modal -->
+      <skip-timestamps-modal
+        v-if="showSkipModal"
+        :media="media"
+        :currentTime="currentContentTime()"
+        :inPlayer="true"
+        @close="showSkipModal = false"
+        @saved="handleSkipSaved"
+      />
+
+      <!-- Bottom-Right Cinematic Resume Card -->
+      <div v-if="showResumeModal" class="resume-card-bottom-right" @click.stop>
+        <div class="resume-card-inner">
+          <!-- Thumbnail Header Preview -->
+          <div class="resume-thumb-container">
+            <img
+              v-if="media?.backdrop_path || media?.still_path || media?.poster_path"
+              :src="imgUrl(media.still_path || media.backdrop_path || media.poster_path)"
+              :alt="media?.title"
+              class="resume-thumb-img"
+            />
+            <div v-else class="resume-thumb-placeholder">🎬</div>
+            <!-- Progress Line on Thumbnail -->
+            <div class="resume-thumb-progress" v-if="duration > 0">
+              <div class="resume-thumb-progress-fill" :style="{ width: (resumeTime / duration * 100) + '%' }"></div>
+            </div>
+          </div>
+
+          <!-- Info & Title -->
+          <div class="resume-card-info">
+            <div class="resume-badge">
+              <i class="ph-fill ph-clock-counter-clockwise"></i> RESUME PLAYBACK
+            </div>
+            <div class="resume-card-heading" :title="media?.title">{{ media?.title || 'Title' }}</div>
+            <div v-if="media?.ep_title" class="resume-card-ep" :title="media.ep_title">
+              S{{ (media.season||'').toString().padStart(2,'0') }}E{{ (media.episode||'').toString().padStart(2,'0') }} — {{ media.ep_title }}
+            </div>
+            <div class="resume-card-subtext">
+              Stopped at <span class="resume-timestamp">{{ formatTime(resumeTime) }}</span>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="resume-card-actions">
+            <button class="btn btn-primary btn-full" @click="confirmResume" id="btn-resume-continue" autoFocus>
+              <i class="ph-fill ph-play"></i>
+              <span>Resume at {{ formatTime(resumeTime) }}</span>
+            </button>
+            <button class="btn btn-secondary btn-full" @click="confirmStartOver" id="btn-resume-startover">
+              <i class="ph ph-arrow-counter-clockwise"></i>
+              <span>Start from Beginning</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Online Subtitles Search Modal -->
+      <div v-if="showOnlineSubModal" class="modal-backdrop" @click.self="showOnlineSubModal = false">
+        <div class="modal-card" style="max-width:540px" @click.stop>
+          <div class="modal-title" style="display:flex;align-items:center;gap:8px">
+            <i class="ph ph-closed-captioning" style="color:var(--accent)"></i>
+            <span>Search Online Subtitles</span>
+          </div>
+
+          <div style="margin-bottom:1rem;color:var(--text-secondary);font-size:0.85rem">
+            Search and download subtitles for <strong>{{ media?.title }}</strong>:
+          </div>
+
+          <div v-if="loadingOnlineSubs" class="loading-spinner" style="margin:2.5rem auto"></div>
+
+          <div v-else-if="onlineSubResults && onlineSubResults.length" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+            <div
+              v-for="sub in onlineSubResults"
+              :key="sub.id"
+              class="player-menu-item"
+              style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg-secondary);border-radius:8px;cursor:pointer"
+              @click="downloadAndApplyOnlineSub(sub)"
+            >
+              <div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-right:12px">
+                <div style="font-weight:600;font-size:0.9rem">{{ sub.title }}</div>
+                <div style="font-size:0.75rem;color:var(--text-muted)">Language: {{ sub.lang }}</div>
+              </div>
+              <button class="btn btn-primary btn-sm" :disabled="downloadingSubId === sub.id">
+                {{ downloadingSubId === sub.id ? 'Downloading...' : 'Download & Apply' }}
+              </button>
+            </div>
+          </div>
+
+          <div v-else style="text-align:center;padding:2rem 0;color:var(--text-muted)">
+            No online subtitles found for this title.
+          </div>
+
+          <button class="btn btn-ghost btn-full" style="margin-top:1.25rem" @click="showOnlineSubModal = false">
+            Close
+          </button>
+        </div>
+      </div>
+
+      <!-- Playback Error Overlay -->
+      <div v-if="playerError" class="empty-state" style="position:fixed;inset:0;background:rgba(10,10,15,0.95);z-index:300;padding:2rem">
+        <div class="empty-icon">⚠️</div>
+        <div class="empty-title">Playback Error</div>
+        <div class="empty-subtitle" style="max-width:480px;margin-bottom:1.5rem">
+          {{ playerError }}
+        </div>
+        <button class="btn btn-primary" @click="goBack">Go Back</button>
+      </div>
+    </div>
+  `,
+  setup() {
+    const route = VueRouter.useRoute();
+    const router = VueRouter.useRouter();
+    const videoRef = ref(null);
+    const seekbarRef = ref(null);
+
+    const media = ref(null);
+    const nextEp = ref(null);
+    const subtitles = ref([]);
+    const playerSettings = ref(null);
+
+    const isPlaying = ref(false);
+    const isMuted = ref(false);
+    const volume = ref(1);
+    const currentTime = ref(0);
+    const duration = ref(0);
+    const isBuffering = ref(false);
+    const isFullscreen = ref(false);
+    const controlsHidden = ref(false);
+    const playerError = ref(null);
+
+    const playbackRate = ref(1);
+    const selectedSub = ref(-1);
+    const showSpeedMenu = ref(false);
+    const showSubMenu = ref(false);
+    const showShortcuts = ref(false);
+
+    const showOnlineSubModal = ref(false);
+    const onlineSubResults = ref([]);
+    const loadingOnlineSubs = ref(false);
+    const downloadingSubId = ref(null);
+
+    async function openOnlineSubModal() {
+      showSubMenu.value = false;
+      showOnlineSubModal.value = true;
+      loadingOnlineSubs.value = true;
+      onlineSubResults.value = [];
+      try {
+        const id = route.params.id;
+        const res = await API.get(`/api/subtitles/online/search?media_id=${id}`);
+        onlineSubResults.value = res || [];
+      } catch (e) {
+        addToast("Failed to search subtitles online", "error");
+      } finally {
+        loadingOnlineSubs.value = false;
+      }
+    }
+
+    async function downloadAndApplyOnlineSub(sub) {
+      downloadingSubId.value = sub.id;
+      try {
+        const id = route.params.id;
+        const subMeta = await API.post("/api/subtitles/online/download", {
+          slug: sub.slug || sub.id,
+          media_id: Number(id)
+        });
+
+        if (subMeta && subMeta.url) {
+          subtitles.value.push(subMeta);
+          const newIdx = subtitles.value.length - 1;
+          selectSub(newIdx);
+          showOnlineSubModal.value = false;
+          addToast("Subtitle downloaded and applied!", "success");
+        } else {
+          addToast("Failed to download subtitle file", "error");
+        }
+      } catch (e) {
+        addToast("Error downloading subtitle", "error");
+      } finally {
+        downloadingSubId.value = null;
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // STREAM CONTROLLER — single source of truth for playback source.
+    //
+    // DESIGN: the <video> element ALWAYS plays the original file natively
+    // (HTTP range seeks, frame-exact). Non-default audio tracks are served
+    // separately to a hidden <audio> element kept in sync with the video
+    // (see REMOTE AUDIO ENGINE below). The video pipeline is therefore
+    // never transcoded or restarted for audio changes — video sync issues
+    // are impossible by construction.
+    //
+    // streamStart is permanently 0: PLAYER time === CONTENT time everywhere.
+    // ════════════════════════════════════════════════════════════════
+
+    const audioTracks = ref([]);
+    const defaultAudioIndex = ref(0);        // container-default track = played by <video>
+    const showAudioMenu = ref(false);
+
+    // The active stream session. Changing any field triggers a stream swap.
+    const streamState = reactive({
+      mediaId: null,        // which file/quality is streaming
+      audioTrack: null,     // null/undefined/default  native; otherwise remote-audio index
+      transcode: false,     // hardware-accelerated compatibility playback
+      streamStart: 0,       // content time where the converted stream begins
+    });
+
+    // Retained for compatibility with helpers below; video is never
+    // transcoded anymore, so this is permanently false.
+    const isTranscodeAudio = computed(() => false);
+
+    function contentToPlayer(t) {
+      return Math.max(0, t - (streamState.transcode ? streamState.streamStart : 0));
+    }
+    function playerToContent(t) {
+      return (streamState.transcode ? streamState.streamStart : 0) + t;
+    }
+    function currentContentTime() {
+      const v = videoRef.value;
+      return currentTime.value || (v ? v.currentTime || 0 : 0);
+    }
+
+    // ── Stream swap: the ONLY way playback source changes ──────────
+    let reloadToken = 0;
+
+    function buildStreamUrl(mediaId) {
+      if (!streamState.transcode) {
+        return `/api/stream/${mediaId}`;
+      }
+      let url = `/api/stream/${mediaId}?transcode=1&max_height=1080`;
+      if (streamState.streamStart > 0) {
+        url += `&start=${Number(streamState.streamStart).toFixed(3)}`;
+      }
+      return url;
+    }
+
+    function swapStream(atContentTime) {
+      const v = videoRef.value;
+      if (!v) return;
+      const token = ++reloadToken;
+      // Converted streams are piped & non-seekable: always start at 0
+      // (server cuts at the keyframe-aligned point).
+      const playerPos = streamState.transcode
+        ? 0
+        : Math.max(0, Math.floor(atContentTime || 0));
+      isBuffering.value = true;
+
+      const onMeta = () => {
+        v.removeEventListener("loadedmetadata", onMeta);
+        if (token !== reloadToken) return;   // a newer swap superseded us
+        try {
+          if (playerPos > 0 && isFinite(playerPos)) v.currentTime = playerPos;
+          currentTime.value = v.currentTime;
+        } catch (e) {}
+        applySubtitleOffset();
+        [300, 700].forEach((d) => setTimeout(applySubtitleOffset, d));
+        // Resume prompt takes priority — stay paused behind the modal
+        if (showResumeModal.value) {
+          v.pause();
+          return;
+        }
+        v.play().catch(() => {});
+        // Re-point the remote audio at this file/position (fresh src)
+        if (isRemoteAudioActive()) {
+          attachRemoteAudio(streamState.audioTrack);
+          startRemoteSyncLoop();
+        } else {
+          detachRemoteAudio();
+        }
+      };
+      v.addEventListener("loadedmetadata", onMeta);
+
+      // Setting src runs the media load algorithm exactly once.
+      const want = buildStreamUrl(streamState.mediaId);
+      const absWant = new URL(want, location.origin).href;
+      if (v.src !== absWant) {
+        currentTime.value = playerPos;
+        v.src = want;
+        v.load();
+      } else {
+        // Same source already loaded — just reposition deterministically
+        try {
+          if (playerPos > 0 && isFinite(playerPos)) v.currentTime = playerPos;
+          currentTime.value = v.currentTime;
+        } catch (e) {}
+        applySubtitleOffset();
+        [300, 700].forEach((d) => setTimeout(applySubtitleOffset, d));
+        v.play().catch(() => {});
+        if (isRemoteAudioActive()) {
+          attachRemoteAudio(streamState.audioTrack);
+          startRemoteSyncLoop();
+        }
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // REMOTE AUDIO ENGINE — non-default audio tracks.
+    //
+    // The <video> keeps playing the original file MUTED; the selected track
+    // is streamed as AAC to a hidden <audio> element driven to match the
+    // video clock. Switching tracks never touches the video pipeline, so
+    // video playback is always frame-perfect and instantly continuous.
+    // ════════════════════════════════════════════════════════════════
+
+    let remoteAudioEl = null;
+    let remoteAudioTimer = null;
+    let remoteRestartToken = 0;
+    let remoteSeekDebounce = null;
+    let remoteRebuildCooldownUntil = 0;
+    // The audio stream's internal timeline starts at 0 — it does NOT know
+    // about absolute content positions. This is the content time where the
+    // current audio stream was cut, i.e. content = base + el.currentTime.
+    let remoteAudioBase = 0;
+    // Until this timestamp the sync loop deliberately does NOT chase the
+    // video clock — a freshly attached stream needs ~1-2s to fill its
+    // buffer, and chasing past delivered data stalls the element
+    // ("plays a little then stops").
+    let remoteSettleUntil = 0;
+
+    function isRemoteAudioActive() {
+      return (
+        streamState.audioTrack !== null &&
+        streamState.audioTrack !== undefined &&
+        streamState.audioTrack !== defaultAudioIndex.value
+      );
+    }
+
+    function buildRemoteAudioUrl(trackIndex, atTime) {
+      const id = streamState.mediaId || route.params.id;
+      return `/api/stream/${id}?audio_only=1&audio_track=${trackIndex}&at=${Math.max(0, atTime).toFixed(2)}`;
+    }
+
+    function attachRemoteAudio(trackIndex) {
+      const v = videoRef.value;
+      if (!v || trackIndex === null || trackIndex === undefined) return;
+
+      // Video goes silent; the remote element carries sound.
+      v.muted = true;
+
+      if (!remoteAudioEl) {
+        remoteAudioEl = new Audio();
+        remoteAudioEl.preload = "auto";
+        // If the element hits a fatal decode/network error, rebuild once.
+        remoteAudioEl.addEventListener("error", () => {
+          if (isRemoteAudioActive() && remoteAudioEl === this) {
+            setTimeout(() => attachRemoteAudio(streamState.audioTrack), 300);
+          }
+        });
+      }
+      remoteAudioEl.volume = Math.min(1, Math.max(0, volume.value));
+      remoteAudioEl.muted = false;
+      remoteAudioEl.playbackRate = playbackRate.value || 1;
+
+      const at = Math.max(0, currentContentTime());   // CONTENT time at cut
+      remoteAudioBase = at;                 // stream position 0 == content `at`
+      remoteSettleUntil = Date.now() + 2000; // let the buffer establish first
+
+      const token = ++remoteRestartToken;
+      const el = remoteAudioEl;
+      el.src = buildRemoteAudioUrl(trackIndex, at);
+      // IMPORTANT: do NOT set el.currentTime to the absolute content time —
+      // the piped ADTS stream is 0-based and non-seekable beyond its buffer.
+
+      // Robust playback start: retry a few times in case the element is not
+      // ready yet or an AbortError raced with pause/play mirroring.
+      const tryPlay = (attempt) => {
+        if (token !== remoteRestartToken || !isRemoteAudioActive()) return;
+        const p = el.play();
+        if (p && typeof p.catch === "function") {
+          p.catch((err) => {
+            if (token !== remoteRestartToken) return;
+            if (err && err.name === "AbortError") return;   // superseded by pause/mirror
+            if (attempt < 3) setTimeout(() => tryPlay(attempt + 1), 200 * (attempt + 1));
+          });
+        }
+      };
+      tryPlay(0);
+    }
+
+    function detachRemoteAudio() {
+      remoteRestartToken++;
+      stopRemoteSyncLoop();
+      if (remoteSeekDebounce) { clearTimeout(remoteSeekDebounce); remoteSeekDebounce = null; }
+      remoteRebuildCooldownUntil = 0;
+      remoteAudioBase = 0;
+      if (remoteAudioEl) {
+        try {
+          remoteAudioEl.pause();
+          remoteAudioEl.removeAttribute("src");
+          remoteAudioEl.load();
+        } catch (e) {}
+      }
+      const v = videoRef.value;
+      if (v) {
+        // Restore only the user's own mute preference — never force-unmute
+        v.muted = !!isMuted.value;
+      }
+    }
+
+    // Keep the hidden audio glued to the video clock.
+    function syncRemoteAudio(force = false) {
+      if (!isRemoteAudioActive() || !remoteAudioEl || !videoRef.value) return;
+      const v = videoRef.value;
+      const a = remoteAudioEl;
+
+      // Fatal element error → rebuild the stream once
+      if (a.error) {
+        attachRemoteAudio(streamState.audioTrack);
+        return;
+      }
+
+      // Mirror transport state
+      if (v.paused && !a.paused) a.pause();
+      if (!v.paused && a.paused) a.play().catch(() => {});
+      if (v.paused) return;
+
+      const nowMs = Date.now();
+      const settling =
+        nowMs < remoteSettleUntil ||
+        a.seeking ||
+        a.readyState < 2;
+
+      // HARD-DRIFT WATCHDOG — self-heals ANY missed seek regardless of cause
+      // (e.g., seeking while the video was still loading fires no 'seeked'
+      // event). Measures DIVERGENCE BETWEEN THE TWO CLOCKS (video position
+      // minus audio position), NOT video advance-from-base — measuring the
+      // latter grows unboundedly during normal playback and triggered an
+      // endless kill/rebuild stutter (~1.6s cadence). A 4s divergence can
+      // only exist if the audio genuinely failed to follow a seek.
+      const streamDrift = (v.currentTime || 0) - remoteAudioBase - (a.currentTime || 0);
+      if (
+        Math.abs(streamDrift) > 4 &&
+        nowMs > remoteRebuildCooldownUntil
+      ) {
+        remoteRebuildCooldownUntil = nowMs + 3000;
+        attachRemoteAudio(streamState.audioTrack);
+        return;
+      }
+
+      // SETTLE WINDOW: never chase the video while a freshly attached stream
+      // is still filling its buffer, mid-seek, or below ready-state. Chasing
+      // past delivered data is what stalls the element permanently.
+      if (settling) return;
+
+      // Convert both clocks to CONTENT time: expected position on the AUDIO
+      // element's own (stream-relative) timeline for the video's current
+      // content position.
+      const rawExpected = playerToContent(v.currentTime || 0) - remoteAudioBase;
+
+      // STALE BASE GUARD: video is at/before the point where this audio
+      // stream was cut (e.g., a small backward seek whose rebuild is still
+      // pending). Never clamp to zero here — that caused the audio to
+      // loop its opening fragment. Silence until onVideoSeeked rebuilds
+      // (or the watchdog above handles a large offset).
+      if (rawExpected < -0.3) {
+        if (!a.paused) a.pause();
+        return;
+      }
+      const expected = Math.max(0, rawExpected);
+      const delta = expected - a.currentTime;
+
+      const baseRate = playbackRate.value || 1;
+      if (force || Math.abs(delta) > 0.6) {
+        const targetPos = Math.max(0, expected + 0.05);
+
+        // NEVER chase beyond delivered data — that stalls the element
+        // ("plays a little then stops"). Wait for the buffer to grow;
+        // the next ticks will land the resync once data exists.
+        let bEnd = 0;
+        try {
+          const b = a.buffered;
+          if (b && b.length) bEnd = b.end(b.length - 1);
+        } catch (e) {}
+        if (delta > 0 && bEnd > 0 && targetPos > bEnd - 0.2) return;
+
+        try { a.currentTime = targetPos; } catch (e) {}
+        a.playbackRate = baseRate;
+      } else if (Math.abs(delta) > 0.12) {
+        // Gentle drift correction via playback rate (video ahead → speed up)
+        a.playbackRate = Math.min(baseRate * 1.12, Math.max(baseRate * 0.88, baseRate + delta * 0.25));
+      } else if (a.playbackRate !== baseRate) {
+        a.playbackRate = baseRate;
+      }
+    }
+
+    function startRemoteSyncLoop() {
+      stopRemoteSyncLoop();
+      remoteAudioTimer = setInterval(() => syncRemoteAudio(false), 300);
+    }
+    function stopRemoteSyncLoop() {
+      if (remoteAudioTimer) { clearInterval(remoteAudioTimer); remoteAudioTimer = null; }
+    }
+
+    // ── Audio switching ─────────────────────────────────────────────
+    async function selectAudioTrack(index) {
+      if (index === null || index === undefined) return;
+      if (streamState.audioTrack === index) {
+        showAudioMenu.value = false;
+        return;
+      }
+      saveProgressNow();
+      suppressResume = true;
+
+      streamState.audioTrack = index;
+      showAudioMenu.value = false;
+
+      // NOTE: the <video> element is NOT reloaded. Only the audio routing
+      // changes, so playback continues seamlessly at the exact same frame.
+      if (isRemoteAudioActive()) {
+        attachRemoteAudio(index);
+        startRemoteSyncLoop();
+      } else {
+        detachRemoteAudio();
+      }
+
+      API.post("/api/achievements/unlock", { achievement_id: "audio_enthusiast" }).catch(() => {});
+    }
+
+    // ── Quality options ─────────────────────────────────────────────
+    const qualityOptions = ref([]);
+    const selectedQualityMediaId = ref(null);
+    const showQualityMenu = ref(false);
+
+    // Only offer switching when another REAL alternative exists.
+    const canSwitchQuality = computed(() =>
+      !!media.value &&
+      media.value.type === "movie" &&
+      qualityOptions.value.some((o) => !o.is_current && o.media_id !== selectedQualityMediaId.value)
+    );
+
+    async function loadQualityOptions(mediaId) {
+      try {
+        const opts = await API.get(`/api/quality-options/${mediaId}`);
+        qualityOptions.value = opts || [];
+        const current = qualityOptions.value.find((o) => o.is_current);
+        if (current) {
+          selectedQualityMediaId.value = current.media_id;
+        } else if (qualityOptions.value.length > 0) {
+          selectedQualityMediaId.value = qualityOptions.value[0].media_id;
+        }
+      } catch (e) {
+        qualityOptions.value = [];
+      }
+    }
+
+    async function selectQuality(option) {
+      if (!option || option.media_id === selectedQualityMediaId.value) {
+        showQualityMenu.value = false;
+        return;
+      }
+      showQualityMenu.value = false;
+      suppressResume = true;
+      saveProgressNow();
+
+      // Preserve BOTH the position AND the chosen audio track across files.
+      // The remote audio (if any) is re-pointed at the new file by
+      // syncRemoteAudio once the new video source reports its position.
+      const atContent = currentContentTime();
+      selectedQualityMediaId.value = option.media_id;
+      streamState.mediaId = option.media_id;
+      swapStream(atContent);
+
+      API.post("/api/achievements/unlock", { achievement_id: "quality_switcher" }).catch(() => {});
+    }
+
+    const showHoverTooltip = ref(null);
+    const showSkipModal = ref(false);
+
+    const activeSkipAction = computed(() => {
+      // Skip windows are stored in ABSOLUTE content time — compare against
+      // content time, not raw player time.
+      const ct = Math.floor(playerToContent(currentTime.value));
+      if (!media.value || ct <= 0) return null;
+
+      // 1. Manual DB Timestamps (Highest Priority)
+      const rStart = media.value.recap_start || 0;
+      const rEnd = media.value.recap_end || 0;
+      if (rEnd > rStart && ct >= rStart && ct < rEnd) {
+        return { type: "Recap", start: rStart, end: rEnd };
+      }
+
+      const iStart = media.value.intro_start || 0;
+      const iEnd = media.value.intro_end || 0;
+      if (iEnd > iStart && ct >= iStart && ct < iEnd) {
+        return { type: "Intro", start: iStart, end: iEnd };
+      }
+
+      const oStart = media.value.outro_start || 0;
+      const oEnd = media.value.outro_end || 0;
+      if (oEnd > oStart && ct >= oStart && ct < oEnd) {
+        return { type: "Outro", start: oStart, end: oEnd };
+      }
+
+      const pStart = media.value.preview_start || 0;
+      const pEnd = media.value.preview_end || 0;
+      if (pEnd > pStart && ct >= pStart && ct < pEnd) {
+        return { type: "Preview", start: pStart, end: pEnd };
+      }
+
+      // 2. Auto-resolved segments (secondary): AniSkip for detected anime,
+      //    otherwise FFprobe embedded chapters. Manual markers always win.
+      if (skipTimes.value) {
+        if (skipTimes.value.recap && ct >= skipTimes.value.recap.start && ct < skipTimes.value.recap.end) {
+          return { type: "Recap", start: skipTimes.value.recap.start, end: skipTimes.value.recap.end };
+        }
+        if (skipTimes.value.op && ct >= skipTimes.value.op.start && ct < skipTimes.value.op.end) {
+          return { type: "Intro", start: skipTimes.value.op.start, end: skipTimes.value.op.end };
+        }
+        if (skipTimes.value.ed && ct >= skipTimes.value.ed.start && ct < skipTimes.value.ed.end) {
+          return { type: "Outro", start: skipTimes.value.ed.start, end: skipTimes.value.ed.end };
+        }
+        if (skipTimes.value.preview && ct >= skipTimes.value.preview.start && ct < skipTimes.value.preview.end) {
+          return { type: "Preview", start: skipTimes.value.preview.start, end: skipTimes.value.preview.end };
+        }
+      }
+
+      // 3. Tail fallback — nothing marked/skipped here and a next episode
+      //    exists: offer it during the final stretch of the title.
+      if (
+        nextEp.value &&
+        displayDuration.value > 0 &&
+        ct >= displayDuration.value - 90 &&
+        ct < displayDuration.value
+      ) {
+        return { type: "Next", start: Math.max(0, displayDuration.value - 90), end: displayDuration.value };
+      }
+
+      return null;
+    });
+
+    // Keyframe-align a content timestamp for converted-stream restarts.
+    async function alignedStreamStart(contentTime) {
+      let target = Math.max(0, Math.floor(contentTime));
+      try {
+        const id = streamState.mediaId || route.params.id;
+        const r = await API.get(`/api/stream-start/${id}?start=${target}`);
+        if (r && typeof r.start === "number") target = r.start;
+      } catch (e) {}
+      return target;
+    }
+
+    function seekTo(targetTime) {
+      if (!videoRef.value) return;
+      const maxDur = media.value?.duration || duration.value || 0;
+      const validTarget = Math.min(Math.max(0, targetTime), maxDur > 0 ? maxDur : targetTime);
+      suppressResume = true;
+
+      if (streamState.transcode) {
+        // Converted stream: align to keyframe, restart stream there
+        isBuffering.value = true;
+        const token = ++reloadToken;
+        alignedStreamStart(validTarget).then((startAt) => {
+          if (token !== reloadToken) return;
+          streamState.streamStart = startAt;
+          swapStream(0);
+        });
+      } else {
+        // Video seeks natively (range requests). The remote audio element is
+        // re-pointed at the new position by the seeked-hook below.
+        videoRef.value.currentTime = validTarget;
+        currentTime.value = validTarget;
+      }
+      saveProgressNow();
+    }
+
+    function executeSkipAction() {
+      const action = activeSkipAction.value;
+      if (!action) return;
+
+      // "Next Episode" tail action (no outro marker, or already past it)
+      if (action.type === "Next") {
+        handleNextEpClick();
+        return;
+      }
+
+      // Outro: always just skip PAST the credits window — the Next Episode
+      // pill takes over afterwards when there's a following episode.
+      seekTo(action.end);
+    }
+
+    // ─── 4K HEVC Playback Risk Guard ────────────────────────────────
+    // Software-decoding 4K (10-bit) HEVC exhausts browser renderers and can
+    // crash the whole tab. Probe actual HEVC decode support up-front and
+    // surface a small dismissible advisory instead of letting the tab die
+    // silently.
+    const codecInfo = computed(() => {
+      if (!media.value) return { hasWarning: false, tags: [], note: "", base_label: "", width: 0, height: 0 };
+      return getCodecInfo(media.value.file_path || "");
+    });
+
+    const hevcSupported = (() => {
+      try {
+        const probe = document.createElement("video");
+        return [
+          'video/mp4; codecs="hvc1.1.6.L153.B0"',
+          'video/mp4; codecs="hev1.1.6.L153.B0"',
+          'video/mp4; codecs="hvc1"',
+        ].some((t) => (probe.canPlayType(t) || "") !== "");
+      } catch (e) {
+        return false;
+      }
+    })();
+
+    const warningDismissed = ref(false);
+    const playbackWarning = computed(() => {
+      if (!media.value || !codecInfo.value.hasWarning) return null;
+      const p = (media.value.file_path || "").toLowerCase();
+      const isHevc = codecInfo.value.tags.some((t) => t.includes("HEVC"));
+      const is4k =
+        p.includes("2160") || p.includes("4k") || p.includes("uhd");
+
+      if (isHevc && !hevcSupported) {
+        return {
+          icon: "ph ph-warning-octagon",
+          title: "HEVC decoding unsupported",
+          msg: "This browser cannot decode HEVC — playback may fail or crash the tab. Use Microsoft Edge with hardware acceleration enabled.",
+        };
+      }
+      if (isHevc && is4k) {
+        return {
+          icon: "ph ph-warning",
+          title: "4K HEVC — high decode load",
+          msg: "Without hardware acceleration, 4K HEVC can crash the browser. Enable hardware acceleration in browser settings if playback stutters.",
+        };
+      }
+      if (is4k) {
+        return {
+          icon: "ph ph-gauge",
+          title: "4K content — demanding decode",
+          msg: "If playback stutters or becomes unresponsive, close other apps or switch to a lower-quality source.",
+        };
+      }
+      return null;
+    });
+
+    function dismissPlaybackWarning() {
+      warningDismissed.value = true;
+    }
+
+    // ─── Hardware-accelerated compatibility playback ────────────────
+    const compatInfo = ref(null);
+    let compatCapsFetched = false;
+
+    function fetchCompatCaps() {
+      if (compatCapsFetched) return;
+      compatCapsFetched = true;
+      API.get("/api/transcode-caps")
+        .then((c) => { compatInfo.value = c || { available: false }; })
+        .catch(() => { compatInfo.value = { available: false }; });
+    }
+
+    async function enableCompatPlayback() {
+      if (!media.value) return;
+      suppressResume = true;
+      isBuffering.value = true;
+      const token = ++reloadToken;
+      const at = currentContentTime();
+      const startAt = await alignedStreamStart(at);
+      if (token !== reloadToken) return;   // superseded
+      streamState.transcode = true;
+      streamState.streamStart = startAt;
+      swapStream(0);
+    }
+
+    function disableCompatPlayback() {
+      suppressResume = true;
+      streamState.transcode = false;
+      streamState.streamStart = 0;
+      reloadToken++;
+      swapStream(currentContentTime());
+    }
+
+    // Fetch encoder capabilities once when the risk advisory appears
+    watch(playbackWarning, (w) => {
+      if (w) fetchCompatCaps();
+    });
+
+    function handleSkipSaved(updatedData) {
+      if (media.value) {
+        // Instant priority: manual fields drive activeSkipAction right away
+        Object.assign(media.value, updatedData);
+      }
+      // Re-resolve segments (seekbar overlays + floating skip buttons read
+      // skipTimes, not media fields). Server returns fresh manual-first data,
+      // so new/edited/cleared markers appear with NO reload needed.
+      loadSkipTimes(route.params.id);
+    }
+
+    // NOTE: auto-skip is handled by checkAutoSkip() inside onTimeUpdate —
+    // it reads the live playerSettings and covers manual markers first.
+    const hoverTooltipPos = ref(0);
+    const hoverTooltipTime = ref(0);
+
+    let hideTimer = null;
+    let progressTimer = null;
+    let stallTimer = null;
+
+    const activeStreamMediaId = computed(() => selectedQualityMediaId.value || route.params.id);
+    // Display timeline: CONTENT time vs the title's REAL duration. In
+    // converted mode the piped stream reports bogus/tiny durations, so we
+    // anchor to the DB duration and content-converted position instead.
+    const displayDuration = computed(() => {
+      const md = Number(media.value?.duration) || 0;
+      if (md > 0) return md;
+      const d = Number(duration.value);
+      return isFinite(d) && d > 0 ? d : 0;
+    });
+    const displayTime = computed(() => playerToContent(currentTime.value));
+    const progressPercent = computed(() => {
+      if (!displayDuration.value) return 0;
+      const pct = (Math.min(displayTime.value, displayDuration.value) / displayDuration.value) * 100;
+      return Math.max(0, Math.min(100, pct));
+    });
+
+    // Wall-clock time the title will finish, e.g. "11:42 PM" (updates live)
+    const endClockTime = computed(() => {
+      const dur = Number(duration.value) || Number(media.value?.duration) || 0;
+      if (!dur || dur <= 0) return "";
+      const remainingSec = Math.max(0, dur - (Number(currentTime.value) || 0));
+      if (!isFinite(remainingSec)) return "";
+      const d = new Date(Date.now() + remainingSec * 1000);
+      let h = d.getHours();
+      const m = String(d.getMinutes()).padStart(2, "0");
+      const ampm = h >= 12 ? "PM" : "AM";
+      h = h % 12 || 12;
+      return `${h}:${m} ${ampm}`;
+    });
+
+    function showControls() {
+      controlsHidden.value = false;
+      clearTimeout(hideTimer);
+      if (videoRef.value && !videoRef.value.paused) {
+        hideTimer = setTimeout(() => {
+          controlsHidden.value = true;
+          showSpeedMenu.value = false;
+          showSubMenu.value = false;
+          showAudioMenu.value = false;
+          showQualityMenu.value = false;
+        }, 3500);
+      }
+    }
+
+    async function saveProgressNow() {
+      if (!store.profile || !media.value?.id) return;
+      // currentTime is PLAYER time — convert to absolute content time for storage
+      const rawPos = Math.floor(playerToContent(currentTime.value || (videoRef.value ? videoRef.value.currentTime : 0)));
+      const pos = rawPos;
+      const dur = Math.floor(media.value.duration || duration.value || (videoRef.value ? videoRef.value.duration : 0));
+      if (pos < 5) return;
+      const completed = dur > 0 && pos >= dur * 0.9;
+
+      // keepalive: true lets the request complete even if the page is being
+      // unloaded (refresh / close / navigate) — this is what makes Continue
+      // Watching stick reliably. One silent retry covers transient server load.
+      async function post(attempt) {
+        try {
+          const r = await fetch("/api/progress", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              media_id: Number(media.value.id),
+              position: pos,
+              duration: dur,
+              completed,
+            }),
+            keepalive: true,
+          });
+          if (!r.ok) throw new Error(`status ${r.status}`);
+          return await r.json().catch(() => null);
+        } catch (e) {
+          if (attempt < 1) {
+            await new Promise((res) => setTimeout(res, 750));
+            return post(attempt + 1);
+          }
+          return null;
+        }
+      }
+
+      const res = await post(0);
+      // Watch-progress achievements: show only the newest as the minimal pill
+      if (res && res.unlocked_achievements && res.unlocked_achievements.length) {
+        showPlayerAchievement(res.unlocked_achievements[res.unlocked_achievements.length - 1]);
+      }
+    }
+
+    function flushProgressOnHide() {
+      saveProgressNow();
+    }
+
+    function handleVisibilityChange() {
+      if (document.hidden) saveProgressNow();
+    }
+
+    function togglePlay() {
+      if (!videoRef.value) return;
+      if (videoRef.value.paused) {
+        const p = videoRef.value.play();
+        if (p && typeof p.then === "function") {
+          p.then(() => {
+            isPlaying.value = true;
+            playerError.value = null;
+          }).catch((err) => {
+            console.log("Autoplay / play interaction handled:", err);
+            isPlaying.value = false;
+          });
+        } else {
+          isPlaying.value = true;
+        }
+      } else {
+        videoRef.value.pause();
+        isPlaying.value = false;
+        saveProgressNow();
+      }
+    }
+
+    function handleContainerClick(e) {
+      if (e.target.closest(".custom-player-controls")) return;
+      togglePlay();
+    }
+
+    function skip(seconds) {
+      if (!videoRef.value) return;
+      const step = seconds !== undefined && seconds !== null ? seconds : playerSettings.value?.playback?.seek_step || 10;
+      // currentTime is player time — seekTo expects CONTENT time
+      const targetTime = Math.min(Math.max(0, playerToContent((currentTime.value || 0) + step)), duration.value || 0);
+      seekTo(targetTime);
+    }
+
+    function onVideoSeeked() {
+      // After a native video seek, decide how to realign the remote audio:
+      //
+      //  1. SLIDE — if the new position is still covered by the audio
+      //     element's own buffered stream (typical small backward seeks),
+      //     just move the element. Instant and seamless, nothing restarts.
+      //  2. REBUILD — otherwise cut a fresh audio stream at the new position
+      //     (debounced so dragging the bar doesn't spawn one per tick).
+      //     While waiting, the element stays SILENT — never left playing
+      //     from a stale base (that caused repeat-looping audio).
+      if (!isRemoteAudioActive() || !remoteAudioEl || !videoRef.value) return;
+      const v = videoRef.value;
+      const a = remoteAudioEl;
+
+      let bufferedEnd = 0;
+      try {
+        const b = a.buffered;
+        if (b && b.length) bufferedEnd = b.end(b.length - 1);
+      } catch (e) {}
+
+      const relTarget = v.currentTime - remoteAudioBase;
+      if (relTarget >= 0 && relTarget <= Math.max(0, bufferedEnd - 0.25)) {
+        // Slide inside the existing stream
+        try { a.currentTime = Math.max(0, relTarget); } catch (e) {}
+        a.play().catch(() => {});
+        return;
+      }
+
+      // Rebuild path — silence immediately, never loop stale audio
+      try { a.pause(); } catch (e) {}
+      if (remoteSeekDebounce) clearTimeout(remoteSeekDebounce);
+      remoteSeekDebounce = setTimeout(() => {
+        remoteSeekDebounce = null;
+        attachRemoteAudio(streamState.audioTrack);
+      }, 180);
+    }
+
+    function toggleMute() {
+      if (!videoRef.value) return;
+      isMuted.value = !isMuted.value;
+      if (isRemoteAudioActive() && remoteAudioEl) {
+        // Remote mode: video stays muted; mute intent applies to the audio element
+        videoRef.value.muted = true;
+        remoteAudioEl.muted = isMuted.value;
+      } else {
+        videoRef.value.muted = isMuted.value;
+      }
+      API.post("/api/achievements/unlock", { achievement_id: "mute_master" }).catch(() => {});
+    }
+
+    let audioCtx = null;
+    let gainNode = null;
+    let audioSource = null;
+
+    function initAudioBoost() {
+      if (audioCtx || !videoRef.value) return;
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContext();
+        gainNode = audioCtx.createGain();
+        audioSource = audioCtx.createMediaElementSource(videoRef.value);
+        audioSource.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+      } catch (e) {
+        console.log("AudioContext init notice:", e);
+      }
+    }
+
+    function onVolumeInput(e) {
+      const val = parseFloat(e.target.value);
+      volume.value = val;
+
+      // Remote-audio mode: route volume to the audio element. The video is
+      // muted, so its boost graph is irrelevant here (no >1x boost remotely).
+      if (isRemoteAudioActive() && remoteAudioEl) {
+        remoteAudioEl.volume = Math.min(1, Math.max(0, val));
+        remoteAudioEl.muted = val === 0;
+        if (videoRef.value) {
+          videoRef.value.muted = true;
+          videoRef.value.volume = 1.0;
+        }
+        isMuted.value = val === 0;
+        return;
+      }
+
+      if (videoRef.value) {
+        if (val > 1.0) {
+          initAudioBoost();
+          videoRef.value.volume = 1.0;
+          if (gainNode) gainNode.gain.value = val;
+          if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+          unlockAchievementSilently("volume_booster");
+        } else {
+          if (gainNode) gainNode.gain.value = 1.0;
+          videoRef.value.volume = val;
+        }
+        videoRef.value.muted = val === 0;
+        isMuted.value = val === 0;
+      }
+    }
+
+    // Record routine playback achievements and surface them as a MINIMAL
+    // pill on the LEFT side of the player — never the large overlay, which
+    // covered the right side (next-episode card / controls).
+    const playerAch = ref(null);
+    let playerAchTimer = null;
+    function showPlayerAchievement(ach) {
+      if (!ach) return;
+      playAchievementSound();
+      playerAch.value = {
+        icon: ach.icon || "🏆",
+        title: ach.title || "Achievement Unlocked!",
+      };
+      if (playerAchTimer) clearTimeout(playerAchTimer);
+      playerAchTimer = setTimeout(() => {
+        playerAch.value = null;
+      }, 2600);
+    }
+    function unlockAchievementSilently(achievementId) {
+      API.post("/api/achievements/unlock", { achievement_id: achievementId })
+        .then((res) => {
+          if (res && res.unlocked) showPlayerAchievement(res.unlocked);
+        })
+        .catch(() => {});
+    }
+
+    function seekToClick(e) {
+      if (!seekbarRef.value || !duration.value) return;
+      const rect = seekbarRef.value.getBoundingClientRect();
+      const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      // Seekbar is player-relative — seekTo expects CONTENT time
+      const targetTime = playerToContent(pos * displayDuration.value);
+      seekTo(targetTime);
+      unlockAchievementSilently("seeker");
+    }
+
+    function hoverSeekbar(e) {
+      if (!seekbarRef.value || !displayDuration.value) return;
+      const rect = seekbarRef.value.getBoundingClientRect();
+      const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      hoverTooltipPos.value = e.clientX - rect.left;
+      hoverTooltipTime.value = pos * displayDuration.value;
+      showHoverTooltip.value = true;
+    }
+
+    const nextEpHover = ref(false);
+    let nextEpHideTimer = null;
+    function showNextPreview() {
+      if (nextEpHideTimer) { clearTimeout(nextEpHideTimer); nextEpHideTimer = null; }
+      nextEpHover.value = true;
+    }
+    function hideNextPreview() {
+      if (nextEpHideTimer) clearTimeout(nextEpHideTimer);
+      // Small delay bridges the gap between the button and the floating card
+      nextEpHideTimer = setTimeout(() => { nextEpHover.value = false; }, 180);
+    }
+    const hasNextEp = computed(() => {
+      return !!(
+        nextEp.value &&
+        nextEp.value.id &&
+        nextEp.value.is_local !== false &&
+        nextEp.value.is_mounted !== false
+      );
+    });
+
+    const showNextEp = computed(() => hasNextEp.value);
+
+    const showAutoAdvanceOverlay = computed(() => {
+      if (!hasNextEp.value || !duration.value || duration.value === 0) return false;
+      const remaining = displayDuration.value - displayTime.value;
+      return remaining <= 90 || (displayDuration.value && displayTime.value / displayDuration.value >= 0.85);
+    });
+
+    function selectSpeed(rate) {
+      playbackRate.value = rate;
+      if (videoRef.value) videoRef.value.playbackRate = rate;
+      // Mirror playback speed to the remote audio element
+      if (isRemoteAudioActive() && remoteAudioEl) remoteAudioEl.playbackRate = rate;
+      showSpeedMenu.value = false;
+
+      let achId = null;
+      if (rate >= 2.0) achId = "double_speed";
+      else if (rate <= 0.5) achId = "slow_motion";
+      else if (rate >= 1.25) achId = "speed_demon";
+
+      if (achId) {
+        unlockAchievementSilently(achId);
+      }
+    }
+
+    // ─── Subtitle pipeline ──────────────────────────────────────────
+    // Subtitle cues carry absolute content timestamps. The video now ALWAYS
+    // plays natively from the real file, so player time === content time and
+    // the offset is permanently zero — this function is kept as an identity
+    // safety-net (it restores original cue timings if they were ever shifted).
+    function applySubtitleOffset() {
+      const video = videoRef.value;
+      if (!video || !video.textTracks) return;
+      const offset = streamState.transcode ? (streamState.streamStart || 0) : 0;
+      const tracks = video.textTracks;
+      for (let i = 0; i < tracks.length; i++) {
+        const cues = tracks[i].cues;
+        if (!cues || cues.length === 0) continue;
+        const list = Array.from(cues);
+        for (const cue of list) {
+          if (cue._origStart === undefined) {
+            cue._origStart = cue.startTime;
+            cue._origEnd = cue.endTime;
+          }
+          const s = Math.max(0, cue._origStart - offset);
+          const e = Math.max(0, cue._origEnd - offset);
+          if (cue.startTime !== s) cue.startTime = s;
+          if (cue.endTime !== e) cue.endTime = e;
+        }
+      }
+    }
+
+    // Cues load ASYNC after every stream swap. The TextTrack 'load' event is
+    // the only reliable signal that cues are ready — hook each track once and
+    // re-apply the offset whenever its cues arrive.
+    function hookTextTrack(track) {
+      if (!track || track._capsHooked) return;
+      track._capsHooked = true;
+      track.addEventListener("load", () => {
+        applySubtitleOffset();
+        setTimeout(applySubtitleOffset, 150);
+      });
+      track.addEventListener("error", () => {
+        console.warn("[Player] Subtitle track failed to load:", track.label);
+      });
+    }
+
+    function syncTextTracks() {
+      if (!videoRef.value) return;
+      const tracks = videoRef.value.textTracks;
+      if (!tracks || tracks.length === 0) return;
+      for (let i = 0; i < tracks.length; i++) hookTextTrack(tracks[i]);
+      applySubtitleOffset();
+      const activeIdx = selectedSub.value;
+      for (let i = 0; i < tracks.length; i++) {
+        try {
+          const newMode = i === activeIdx ? "hidden" : "disabled";
+          if (tracks[i].mode !== newMode) {
+            tracks[i].mode = newMode;
+          }
+          // Attach cuechange listener on active track for instant subtitle updates
+          if (i === activeIdx) {
+            tracks[i].oncuechange = updateActiveCueText;
+          } else {
+            tracks[i].oncuechange = null;
+          }
+        } catch (e) {}
+      }
+    }
+
+    function selectSub(index) {
+      selectedSub.value = index;
+      showSubMenu.value = false;
+      if (index >= 0) {
+        unlockAchievementSilently("sub_master");
+      }
+      nextTick(() => {
+        syncTextTracks();
+        setTimeout(syncTextTracks, 100);
+        setTimeout(syncTextTracks, 300);
+      });
+    }
+
+    function onVideoPlaying() {
+      isPlaying.value = true;
+      isBuffering.value = false;
+      playerError.value = null;
+      syncTextTracks();
+      setTimeout(syncTextTracks, 150);
+      // Instantly resume the remote audio track with the video
+      if (isRemoteAudioActive() && remoteAudioEl) {
+        remoteAudioEl.play().catch(() => {});
+      }
+      showControls();
+    }
+
+    function onVideoPause() {
+      isPlaying.value = false;
+      controlsHidden.value = false;
+      clearTimeout(hideTimer);
+      // Instantly pause the remote audio track with the video
+      if (isRemoteAudioActive() && remoteAudioEl) remoteAudioEl.pause();
+    }
+
+    watch(
+      [subtitles, selectedSub],
+      () => {
+        nextTick(() => {
+          syncTextTracks();
+          setTimeout(syncTextTracks, 100);
+          setTimeout(syncTextTracks, 300);
+        });
+      },
+      { deep: true }
+    );
+
+    // Watch serverOnline for seamless video playback recovery on reconnection
+    watch(
+      () => store.serverOnline,
+      (isOnline, wasOnline) => {
+        if (isOnline && wasOnline === false && videoRef.value) {
+          const pos = currentContentTime();
+          console.log("[Player] Server reconnected. Restoring stream playback at position:", pos);
+          swapStream(pos);
+          if (isRemoteAudioActive()) {
+            attachRemoteAudio(streamState.audioTrack);
+          }
+        }
+      }
+    );
+
+    const subStyle = ref({
+      fontSize: "1.1rem",
+      textColor: "#ffffff",
+      bgOpacity: 0.5
+    });
+
+    async function loadSubStyleFromConfig() {
+      try {
+        const cfg = await API.get("/api/settings");
+        if (cfg && cfg.subtitles && cfg.subtitles.appearance) {
+          subStyle.value = { ...subStyle.value, ...cfg.subtitles.appearance };
+        }
+      } catch (e) {}
+      applySubStyleCSS();
+    }
+
+    async function updateSubStyle(key, value) {
+      subStyle.value[key] = value;
+      applySubStyleCSS();
+      unlockAchievementSilently("sub_styler");
+      try {
+        await API.post("/api/settings", {
+          subtitles: {
+            appearance: { ...subStyle.value }
+          }
+        });
+      } catch (e) {}
+    }
+
+    const activeCueText = ref("");
+
+    // Sanitize raw VTT cue text. FFmpeg's ASS/SSA -> VTT conversion often
+    // fragments styled lines into ONE CHARACTER PER LINE cues (karaoke /
+    // position tags), which the overlay would render as a vertical letter
+    // stack. Collapse that pathology and cap visible lines.
+    function sanitizeCueText(raw) {
+      if (!raw) return "";
+      let t = String(raw).replace(/<[^>]*>/g, "");
+      let lines = t
+        .split(/\r?\n/)
+        .map((l) => l.replace(/[\u200b\u200e\u200f]/g, "").replace(/[ \t]+/g, " ").trim())
+        .filter(Boolean);
+      if (lines.length === 0) return "";
+
+      // Degenerate fragmentation: many single-character lines → fuse them
+      const singleChar = lines.filter((l) => Array.from(l).length === 1).length;
+      if (lines.length > 2 && singleChar / lines.length >= 0.6) {
+        return lines.join("").replace(/\s+/g, " ").trim();
+      }
+      return lines.slice(0, 3).join("\n");
+    }
+
+    function updateActiveCueText() {
+      try {
+        if (!videoRef.value) return;
+        const tracks = videoRef.value.textTracks;
+        if (!tracks || selectedSub.value < 0 || !tracks[selectedSub.value]) {
+          activeCueText.value = "";
+          return;
+        }
+        const track = tracks[selectedSub.value];
+        const now = currentTime.value;
+
+        // Primary: manual cue scan using currentTime.value (total media time).
+        if (track.cues && track.cues.length > 0) {
+          const active = [];
+          for (let i = 0; i < track.cues.length; i++) {
+            const c = track.cues[i];
+            if (c && now >= c.startTime && now <= c.endTime) {
+              const s = sanitizeCueText(c.text);
+              if (s) active.push(s);
+            }
+          }
+          activeCueText.value = active.length > 0 ? active.join("\n") : "";
+          return;
+        }
+
+        // Secondary fallback: browser-managed activeCues.
+        if (track.activeCues && track.activeCues.length > 0) {
+          const active = [];
+          for (let i = 0; i < track.activeCues.length; i++) {
+            if (track.activeCues[i]) {
+              const s = sanitizeCueText(track.activeCues[i].text);
+              if (s) active.push(s);
+            }
+          }
+          activeCueText.value = active.length > 0 ? active.join("\n") : "";
+          return;
+        }
+
+        activeCueText.value = "";
+      } catch (err) {
+        console.warn("Subtitle update error:", err);
+        activeCueText.value = "";
+      }
+    }
+
+    const customCueStyle = computed(() => {
+      const { fontSize, textColor, bgOpacity } = subStyle.value;
+      const pxSize = fontSize === "0.85rem" ? "18px" : fontSize === "1.4rem" ? "30px" : fontSize === "1.8rem" ? "40px" : "24px";
+      const bg = bgOpacity === 0 ? "transparent" : `rgba(0, 0, 0, ${bgOpacity})`;
+      return {
+        display: "inline-block",
+        width: "fit-content",
+        fontSize: pxSize,
+        color: textColor,
+        backgroundColor: bg,
+        textShadow: "0 2px 8px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.95)",
+        padding: "6px 14px",
+        borderRadius: "6px",
+        position: "absolute",
+        bottom: controlsHidden.value ? "35px" : "105px",
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: "14",
+        maxWidth: "80%",
+        textAlign: "center",
+        pointerEvents: "none",
+        whiteSpace: "pre-line",
+        fontWeight: "600",
+        transition: "bottom 0.25s ease, font-size 0.2s ease, color 0.2s ease, background 0.2s ease"
+      };
+    });
+
+    function applySubStyleCSS() {
+      let styleEl = document.getElementById("caps-sub-style-el");
+      if (!styleEl) {
+        styleEl = document.createElement("style");
+        styleEl.id = "caps-sub-style-el";
+        document.head.appendChild(styleEl);
+      }
+      const { fontSize, textColor, bgOpacity } = subStyle.value;
+      const pxSize = fontSize === "0.85rem" ? "20px" : fontSize === "1.4rem" ? "34px" : fontSize === "1.8rem" ? "44px" : "26px";
+      const bg = bgOpacity === 0 ? "transparent" : `rgba(0, 0, 0, ${bgOpacity})`;
+      styleEl.textContent = `
+        video::cue {
+          font-size: ${pxSize} !important;
+          color: ${textColor} !important;
+          background-color: ${bg} !important;
+          background: ${bg} !important;
+          text-shadow: 0 2px 8px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.95) !important;
+          line-height: 1.3 !important;
+        }
+        video::-webkit-media-text-track-display,
+        video::-webkit-media-text-track-container,
+        video::-webkit-media-text-track-region {
+          background: transparent !important;
+          background-color: transparent !important;
+        }
+      `;
+    }
+
+    onMounted(loadSubStyleFromConfig);
+
+    function handleCustomSubFile(e) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        let content = event.target.result;
+        if (file.name.toLowerCase().endsWith(".srt")) {
+          content = convertSrtToVtt(content);
+        }
+        const blob = new Blob([content], { type: "text/vtt" });
+        const url = URL.createObjectURL(blob);
+        const newSub = { label: file.name.replace(/\.(vtt|srt)$/i, ""), url };
+        if (!subtitles.value) subtitles.value = [];
+        subtitles.value.push(newSub);
+        selectSub(subtitles.value.length - 1);
+        addToast(`Loaded subtitle: ${file.name}`, "success");
+      };
+      reader.readAsText(file);
+    }
+
+    const isPipActive = ref(false);
+    const isPipSupported = computed(() => {
+      return typeof document !== "undefined" && "pictureInPictureEnabled" in document && document.pictureInPictureEnabled;
+    });
+
+    async function togglePip() {
+      if (!videoRef.value) return;
+      try {
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+          isPipActive.value = false;
+        } else {
+          await videoRef.value.requestPictureInPicture();
+          isPipActive.value = true;
+        }
+      } catch (e) {
+        console.log("Picture-in-Picture interaction:", e);
+        addToast("Unable to toggle Picture-in-Picture", "error");
+      }
+    }
+
+    function bindPipListeners() {
+      if (!videoRef.value) return;
+      videoRef.value.addEventListener("enterpictureinpicture", () => {
+        isPipActive.value = true;
+        addToast("Entered Picture-in-Picture 📺", "info");
+        unlockAchievementSilently("pip_master");
+      });
+      videoRef.value.addEventListener("leavepictureinpicture", () => {
+        isPipActive.value = false;
+        addToast("Exited Picture-in-Picture", "info");
+      });
+    }
+
+    const showResumeModal = ref(false);
+    const resumeTime = ref(0);
+
+    const skipTimes = ref({});
+    const autoSkippedOp = ref(false);
+    const autoSkippedEd = ref(false);
+
+    async function loadSkipTimes(mediaId) {
+      try {
+        const data = await API.get(`/api/skip-times/${mediaId}`);
+        skipTimes.value = data || {};
+      } catch (e) {
+        skipTimes.value = {};
+      }
+    }
+
+    const activeSkipButton = computed(() => {
+      if (!skipTimes.value) return null;
+      const time = currentTime.value;
+      if (skipTimes.value.op && time >= skipTimes.value.op.start && time <= skipTimes.value.op.end - 1) {
+        return { type: "op", label: "Skip Intro", target: skipTimes.value.op.end };
+      }
+      if (skipTimes.value.recap && time >= skipTimes.value.recap.start && time <= skipTimes.value.recap.end - 1) {
+        return { type: "recap", label: "Skip Recap", target: skipTimes.value.recap.end };
+      }
+      if (skipTimes.value.ed && time >= skipTimes.value.ed.start && time <= skipTimes.value.ed.end - 1) {
+        return { type: "ed", label: "Skip Outro", target: skipTimes.value.ed.end };
+      }
+      if (skipTimes.value.preview && time >= skipTimes.value.preview.start && time <= skipTimes.value.preview.end - 1) {
+        return { type: "preview", label: "Skip Preview", target: skipTimes.value.preview.end };
+      }
+      return null;
+    });
+
+    function getSegmentStyle(segment) {
+      const dur = displayDuration.value;
+      if (!segment || !dur || dur < 10 || segment.start >= dur) return { display: "none" };
+      // Segments are stored in CONTENT time; the seekbar shows PLAYER time.
+      // In direct mode this is identity — in transcode mode it shifts by streamStart.
+      const segStart = contentToPlayer(segment.start);
+      const segEnd = contentToPlayer(segment.end);
+      if (segEnd <= 0) return { display: "none" };
+      const left = Math.max(0, Math.min(100, (segStart / dur) * 100));
+      const width = Math.max(0, Math.min(100 - left, ((segEnd - segStart) / dur) * 100));
+      return {
+        left: `${left}%`,
+        width: `${width}%`
+      };
+    }
+
+    function performSkip(button) {
+      if (!button) return;
+      seekTo(button.target);
+      unlockAchievementSilently("skip_master");
+    }
+
+    // Auto-skip: when enabled in settings, jump past Recap / Intro / Outro
+    // windows (manual markers take priority, then AniSkip/chapters).
+    // Outro auto-skips by seeking to its end — episode advance still
+    // requires the normal end-of-playback flow.
+    let lastAutoSkipAt = 0;
+    function checkAutoSkip() {
+      if (!playerSettings.value?.playback?.auto_skip_intro) return;
+      const action = activeSkipAction.value;
+      if (!action) return;
+
+      const now = Date.now();
+      if (now - lastAutoSkipAt < 1500) return;   // debounce re-entry
+      lastAutoSkipAt = now;
+
+      seekTo(action.end);
+    }
+
+    function onTimeUpdate() {
+      if (!videoRef.value) return;
+      // currentTime mirrors raw PLAYER time; content conversions go through
+      // playerToContent()/currentContentTime() only.
+      currentTime.value = videoRef.value.currentTime || 0;
+      isPlaying.value = !videoRef.value.paused;
+      updateActiveCueText();
+      checkPlaybackStall();
+      checkAutoSkip();
+    }
+
+    let hasResumedProgress = false;
+    // Set while the user is actively switching audio/seeks — the resume
+    // prompt must never fire mid-session on programmatic reloads.
+    let suppressResume = false;
+
+    function applyResumedProgress() {
+      if (hasResumedProgress || suppressResume || !videoRef.value || !media.value) return;
+      if (Number(media.value.id) !== Number(route.params.id)) return;
+      const progress = media.value.progress;
+      if (progress && progress.position > 5 && !progress.completed) {
+        const dur = media.value.duration || duration.value || 0;
+        if (dur > 0 && progress.position >= dur * 0.9) return;
+        resumeTime.value = progress.position;
+        showResumeModal.value = true;
+        hasResumedProgress = true;
+        if (videoRef.value) {
+          videoRef.value.pause();
+        }
+      }
+    }
+
+    function confirmResume() {
+      showResumeModal.value = false;
+      if (videoRef.value) {
+        videoRef.value.currentTime = resumeTime.value;
+        currentTime.value = resumeTime.value;
+        videoRef.value.play().catch(() => {});
+      }
+      unlockAchievementSilently("resume_master");
+    }
+
+    function confirmStartOver() {
+      showResumeModal.value = false;
+      if (videoRef.value) {
+        videoRef.value.currentTime = 0;
+        currentTime.value = 0;
+        videoRef.value.play().catch(() => {});
+      }
+      if (store.profile && media.value?.id) {
+        API.post("/api/progress", {
+          media_id: Number(media.value.id),
+          position: 0,
+          duration: Math.floor(duration.value || 0),
+          completed: false,
+        }).catch(() => {});
+      }
+    }
+
+    function onLoadedMetadata() {
+      if (!videoRef.value) return;
+      if (streamState.transcode) {
+        // Piped converted streams report bogus/fragment durations — never
+        // adopt them. displayDuration falls back to the DB value instead.
+      } else if (media.value && media.value.duration > 0) {
+        duration.value = media.value.duration;
+      } else if (videoRef.value.duration && isFinite(videoRef.value.duration) && videoRef.value.duration > 10) {
+        duration.value = videoRef.value.duration;
+      }
+      if (playbackRate.value) {
+        videoRef.value.playbackRate = playbackRate.value;
+      }
+      bindPipListeners();
+      syncTextTracks();
+      setTimeout(syncTextTracks, 200);
+      applyResumedProgress();
+    }
+
+    const isEnded = ref(false);
+    const nextEpCountdownSeconds = ref(5);
+    const nextEpProgressPercent = ref(0);
+    let autoAdvanceInterval = null;
+
+    function startAutoAdvanceCountdown() {
+      cancelAutoAdvance();
+      isEnded.value = true;
+      controlsHidden.value = false;
+      nextEpCountdownSeconds.value = 5.0;
+      nextEpProgressPercent.value = 0;
+
+      const durationSec = 5.0;
+      const startTime = Date.now();
+
+      autoAdvanceInterval = setInterval(() => {
+        const elapsed = (Date.now() - startTime) / 1000;
+        const remaining = Math.max(0, durationSec - elapsed);
+        nextEpCountdownSeconds.value = remaining;
+        nextEpProgressPercent.value = Math.min(100, (elapsed / durationSec) * 100);
+
+        if (remaining <= 0) {
+          cancelAutoAdvance();
+          playNext();
+        }
+      }, 50);
+    }
+
+    function cancelAutoAdvance() {
+      if (autoAdvanceInterval) {
+        clearInterval(autoAdvanceInterval);
+        autoAdvanceInterval = null;
+      }
+      isEnded.value = false;
+      nextEpProgressPercent.value = 0;
+    }
+
+    function handleNextEpClick() {
+      cancelAutoAdvance();
+      playNext();
+      unlockAchievementSilently("next_ep_advance");
+    }
+
+
+    function onEnded() {
+      isPlaying.value = false;
+      const autoNext = playerSettings.value?.playback?.auto_play_next !== false;
+      if (showNextEp.value && autoNext) {
+        startAutoAdvanceCountdown();
+      }
+    }
+
+    function onVideoError(e) {
+      const v = videoRef.value;
+      if (!v || !v.currentSrc || v.currentSrc.endsWith('/stream/') || v.currentSrc.endsWith('/null') || v.currentSrc.endsWith('/undefined')) {
+        return;
+      }
+      if (v.error && v.error.code !== 0 && v.currentSrc && v.currentSrc.includes('/api/stream/')) {
+        console.error("[HTML5 Player Error]", e, v.error);
+        const p = (media.value?.file_path || "").toLowerCase();
+        const isHeavy4k = p.includes("2160") || p.includes("4k") || p.includes("uhd");
+        playerError.value = isHeavy4k
+          ? "Playback failed — 4K/HEVC content needs hardware acceleration or a compatible browser (Edge recommended). Try another quality source or enable HW acceleration."
+          : "Your browser cannot play this video codec natively (e.g. AC-3 audio or HEVC in MKV). Try another file format or Edge browser.";
+      }
+    }
+
+    // Decoder-stall watchdog: 4K HEVC software decode can wedge the renderer
+    // without firing an error event. If the video claims to be playing but
+    // time stops advancing for ~6s, surface a recovery notice.
+    let stallCheckCount = 0;
+    let lastStallPos = -1;
+    function checkPlaybackStall() {
+      const v = videoRef.value;
+      if (!v || v.paused || !media.value) {
+        stallCheckCount = 0;
+        lastStallPos = -1;
+        return;
+      }
+      const pos = Math.floor(v.currentTime * 2) / 2; // half-second granularity
+      if (pos === lastStallPos && v.readyState < 3) {
+        stallCheckCount++;
+        if (stallCheckCount === 20) {   // ~30s of zero progress
+          const p = (media.value.file_path || "").toLowerCase();
+          const heavy = p.includes("2160") || p.includes("4k") || p.includes("uhd") ||
+                        codecInfo.value.tags.some((t) => t.includes("HEVC"));
+          playerError.value = heavy
+            ? "Decoder appears stuck — this 4K/HEVC stream exceeds what this device can handle. Enable hardware acceleration, use Edge, or pick a lower-quality source."
+            : "Playback appears stuck. Press Play again or reload the stream.";
+        }
+      } else {
+        stallCheckCount = 0;
+        if (playerError.value && playerError.value.startsWith("Decoder appears stuck")) {
+          playerError.value = null;   // recovered on its own
+        }
+      }
+      lastStallPos = pos;
+    }
+
+    function formatTime(seconds) {
+      if (!seconds || isNaN(seconds)) return "00:00";
+      const s = Math.floor(seconds);
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = s % 60;
+      const mStr = m.toString().padStart(2, "0");
+      const sStr = sec.toString().padStart(2, "0");
+      return h > 0 ? `${h}:${mStr}:${sStr}` : `${mStr}:${sStr}`;
+    }
+
+    function handleKeyboard(e) {
+      if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
+      unlockAchievementSilently("keyboard_ninja");
+
+      if (showResumeModal.value) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          confirmResume();
+          return;
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          confirmResume();
+          return;
+        }
+      }
+
+      const step = playerSettings.value?.playback?.seek_step || 10;
+
+      switch (e.key) {
+        case " ":
+        case "k":
+        case "K":
+          e.preventDefault();
+          togglePlay();
+          break;
+        case "ArrowRight":
+        case "l":
+        case "L":
+          e.preventDefault();
+          skip(step);
+          break;
+        case "ArrowLeft":
+        case "j":
+        case "J":
+          e.preventDefault();
+          skip(-step);
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          if (videoRef.value) {
+            const newVol = Math.min(1, videoRef.value.volume + 0.1);
+            videoRef.value.volume = newVol;
+            volume.value = newVol;
+          }
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          if (videoRef.value) {
+            const newVol = Math.max(0, videoRef.value.volume - 0.1);
+            videoRef.value.volume = newVol;
+            volume.value = newVol;
+          }
+          break;
+        case "f":
+        case "F":
+          e.preventDefault();
+          toggleFullscreen();
+          break;
+        case "p":
+        case "P":
+          e.preventDefault();
+          togglePip();
+          break;
+        case "m":
+        case "M":
+          e.preventDefault();
+          toggleMute();
+          break;
+        case "n":
+        case "N":
+          e.preventDefault();
+          if (hasNextEp.value) handleNextEpClick();
+          break;
+      }
+    }
+
+    function toggleFullscreen() {
+      if (!videoRef.value) return;
+      const container = videoRef.value.closest(".custom-player-wrapper") || videoRef.value;
+      if (!document.fullscreenElement) {
+        if (container.requestFullscreen) container.requestFullscreen();
+        isFullscreen.value = true;
+      } else {
+        if (document.exitFullscreen) document.exitFullscreen();
+        isFullscreen.value = false;
+      }
+      API.post("/api/achievements/unlock", { achievement_id: "fullscreen_pro" }).then((res) => {
+        if (res && res.unlocked) {
+          addToast(`🏆 Achievement Unlocked: ${res.unlocked.icon} ${res.unlocked.title}!`, "success");
+        }
+      }).catch(() => {});
+    }
+
+    async function initPlayer() {
+      const mediaId = route.params.id;
+      playerError.value = null;
+      showResumeModal.value = false;
+      resumeTime.value = 0;
+      hasResumedProgress = false;
+      suppressResume = false;
+      reloadToken++;                       // invalidate any in-flight swaps
+      streamState.mediaId = Number(mediaId);
+      streamState.audioTrack = null;
+      streamState.transcode = false;
+      streamState.streamStart = 0;
+      // Fresh session — drop any previous remote-audio element state
+      detachRemoteAudio();
+      cancelAutoAdvance();
+
+      if (videoRef.value) {
+        videoRef.value.pause();
+        try { videoRef.value.currentTime = 0; } catch (e) {}
+      }
+      currentTime.value = 0;
+      duration.value = 0;
+      media.value = null;
+
+      selectedQualityMediaId.value = Number(mediaId);
+      loadQualityOptions(mediaId);
+
+      autoSkippedOp.value = false;
+      autoSkippedEd.value = false;
+      loadSkipTimes(mediaId);
+
+      try {
+        playerSettings.value = await API.get("/api/settings");
+      } catch (e) {}
+
+      if (playerSettings.value) {
+        const pb = playerSettings.value.playback || {};
+        const sub = playerSettings.value.subtitles || {};
+
+        if (pb.default_volume !== undefined) {
+          const rawVol = Number(pb.default_volume);
+          const defaultVol = rawVol <= 1 ? rawVol : Math.min(1, Math.max(0, rawVol / 100));
+          volume.value = defaultVol;
+          if (videoRef.value) videoRef.value.volume = defaultVol;
+        }
+
+        if (sub.font_size) {
+          const fontMap = { small: "0.85rem", normal: "1rem", large: "1.2rem", "extra-large": "1.4rem" };
+          const fontVal = fontMap[sub.font_size] || sub.font_size;
+          document.documentElement.style.setProperty("--sub-font-size", fontVal);
+        }
+      }
+
+      try {
+        media.value = await API.get(`/api/media/${mediaId}`);
+        subtitles.value = media.value.subtitles || [];
+
+        applyResumedProgress();
+
+        // Auto-select preferred subtitle language if auto_load enabled
+        if (subtitles.value.length > 0) {
+          const autoLoad = playerSettings.value?.subtitles?.auto_load !== false;
+          if (autoLoad) {
+            let prefLang = (playerSettings.value?.subtitles?.preferred_language || "en").toLowerCase();
+            if (prefLang === "auto") prefLang = "en";
+            const prefIdx = subtitles.value.findIndex((s) => (s.language || "").toLowerCase().startsWith(prefLang) || (s.label || "").toLowerCase().includes(prefLang));
+            const defaultIdx = prefIdx >= 0 ? prefIdx : 0;
+            selectSub(defaultIdx);
+          }
+        }
+      } catch (e) {
+        addToast("Failed to load media", "error");
+        return;
+      }
+
+      try {
+        audioTracks.value = await API.get(`/api/audio-tracks/${mediaId}`);
+      } catch (e) {
+        audioTracks.value = [];
+      }
+
+      // Browsers direct-play the container's DEFAULT-flagged track — align the
+      // UI selection with it so "Track 1" isn't silently playing another track.
+      const defTrack = audioTracks.value.find((t) => t.default);
+      defaultAudioIndex.value = defTrack ? defTrack.index : 0;
+      streamState.audioTrack = defaultAudioIndex.value;
+
+      if (media.value.type !== "movie" && media.value.tmdb_id) {
+        try {
+          const show = await API.get(`/api/show/${media.value.tmdb_id}?type=${media.value.type}`);
+          const allEps = Object.values(show.seasons || {})
+            .flat()
+            .sort((a, b) => {
+              if (a.season !== b.season) return (a.season || 0) - (b.season || 0);
+              return (a.episode || 0) - (b.episode || 0);
+            });
+          const idx = allEps.findIndex((e) => e.id === Number(mediaId));
+          if (idx >= 0) {
+            let foundNext = null;
+            for (let i = idx + 1; i < allEps.length; i++) {
+              const candidate = allEps[i];
+              if (candidate && candidate.id && candidate.is_local !== false && candidate.is_mounted !== false) {
+                foundNext = candidate;
+                break;
+              }
+            }
+            nextEp.value = foundNext;
+          } else {
+            nextEp.value = null;
+          }
+        } catch (e) {
+          nextEp.value = null;
+        }
+      } else {
+        nextEp.value = null;
+      }
+
+      if (store.profile) {
+        progressTimer = setInterval(() => {
+          if (!videoRef.value || videoRef.value.paused || !media.value?.id) return;
+          saveProgressNow();
+        }, 5000);
+        // Belt-and-braces: flush progress when the tab is hidden or closing
+        window.addEventListener("pagehide", flushProgressOnHide);
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+      }
+
+      // Decoder-stall watchdog runs independently of media events —
+      // a wedged 4K HEVC decoder stops firing timeupdate entirely.
+      stallTimer = setInterval(() => checkPlaybackStall(), 1500);
+
+      // Kick off initial playback through the controller (it owns the src)
+      swapStream(0);
+      window.addEventListener("keydown", handleKeyboard);
+      showControls();
+    }
+
+    async function goBack() {
+      await saveProgressNow();
+      if (media.value) {
+        if (media.value.type === "movie" && media.value.id) {
+          router.push(`/title/movie/${media.value.id}`);
+          return;
+        } else if (media.value.tmdb_id) {
+          router.push(`/title/${media.value.type || "series"}/${media.value.tmdb_id}`);
+          return;
+        } else if (media.value.id) {
+          router.push(`/title/${media.value.type || "movie"}/${media.value.id}`);
+          return;
+        }
+      }
+      router.back();
+    }
+
+    async function goHome() {
+      await saveProgressNow();
+      router.push("/");
+    }
+
+    async function playNext() {
+      await saveProgressNow();
+      if (videoRef.value) {
+        videoRef.value.pause();
+        try { videoRef.value.currentTime = 0; } catch (e) {}
+      }
+      currentTime.value = 0;
+      showResumeModal.value = false;
+      resumeTime.value = 0;
+      hasResumedProgress = false;
+      if (nextEp.value && nextEp.value.id && nextEp.value.is_local !== false && nextEp.value.is_mounted !== false) {
+        router.push(`/watch/${nextEp.value.id}`);
+      }
+    }
+
+    onMounted(initPlayer);
+
+    onUnmounted(() => {
+      cancelAutoAdvance();
+      saveProgressNow();
+      detachRemoteAudio();
+      clearInterval(progressTimer);
+      clearInterval(stallTimer);
+      clearTimeout(hideTimer);
+      if (playerAchTimer) clearTimeout(playerAchTimer);
+      window.removeEventListener("pagehide", flushProgressOnHide);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("keydown", handleKeyboard);
+    });
+
+    watch(
+      () => route.params.id,
+      () => {
+        cancelAutoAdvance();
+        clearInterval(progressTimer);
+        if (videoRef.value) {
+          videoRef.value.pause();
+          try { videoRef.value.currentTime = 0; } catch (e) {}
+        }
+        currentTime.value = 0;
+        duration.value = 0;
+        media.value = null;
+        showResumeModal.value = false;
+        resumeTime.value = 0;
+        hasResumedProgress = false;
+        initPlayer();
+      },
+    );
+
+    return {
+      store,
+      videoRef,
+      seekbarRef,
+      media,
+      nextEp,
+      nextEpHover,
+      showNextPreview,
+      hideNextPreview,
+      formatDuration,
+      hasNextEp,
+      showNextEp,
+      showAutoAdvanceOverlay,
+      subtitles,
+      playerSettings,
+      isPlaying,
+      isMuted,
+      volume,
+      currentTime,
+      duration,
+      isBuffering,
+      isPipSupported,
+      isPipActive,
+      togglePip,
+      toggleFullscreen,
+      isFullscreen,
+      controlsHidden,
+      playerError,
+      playbackRate,
+      selectedSub,
+      showSpeedMenu,
+      showSubMenu,
+      showOnlineSubModal,
+      onlineSubResults,
+      loadingOnlineSubs,
+      downloadingSubId,
+      openOnlineSubModal,
+      downloadAndApplyOnlineSub,
+      audioTracks,
+      streamState,
+      defaultAudioIndex,
+      canSwitchQuality,
+      currentContentTime,
+      playerAch,
+      playbackWarning,
+      warningDismissed,
+      dismissPlaybackWarning,
+      compatInfo,
+      enableCompatPlayback,
+      disableCompatPlayback,
+      showAudioMenu,
+      selectAudioTrack,
+      qualityOptions,
+      selectedQualityMediaId,
+      showQualityMenu,
+      selectQuality,
+      skipTimes,
+      activeSkipButton,
+      getSegmentStyle,
+      performSkip,
+      showHoverTooltip,
+      hoverTooltipPos,
+      hoverTooltipTime,
+      progressPercent,
+      endClockTime,
+      displayDuration,
+      displayTime,
+      showControls,
+      showSkipModal,
+      activeSkipAction,
+      executeSkipAction,
+      handleSkipSaved,
+      formatSecToTime,
+      togglePlay,
+      handleContainerClick,
+      skip,
+      toggleMute,
+      onVolumeInput,
+      seekToClick,
+      hoverSeekbar,
+      selectSpeed,
+      selectSub,
+      syncTextTracks,
+      onVideoPlaying,
+      onVideoPause,
+      handleCustomSubFile,
+      toggleFullscreen,
+      onTimeUpdate,
+      onLoadedMetadata,
+      onEnded,
+      onVideoError,
+      subStyle,
+      updateSubStyle,
+      activeCueText,
+      updateActiveCueText,
+      customCueStyle,
+      formatTime,
+      imgUrl,
+      goBack,
+      goHome,
+      playNext,
+      showResumeModal,
+      showShortcuts,
+      resumeTime,
+      confirmResume,
+      confirmStartOver,
+      isEnded,
+      nextEpCountdownSeconds,
+      nextEpProgressPercent,
+      handleNextEpClick,
+      cancelAutoAdvance,
+    };
+  },
+};
+
+// ─── Browse Page ──────────────────────────────────────────────
+
+const BrowsePage = {
+  components: { MediaCard },
+  template: `
+    <div class="browse-page">
+      <div class="browse-header">
+        <h1 class="browse-title">{{ pageTitle }}</h1>
+        <div class="browse-filters">
+          <button
+            v-for="t in types"
+            :key="t.value"
+            class="filter-btn"
+            :class="{ active: activeType === t.value }"
+            @click="setType(t.value)"
+            :id="'filter-' + t.value"
+          >{{ t.label }}</button>
+
+          <button
+            class="filter-btn"
+            :class="{ active: hideUnmounted }"
+            @click="toggleHideUnmounted"
+            id="filter-unmounted-toggle"
+            style="margin-left:8px"
+            title="Toggle hiding media from unmounted drives"
+          >
+            {{ hideUnmounted ? '👁️ Unmounted Hidden' : '👁️ Show Unmounted' }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="loading" class="media-grid">
+        <div v-for="i in 12" :key="i" class="skeleton" style="aspect-ratio:2/3;border-radius:10px"></div>
+      </div>
+
+      <div v-else-if="filteredItems.length === 0" class="empty-state">
+        <div class="empty-icon">🎬</div>
+        <div class="empty-title">No titles found</div>
+        <div class="empty-subtitle">Add media to your folders or reconnect unmounted storage drives.</div>
+      </div>
+
+      <div v-else class="media-grid">
+        <media-card
+          v-for="item in paginatedItems"
+          :key="item.id || item.tmdb_id"
+          :item="item"
+          @click="handleClick"
+        />
+      </div>
+
+      <!-- Classic Page Number Bar Pagination -->
+      <div v-if="filteredItems.length > 0" class="pagination-bar">
+        <button class="pagination-btn" :disabled="currentPage === 1" @click="setPage(1)" title="First Page">
+          « First
+        </button>
+        <button class="pagination-btn" :disabled="currentPage === 1" @click="setPage(currentPage - 1)" title="Previous Page">
+          ‹ Prev
+        </button>
+
+        <div class="pagination-numbers" v-if="totalPages > 1">
+          <button
+            v-for="p in visiblePageNumbers"
+            :key="p"
+            class="pagination-num-btn"
+            :class="{ active: currentPage === p }"
+            @click="setPage(p)"
+          >
+            {{ p }}
+          </button>
+        </div>
+
+        <span class="pagination-info">
+          Page <strong>{{ currentPage }}</strong> of <strong>{{ totalPages }}</strong>
+          <span style="font-size:0.75rem;color:var(--text-muted);margin-left:6px">({{ filteredItems.length }} total titles)</span>
+        </span>
+
+        <button class="pagination-btn" :disabled="currentPage === totalPages" @click="setPage(currentPage + 1)" title="Next Page">
+          Next ›
+        </button>
+        <button class="pagination-btn" :disabled="currentPage === totalPages" @click="setPage(totalPages)" title="Last Page">
+          Last »
+        </button>
+
+        <!-- Items Per Page Selector -->
+        <div class="pagination-size-selector">
+          <span style="font-size:0.8rem;color:var(--text-muted)">Per page:</span>
+          <select v-model.number="pageSize" class="form-input pagination-select" @change="currentPage = 1" id="browse-page-size-select">
+            <option :value="12">12 / page</option>
+            <option :value="24">24 / page</option>
+            <option :value="48">48 / page</option>
+            <option :value="96">96 / page</option>
+            <option :value="999999">Show All</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  `,
+  setup() {
+    const route = VueRouter.useRoute();
+    const router = VueRouter.useRouter();
+    const items = ref([]);
+    const loading = ref(true);
+    const activeType = ref(route.query.type || "");
+
+    const pageSize = ref(24);
+    const currentPage = ref(1);
+
+    const types = [
+      { label: "All", value: "" },
+      { label: "🎬 Movies", value: "movie" },
+      { label: "📺 Series", value: "series" },
+      { label: "🎌 Anime", value: "anime" },
+    ];
+
+    const pageTitle = computed(() => {
+      if (route.query.genre) return route.query.genre;
+      if (activeType.value === "movie") return "Movies";
+      if (activeType.value === "series") return "Series";
+      if (activeType.value === "anime") return "Anime";
+      return "Browse All";
+    });
+
+    async function load() {
+      loading.value = true;
+      try {
+        const genre = route.query.genre;
+        const type = activeType.value;
+        let data;
+        if (genre) {
+          const q = new URLSearchParams();
+          q.set("q", genre);
+          if (type) q.set("type", type);
+          q.set("genre", genre);
+          data = await API.get(`/api/search?${q}`);
+        } else {
+          const url = type ? `/api/library?type=${type}` : "/api/library";
+          data = await API.get(url);
+        }
+        items.value = kidsFilter(data);
+      } catch (e) {
+        addToast("Failed to load library", "error");
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    function setType(t) {
+      activeType.value = t;
+      currentPage.value = 1;
+      if (t) {
+        router.push({ path: "/browse", query: { type: t } });
+      } else {
+        router.push({ path: "/browse" });
+      }
+    }
+
+    function handleClick(item) {
+      if (item.type === "movie") {
+        router.push(`/title/movie/${item.id}`);
+      } else {
+        router.push(`/title/${item.type}/${item.tmdb_id}`);
+      }
+    }
+
+    onMounted(load);
+    watch(
+      () => route.query.type,
+      (newType) => {
+        activeType.value = newType || "";
+        currentPage.value = 1;
+        load();
+      },
+    );
+    watch(() => route.query.genre, () => {
+      currentPage.value = 1;
+      load();
+    });
+    watch(
+      () => store.scanRunning,
+      (running, prev) => {
+        if (!running && prev === true) {
+          load();
+        }
+      },
+    );
+
+    const hideUnmounted = ref(false);
+
+    function toggleHideUnmounted() {
+      hideUnmounted.value = !hideUnmounted.value;
+      currentPage.value = 1;
+    }
+
+    const filteredItems = computed(() => {
+      let list = items.value || [];
+      if (hideUnmounted.value) {
+        list = list.filter((item) => item.is_mounted !== false);
+      }
+      return list;
+    });
+
+    const totalPages = computed(() => {
+      return Math.ceil(filteredItems.value.length / pageSize.value) || 1;
+    });
+
+    const paginatedItems = computed(() => {
+      const start = (currentPage.value - 1) * pageSize.value;
+      return filteredItems.value.slice(start, start + pageSize.value);
+    });
+
+    const visiblePageNumbers = computed(() => {
+      const total = totalPages.value;
+      const current = currentPage.value;
+      const pages = [];
+      const delta = 2;
+      const start = Math.max(1, current - delta);
+      const end = Math.min(total, current + delta);
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+      return pages;
+    });
+
+    function setPage(page) {
+      if (page < 1 || page > totalPages.value) return;
+      currentPage.value = page;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    return {
+      store,
+      items,
+      filteredItems,
+      paginatedItems,
+      loading,
+      activeType,
+      types,
+      pageTitle,
+      hideUnmounted,
+      toggleHideUnmounted,
+      setType,
+      handleClick,
+      currentPage,
+      pageSize,
+      totalPages,
+      visiblePageNumbers,
+      setPage,
+    };
+  },
+};
+
+// ─── Collections Page ─────────────────────────────────────────
+
+const CollectionsPage = {
+  template: `
+    <div class="collections-page">
+      <div class="page-header">
+        <h1 class="page-title">My Collections</h1>
+        <button class="btn btn-primary" @click="showCreate = true" id="create-collection-btn">
+          <i class="ph ph-plus"></i> New Collection
+        </button>
+      </div>
+
+      <div v-if="!store.profile" class="empty-state">
+        <div class="empty-icon">👤</div>
+        <div class="empty-title">Select a profile first</div>
+      </div>
+
+      <div v-else-if="collections.length === 0" class="empty-state">
+        <div class="empty-icon">📚</div>
+        <div class="empty-title">No collections yet</div>
+        <div class="empty-subtitle">Create a collection to group your favourite titles.</div>
+        <button class="btn btn-primary" style="margin-top:1rem" @click="showCreate = true" id="create-first-col-btn">
+          <i class="ph ph-plus"></i> Create First Collection
+        </button>
+      </div>
+
+      <div v-else class="collections-grid">
+        <div
+          v-for="col in collections"
+          :key="col.id"
+          class="collection-card"
+          @click="router.push('/collection/' + col.id)"
+          :id="'collection-' + col.id"
+        >
+          <div class="collection-cover">
+            <template v-if="col.items.length">
+              <img
+                v-for="item in col.items.slice(0,4)"
+                :key="item.id"
+                :src="imgUrl(item.poster_path)"
+                class="collection-cover-img"
+                :alt="item.title"
+              >
+            </template>
+            <div v-else class="collection-cover-empty">📚</div>
+          </div>
+          <div class="collection-info">
+            <div class="collection-name">{{ col.name }}</div>
+            <div class="collection-count">{{ col.items.length }} title{{ col.items.length !== 1 ? 's' : '' }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Create Modal -->
+      <div class="modal-backdrop" v-if="showCreate" @click.self="showCreate = false">
+        <div class="modal">
+          <h3>New Collection</h3>
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input id="new-collection-name" class="form-input" v-model="newName" placeholder="e.g. Marvel Order" @keyup.enter="createCollection">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description (optional)</label>
+            <input id="new-collection-desc" class="form-input" v-model="newDesc" placeholder="A brief description">
+          </div>
+          <div style="display:flex;gap:0.75rem;margin-top:1rem">
+            <button class="btn btn-primary btn-full" @click="createCollection" id="save-collection-btn">Create</button>
+            <button class="btn btn-ghost btn-full" @click="showCreate = false">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `,
+  setup() {
+    const router = VueRouter.useRouter();
+    const collections = ref([]);
+    const showCreate = ref(false);
+    const newName = ref("");
+    const newDesc = ref("");
+
+    async function load() {
+      if (!store.profile) return;
+      try {
+        collections.value = await API.get("/api/collections");
+      } catch (e) {
+        addToast("Failed to load collections", "error");
+      }
+    }
+
+    async function createCollection() {
+      if (!newName.value.trim()) return;
+      try {
+        const col = await API.post("/api/collections", { name: newName.value.trim(), description: newDesc.value });
+        col.items = [];
+        collections.value.unshift(col);
+        newName.value = "";
+        newDesc.value = "";
+        showCreate.value = false;
+        addToast("Collection created", "success");
+      } catch (e) {
+        addToast("Failed to create collection", "error");
+      }
+    }
+
+    onMounted(load);
+    watch(() => store.profile, load);
+
+    return { store, collections, showCreate, newName, newDesc, router, imgUrl, createCollection };
+  },
+};
+
+// ─── Collection Detail Page ───────────────────────────────────
+
+const CollectionDetailPage = {
+  components: { MediaCard },
+  template: `
+    <div class="browse-page">
+      <div class="browse-header" v-if="collection">
+        <div>
+          <h1 class="browse-title">{{ collection.name }}</h1>
+          <p v-if="collection.description" style="color:var(--text-muted);font-size:0.875rem;margin-top:4px">{{ collection.description }}</p>
+        </div>
+        <button class="btn btn-ghost" @click="deleteCollection" style="color:var(--accent)">
+          <i class="ph ph-trash"></i> Delete
+        </button>
+      </div>
+
+      <div v-if="!collection || collection.items.length === 0" class="empty-state">
+        <div class="empty-icon">📚</div>
+        <div class="empty-title">Collection is empty</div>
+        <div class="empty-subtitle">Add titles from their detail pages.</div>
+      </div>
+
+      <div v-else class="media-grid">
+        <media-card
+          v-for="item in collection.items"
+          :key="item.id"
+          :item="item"
+          @click="handleClick"
+        />
+      </div>
+    </div>
+  `,
+  setup() {
+    const route = VueRouter.useRoute();
+    const router = VueRouter.useRouter();
+    const collection = ref(null);
+
+    async function load() {
+      try {
+        const cols = await API.get("/api/collections");
+        collection.value = cols.find((c) => c.id === Number(route.params.id)) || null;
+      } catch (e) {
+        addToast("Failed to load collection", "error");
+      }
+    }
+
+    async function deleteCollection() {
+      const ok = await customConfirm({
+        title: "Delete Collection",
+        message: `Are you sure you want to delete collection "${collection.value?.name}"?`,
+        icon: "ph ph-trash",
+        danger: true,
+        okText: "Delete Collection"
+      });
+      if (!ok) return;
+      try {
+        await API.del(`/api/collections/${route.params.id}`);
+        addToast("Collection deleted", "success");
+        router.push("/collections");
+      } catch (e) {
+        addToast("Failed to delete", "error");
+      }
+    }
+
+    function handleClick(item) {
+      if (item.type === "movie") router.push(`/title/movie/${item.id}`);
+      else router.push(`/title/${item.type}/${item.tmdb_id}`);
+    }
+
+    onMounted(load);
+
+    return { store, collection, handleClick, deleteCollection };
+  },
+};
+
+// ─── Favorites Page ───────────────────────────────────────────
+
+const FavoritesPage = {
+  components: { MediaCard },
+  template: `
+    <div class="favorites-page">
+      <div class="page-header">
+        <h1 class="page-title">Watchlist</h1>
+      </div>
+
+      <div v-if="!store.profile" class="empty-state">
+        <div class="empty-icon">👤</div>
+        <div class="empty-title">Select a profile first</div>
+      </div>
+
+      <div v-else-if="items.length === 0" class="empty-state">
+        <div class="empty-icon">❤️</div>
+        <div class="empty-title">Nothing saved yet</div>
+        <div class="empty-subtitle">Heart any title to add it to your watchlist.</div>
+      </div>
+
+      <div v-else class="media-grid">
+        <media-card
+          v-for="item in items"
+          :key="item.id"
+          :item="item"
+          @click="handleClick"
+        />
+      </div>
+    </div>
+  `,
+  setup() {
+    const router = VueRouter.useRouter();
+    const items = ref([]);
+
+    async function load() {
+      if (!store.profile) return;
+      try {
+        items.value = await API.get("/api/favorites");
+      } catch (e) {
+        addToast("Failed to load watchlist", "error");
+      }
+    }
+
+    function handleClick(item) {
+      if (item.type === "movie") router.push(`/title/movie/${item.id}`);
+      else router.push(`/title/${item.type}/${item.tmdb_id}`);
+    }
+
+    onMounted(load);
+    watch(() => store.profile, load);
+
+    return { store, items, handleClick };
+  },
+};
+
+// ─── Profile Selector (Netflix Style) ─────────────────────────
+
+const ProfilesPage = {
+  template: `
+    <div class="netflix-profile-page">
+      <!-- Netflix Brand Logo Top Left -->
+      <div class="netflix-profile-brand" @click="viewMode = 'select'">
+        <img src="/static/img/favicon.png" alt="CapsStream" class="netflix-profile-brand-logo">
+        <span class="netflix-profile-brand-text">CapsStream</span>
+      </div>
+
+      <!-- 1. Who's Watching / Manage Profiles View -->
+      <div v-if="viewMode === 'select' || viewMode === 'manage'" class="netflix-profile-container">
+        <div class="netflix-profile-header">
+          <h1 class="netflix-profile-title">
+            {{ viewMode === 'manage' ? 'Manage Profiles:' : "Who's watching?" }}
+          </h1>
+        </div>
+
+        <div class="netflix-profiles-list">
+          <!-- Profile Cards -->
+          <div
+            v-for="profile in profiles"
+            :key="profile.id"
+            class="netflix-profile-card"
+            @click="onProfileClick(profile)"
+            :id="'profile-' + profile.id"
+          >
+            <div
+              class="netflix-avatar-wrap"
+              :style="{
+                background: profile.color ? profile.color + '44' : 'rgba(255,255,255,0.08)',
+                border: profile.color ? '3px solid ' + profile.color + '88' : '3px solid transparent'
+              }"
+            >
+              <span>{{ profile.avatar || '🎬' }}</span>
+
+              <!-- Edit Pencil Overlay in Manage Mode -->
+              <div v-if="viewMode === 'manage'" class="netflix-avatar-edit-overlay">
+                <div class="netflix-avatar-edit-badge">
+                  <i class="ph-bold ph-pencil-simple"></i>
+                </div>
+              </div>
+            </div>
+
+            <div class="netflix-profile-label">
+              {{ profile.name }}
+            </div>
+            <div v-if="profile.is_kids" class="kids-profile-badge">🧒 Kids</div>
+          </div>
+
+          <!-- Add Profile Card (visible if under 5 profiles) -->
+          <div
+            v-if="profiles.length < 5"
+            class="netflix-profile-card netflix-add-card"
+            @click="openCreateView"
+            id="add-profile-btn"
+          >
+            <div class="netflix-avatar-wrap">
+              <i class="ph ph-plus-circle"></i>
+            </div>
+            <div class="netflix-profile-label">Add Profile</div>
+          </div>
+        </div>
+
+        <!-- Manage Profiles / Done Button -->
+        <div style="text-align:center">
+          <button
+            v-if="viewMode === 'select'"
+            class="netflix-action-btn"
+            @click="viewMode = 'manage'"
+            id="manage-profiles-btn"
+          >
+            Manage Profiles
+          </button>
+          <button
+            v-else
+            class="netflix-action-btn active-done"
+            @click="viewMode = 'select'"
+            id="done-profiles-btn"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+
+      <!-- 2. Dedicated Netflix Edit Profile View -->
+      <div v-else-if="viewMode === 'edit' && editTarget" class="netflix-form-container">
+        <h1 class="netflix-form-header">Edit Profile</h1>
+        <div class="netflix-form-divider"></div>
+
+        <div class="netflix-form-body">
+          <!-- Left: Avatar Preview & Picker -->
+          <div class="netflix-form-left">
+            <div
+              class="netflix-form-avatar-preview"
+              :style="{
+                background: editProfile.color ? editProfile.color + '44' : 'rgba(255,255,255,0.08)',
+                border: '3px solid ' + editProfile.color
+              }"
+            >
+              <span>{{ editProfile.avatar }}</span>
+            </div>
+
+            <!-- Avatar Choices Grid -->
+            <div style="margin-top:14px;max-width:140px">
+              <div style="font-size:0.75rem;color:#808080;margin-bottom:6px;font-weight:600">ICON</div>
+              <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
+                <div
+                  v-for="a in avatars"
+                  :key="a"
+                  @click="editProfile.avatar = a"
+                  style="cursor:pointer;font-size:1.3rem;padding:4px;border-radius:4px;text-align:center;transition:background 0.2s"
+                  :style="editProfile.avatar === a ? { background: 'rgba(255,255,255,0.2)' } : {}"
+                >
+                  {{ a }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Color Palette -->
+            <div style="margin-top:14px;max-width:140px">
+              <div style="font-size:0.75rem;color:#808080;margin-bottom:6px;font-weight:600">COLOR</div>
+              <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
+                <div
+                  v-for="c in colors"
+                  :key="c"
+                  @click="editProfile.color = c"
+                  style="width:22px;height:22px;border-radius:50%;cursor:pointer;box-sizing:border-box"
+                  :style="{
+                    background: c,
+                    border: editProfile.color === c ? '2px solid #ffffff' : 'none',
+                    transform: editProfile.color === c ? 'scale(1.15)' : 'scale(1)'
+                  }"
+                ></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Profile Name, Kids Settings, PIN -->
+          <div class="netflix-form-right">
+            <div>
+              <input
+                id="edit-profile-name"
+                class="netflix-input"
+                v-model="editProfile.name"
+                placeholder="Name"
+                autofocus
+              >
+            </div>
+
+            <!-- Kids Setting -->
+            <div style="border-top:1px solid #282828;padding-top:18px">
+              <label class="netflix-checkbox-label">
+                <input type="checkbox" v-model="editProfile.is_kids" id="edit-kids-mode-switch">
+                <div>
+                  <div class="netflix-checkbox-title">Kid?</div>
+                  <div class="netflix-checkbox-desc">Only see TV shows and movies rated for kids. Locks app Settings.</div>
+                </div>
+              </label>
+            </div>
+
+            <!-- PIN Protection -->
+            <div style="border-top:1px solid #282828;padding-top:18px">
+              <label class="netflix-checkbox-label" style="margin-bottom:8px">
+                <input type="checkbox" v-model="editProfile.update_pin" :disabled="editProfile.is_kids">
+                <div>
+                  <div class="netflix-checkbox-title">Lock Profile with PIN</div>
+                  <div class="netflix-checkbox-desc">Require a 4-digit PIN to access this profile.</div>
+                </div>
+              </label>
+
+              <div v-if="editProfile.update_pin" style="margin-top:10px">
+                <input
+                  id="edit-profile-pin"
+                  class="netflix-input"
+                  v-model="editProfile.pin"
+                  placeholder="Enter 4-digit PIN (leave empty to remove PIN)"
+                  maxlength="4"
+                  inputmode="numeric"
+                  style="max-width:240px"
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="netflix-form-divider"></div>
+
+        <!-- Action Buttons -->
+        <div class="netflix-form-buttons">
+          <button class="netflix-btn-white" @click="saveEditProfile" id="save-edit-profile-btn">
+            Save
+          </button>
+          <button class="netflix-btn-ghost" @click="viewMode = 'manage'">
+            Cancel
+          </button>
+          <button
+            v-if="profiles.length > 1 && !store.profile?.is_kids"
+            class="netflix-btn-danger"
+            @click="confirmDeleteProfile(editTarget)"
+            id="delete-profile-btn"
+          >
+            Delete Profile
+          </button>
+        </div>
+      </div>
+
+      <!-- 3. Dedicated Netflix Add Profile View -->
+      <div v-else-if="viewMode === 'create'" class="netflix-form-container">
+        <h1 class="netflix-form-header">Add Profile</h1>
+        <div class="netflix-form-subtitle">Add a profile for another person watching CapsStream.</div>
+        <div class="netflix-form-divider"></div>
+
+        <div class="netflix-form-body">
+          <!-- Left: Avatar Preview & Picker -->
+          <div class="netflix-form-left">
+            <div
+              class="netflix-form-avatar-preview"
+              :style="{
+                background: newProfile.color ? newProfile.color + '44' : 'rgba(255,255,255,0.08)',
+                border: '3px solid ' + newProfile.color
+              }"
+            >
+              <span>{{ newProfile.avatar }}</span>
+            </div>
+
+            <!-- Avatar Choices Grid -->
+            <div style="margin-top:14px;max-width:140px">
+              <div style="font-size:0.75rem;color:#808080;margin-bottom:6px;font-weight:600">ICON</div>
+              <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
+                <div
+                  v-for="a in avatars"
+                  :key="a"
+                  @click="newProfile.avatar = a"
+                  style="cursor:pointer;font-size:1.3rem;padding:4px;border-radius:4px;text-align:center;transition:background 0.2s"
+                  :style="newProfile.avatar === a ? { background: 'rgba(255,255,255,0.2)' } : {}"
+                >
+                  {{ a }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Color Palette -->
+            <div style="margin-top:14px;max-width:140px">
+              <div style="font-size:0.75rem;color:#808080;margin-bottom:6px;font-weight:600">COLOR</div>
+              <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
+                <div
+                  v-for="c in colors"
+                  :key="c"
+                  @click="newProfile.color = c"
+                  style="width:22px;height:22px;border-radius:50%;cursor:pointer;box-sizing:border-box"
+                  :style="{
+                    background: c,
+                    border: newProfile.color === c ? '2px solid #ffffff' : 'none',
+                    transform: newProfile.color === c ? 'scale(1.15)' : 'scale(1)'
+                  }"
+                ></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Profile Name, Kids Settings, PIN -->
+          <div class="netflix-form-right">
+            <div>
+              <input
+                id="new-profile-name"
+                class="netflix-input"
+                v-model="newProfile.name"
+                placeholder="Name"
+                autofocus
+              >
+            </div>
+
+            <!-- Kids Setting -->
+            <div style="border-top:1px solid #282828;padding-top:18px">
+              <label class="netflix-checkbox-label">
+                <input type="checkbox" v-model="newProfile.is_kids" id="kids-mode-switch">
+                <div>
+                  <div class="netflix-checkbox-title">Kid?</div>
+                  <div class="netflix-checkbox-desc">Only see TV shows and movies rated for kids. Locks app Settings.</div>
+                </div>
+              </label>
+            </div>
+
+            <!-- PIN Protection -->
+            <div style="border-top:1px solid #282828;padding-top:18px">
+              <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">PIN Protection (Optional)</div>
+              <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Leave empty for instant access without a PIN.</div>
+              <input
+                id="new-profile-pin"
+                class="netflix-input"
+                v-model="newProfile.pin"
+                :placeholder="newProfile.is_kids ? 'PIN disabled in Kids Mode' : '4-digit PIN'"
+                :disabled="newProfile.is_kids"
+                maxlength="4"
+                inputmode="numeric"
+                style="max-width:240px"
+              >
+            </div>
+          </div>
+        </div>
+
+        <div class="netflix-form-divider"></div>
+
+        <!-- Action Buttons -->
+        <div class="netflix-form-buttons">
+          <button class="netflix-btn-white" @click="createProfile" id="save-profile-btn">
+            Continue
+          </button>
+          <button class="netflix-btn-ghost" @click="viewMode = 'select'">
+            Cancel
+          </button>
+        </div>
+      </div>
+
+      <!-- PIN Modal (Netflix styled) -->
+      <div class="modal-backdrop" v-if="pinTarget" @click.self="pinTarget = null" style="background:rgba(0,0,0,0.85)">
+        <div class="modal" style="background:#181818;border:1px solid #333;text-align:center;max-width:380px">
+          <h3 style="font-size:1.4rem;font-weight:600;margin-bottom:1rem">Enter PIN for {{ pinTarget?.name }}</h3>
+          <div class="pin-display" style="justify-content:center;gap:12px;margin-bottom:1.5rem">
+            <div v-for="i in 4" :key="i" class="pin-dot"
+              :class="{ filled: pin.length >= i, error: pinError }">
+            </div>
+          </div>
+          <div class="pin-pad">
+            <button v-for="n in [1,2,3,4,5,6,7,8,9,'',0,'⌫']" :key="n"
+              class="pin-key"
+              :class="{ backspace: n === '⌫' }"
+              @click="handlePinKey(n)"
+              :id="'pin-key-' + n"
+              :disabled="n === ''"
+            >{{ n }}</button>
+          </div>
+          <div class="modal-error" v-if="pinError" style="margin-top:10px">{{ pinError }}</div>
+          <button class="btn btn-ghost btn-full" style="margin-top:1.25rem" @click="pinTarget = null">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Delete PIN Confirmation Modal -->
+      <div class="modal-backdrop" v-if="deletePinTarget" @click.self="deletePinTarget = null" style="background:rgba(0,0,0,0.85)">
+        <div class="modal" style="background:#181818;border:1px solid #333;text-align:center;max-width:380px">
+          <h3 style="font-size:1.4rem;font-weight:600;margin-bottom:1rem">Enter PIN to Delete {{ deletePinTarget?.name }}</h3>
+          <div class="pin-display" style="justify-content:center;gap:12px;margin-bottom:1.5rem">
+            <div v-for="i in 4" :key="i" class="pin-dot"
+              :class="{ filled: deletePin.length >= i, error: deletePinError }">
+            </div>
+          </div>
+          <div class="pin-pad">
+            <button v-for="n in [1,2,3,4,5,6,7,8,9,'',0,'⌫']" :key="n"
+              class="pin-key"
+              :class="{ backspace: n === '⌫' }"
+              @click="handleDeletePinKey(n)"
+              :id="'delete-pin-key-' + n"
+              :disabled="n === ''"
+            >{{ n }}</button>
+          </div>
+          <div class="modal-error" v-if="deletePinError" style="margin-top:10px">{{ deletePinError }}</div>
+          <button class="btn btn-ghost btn-full" style="margin-top:1.25rem" @click="deletePinTarget = null">Cancel</button>
+        </div>
+      </div>
+    </div>
+  `,
+  setup() {
+    const router = VueRouter.useRouter();
+    const route = VueRouter.useRoute();
+    const profiles = ref([]);
+    const viewMode = ref("select"); // 'select' | 'manage' | 'edit' | 'create'
+    const pinTarget = ref(null);
+    const pin = ref("");
+    const pinError = ref("");
+
+    const editTarget = ref(null);
+    const editProfile = reactive({
+      name: "",
+      avatar: "🎬",
+      color: "#e50914",
+      is_kids: false,
+      pin: "",
+      update_pin: false,
+    });
+
+    const avatars = ["🎬", "🎭", "🍿", "🎮", "🚀", "🐱", "🐶", "🦊", "🎵", "🌟", "🔥", "💫"];
+    const colors = ["#e50914", "#6c5ce7", "#0984e3", "#00b894", "#fdcb6e", "#e17055", "#fd79a8", "#a29bfe"];
+
+    const newProfile = reactive({
+      name: "",
+      avatar: "🎬",
+      color: "#e50914",
+      pin: "",
+      is_kids: false,
+    });
+
+    watch(
+      () => newProfile.is_kids,
+      (kids) => {
+        if (kids) newProfile.pin = "";
+      }
+    );
+
+    watch(
+      () => editProfile.is_kids,
+      (kids) => {
+        if (kids) {
+          editProfile.pin = "";
+          editProfile.update_pin = false;
+        }
+      }
+    );
+
+    async function load() {
+      try {
+        profiles.value = await API.get("/api/profiles");
+        checkQueryManage();
+      } catch (e) {
+        addToast("Failed to load profiles", "error");
+      }
+    }
+
+    function checkQueryManage() {
+      if (route.query.manage === "true") {
+        viewMode.value = "manage";
+        if (route.query.edit_id && profiles.value && profiles.value.length) {
+          const target = profiles.value.find((p) => p.id === Number(route.query.edit_id));
+          if (target) openEditView(target);
+        }
+      } else if (viewMode.value !== "create" && viewMode.value !== "edit") {
+        viewMode.value = "select";
+      }
+    }
+
+    function onProfileClick(profile) {
+      if (viewMode.value === "manage") {
+        openEditView(profile);
+      } else {
+        selectProfile(profile);
+      }
+    }
+
+    function openEditView(profile) {
+      editTarget.value = profile;
+      editProfile.name = profile.name;
+      editProfile.avatar = profile.avatar || "🎬";
+      editProfile.color = profile.color || "#e50914";
+      editProfile.is_kids = !!profile.is_kids;
+      editProfile.pin = "";
+      editProfile.update_pin = false;
+      viewMode.value = "edit";
+    }
+
+    function openCreateView() {
+      newProfile.name = "";
+      newProfile.avatar = "🎬";
+      newProfile.color = "#e50914";
+      newProfile.pin = "";
+      newProfile.is_kids = false;
+      viewMode.value = "create";
+    }
+
+    async function saveEditProfile() {
+      if (!editProfile.name.trim()) {
+        addToast("Please enter a name", "error");
+        return;
+      }
+      try {
+        const res = await API.put(`/api/profiles/${editTarget.value.id}`, {
+          name: editProfile.name.trim(),
+          avatar: editProfile.avatar,
+          color: editProfile.color,
+          is_kids: editProfile.is_kids,
+          pin: editProfile.pin || "",
+          update_pin: editProfile.update_pin,
+        });
+
+        const idx = profiles.value.findIndex((p) => p.id === editTarget.value.id);
+        if (idx !== -1) {
+          profiles.value[idx] = { ...profiles.value[idx], ...res };
+        }
+
+        if (store.profile?.id === editTarget.value.id) {
+          store.profile = { ...store.profile, ...res };
+        }
+
+        viewMode.value = "manage";
+        editTarget.value = null;
+        addToast("Profile updated ✓", "success");
+      } catch (e) {
+        addToast(e.message || "Failed to update profile", "error");
+      }
+    }
+
+    const deletePinTarget = ref(null);
+    const deletePin = ref("");
+    const deletePinError = ref("");
+
+    async function confirmDeleteProfile(profile) {
+      if (store.profile?.is_kids) {
+        addToast("Kids profiles cannot delete profiles", "error");
+        return;
+      }
+      if (profiles.value.length <= 1) {
+        addToast("Cannot delete the only profile", "error");
+        return;
+      }
+      if (profile.has_pin) {
+        deletePinTarget.value = profile;
+        deletePin.value = "";
+        deletePinError.value = "";
+      } else {
+        const ok = await customConfirm({
+          title: "Delete Profile",
+          message: `Are you sure you want to delete profile "${profile.name}"? This action cannot be undone.`,
+          icon: "ph ph-user-minus",
+          danger: true,
+          okText: "Delete Profile"
+        });
+        if (!ok) return;
+        executeDeleteProfile(profile, "");
+      }
+    }
+
+    function handleDeletePinKey(key) {
+      // Any new input clears a previous wrong-PIN error state immediately
+      deletePinError.value = "";
+      if (key === "⌫") {
+        deletePin.value = deletePin.value.slice(0, -1);
+        return;
+      }
+      if (key === "") return;
+      if (deletePin.value.length >= 4) return;
+      deletePin.value += key.toString();
+      if (deletePin.value.length === 4) {
+        executeDeleteProfile(deletePinTarget.value, deletePin.value);
+      }
+    }
+
+    async function executeDeleteProfile(profile, pinVal) {
+      try {
+        await API.post(`/api/profiles/${profile.id}`, { pin: pinVal });
+        profiles.value = profiles.value.filter((p) => p.id !== profile.id);
+        if (store.profile?.id === profile.id) {
+          store.profile = null;
+        }
+        viewMode.value = "manage";
+        editTarget.value = null;
+        deletePinTarget.value = null;
+        addToast("Profile deleted", "success");
+      } catch (e) {
+        if (profile.has_pin) {
+          deletePinError.value = "Incorrect PIN";
+          deletePin.value = "";
+        } else {
+          addToast(e.message || "Failed to delete profile", "error");
+        }
+      }
+    }
+
+    function selectProfile(profile) {
+      if (profile.has_pin) {
+        pinTarget.value = profile;
+        pin.value = "";
+        pinError.value = "";
+      } else {
+        authProfile(profile, "");
+      }
+    }
+
+    async function authProfile(profile, enteredPin) {
+      try {
+        const res = await API.post("/api/profiles/auth", {
+          profile_id: profile.id,
+          pin: enteredPin,
+        });
+        if (res.ok) {
+          store.profile = res.profile;
+          pinTarget.value = null;
+          router.push("/");
+          // Active login — start the library scan (once per session)
+          startLibraryScan();
+        }
+      } catch (e) {
+        if (enteredPin === "") {
+          pinTarget.value = profile;
+        } else {
+          pinError.value = "Incorrect PIN";
+          pin.value = "";
+        }
+      }
+    }
+
+    function handlePinKey(key) {
+      // Any new input clears a previous wrong-PIN error state immediately
+      pinError.value = "";
+      if (key === "⌫") {
+        pin.value = pin.value.slice(0, -1);
+        return;
+      }
+      if (key === "") return;
+      if (pin.value.length >= 4) return;
+      pin.value += key.toString();
+      if (pin.value.length === 4) {
+        authProfile(pinTarget.value, pin.value);
+      }
+    }
+
+    async function createProfile() {
+      if (!newProfile.name.trim()) {
+        addToast("Please enter a name", "error");
+        return;
+      }
+      try {
+        const p = await API.post("/api/profiles", {
+          name: newProfile.name.trim(),
+          pin: newProfile.pin || "",
+          avatar: newProfile.avatar,
+          color: newProfile.color,
+          is_kids: newProfile.is_kids,
+        });
+        profiles.value.push(p);
+        viewMode.value = "select";
+        newProfile.name = "";
+        newProfile.pin = "";
+        newProfile.is_kids = false;
+        addToast(newProfile.is_kids ? "Kids profile created 🧒" : "Profile created", "success");
+      } catch (e) {
+        addToast(e.message || "Failed to create profile", "error");
+      }
+    }
+
+    watch(
+      () => route.query,
+      () => {
+        checkQueryManage();
+      },
+      { deep: true }
+    );
+
+    onMounted(() => {
+      load();
+    });
+
+    return {
+      store,
+      profiles,
+      viewMode,
+      pinTarget,
+      pin,
+      pinError,
+      editTarget,
+      editProfile,
+      newProfile,
+      avatars,
+      colors,
+      onProfileClick,
+      openEditView,
+      openCreateView,
+      saveEditProfile,
+      confirmDeleteProfile,
+      deletePinTarget,
+      deletePin,
+      deletePinError,
+      handleDeletePinKey,
+      selectProfile,
+      handlePinKey,
+      createProfile,
+    };
+  },
+};
+
+// ─── Setup Wizard Page (Fresh Setup) ─────────────────────────
+
+const SetupPage = {
+  template: `
+    <div class="setup-container">
+      <div class="setup-card">
+        <div class="setup-header">
+          <div class="setup-logo">
+            <img src="/static/img/favicon.png" alt="CapsStream" style="height:32px;width:32px;vertical-align:middle;margin-right:8px;display:inline-block">
+            <span>CapsStream</span>
+          </div>
+          <h1 class="setup-title">Welcome to CapsStream</h1>
+          <p class="setup-subtitle">Create your primary profile to set up your media streaming library</p>
+        </div>
+
+        <form @submit.prevent="submitSetup" class="setup-form">
+          <div class="form-group" style="margin-bottom:1.25rem">
+            <label class="form-label">Profile Name</label>
+            <input
+              type="text"
+              v-model="name"
+              class="form-input"
+              placeholder="e.g. Primary User"
+              required
+              id="setup-name-input"
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom:1.25rem">
+            <label class="form-label">Choose Avatar</label>
+            <div class="avatar-picker-grid">
+              <div
+                v-for="av in avatars"
+                :key="av.icon"
+                class="avatar-picker-item"
+                :class="{ active: avatar === av.icon }"
+                @click="avatar = av.icon"
+              >
+                <span>{{ av.icon }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:1.75rem">
+            <label class="form-label">4-Digit PIN (Optional)</label>
+            <input
+              type="password"
+              v-model="pin"
+              maxlength="4"
+              class="form-input"
+              placeholder="Leave empty for no PIN"
+              id="setup-pin-input"
+            />
+            <span style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;display:block">
+              You can lock your profile with a PIN or leave it empty for instant access.
+            </span>
+          </div>
+
+          <button
+            type="submit"
+            class="btn btn-primary btn-full btn-lg"
+            :disabled="creating || !name.trim()"
+            id="setup-submit-btn"
+          >
+            <span v-if="creating" class="loading-spinner-sm"></span>
+            <span v-else>Complete Setup & Start Streaming 🚀</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  `,
+  setup() {
+    const router = VueRouter.useRouter();
+    const name = ref("");
+    const avatar = ref("🎬");
+    const pin = ref("");
+    const creating = ref(false);
+
+    const avatars = [{ icon: "🎬" }, { icon: "🍿" }, { icon: "🐉" }, { icon: "🚀" }, { icon: "👑" }, { icon: "🔥" }, { icon: "⚡" }, { icon: "🎭" }];
+
+    async function submitSetup() {
+      if (!name.value.trim() || creating.value) return;
+      creating.value = true;
+      try {
+        const created = await API.post("/api/profiles", {
+          name: name.value.trim(),
+          avatar: avatar.value,
+          pin: pin.value.trim() || null,
+        });
+
+        // Log into profile
+        const authRes = await API.post("/api/profiles/auth", {
+          profile_id: created.id,
+          pin: pin.value.trim() || null,
+        });
+
+        store.profile = authRes.profile || created;
+        addToast(`Welcome, ${created.name}!`, "success");
+
+        // Active login — start the library scan (once per session)
+        startLibraryScan();
+
+        router.push("/");
+      } catch (e) {
+        addToast(e.message || "Failed to create profile", "error");
+      } finally {
+        creating.value = false;
+      }
+    }
+
+    return { store, name, avatar, pin, avatars, creating, submitSetup };
+  },
+};
+
+// ─── Search Page ──────────────────────────────────────────────
+
+const SearchPage = {
+  components: { MediaCard },
+  template: `
+    <div class="search-page">
+      <!-- Search Hero Header -->
+      <div class="search-hero">
+        <div class="search-hero-content">
+          <div class="search-pill-badge">
+            <i class="ph ph-sparkle"></i> DEEP MEDIA DISCOVERY
+          </div>
+          <h1 class="search-hero-title">Find Movies, Series & Anime</h1>
+
+          <!-- Double-Bezel Search Bar -->
+          <div class="search-input-card">
+            <div class="card-inner search-input-inner">
+              <div v-if="loading" class="search-input-spinner"></div>
+              <i v-else class="ph ph-magnifying-glass search-input-icon"></i>
+              <input
+                ref="searchInputRef"
+                type="text"
+                v-model="query"
+                placeholder="Search titles, actors (e.g. Eric Nam), genres, or year (e.g. 2026)..."
+                class="search-text-input"
+                @input="onQueryInput"
+                @keyup.enter="performSearch"
+                id="search-input"
+                autofocus
+              />
+              <button v-if="query" class="search-clear-btn" @click="clearSearch" title="Clear search">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filters & Control Bar -->
+      <div class="search-controls-container">
+        <div class="search-controls-inner">
+          <!-- Type Filter Tabs -->
+          <div class="search-type-pills">
+            <button
+              v-for="t in typeOptions"
+              :key="t.value"
+              class="type-pill"
+              :class="{ active: selectedType === t.value }"
+              @click="selectType(t.value)"
+            >
+              <i :class="t.icon"></i> {{ t.label }}
+            </button>
+          </div>
+
+          <div class="search-filter-selectors">
+            <!-- Genre Selector -->
+            <select v-model="selectedGenre" class="form-input search-select" @change="performSearch">
+              <option value="all">All Genres</option>
+              <option v-for="g in genresList" :key="g" :value="g">{{ g }}</option>
+            </select>
+
+            <!-- Sort Selector -->
+            <select v-model="selectedSort" class="form-input search-select" @change="performSearch">
+              <option value="relevance">Sort: Highest Rated</option>
+              <option value="year_desc">Sort: Release Year (Newest)</option>
+              <option value="title_asc">Sort: Title (A - Z)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Results Body -->
+      <div class="search-results-container">
+        <!-- Double-Bezel Loading Card -->
+        <div v-if="loading" class="search-loading-card">
+          <div class="search-loading-inner">
+            <div class="search-bento-spinner"></div>
+            <div class="search-loading-title">Searching media library...</div>
+            <div class="search-loading-subtitle">Probing audio tracks, titles & cast metadata</div>
+          </div>
+        </div>
+
+        <!-- Dynamic Results Header -->
+        <div v-else-if="results.length" class="search-results-header">
+          <div class="search-results-count">
+            Found <strong style="color:var(--text-primary)">{{ results.length }}</strong> {{ results.length === 1 ? 'title' : 'titles' }}
+            <span v-if="query"> matching "<strong style="color:var(--accent)">{{ query }}</strong>"</span>
+          </div>
+        </div>
+
+        <!-- Results Grid -->
+        <div v-if="!loading && results.length" class="search-grid">
+          <MediaCard v-for="item in paginatedResults" :key="item.id || item.tmdb_id" :item="item" @click="handleClick" />
+        </div>
+
+        <!-- Classic Page Number Bar Pagination -->
+        <div v-if="!loading && results.length > 0" class="pagination-bar">
+          <button class="pagination-btn" :disabled="currentPage === 1" @click="setPage(1)" title="First Page">
+            « First
+          </button>
+          <button class="pagination-btn" :disabled="currentPage === 1" @click="setPage(currentPage - 1)" title="Previous Page">
+            ‹ Prev
+          </button>
+
+          <div class="pagination-numbers" v-if="totalPages > 1">
+            <button
+              v-for="p in visiblePageNumbers"
+              :key="p"
+              class="pagination-num-btn"
+              :class="{ active: currentPage === p }"
+              @click="setPage(p)"
+            >
+              {{ p }}
+            </button>
+          </div>
+
+          <span class="pagination-info">
+            Page <strong>{{ currentPage }}</strong> of <strong>{{ totalPages }}</strong>
+            <span style="font-size:0.75rem;color:var(--text-muted);margin-left:6px">({{ results.length }} total matches)</span>
+          </span>
+
+          <button class="pagination-btn" :disabled="currentPage === totalPages" @click="setPage(currentPage + 1)" title="Next Page">
+            Next ›
+          </button>
+          <button class="pagination-btn" :disabled="currentPage === totalPages" @click="setPage(totalPages)" title="Last Page">
+            Last »
+          </button>
+
+          <!-- Items Per Page Selector -->
+          <div class="pagination-size-selector">
+            <span style="font-size:0.8rem;color:var(--text-muted)">Per page:</span>
+            <select v-model.number="pageSize" class="form-input pagination-select" @change="currentPage = 1" id="search-page-size-select">
+              <option :value="12">12 / page</option>
+              <option :value="24">24 / page</option>
+              <option :value="48">48 / page</option>
+              <option :value="96">96 / page</option>
+              <option :value="999999">Show All</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Empty Results State (Double-Bezel Card) -->
+        <div v-else-if="!loading && searched && results.length === 0" class="search-empty-card">
+          <div class="search-empty-inner">
+            <div class="search-empty-icon">🔍</div>
+            <h2 class="search-empty-title">No Media Found</h2>
+            <div class="search-empty-subtitle">
+              No matching titles found<span v-if="query"> for "<strong style="color:var(--text-primary)">{{ query }}</strong>"</span>. Try searching for an actor, release year, multi-audio tracks, or choosing another genre filter.
+            </div>
+            <div class="search-suggestions" v-if="store.profile?.is_kids">
+              <span class="suggestion-tag" @click="quickSearch('Animation')">🎨 Animation</span>
+              <span class="suggestion-tag" @click="quickSearch('Fantasy')">🪄 Magic</span>
+              <span class="suggestion-tag" @click="quickSearch('Family')">🐾 Animals & Family</span>
+              <span class="suggestion-tag" @click="quickSearch('Comedy')">😄 Comedy</span>
+            </div>
+            <div class="search-suggestions" v-else>
+              <span class="suggestion-tag" @click="quickSearch('Multi Audio')">🌐 Multi Audio</span>
+              <span class="suggestion-tag" @click="quickSearch('x265')">⚡ HEVC / x265</span>
+              <span class="suggestion-tag" @click="quickSearch('1080p')">📺 1080p Quality</span>
+              <span class="suggestion-tag" @click="quickSearch('Action')">🔥 Action</span>
+              <span class="suggestion-tag" @click="quickSearch('2026')">📅 2026</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `,
+  setup() {
+    const route = VueRouter.useRoute();
+    const router = VueRouter.useRouter();
+    const searchInputRef = ref(null);
+
+    const query = ref('');
+    const selectedType = ref('all');
+    const selectedGenre = ref('all');
+    const selectedSort = ref('relevance');
+
+    const pageSize = ref(24);
+    const currentPage = ref(1);
+
+    const results = ref([]);
+    const loading = ref(false);
+    const searched = ref(false);
+    const genresList = ref([
+      'Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 
+      'Drama', 'Family', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller'
+    ]);
+
+    let debounceTimer = null;
+
+    const typeOptions = [
+      { label: 'All', value: 'all', icon: 'ph ph-squares-four' },
+      { label: 'Movies', value: 'movie', icon: 'ph ph-film-strip' },
+      { label: 'Series', value: 'series', icon: 'ph ph-television' },
+      { label: 'Anime', value: 'anime', icon: 'ph ph-sparkle' },
+    ];
+
+    async function performSearch() {
+      loading.value = true;
+      searched.value = true;
+      currentPage.value = 1;
+      try {
+        const res = await API.get(`/api/search?q=${encodeURIComponent(query.value)}&type=${selectedType.value}&genre=${selectedGenre.value}&sort=${selectedSort.value}`);
+        results.value = kidsFilter(res || []);
+      } catch (e) {
+        results.value = [];
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    const totalPages = computed(() => {
+      return Math.ceil(results.value.length / pageSize.value) || 1;
+    });
+
+    const paginatedResults = computed(() => {
+      const start = (currentPage.value - 1) * pageSize.value;
+      return results.value.slice(start, start + pageSize.value);
+    });
+
+    const visiblePageNumbers = computed(() => {
+      const total = totalPages.value;
+      const current = currentPage.value;
+      const pages = [];
+      const delta = 2;
+      const start = Math.max(1, current - delta);
+      const end = Math.min(total, current + delta);
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+      return pages;
+    });
+
+    function setPage(page) {
+      if (page < 1 || page > totalPages.value) return;
+      currentPage.value = page;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function onQueryInput() {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        performSearch();
+      }, 300);
+    }
+
+    function clearSearch() {
+      query.value = '';
+      performSearch();
+      if (searchInputRef.value) searchInputRef.value.focus();
+    }
+
+    function selectType(type) {
+      selectedType.value = type;
+      performSearch();
+    }
+
+    function quickSearch(tag) {
+      query.value = tag;
+      performSearch();
+    }
+
+    function handleGlobalHotkeys(e) {
+      if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
+        e.preventDefault();
+        if (searchInputRef.value) searchInputRef.value.focus();
+      }
+    }
+
+    onMounted(() => {
+      window.addEventListener('keydown', handleGlobalHotkeys);
+      if (route.query.q) {
+        query.value = route.query.q;
+      }
+      performSearch();
+    });
+
+    // React to external navigations into /search?q=... (e.g., cast member
+    // clicks) while this page is already mounted.
+    watch(
+      () => route.query.q,
+      (q) => {
+        const newQ = typeof q === "string" ? q : "";
+        if (newQ && newQ !== query.value) {
+          query.value = newQ;
+          performSearch();
+        }
+      }
+    );
+
+    onUnmounted(() => {
+      window.removeEventListener('keydown', handleGlobalHotkeys);
+      clearTimeout(debounceTimer);
+    });
+
+    function handleClick(item) {
+      if (!item) return;
+      if (item.is_mounted === false) {
+        addToast("Source drive not mounted. Please connect drive to watch this title.", "error");
+        return;
+      }
+      if (item.type === "movie") {
+        router.push(`/title/movie/${item.id}`);
+      } else {
+        router.push(`/title/${item.type}/${item.tmdb_id || item.id}`);
+      }
+    }
+
+    return {
+      store, searchInputRef, query, selectedType, selectedGenre, selectedSort,
+      results, paginatedResults, currentPage, pageSize, totalPages, visiblePageNumbers, setPage, loading, searched, genresList, typeOptions,
+      performSearch, onQueryInput, clearSearch, selectType, quickSearch, handleClick
+    };
+  }
+};
+
+// ─── Profile Watch Stats & Insights Page ──────────────────────
+
+const StatsPage = {
+  template: `
+    <div class="stats-page" style="max-width:1100px;margin:calc(var(--nav-height) + 2rem) auto 4rem;padding:0 var(--space-lg)">
+      <div style="margin-bottom:2rem;display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <h1 style="font-size:2rem;font-weight:800;display:flex;align-items:center;gap:10px">
+            <i class="ph ph-chart-bar" style="color:var(--accent)"></i>
+            <span>Watch Stats & Insights</span>
+          </h1>
+          <p style="color:var(--text-secondary);margin-top:4px">Viewing analytics and watch activity for <strong>{{ store.profile?.name }}</strong></p>
+        </div>
+      </div>
+
+      <div v-if="loading" class="loading-spinner" style="margin:4rem auto"></div>
+
+      <template v-else-if="stats">
+        <!-- Overview Stat Cards Grid -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:1.25rem;margin-bottom:2rem">
+          <div class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;display:flex;align-items:center;gap:1rem">
+            <div style="width:52px;height:52px;border-radius:12px;background:rgba(229,9,20,0.15);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:var(--accent)">
+              <i class="ph ph-clock"></i>
+            </div>
+            <div>
+              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">Total Watch Time</div>
+              <div style="font-size:1.4rem;font-weight:800;color:#fff">{{ formatTimeSpent(stats.total_seconds) }}</div>
+            </div>
+          </div>
+
+          <div class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;display:flex;align-items:center;gap:1rem">
+            <div style="width:52px;height:52px;border-radius:12px;background:rgba(56,189,248,0.15);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#38bdf8">
+              <i class="ph ph-check-circle"></i>
+            </div>
+            <div>
+              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">Completion Rate</div>
+              <div style="font-size:1.4rem;font-weight:800;color:#fff">{{ stats.completion_rate }}% <span style="font-size:0.75rem;color:var(--text-muted);font-weight:500">({{ stats.completed_items }}/{{ stats.total_items }})</span></div>
+            </div>
+          </div>
+
+          <div class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;display:flex;align-items:center;gap:1rem">
+            <div style="width:52px;height:52px;border-radius:12px;background:rgba(245,158,11,0.15);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#f59e0b">
+              <i class="ph ph-sun-dim"></i>
+            </div>
+            <div>
+              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">Peak Watch Hour</div>
+              <div style="font-size:1.2rem;font-weight:800;color:#fff">{{ stats.peak_hour }}</div>
+            </div>
+          </div>
+
+          <div class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;display:flex;align-items:center;gap:1rem">
+            <div style="width:52px;height:52px;border-radius:12px;background:rgba(168,85,247,0.15);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#a855f7">
+              <i class="ph ph-hard-drives"></i>
+            </div>
+            <div>
+              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">Mounted Storage</div>
+              <div style="font-size:1.4rem;font-weight:800;color:#fff">{{ stats.technical_stats?.total_storage_formatted || (stats.technical_stats?.total_storage_gb ? stats.technical_stats.total_storage_gb + ' GB' : '0 GB') }}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 7-Day Watch Activity & Technical Metrics Row -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:1.5rem;margin-bottom:2.5rem">
+          <!-- 7-Day Watch Activity Chart -->
+          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem">
+            <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px">
+              <i class="ph ph-chart-line-up" style="color:var(--accent)"></i> 7-Day Watch Activity (Minutes)
+            </h3>
+            <div class="stats-activity-chart">
+              <div
+                v-for="d in stats.weekly_activity"
+                :key="d.date"
+                class="chart-bar-col"
+                :class="{ 'active-day': d.minutes > 0 }"
+              >
+                <div class="chart-bar-track">
+                  <div
+                    class="chart-bar-fill"
+                    :style="{ height: Math.min(100, Math.max(12, (d.minutes / (maxWeeklyMinutes || 1)) * 100)) + '%' }"
+                  ></div>
+                </div>
+                <div class="chart-bar-val" v-if="d.minutes > 0">{{ d.minutes }}m</div>
+                <div class="chart-bar-label">{{ d.day }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Technical Library & Resolution Breakdown -->
+          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem">
+            <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px">
+              <i class="ph ph-film-strip" style="color:#38bdf8"></i> Library Resolution & Quality
+            </h3>
+            <div class="tech-res-grid">
+              <div class="tech-res-card" :class="{ 'has-items': stats.technical_stats?.resolutions?.['4K'] > 0 }">
+                <div class="tech-res-val" style="color:#a855f7">💎 {{ stats.technical_stats?.resolutions?.['4K'] || 0 }}</div>
+                <div class="tech-res-label">4K Ultra HD</div>
+              </div>
+              <div class="tech-res-card" :class="{ 'has-items': stats.technical_stats?.resolutions?.['1080p'] > 0 }">
+                <div class="tech-res-val" style="color:#38bdf8">🎬 {{ stats.technical_stats?.resolutions?.['1080p'] || 0 }}</div>
+                <div class="tech-res-label">1080p Full HD</div>
+              </div>
+              <div class="tech-res-card" :class="{ 'has-items': stats.technical_stats?.resolutions?.['720p'] > 0 }">
+                <div class="tech-res-val" style="color:#f59e0b">📺 {{ stats.technical_stats?.resolutions?.['720p'] || 0 }}</div>
+                <div class="tech-res-label">720p HD</div>
+              </div>
+              <div class="tech-res-card" :class="{ 'has-items': stats.technical_stats?.resolutions?.['SD'] > 0 }">
+                <div class="tech-res-val" style="color:var(--text-muted)">📼 {{ stats.technical_stats?.resolutions?.['SD'] || 0 }}</div>
+                <div class="tech-res-label">Standard (SD)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Genre Distribution Progress Section -->
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem;margin-bottom:2.5rem">
+          <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px">
+            <i class="ph ph-tag" style="color:var(--accent)"></i> Favorite Genres Distribution
+          </h3>
+          <div v-if="stats.top_genres && stats.top_genres.length" style="display:flex;flex-direction:column;gap:1rem">
+            <div v-for="g in stats.top_genres" :key="g.genre">
+              <div style="display:flex;justify-content:space-between;font-size:0.9rem;font-weight:600;margin-bottom:4px">
+                <span>{{ g.genre }}</span>
+                <span style="color:var(--text-muted)">{{ g.count }} title{{ g.count > 1 ? 's' : '' }}</span>
+              </div>
+              <div style="height:10px;background:rgba(255,255,255,0.08);border-radius:6px;overflow:hidden">
+                <div :style="{ width: calcGenrePercent(g.count) + '%' }" style="height:100%;background:linear-gradient(90deg, var(--accent), #ff758c);border-radius:6px;transition:width 0.6s ease"></div>
+              </div>
+            </div>
+          </div>
+          <div v-else style="color:var(--text-muted);text-align:center;padding:1.5rem">
+            Watch titles in your library to unlock genre analytics!
+          </div>
+        </div>
+
+        <!-- Achievements & Badges Trophy Case Section -->
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem;margin-bottom:2.5rem" class="trophy-case-header">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;flex-wrap:wrap;gap:10px">
+            <h3 style="font-size:1.15rem;font-weight:800;display:flex;align-items:center;gap:10px">
+              <i class="ph ph-trophy" style="color:#f59e0b;font-size:1.35rem"></i> Achievements & Badges Trophy Case
+            </h3>
+            <span style="font-size:0.9rem;font-weight:700;color:var(--accent)" v-if="stats.achievements">
+              {{ unlockedCount }} / {{ totalCount }} Unlocked ({{ completionPercent }}%)
+            </span>
+          </div>
+
+          <!-- Completion Progress Bar -->
+          <div class="trophy-progress-container" v-if="stats.achievements">
+            <div class="trophy-progress-bar">
+              <div class="trophy-progress-fill" :style="{ width: completionPercent + '%' }"></div>
+            </div>
+          </div>
+
+          <!-- Category Filter Tabs -->
+          <div class="trophy-category-tabs" style="margin-top:1.25rem" v-if="stats.achievements">
+            <button
+              v-for="cat in categories"
+              :key="cat"
+              class="trophy-category-tab"
+              :class="{ active: activeCategory === cat }"
+              @click="activeCategory = cat"
+            >
+              {{ cat }}
+            </button>
+          </div>
+
+          <!-- Achievements Grid -->
+          <div v-if="filteredAchievements && filteredAchievements.length" class="achievements-grid">
+            <div
+              v-for="ach in filteredAchievements"
+              :key="ach.id"
+              class="achievement-card"
+              :class="['rarity-' + (ach.rarity || 'bronze').toLowerCase(), { unlocked: ach.unlocked }]"
+            >
+              <div class="achievement-icon-wrapper">
+                {{ ach.unlocked ? ach.icon : '🔒' }}
+              </div>
+              <div class="achievement-info">
+                <div class="achievement-header">
+                  <span class="achievement-title">{{ ach.title }}</span>
+                  <div class="achievement-badge-group">
+                    <span class="rarity-badge" :class="(ach.rarity || 'bronze').toLowerCase()">{{ ach.rarity || 'Bronze' }}</span>
+                    <span v-if="ach.unlocked" class="achievement-badge">UNLOCKED</span>
+                    <span v-else class="achievement-badge locked">LOCKED</span>
+                  </div>
+                </div>
+                <div class="achievement-desc">{{ ach.description }}</div>
+                <div v-if="ach.unlocked && ach.unlocked_at" class="achievement-unlocked-date">
+                  <i class="ph ph-check-circle" style="color:#10b981"></i> {{ ach.unlocked_at }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else style="color:var(--text-muted);text-align:center;padding:1.5rem">
+            No achievements found in this category.
+          </div>
+        </div>
+
+        <!-- Recently Watched History -->
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem">
+          <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <span style="display:flex;align-items:center;gap:8px">
+              <i class="ph ph-history" style="color:var(--accent)"></i> Recent Watch History
+            </span>
+            <span style="font-size:0.75rem;font-weight:600;color:var(--text-muted)">Consolidated Titles</span>
+          </h3>
+          <div v-if="stats.recent_history && stats.recent_history.length" style="display:flex;flex-direction:column;gap:10px">
+            <div
+              v-for="item in stats.recent_history"
+              :key="item.id"
+              style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(255,255,255,0.03);border-radius:12px;cursor:pointer;transition:background 0.2s ease"
+              class="history-row-item"
+              @click="openMedia(item)"
+            >
+              <div style="display:flex;align-items:center;gap:14px;min-width:0">
+                <img
+                  v-if="item.poster_path"
+                  :src="imgUrl(item.poster_path)"
+                  style="width:42px;height:58px;object-fit:cover;border-radius:6px;flex-shrink:0"
+                />
+                <div style="min-width:0">
+                  <div style="font-weight:700;font-size:0.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" :title="item.title">
+                    {{ item.title }}
+                  </div>
+                  <div style="font-size:0.8rem;color:var(--text-muted);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                    <span style="color:var(--text-secondary);font-weight:600">
+                      {{ item.type === 'anime' ? 'Anime' : item.type === 'series' ? 'Series' : 'Movie' }}
+                    </span>
+                    <span v-if="item.season && item.episode" style="color:var(--text-primary);font-weight:600">
+                      · Latest: S{{ (item.season||'').toString().padStart(2,'0') }}E{{ (item.episode||'').toString().padStart(2,'0') }}
+                      <span v-if="item.ep_title" style="color:var(--text-muted);font-weight:500"> ("{{ item.ep_title }}")</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div style="text-align:right;flex-shrink:0;margin-left:12px">
+                <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+                  <span v-if="item.ep_count && item.ep_count > 1" style="font-size:0.72rem;font-weight:700;background:rgba(229,9,20,0.18);color:var(--accent);border:1px solid rgba(229,9,20,0.35);padding:2px 8px;border-radius:99px">
+                    {{ item.ep_count }} eps watched
+                  </span>
+                  <span style="font-size:0.85rem;font-weight:700;color:var(--accent)">
+                    {{ item.completed ? 'Completed ✓' : formatTimeSpent(item.position) }}
+                  </span>
+                </div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-top:3px">
+                  {{ formatDate(item.last_watched) }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else style="color:var(--text-muted);text-align:center;padding:1.5rem">
+            No watch history recorded yet. Start watching a title!
+          </div>
+        </div>
+      </template>
+    </div>
+  `,
+  setup() {
+    const router = VueRouter.useRouter();
+    const stats = ref(null);
+    const loading = ref(true);
+    const activeCategory = ref("All");
+    const categories = ["All", "Milestones", "Viewing Habits", "Player Master", "Discovery", "Collector"];
+
+    const unlockedCount = computed(() => {
+      if (!stats.value?.achievements) return 0;
+      return stats.value.achievements.filter(a => a.unlocked).length;
+    });
+
+    const totalCount = computed(() => stats.value?.achievements?.length || 0);
+
+    const completionPercent = computed(() => {
+      if (!totalCount.value) return 0;
+      return Math.round((unlockedCount.value / totalCount.value) * 100);
+    });
+
+    const filteredAchievements = computed(() => {
+      if (!stats.value?.achievements) return [];
+      if (activeCategory.value === "All") return stats.value.achievements;
+      return stats.value.achievements.filter(a => a.category === activeCategory.value);
+    });
+
+    const maxWeeklyMinutes = computed(() => {
+      if (!stats.value?.weekly_activity?.length) return 60;
+      const maxVal = Math.max(...stats.value.weekly_activity.map(d => d.minutes || 0));
+      return maxVal > 0 ? maxVal : 60;
+    });
+
+    async function loadStats() {
+      loading.value = true;
+      try {
+        stats.value = await API.get("/api/stats");
+      } catch (e) {
+        addToast("Failed to load watch stats", "error");
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    onMounted(loadStats);
+
+    function formatTimeSpent(seconds) {
+      if (!seconds || isNaN(seconds)) return "0m";
+      const s = Math.floor(seconds);
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      if (h > 0) {
+        return `${h}h ${m}m`;
+      }
+      return `${m}m`;
+    }
+
+    function calcGenrePercent(count) {
+      if (!stats.value?.top_genres?.length) return 0;
+      const maxCount = Math.max(...stats.value.top_genres.map(g => g.count));
+      return Math.min(100, Math.round((count / (maxCount || 1)) * 100));
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) return "";
+      try {
+        return new Date(dateStr).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      } catch (e) {
+        return dateStr;
+      }
+    }
+
+    function openMedia(item) {
+      if (item.type === "movie" && item.id) {
+        router.push(`/title/movie/${item.id}`);
+      } else if (item.tmdb_id) {
+        router.push(`/title/${item.type || "series"}/${item.tmdb_id}`);
+      }
+    }
+
+    return {
+      store,
+      stats,
+      loading,
+      activeCategory,
+      categories,
+      unlockedCount,
+      totalCount,
+      completionPercent,
+      filteredAchievements,
+      maxWeeklyMinutes,
+      formatTimeSpent,
+      calcGenrePercent,
+      formatDate,
+      openMedia,
+      imgUrl,
+    };
+  },
+};
+
+// ─── About Page ───────────────────────────────────────────────
+
+const AboutPage = {
+  template: `
+    <div class="about-page-wrapper">
+      <div class="about-glow-orb-1"></div>
+      <div class="about-glow-orb-2"></div>
+
+      <div class="about-page">
+      <!-- Hero Banner -->
+      <div class="about-hero">
+        <div class="about-hero-badge">
+          <img src="/static/img/favicon.png" alt="CapsStream" class="about-hero-logo">
+            <span>CapsStream v{{ sysInfo?.version || '2.0.0.0' }}</span>
+        </div>
+        <h1 class="about-hero-title">Stream Everything You Own.</h1>
+        <p class="about-hero-subtitle">
+          CapsStream is your personal streaming platform for movies, TV shows, music, and more. Built for self-hosting, it delivers a clean, Netflix-inspired experience with fast browsing, rich metadata, watch history, continue watching, and seamless playback.
+        </p>
+        <div class="about-hero-tags">
+          <span class="about-tag">🎬 4K HEVC Ready</span>
+          <span class="about-tag">⚡ AniSkip & FFprobe</span>
+          <span class="about-tag">🔒 Kids & Multi-Profile</span>
+          <span class="about-tag">🏆 Trophy Case</span>
+          <span class="about-tag">📁 Multi-Drive Scanner</span>
+        </div>
+      </div>
+
+      <!-- Feature Bento Grid -->
+      <div class="about-section">
+        <div class="about-section-header">
+          <i class="ph ph-sparkle" style="color:var(--accent);font-size:1.5rem"></i>
+          <span>Key Platform Highlights</span>
+        </div>
+
+        <div class="about-bento-grid">
+          <div class="bento-card">
+            <div class="bento-icon-wrap" style="background:rgba(229,9,20,0.15);color:var(--accent)">
+              <i class="ph ph-film-strip"></i>
+            </div>
+            <div class="bento-title">High-Perf 4K & Multi-Audio Engine</div>
+            <div class="bento-desc">Direct playback & hardware acceleration for HEVC, H.264, and Dolby AC-3 / AAC multi-track audio.</div>
+          </div>
+
+          <div class="bento-card">
+            <div class="bento-icon-wrap" style="background:rgba(56,189,248,0.15);color:#38bdf8">
+              <i class="ph ph-timer"></i>
+            </div>
+            <div class="bento-title">Smart & Manual Skip Markers</div>
+            <div class="bento-desc">Manual 1-click frame stamping for Recaps, Intros, and Outros — with automatic AniSkip lookup for anime and FFprobe chapter detection as fallbacks.</div>
+          </div>
+
+          <div class="bento-card">
+            <div class="bento-icon-wrap" style="background:rgba(16,185,129,0.15);color:#10b981">
+              <i class="ph ph-user-focus"></i>
+            </div>
+            <div class="bento-title">Multi-Profile & Kids PIN Lock</div>
+            <div class="bento-desc">Personalized watch history, favorites, and watchlist per profile with optional 4-digit PIN protection and Kids Mode filters.</div>
+          </div>
+
+          <div class="bento-card">
+            <div class="bento-icon-wrap" style="background:rgba(245,158,11,0.15);color:#f59e0b">
+              <i class="ph ph-trophy"></i>
+            </div>
+            <div class="bento-title">Trophy Case & Analytics</div>
+            <div class="bento-desc">Unlockable achievement badges, detailed viewing statistics, milestones, and category habit analysis.</div>
+          </div>
+
+          <div class="bento-card">
+            <div class="bento-icon-wrap" style="background:rgba(168,85,247,0.15);color:#a855f7">
+              <i class="ph ph-folder-notch-open"></i>
+            </div>
+            <div class="bento-title">Multi-Drive Media Scanner</div>
+            <div class="bento-desc">Scans local directories and external drives (E:\\, D:\\) with native OS folder browser dialogs and live connected/unmounted status badges.</div>
+          </div>
+
+          <div class="bento-card">
+            <div class="bento-icon-wrap" style="background:rgba(236,72,153,0.15);color:#ec4899">
+              <i class="ph ph-paint-brush"></i>
+            </div>
+            <div class="bento-title">Single-Layer Glass Aesthetics</div>
+            <div class="bento-desc">Ultra-premium glassmorphic theme featuring smooth micro-animations, single-layer cards, and animated sliding pill navbar indicators.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Server & Diagnostics Status (3-Section Glass Cards) -->
+      <div class="about-section" style="margin-top:2.5rem">
+        <div class="about-section-header" style="justify-content:space-between;flex-wrap:wrap;gap:12px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <i class="ph ph-cpu" style="color:var(--accent);font-size:1.5rem"></i>
+            <span>Live Server & Enterprise Diagnostics Suite</span>
+          </div>
+          <div :class="['server-status-pill', store.serverOnline ? 'online' : 'offline']">
+            <span class="status-dot"></span>
+            <span>{{ store.serverOnline ? 'Server Online' : 'Server Offline / Disconnected' }}</span>
+          </div>
+        </div>
+
+        <div v-if="!store.serverOnline" class="server-offline-banner">
+          <i class="ph ph-warning-octagon" style="font-size:1.5rem;flex-shrink:0"></i>
+          <div>
+            <strong>Backend Server Disconnected!</strong>
+            <div>The CapsStream Flask backend is unreachable or stopped. Please launch <code>start.bat</code> to resume server connectivity.</div>
+          </div>
+        </div>
+
+        <div v-if="loadingSysInfo" style="display:flex;justify-content:center;padding:2.5rem">
+          <div class="loading-spinner"></div>
+        </div>
+
+        <div v-else-if="sysInfo" class="diag-sections-container">
+          <!-- Card 1: System & Memory Health -->
+          <div class="diag-section-card">
+            <div class="diag-section-header">
+              <i class="ph ph-heartbeat" style="color:#10b981"></i>
+              <span>System & Memory Health</span>
+            </div>
+
+            <div class="diagnostics-grid">
+              <div class="diag-item">
+                <div class="diag-label">SYSTEM ENGINE</div>
+                <div class="diag-val" style="color:var(--accent);font-weight:700">
+                  ⚡ {{ sysInfo.engine_name || ('CapsStream Core v' + sysInfo.version) }}
+                </div>
+                <div class="diag-sub">Python {{ sysInfo.python_version }} • {{ sysInfo.engine_features || 'WAL Mode • Synced Remux' }}</div>
+              </div>
+              <div class="diag-item">
+                <div class="diag-label">SERVER UPTIME</div>
+                <div class="diag-val" style="color:#10b981">⚡ {{ sysInfo.server_uptime || 'Active' }}</div>
+                <div class="diag-sub">Continuous Runtime</div>
+              </div>
+              <div class="diag-item" style="grid-column:1 / -1" v-if="sysInfo.ram_info">
+                <div class="diag-label" style="display:flex;justify-content:space-between">
+                  <span>SYSTEM RAM LOAD</span>
+                  <span style="color:var(--text-primary)">{{ sysInfo.ram_info.used_gb }} GB / {{ sysInfo.ram_info.total_gb }} GB ({{ sysInfo.ram_info.load_pct }}%)</span>
+                </div>
+                <div class="ram-meter-track">
+                  <div class="ram-meter-fill" :style="{ width: sysInfo.ram_info.load_pct + '%' }"></div>
+                </div>
+              </div>
+              <div class="diag-item">
+                <div class="diag-label">HOST OS</div>
+                <div class="diag-val">{{ sysInfo.os_name === 'nt' ? 'Windows OS' : sysInfo.os_name }}</div>
+                <div class="diag-sub" :title="sysInfo.platform">{{ sysInfo.platform }}</div>
+              </div>
+              <div class="diag-item">
+                <div class="diag-label">FFMPEG TRANSCODER</div>
+                <div class="diag-val" :style="{ color: sysInfo.has_ffmpeg ? '#10b981' : '#ef4444' }">
+                  {{ sysInfo.has_ffmpeg && sysInfo.has_ffprobe ? '🟢 Active' : '🔴 Missing' }}
+                </div>
+                <div class="diag-sub">Hardware Pipeline</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2: External API Integrations Health -->
+          <div class="diag-section-card">
+            <div class="diag-section-header">
+              <i class="ph ph-globe-hemisphere-west" style="color:#38bdf8"></i>
+              <span>External API Integrations</span>
+            </div>
+
+            <div class="diagnostics-grid" v-if="sysInfo.api_statuses">
+              <div class="diag-item">
+                <div class="diag-label">TMDB METADATA</div>
+                <div class="diag-val" style="color:#10b981">🟢 Active</div>
+                <div class="diag-sub">Movie & TV Details</div>
+              </div>
+              <div class="diag-item">
+                <div class="diag-label">OMDB RATINGS</div>
+                <div class="diag-val" style="color:#38bdf8">🟢 Active</div>
+                <div class="diag-sub">Backup Ratings API</div>
+              </div>
+              <div class="diag-item">
+                <div class="diag-label">ANISKIP API</div>
+                <div class="diag-val" style="color:#a855f7">🟢 Connected</div>
+                <div class="diag-sub">Intro/Outro Skip Markers</div>
+              </div>
+              <div class="diag-item">
+                <div class="diag-label">POSTER CDN PROXY</div>
+                <div class="diag-val" style="color:#10b981">🟢 Active</div>
+                <div class="diag-sub">Image Caching Proxy</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 3: Database & Profile Metrics -->
+          <div class="diag-section-card">
+            <div class="diag-section-header">
+              <i class="ph ph-database" style="color:#a855f7"></i>
+              <span>Database & Profile Metrics</span>
+            </div>
+
+            <div class="diagnostics-grid" v-if="sysInfo.db_metrics">
+              <div class="diag-item">
+                <div class="diag-label">DATABASE SIZE</div>
+                <div class="diag-val">{{ sysInfo.database_size }}</div>
+                <div class="diag-sub">SQLite DB File</div>
+              </div>
+              <div class="diag-item">
+                <div class="diag-label">PROFILES CREATED</div>
+                <div class="diag-val">👤 {{ sysInfo.db_metrics.profiles_count }}</div>
+                <div class="diag-sub">Multi-User Profiles</div>
+              </div>
+              <div class="diag-item">
+                <div class="diag-label">WATCH HISTORY</div>
+                <div class="diag-val">⏱️ {{ sysInfo.db_metrics.progress_count }}</div>
+                <div class="diag-sub">Tracked Positions</div>
+              </div>
+              <div class="diag-item">
+                <div class="diag-label">CUSTOM SKIP MARKERS</div>
+                <div class="diag-val">⏩ {{ sysInfo.db_metrics.skip_markers_count }}</div>
+                <div class="diag-sub">Manual Timestamps</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Storage Progress Meter -->
+        <div class="storage-progress-wrapper" v-if="sysInfo?.storage_info" style="margin-top:1.5rem">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div style="font-size:0.82rem;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px">
+              <i class="ph ph-hard-drives" style="color:var(--accent)"></i> MEDIA STORAGE BREAKDOWN
+            </div>
+            <div style="font-size:0.85rem;font-weight:800;color:var(--accent)">
+              {{ sysInfo.storage_info.total_size }} Total
+            </div>
+          </div>
+
+          <div class="storage-bar-track">
+            <div class="storage-segment-movies" :style="{ width: sysInfo.storage_info.movies_pct + '%' }" :title="'Movies: ' + sysInfo.storage_info.movies_size"></div>
+            <div class="storage-segment-series" :style="{ width: sysInfo.storage_info.series_pct + '%' }" :title="'Series: ' + sysInfo.storage_info.series_size"></div>
+            <div class="storage-segment-anime" :style="{ width: sysInfo.storage_info.anime_pct + '%' }" :title="'Anime: ' + sysInfo.storage_info.anime_size"></div>
+          </div>
+
+          <div style="display:flex;gap:1.25rem;font-size:0.78rem;color:var(--text-muted);flex-wrap:wrap;margin-top:4px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block"></span>
+              Movies: <strong>{{ sysInfo.storage_info.movies_size }}</strong> ({{ sysInfo.storage_info.movies_pct }}%)
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="width:8px;height:8px;border-radius:50%;background:#38bdf8;display:inline-block"></span>
+              TV Series: <strong>{{ sysInfo.storage_info.series_size }}</strong> ({{ sysInfo.storage_info.series_pct }}%)
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="width:8px;height:8px;border-radius:50%;background:#a855f7;display:inline-block"></span>
+              Anime: <strong>{{ sysInfo.storage_info.anime_size }}</strong> ({{ sysInfo.storage_info.anime_pct }}%)
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Keyboard Shortcuts Quick-Reference -->
+      <div class="about-section" style="margin-top:2.5rem">
+        <div class="about-section-header">
+          <i class="ph ph-keyboard" style="color:var(--accent);font-size:1.5rem"></i>
+          <span>Player Keyboard Controls Quick-Reference</span>
+        </div>
+
+        <div class="hotkey-card-grid">
+          <div class="hotkey-item">
+            <kbd class="about-kbd">Space</kbd>
+            <div class="hotkey-label-wrap">
+              <div class="hotkey-title">Play / Pause</div>
+              <div class="hotkey-desc">Toggle video playback</div>
+            </div>
+          </div>
+
+          <div class="hotkey-item">
+            <kbd class="about-kbd">F</kbd>
+            <div class="hotkey-label-wrap">
+              <div class="hotkey-title">Fullscreen</div>
+              <div class="hotkey-desc">Toggle fullscreen mode</div>
+            </div>
+          </div>
+
+          <div class="hotkey-item">
+            <kbd class="about-kbd">M</kbd>
+            <div class="hotkey-label-wrap">
+              <div class="hotkey-title">Mute</div>
+              <div class="hotkey-desc">Toggle audio mute</div>
+            </div>
+          </div>
+
+          <div class="hotkey-item">
+            <kbd class="about-kbd">J / L</kbd>
+            <div class="hotkey-label-wrap">
+              <div class="hotkey-title">Seek ±10s</div>
+              <div class="hotkey-desc">Rewind or skip 10 seconds</div>
+            </div>
+          </div>
+
+          <div class="hotkey-item">
+            <kbd class="about-kbd">N</kbd>
+            <div class="hotkey-label-wrap">
+              <div class="hotkey-title">Next Episode</div>
+              <div class="hotkey-desc">Advance to next episode</div>
+            </div>
+          </div>
+
+          <div class="hotkey-item">
+            <kbd class="about-kbd">?</kbd>
+            <div class="hotkey-label-wrap">
+              <div class="hotkey-title">Shortcuts Modal</div>
+              <div class="hotkey-desc">View full hotkeys overlay</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tech Stack & Credits -->
+      <div class="about-section" style="margin-top:2.5rem">
+        <div class="about-section-header">
+          <i class="ph ph-code" style="color:var(--accent);font-size:1.5rem"></i>
+          <span>Built With Modern Open Technologies</span>
+        </div>
+        <div class="tech-stack-row">
+          <div class="tech-badge"><span>⚡ Vue.js 3</span></div>
+          <div class="tech-badge"><span>🐍 Python Flask</span></div>
+          <div class="tech-badge"><span>🗄️ SQLite3</span></div>
+          <div class="tech-badge"><span>🎞️ FFmpeg & FFprobe</span></div>
+          <div class="tech-badge"><span>✨ Phosphor Icons</span></div>
+          <div class="tech-badge"><span>🎬 TMDb & OMDb API</span></div>
+          <a href="https://github.com/Unknownplanet40/" target="_blank" rel="noopener noreferrer" class="tech-badge" style="text-decoration:none;color:var(--text-primary)">
+            <i class="ph ph-github-logo" style="margin-right:4px"></i><span>GitHub @Unknownplanet40</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- Creator & Engineering Credit Card -->
+      <div class="about-section" style="margin-top:2.5rem;margin-bottom:3rem">
+        <div class="about-section-header">
+          <i class="ph ph-crown" style="color:var(--gold);font-size:1.5rem"></i>
+          <span>Creator & Engineering</span>
+        </div>
+
+        <div class="creator-card">
+          <div class="creator-avatar-wrap">
+            <img
+              v-if="sysInfo?.github_profile?.avatar_url"
+              :src="sysInfo.github_profile.avatar_url"
+              :alt="sysInfo?.github_profile?.name || 'Creator Avatar'"
+              class="creator-avatar-img"
+            />
+            <span v-else>👨‍💻</span>
+          </div>
+          <div class="creator-info">
+            <div class="creator-name-row">
+              <span class="creator-name">{{ sysInfo?.github_profile?.name || '<Caps />' }}</span>
+              <span v-if="sysInfo?.github_profile?.location" class="creator-location-badge">
+                <i class="ph ph-map-pin"></i> {{ sysInfo.github_profile.location }}
+              </span>
+              <a
+                :href="sysInfo?.github_profile?.html_url || 'https://github.com/Unknownplanet40/'"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="creator-github-link"
+                title="Visit GitHub Profile"
+              >
+                <i class="ph ph-github-logo" style="font-size:1.1rem"></i>
+                <span>@{{ sysInfo?.github_profile?.login || 'Unknownplanet40' }}</span>
+              </a>
+            </div>
+
+            <div class="creator-bio-quote" v-if="sysInfo?.github_profile?.bio">
+              "{{ sysInfo.github_profile.bio }}"
+            </div>
+
+            <div class="creator-badges-row">
+              <span class="creator-stat-pill">📦 <strong>{{ sysInfo?.github_profile?.public_repos || 20 }}</strong> Public Repos</span>
+              <span class="creator-stat-pill">👥 <strong>{{ sysInfo?.github_profile?.followers || 13 }}</strong> Followers</span>
+              <span class="creator-stat-pill">👤 <strong>{{ sysInfo?.github_profile?.following || 8 }}</strong> Following</span>
+              <span class="creator-stat-pill">📅 Member since <strong>{{ sysInfo?.github_profile?.created_year || '2019' }}</strong></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  `,
+  setup() {
+    const sysInfo = ref(null);
+    const loadingSysInfo = ref(true);
+    let pollTimer = null;
+
+    async function fetchSystemInfo() {
+      try {
+        const data = await API.get("/api/system/info");
+        sysInfo.value = data;
+        store.serverOnline = true;
+      } catch (e) {
+        if (store.serverOnline !== false) {
+          store.serverOnline = false;
+          addToast("⚠️ Server Disconnected — CapsStream backend is unreachable or offline.", "error", 6000);
+        }
+      } finally {
+        loadingSysInfo.value = false;
+      }
+    }
+
+    onMounted(() => {
+      fetchSystemInfo();
+      pollTimer = setInterval(fetchSystemInfo, 3000);
+    });
+
+    onUnmounted(() => {
+      if (pollTimer) clearInterval(pollTimer);
+    });
+
+    return { sysInfo, loadingSysInfo, store };
+  }
+};
+
+// ─── Router ───────────────────────────────────────────────────
+
+const router = createRouter({
+  history: createWebHashHistory(),
+  routes: [
+    { path: "/", component: HomePage },
+    { path: "/setup", component: SetupPage },
+    { path: "/profiles", component: ProfilesPage },
+    { path: "/browse", component: BrowsePage },
+    { path: "/search", component: SearchPage },
+    { path: "/title/:type/:id", component: DetailPage },
+    { path: "/watch/:id", component: PlayerPage },
+    { path: "/collections", component: CollectionsPage },
+    { path: "/collection/:id", component: CollectionDetailPage },
+    { path: "/favorites", component: FavoritesPage },
+    { path: "/stats", component: StatsPage },
+    { path: "/settings", component: SettingsPage },
+    { path: "/about", component: AboutPage },
+  ],
+  scrollBehavior(to, from, saved) {
+    if (to.path === from.path) return null;
+    return { top: 0 };
+  },
+});
+
+// ─── Floating Scan Progress Widget ───────────────────────────
+
+const ScanProgressWidget = {
+  template: `
+    <div class="scan-floating-widget" v-if="store.scanRunning || showCompleted">
+      <!-- Minimized Pill View -->
+      <div v-if="isMinimized" class="scan-widget-pill" @click="isMinimized = false" id="scan-widget-pill">
+        <div class="scan-widget-pill-text">
+          <i :class="phaseIcon" :style="{ animation: store.scanRunning ? 'spin 1s linear infinite' : 'none' }"></i>
+          <span v-if="store.scanRunning">{{ phaseLabel }} · {{ store.scanPercent }}% ({{ store.scanCount || 0 }}{{ store.scanTotal ? '/' + store.scanTotal : '' }})</span>
+          <span v-else style="color:var(--success)">✅ Scan Complete!</span>
+        </div>
+        <button class="scan-widget-btn" title="Expand Widget" id="scan-widget-expand-btn">
+          <i class="ph ph-caret-up"></i>
+        </button>
+      </div>
+
+      <!-- Expanded Card View -->
+      <div v-else class="scan-widget-card" id="scan-widget-card">
+        <div class="scan-widget-header">
+          <div class="scan-widget-title">
+            <i class="ph ph-popcorn"></i>
+            <span>{{ store.scanRunning ? 'Library Scan' : 'Scan Complete!' }}</span>
+            <span v-if="store.scanRunning" class="scan-phase-badge" :class="store.scanPhase">
+              <i :class="phaseIcon"></i>{{ phaseLabel }}
+            </span>
+          </div>
+          <div class="scan-widget-actions">
+            <button class="scan-widget-btn" @click="isMinimized = true" title="Minimize Widget" id="scan-widget-minimize-btn">
+              <i class="ph ph-minus"></i>
+            </button>
+            <button class="scan-widget-btn" @click="dismiss" title="Close" id="scan-widget-close-btn">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="scan-widget-progress-row">
+          <div class="scan-widget-progress-bg">
+            <div
+              class="scan-widget-progress-fill"
+              :class="{ indeterminate: store.scanRunning && !store.scanPercent }"
+              :style="{ width: store.scanRunning ? store.scanPercent + '%' : '100%' }"
+            ></div>
+          </div>
+          <span class="scan-widget-percent" v-if="store.scanRunning">{{ store.scanPercent }}%</span>
+        </div>
+
+        <!-- Running: current item details -->
+        <template v-if="store.scanRunning">
+          <div class="scan-widget-item" v-if="store.scanItem && store.scanItem.file_name">
+            <div class="scan-item-top">
+              <span class="scan-item-type"><i :class="typeIcon"></i>{{ typeLabel }}</span>
+              <span class="scan-item-se" v-if="isEpisode">S{{ pad2(store.scanItem.season) }}E{{ pad2(store.scanItem.episode) }}</span>
+            </div>
+            <div class="scan-item-title" :title="store.scanItem.title">{{ store.scanItem.title }}</div>
+            <div class="scan-item-file" :title="store.scanItem.file_name">
+              {{ store.scanItem.file_name }}<span v-if="itemSize"> · {{ itemSize }}</span>
+            </div>
+            <div class="scan-item-match" v-if="store.scanItem.matched_title">
+              <i class="ph ph-check-circle"></i>
+              Matched: {{ store.scanItem.matched_title }}<template v-if="store.scanItem.year"> ({{ store.scanItem.year }})</template><template v-if="store.scanItem.rating"> · ★ {{ Number(store.scanItem.rating).toFixed(1) }}</template>
+            </div>
+            <div class="scan-item-match pending" v-else>
+              <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite"></i> Searching TMDb...
+            </div>
+          </div>
+
+          <div class="scan-widget-status" v-else style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            {{ store.scanProgress || 'Preparing scan...' }}
+          </div>
+
+          <div class="scan-widget-footer">
+            <span><i class="ph ph-files"></i> {{ store.scanCount || 0 }}/{{ store.scanTotal || '?' }} processed</span>
+            <span v-if="store.scanMatched"><i class="ph ph-checks"></i> {{ store.scanMatched }} matched</span>
+            <span v-if="store.scanElapsed"><i class="ph ph-timer"></i> {{ fmtElapsed(store.scanElapsed) }}</span>
+          </div>
+        </template>
+
+        <!-- Completed -->
+        <template v-else>
+          <div class="scan-widget-status" style="color:var(--text-muted)">
+            Processed {{ store.scanCount || 0 }} new media files<template v-if="store.scanMatched"> · {{ store.scanMatched }} matched to TMDb</template>.
+          </div>
+        </template>
+      </div>
+    </div>
+  `,
+  setup() {
+    const isMinimized = ref(false);
+    const showCompleted = ref(false);
+
+    const phaseLabel = computed(() => {
+      if (store.scanPhase === "matching") return "Matching";
+      if (store.scanPhase === "scanning") return "Scanning";
+      return "Scanning";
+    });
+
+    const phaseIcon = computed(() => {
+      if (store.scanPhase === "matching") return "ph ph-target";
+      return "ph ph-magnifying-glass";
+    });
+
+    const typeLabel = computed(() => {
+      const t = store.scanItem?.type;
+      if (t === "movie") return "Movie";
+      if (t === "anime") return "Anime";
+      if (t === "series") return "Series";
+      return "File";
+    });
+
+    const typeIcon = computed(() => {
+      const t = store.scanItem?.type;
+      if (t === "movie") return "ph ph-film-strip";
+      if (t === "anime") return "ph ph-sparkle";
+      if (t === "series") return "ph ph-television";
+      return "ph ph-file-video";
+    });
+
+    const isEpisode = computed(() => {
+      const it = store.scanItem;
+      return !!it && it.type !== "movie" && it.season != null;
+    });
+
+    const itemSize = computed(() => fmtFileSize(store.scanItem?.file_size));
+
+    function pad2(n) {
+      return String(n ?? 0).padStart(2, "0");
+    }
+
+    function fmtElapsed(sec) {
+      sec = Number(sec) || 0;
+      if (sec < 60) return `${sec}s`;
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${m}m ${pad2(s)}s`;
+    }
+
+    watch(
+      () => store.scanRunning,
+      (running, prev) => {
+        if (!running && prev === true) {
+          showCompleted.value = true;
+          setTimeout(() => {
+            showCompleted.value = false;
+          }, 4000);
+        }
+      },
+    );
+
+    function dismiss() {
+      showCompleted.value = false;
+      isMinimized.value = true;
+    }
+
+    function fmtFileSize(bytes) {
+      bytes = Number(bytes);
+      if (!bytes || bytes <= 0) return null;
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      let i = 0;
+      while (bytes >= 1024 && i < units.length - 1) {
+        bytes /= 1024;
+        i++;
+      }
+      return `${bytes.toFixed(i > 1 ? 1 : 0)} ${units[i]}`;
+    }
+
+    return { store, isMinimized, showCompleted, dismiss, phaseLabel, phaseIcon, typeLabel, typeIcon, isEpisode, itemSize, pad2, fmtElapsed };
+  },
+};
+
+
+
+// ─── Root App ─────────────────────────────────────────────────
+
+const App = {
+  components: { MediaCard, ScanProgressWidget, ShortcutsModal },
+  template: `
+    <!-- Loading screen -->
+    <div class="loading-screen" v-if="appLoading">
+      <div class="loading-logo">
+        <img src="/static/img/favicon.png" alt="CapsStream" style="height:48px;width:48px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto">
+        <span>CapsStream</span>
+      </div>
+      <div class="loading-spinner"></div>
+    </div>
+
+    <template v-else>
+      <!-- Navbar (hidden on player/profile pages) -->
+      <nav class="navbar" :class="{ scrolled: navScrolled }" v-if="showNav" id="navbar">
+        <div class="navbar-island">
+          <div class="nav-logo" @click="router.push('/')" id="nav-logo">
+            <img src="/static/img/favicon.png" alt="CapsStream Logo" class="app-logo-img">
+            <span>CapsStream</span>
+          </div>
+
+          <div class="nav-links" ref="navLinksRef" @mouseleave="hoveredLinkIndex = null">
+            <div
+              class="nav-pill-indicator"
+              :style="pillStyle"
+            ></div>
+            <div
+              v-for="(item, idx) in navItems"
+              :key="item.id"
+              class="nav-link"
+              :class="{ active: isNavActive(item) }"
+              @mouseenter="hoveredLinkIndex = idx"
+              @click="router.push(item.path)"
+              :id="item.id"
+              :ref="el => { if (el) linkRefs[idx] = el }"
+            >
+              {{ item.name }}
+            </div>
+          </div>
+
+          <div class="nav-spacer"></div>
+
+          <div class="nav-actions">
+            <div class="nav-search-btn" @click="router.push('/search')" id="nav-search" data-tooltip="Search">
+              <i class="ph ph-magnifying-glass" style="font-size:1.1rem"></i>
+            </div>
+
+            <!-- Shortcuts button -->
+            <div class="nav-search-btn" @click="showShortcuts = true" id="nav-shortcuts" data-tooltip="Keyboard Shortcuts (?)">
+              <i class="ph ph-keyboard" style="font-size:1.1rem"></i>
+            </div>
+
+            <!-- Scan button -->
+            <div class="nav-search-btn" @click="triggerScan" id="nav-scan" data-tooltip="Refresh Library" style="position:relative">
+              <i class="ph ph-arrows-clockwise" style="font-size:1.1rem" :style="{ animation: store.scanRunning ? 'spin 1s linear infinite' : 'none' }"></i>
+              <div class="scan-badge" v-if="store.scanRunning"></div>
+            </div>
+
+            <!-- Settings button (hidden for Kids profiles) -->
+            <div v-if="!store.profile?.is_kids" class="nav-search-btn" @click="router.push('/settings')" id="nav-settings" data-tooltip="Settings">
+              <i class="ph ph-gear" style="font-size:1.1rem"></i>
+            </div>
+
+            <!-- Kids Mode Badge -->
+            <div v-if="store.profile?.is_kids" class="kids-mode-nav-badge" id="nav-kids-badge">
+              🧒 Kids
+            </div>
+
+            <!-- Profile -->
+            <div class="nav-profile" @click.stop="toggleProfileMenu" id="nav-profile" data-tooltip="Profile Menu"
+              :style="{ background: store.profile?.color + '33' || 'var(--bg-card)' }">
+              {{ store.profile?.avatar || '👤' }}
+              <div class="profile-dropdown" v-if="showProfileMenu" @click.stop>
+                <div v-if="store?.profile" class="profile-dropdown-item" style="font-weight:600;color:var(--text-primary);cursor:default" @click.stop>
+                  {{ store.profile?.avatar }} {{ store.profile?.name }}
+                  <span v-if="store.profile?.is_kids" style="font-size:0.75rem;color:#fdcb6e;margin-left:4px;">🧒 Kids</span>
+                </div>
+                <div class="profile-dropdown-divider" v-if="store?.profile"></div>
+                <div class="profile-dropdown-item" @click.stop="goFavorites" id="dd-watchlist">❤️ Watchlist</div>
+                <div class="profile-dropdown-item" @click.stop="goCollections" id="dd-collections">📚 Collections</div>
+                <div class="profile-dropdown-item" @click.stop="goStats" id="dd-stats">📊 Watch Stats</div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="dd-settings">⚙️ Settings</div>
+                <div class="profile-dropdown-item" @click.stop="goAbout" id="dd-about">ℹ️ About CapsStream</div>
+                <div class="profile-dropdown-divider"></div>
+                <div class="profile-dropdown-item" @click.stop="editCurrentProfile" id="dd-edit-profile">✏️ Edit Profile</div>
+                <div class="profile-dropdown-item" @click.stop="switchProfile" id="dd-switch">👤 Switch Profile</div>
+                <div class="profile-dropdown-item danger" @click.stop="logout" v-if="store.profile" id="dd-logout">🚪 Sign Out</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <!-- Main content -->
+      <main :style="{ paddingTop: showNav && isPlayerRoute && isDetailRoute ? 'var(--nav-height)' : '0' }">
+        <router-view />
+      </main>
+
+      <!-- Toast container (Clean Single-Layer Glass Card) -->
+      <div class="toast-container" id="toast-container">
+        <div
+          v-for="toast in store.toasts"
+          :key="toast.id"
+          class="toast-card"
+          :class="toast.type || 'info'"
+        >
+          <div class="toast-card-header">
+            <div class="toast-card-title">
+              <i :class="getToastIcon(toast.type)" class="toast-card-icon"></i>
+              <span class="toast-card-tag">{{ (toast.type || 'INFO').toUpperCase() }}</span>
+            </div>
+            <button class="toast-card-dismiss-btn" @click="dismissToast(toast.id)" title="Dismiss">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+
+          <div class="toast-progress-track">
+            <div class="toast-progress-fill" :class="toast.type || 'info'"></div>
+          </div>
+
+          <div class="toast-card-body">
+            {{ toast.message }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Trophy Case Achievement Unlocked Popup Banner -->
+      <div class="achievement-toast-container" id="achievement-toast-container">
+        <div
+          v-for="ach in store.achievementQueue"
+          :key="ach.id"
+          class="achievement-toast-card"
+          :class="(ach.rarity || 'gold').toLowerCase()"
+        >
+          <div class="achievement-toast-inner">
+            <div class="achievement-toast-icon-wrap">
+              <span class="achievement-toast-icon">{{ ach.icon || '🏆' }}</span>
+            </div>
+            <div class="achievement-toast-body">
+              <div class="achievement-toast-tag">
+                <i class="ph-fill ph-trophy" style="color:var(--gold)"></i> ACHIEVEMENT UNLOCKED
+              </div>
+              <div class="achievement-toast-title" :title="ach.title">{{ ach.title }}</div>
+              <div class="achievement-toast-desc">{{ ach.description }}</div>
+            </div>
+            <div class="achievement-rarity-pill" :class="(ach.rarity || 'gold').toLowerCase()">
+              {{ ach.rarity || 'Gold' }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shortcuts Modal -->
+      <shortcuts-modal v-if="showShortcuts" @close="showShortcuts = false" />
+
+      <!-- Bottom-Left Floating Scan Progress Widget -->
+      <scan-progress-widget />
+
+      <!-- Global Custom Confirm Modal -->
+      <div v-if="confirmState.show" class="modal-backdrop" style="z-index:999999;background:rgba(0,0,0,0.85);backdrop-filter:blur(20px);" @click.self="handleConfirmCancel">
+        <div class="shortcuts-modal-card" style="max-width:460px;border-radius:var(--radius-outer);border:1px solid rgba(255,255,255,0.16);box-shadow:0 24px 60px rgba(0,0,0,0.95)" @click.stop>
+          <div class="shortcuts-modal-inner" style="text-align:left">
+            <div class="shortcuts-modal-header" style="margin-bottom:1rem;border-bottom:1px solid rgba(255,255,255,0.1)">
+              <div class="shortcuts-header-title" style="color:var(--text-primary);display:flex;align-items:center;gap:10px;font-size:1.15rem;font-weight:800">
+                <i :class="confirmState.icon || 'ph ph-question'" style="color:var(--accent);font-size:1.4rem"></i>
+                <span>{{ confirmState.title || 'Confirmation Required' }}</span>
+              </div>
+              <button class="shortcuts-close-btn" @click="handleConfirmCancel">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+
+            <div style="font-size:0.92rem;color:var(--text-secondary);line-height:1.5;margin-bottom:1.5rem">
+              {{ confirmState.message }}
+            </div>
+
+            <div style="display:flex;gap:0.75rem;justify-content:flex-end">
+              <button class="btn btn-ghost" @click="handleConfirmCancel" id="confirm-modal-cancel-btn">
+                {{ confirmState.cancelText || 'Cancel' }}
+              </button>
+              <button class="btn" :class="confirmState.danger ? 'btn-primary danger' : 'btn-primary'" @click="handleConfirmOk" id="confirm-modal-ok-btn">
+                {{ confirmState.okText || 'Confirm' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+  `,
+  setup() {
+    const route = VueRouter.useRoute();
+    const navScrolled = ref(false);
+    const showProfileMenu = ref(false);
+    const showShortcuts = ref(false);
+    const appLoading = ref(true);
+
+    watch(
+      () => store.profile,
+      (prof) => {
+        document.body.classList.toggle("kids-mode-theme", !!prof?.is_kids);
+      },
+      { immediate: true, deep: true }
+    );
+
+    function handleGlobalShortcutsKey(e) {
+      const tag = (e.target && e.target.tagName) || "";
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(tag)) return;
+
+      if (e.key === "?") {
+        e.preventDefault();
+        showShortcuts.value = !showShortcuts.value;
+      }
+
+      // "/" opens Quick Search from anywhere; on /search the page's own
+      // handler focuses the input instead.
+      if (e.key === "/" && !route.path.startsWith("/search")) {
+        e.preventDefault();
+        router.push("/search");
+      }
+    }
+
+    const showNav = computed(() => {
+      return !["profiles", "setup"].some((name) => route.path === "/" + name) && !route.path.startsWith("/watch/");
+    });
+
+    const isPlayerRoute = computed(() => route.path.startsWith("/watch/"));
+    const isDetailRoute = computed(() => route.path.startsWith("/detail/"));
+
+    function isRoute(path) {
+      return route.path === path || route.fullPath === path;
+    }
+
+    const navItems = [
+      { name: "Home", path: "/", id: "nav-home", isMatch: (r) => r.path === "/" },
+      { name: "Movies", path: "/browse?type=movie", id: "nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
+      { name: "Series", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
+      { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
+      { name: "Stats", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
+      { name: "About", path: "/about", id: "nav-about", isMatch: (r) => r.path === "/about" },
+    ];
+
+    const navLinksRef = ref(null);
+    const linkRefs = ref([]);
+    const hoveredLinkIndex = ref(null);
+    const pillStyle = ref({ opacity: 0, transform: "translateX(0px)", width: "0px" });
+
+    function isNavActive(item) {
+      return item.isMatch(route);
+    }
+
+    function updatePillPosition() {
+      nextTick(() => {
+        let targetIdx = hoveredLinkIndex.value;
+        if (targetIdx === null || targetIdx === undefined) {
+          targetIdx = navItems.findIndex((item) => isNavActive(item));
+        }
+
+        if (targetIdx >= 0 && linkRefs.value[targetIdx]) {
+          const el = linkRefs.value[targetIdx];
+          pillStyle.value = {
+            opacity: 1,
+            transform: `translateX(${el.offsetLeft}px)`,
+            width: `${el.offsetWidth}px`,
+          };
+        } else {
+          pillStyle.value = { opacity: 0, transform: "translateX(0px)", width: "0px" };
+        }
+      });
+    }
+
+    watch([() => route.fullPath, hoveredLinkIndex], () => {
+      updatePillPosition();
+    });
+
+    onMounted(() => {
+      window.addEventListener("resize", updatePillPosition);
+      setTimeout(updatePillPosition, 80);
+      setTimeout(updatePillPosition, 250);
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener("resize", updatePillPosition);
+    });
+
+    function toggleProfileMenu() {
+      showProfileMenu.value = !showProfileMenu.value;
+    }
+
+    function goFavorites() {
+      showProfileMenu.value = false;
+      router.push("/favorites");
+    }
+
+    function goCollections() {
+      showProfileMenu.value = false;
+      router.push("/collections");
+    }
+
+    function goSettings() {
+      showProfileMenu.value = false;
+      router.push("/settings");
+    }
+
+    function goAbout() {
+      showProfileMenu.value = false;
+      router.push("/about");
+    }
+
+    function switchProfile() {
+      showProfileMenu.value = false;
+      store.profile = null;
+      router.push("/profiles");
+      API.post("/api/profiles/logout", {}).catch(() => {});
+    }
+
+    function logout() {
+      showProfileMenu.value = false;
+      store.profile = null;
+      router.push("/profiles");
+      API.post("/api/profiles/logout", {}).catch(() => {});
+    }
+
+    async function triggerScan() {
+      try {
+        await API.post("/api/scan", {});
+        store.scanRunning = true;
+        pollScanStatus();
+      } catch (e) {
+        if (e.message.includes("409")) {
+          addToast("Scan already in progress", "info");
+        }
+      }
+    }
+
+    // NOTE: library scan intentionally does NOT auto-start on app load or
+    // session restore — it is triggered by startLibraryScan() only when the
+    // user actively logs into a profile (ProfilesPage / SetupPage).
+
+    // Close profile menu on outside click
+    function handleOutsideClick(e) {
+      if (!e.target.closest("#nav-profile")) {
+        showProfileMenu.value = false;
+      }
+    }
+
+    // Dynamic tooltip direction & alignment calculator
+    function handleTooltipMouseOver(e) {
+      const target = e.target.closest("[data-tooltip]");
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      if (rect.top < 70) {
+        target.setAttribute("data-tooltip-pos", "bottom");
+      } else if (window.innerHeight - rect.bottom < 70) {
+        target.setAttribute("data-tooltip-pos", "top");
+      } else {
+        target.setAttribute("data-tooltip-pos", "bottom");
+      }
+
+      if (window.innerWidth - rect.right < 110) {
+        target.setAttribute("data-tooltip-align", "right");
+      } else if (rect.left < 110) {
+        target.setAttribute("data-tooltip-align", "left");
+      } else {
+        target.removeAttribute("data-tooltip-align");
+      }
+    }
+
+    onMounted(async () => {
+      window.addEventListener("mouseover", handleTooltipMouseOver);
+      window.addEventListener("keydown", handleGlobalShortcutsKey);
+
+      try {
+        // Restore a persisted session (survives page refresh) before anything else
+        const me = await API.get("/api/profiles/me").catch(() => null);
+        const profiles = await API.get("/api/profiles");
+        if (!profiles || profiles.length === 0) {
+          store.profile = null;
+          router.push("/setup");
+        } else if (me && me.id) {
+          // Session still valid — keep the user logged in on their current page
+          store.profile = me;
+          const path = router.currentRoute.value.path;
+          if (path === "/profiles") {
+            router.push("/");
+          }
+        } else {
+          // No session — show the "Who's Watching?" screen (never force logout server-side)
+          store.profile = null;
+          router.push("/profiles");
+        }
+      } catch (e) {
+        router.push("/profiles");
+      } finally {
+        appLoading.value = false;
+      }
+
+      window.addEventListener("scroll", () => {
+        navScrolled.value = window.scrollY > 20;
+      });
+
+      window.addEventListener("click", handleOutsideClick);
+
+      // Poll if scan is running
+      try {
+        const status = await API.get("/api/scan/status");
+        if (status.running) {
+          store.scanRunning = true;
+          pollScanStatus();
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener("click", handleOutsideClick);
+      window.removeEventListener("mouseover", handleTooltipMouseOver);
+      window.removeEventListener("keydown", handleGlobalShortcutsKey);
+      clearInterval(scanPollTimer);
+    });
+
+    function editCurrentProfile() {
+      showProfileMenu.value = false;
+      const targetId = store.profile?.id;
+      if (targetId) {
+        router.push({ path: "/profiles", query: { manage: "true", edit_id: targetId, t: Date.now() } });
+      } else {
+        router.push({ path: "/profiles", query: { manage: "true", t: Date.now() } });
+      }
+    }
+
+    function goStats() {
+      showProfileMenu.value = false;
+      router.push("/stats");
+    }
+
+    function dismissToast(id) {
+      store.toasts = store.toasts.filter((t) => t.id !== id);
+    }
+
+    function getToastIcon(type) {
+      if (type === "success") return "ph ph-check-circle";
+      if (type === "error") return "ph ph-warning-octagon";
+      if (type === "warning") return "ph ph-warning";
+      return "ph ph-info";
+    }
+
+    return {
+      store,
+      route,
+      navScrolled,
+      showProfileMenu,
+      showShortcuts,
+      appLoading,
+      showNav,
+      isPlayerRoute,
+      isDetailRoute,
+      isRoute,
+      router,
+      toggleProfileMenu,
+      goFavorites,
+      goCollections,
+      goStats,
+      goSettings,
+      goAbout,
+      editCurrentProfile,
+      switchProfile,
+      logout,
+      triggerScan,
+      confirmState,
+      handleConfirmOk,
+      handleConfirmCancel,
+      dismissToast,
+      getToastIcon,
+      navItems,
+      navLinksRef,
+      linkRefs,
+      hoveredLinkIndex,
+      pillStyle,
+      isNavActive,
+    };
+  },
+};
+
+// ─── Skip Timestamps Modal Component ───────────────────────────
+
+function formatSecToTime(seconds) {
+  if (!seconds || isNaN(seconds) || seconds < 0) return "00:00";
+  const s = Math.floor(seconds);
+  const m = Math.floor(s / 60);
+  const rs = s % 60;
+  return `${m.toString().padStart(2, '0')}:${rs.toString().padStart(2, '0')}`;
+}
+
+function parseTimeToSec(timeStr) {
+  if (!timeStr) return 0;
+  if (typeof timeStr === "number") return Math.floor(timeStr);
+  const str = String(timeStr).trim();
+  if (str.includes(":")) {
+    const parts = str.split(":");
+    if (parts.length === 2) {
+      return (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+    } else if (parts.length === 3) {
+      return (parseInt(parts[0], 10) || 0) * 3600 + (parseInt(parts[1], 10) || 0) * 60 + (parseInt(parts[2], 10) || 0);
+    }
+  }
+  return parseInt(str, 10) || 0;
+}
+
+const SkipTimestampsModal = {
+  props: ["media", "currentTime", "inPlayer"],
+  emits: ["close", "saved"],
+  template: `
+    <div class="modal-backdrop" style="z-index:999900;background:rgba(0,0,0,0.85);backdrop-filter:blur(20px);" @click.self="$emit('close')">
+      <div class="shortcuts-modal-card" style="max-width:520px" @click.stop>
+        <div class="shortcuts-modal-inner" style="text-align:left">
+          <div class="shortcuts-modal-header" style="margin-bottom:1.25rem">
+            <div class="shortcuts-header-title" style="color:var(--text-primary);display:flex;align-items:center;gap:10px">
+              <i class="ph ph-timer" style="color:var(--accent);font-size:1.5rem"></i>
+              <span>Edit Skip Timestamps</span>
+            </div>
+            <button class="shortcuts-close-btn" @click="$emit('close')">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+
+          <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.25rem">
+            Configure manual skip ranges for <strong>{{ media?.title }}</strong>. Timestamps can be entered as <code>MM:SS</code> or seconds.
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:1.25rem;margin-bottom:1.5rem">
+            <!-- 1. Recap Section -->
+            <div class="skip-timestamp-group">
+              <div style="font-size:0.88rem;font-weight:700;color:var(--accent);margin-bottom:2px;display:flex;align-items:center;gap:6px">
+                <i class="ph ph-rewind"></i> Recap
+                <span style="font-weight:600;color:var(--text-muted);font-size:0.65rem;text-transform:none">max 5 min</span>
+              </div>
+              <div class="skip-seg-desc">"Previously on…" catch-up before the episode proper starts.</div>
+              <label style="display:flex;align-items:center;gap:7px;margin:4px 0 6px;font-size:0.72rem;color:var(--text-muted);cursor:pointer">
+                <input type="checkbox" v-model="noneChecked.recap" @change="onNoneToggle('recap')" />
+                No recap this week — save as confirmed none
+              </label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div>
+                  <label class="form-label" style="font-size:0.75rem">Start Time</label>
+                  <div style="display:flex;gap:4px">
+                    <input type="text" v-model="form.recap_start" class="form-input" placeholder="00:00" />
+                    <button v-if="inPlayer" class="btn btn-secondary btn-sm" @click="stampCurrent('recap_start')" title="Set to active frame time">⏱️ Stamp</button>
+                  </div>
+                </div>
+                <div>
+                  <label class="form-label" style="font-size:0.75rem">End Time</label>
+                  <div style="display:flex;gap:4px">
+                    <input type="text" v-model="form.recap_end" class="form-input" placeholder="01:30" />
+                    <button v-if="inPlayer" class="btn btn-secondary btn-sm" @click="stampCurrent('recap_end')" title="Set to active frame time">⏱️ Stamp</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 2. Intro Section -->
+            <div class="skip-timestamp-group">
+              <div style="font-size:0.88rem;font-weight:700;color:#38bdf8;margin-bottom:2px;display:flex;align-items:center;gap:6px">
+                <i class="ph ph-fast-forward"></i> Intro
+                <span style="font-weight:600;color:var(--text-muted);font-size:0.65rem;text-transform:none">max 5 min</span>
+              </div>
+              <div class="skip-seg-desc">Opening titles / theme song.</div>
+              <label style="display:flex;align-items:center;gap:7px;margin:4px 0 6px;font-size:0.72rem;color:var(--text-muted);cursor:pointer">
+                <input type="checkbox" v-model="noneChecked.intro" @change="onNoneToggle('intro')" />
+                No intro this week — save as confirmed none
+              </label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div>
+                  <label class="form-label" style="font-size:0.75rem">Start Time</label>
+                  <div style="display:flex;gap:4px">
+                    <input type="text" v-model="form.intro_start" class="form-input" placeholder="01:30" />
+                    <button v-if="inPlayer" class="btn btn-secondary btn-sm" @click="stampCurrent('intro_start')" title="Set to active frame time">⏱️ Stamp</button>
+                  </div>
+                </div>
+                <div>
+                  <label class="form-label" style="font-size:0.75rem">End Time</label>
+                  <div style="display:flex;gap:4px">
+                    <input type="text" v-model="form.intro_end" class="form-input" placeholder="03:00" />
+                    <button v-if="inPlayer" class="btn btn-secondary btn-sm" @click="stampCurrent('intro_end')" title="Set to active frame time">⏱️ Stamp</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 3. Outro Section -->
+            <div class="skip-timestamp-group">
+              <div style="font-size:0.88rem;font-weight:700;color:#10b981;margin-bottom:2px;display:flex;align-items:center;gap:6px">
+                <i class="ph ph-flag"></i> Outro
+                <span style="font-weight:600;color:var(--text-muted);font-size:0.65rem;text-transform:none">max 15 min</span>
+              </div>
+              <div class="skip-seg-desc">End credits.</div>
+              <label style="display:flex;align-items:center;gap:7px;margin:4px 0 6px;font-size:0.72rem;color:var(--text-muted);cursor:pointer">
+                <input type="checkbox" v-model="noneChecked.outro" @change="onNoneToggle('outro')" />
+                No outro this week — save as confirmed none
+              </label>
+              <label style="display:flex;align-items:center;gap:7px;margin:0 0 6px;font-size:0.72rem;color:var(--text-secondary);cursor:pointer">
+                <input type="checkbox" v-model="toEnd.outro" @change="onToEndToggle" />
+                Runs to the end of the video
+              </label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div>
+                  <label class="form-label" style="font-size:0.75rem">Start Time</label>
+                  <div style="display:flex;gap:4px">
+                    <input type="text" v-model="form.outro_start" class="form-input" placeholder="22:00" />
+                    <button v-if="inPlayer" class="btn btn-secondary btn-sm" @click="stampCurrent('outro_start')" title="Set to active frame time">⏱️ Stamp</button>
+                  </div>
+                </div>
+                <div>
+                  <label class="form-label" style="font-size:0.75rem">End Time</label>
+                  <div style="display:flex;gap:4px">
+                    <input type="text" v-model="form.outro_end" class="form-input" placeholder="24:00" />
+                    <button v-if="inPlayer" class="btn btn-secondary btn-sm" @click="stampCurrent('outro_end')" title="Set to active frame time">⏱️ Stamp</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 4. Preview Section -->
+            <div class="skip-timestamp-group">
+              <div style="font-size:0.88rem;font-weight:700;color:#c084fc;margin-bottom:2px;display:flex;align-items:center;gap:6px">
+                <i class="ph ph-telescope"></i> Preview
+                <span style="font-weight:600;color:var(--text-muted);font-size:0.65rem;text-transform:none">max 15 min</span>
+              </div>
+              <div class="skip-seg-desc">"Next time on…" teaser for the following episode.</div>
+              <label style="display:flex;align-items:center;gap:7px;margin:4px 0 6px;font-size:0.72rem;color:var(--text-muted);cursor:pointer">
+                <input type="checkbox" v-model="noneChecked.preview" @change="onNoneToggle('preview')" />
+                No preview this week — save as confirmed none
+              </label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div>
+                  <label class="form-label" style="font-size:0.75rem">Start Time</label>
+                  <div style="display:flex;gap:4px">
+                    <input type="text" v-model="form.preview_start" class="form-input" placeholder="23:40" />
+                    <button v-if="inPlayer" class="btn btn-secondary btn-sm" @click="stampCurrent('preview_start')" title="Set to active frame time">⏱ Stamp</button>
+                  </div>
+                </div>
+                <div>
+                  <label class="form-label" style="font-size:0.75rem">End Time</label>
+                  <div style="display:flex;gap:4px">
+                    <input type="text" v-model="form.preview_end" class="form-input" placeholder="24:10" />
+                    <button v-if="inPlayer" class="btn btn-secondary btn-sm" @click="stampCurrent('preview_end')" title="Set to active frame time">⏱ Stamp</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:0.75rem;justify-content:flex-end">
+            <button class="btn btn-ghost" @click="$emit('close')">Cancel</button>
+            <button class="btn btn-primary" @click="save" :disabled="saving" id="btn-save-skip-stamps">
+              <i class="ph ph-floppy-disk" style="margin-right:6px"></i>
+              {{ saving ? 'Saving...' : 'Save Timestamps' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `,
+  setup(props, { emit }) {
+    const saving = ref(false);
+
+    // Segment validation limits (minutes)
+    const SEGMENTS = [
+      { key: "recap",   label: "Recap",   max: 5 },
+      { key: "intro",   label: "Intro",   max: 5 },
+      { key: "outro",   label: "Outro",   max: 15 },
+      { key: "preview", label: "Preview", max: 15 },
+    ];
+    const videoDuration = Number(props.media?.duration) || 0;
+
+    const form = ref({
+      recap_start: formatSecToTime(props.media?.recap_start),
+      recap_end: formatSecToTime(props.media?.recap_end),
+      intro_start: formatSecToTime(props.media?.intro_start),
+      intro_end: formatSecToTime(props.media?.intro_end),
+      outro_start: formatSecToTime(props.media?.outro_start),
+      outro_end: formatSecToTime(props.media?.outro_end),
+      preview_start: formatSecToTime(props.media?.preview_start),
+      preview_end: formatSecToTime(props.media?.preview_end),
+    });
+
+    // Sentinel state: a stored 0/0 pair means the user CONFIRMED this
+    // episode has no such segment (distinct from never filling it in).
+    const noneChecked = reactive({
+      recap:   Number(props.media?.recap_start) === 0 && Number(props.media?.recap_end) === 0,
+      intro:   Number(props.media?.intro_start) === 0 && Number(props.media?.intro_end) === 0,
+      outro:   Number(props.media?.outro_start) === 0 && Number(props.media?.outro_end) === 0,
+      preview: Number(props.media?.preview_start) === 0 && Number(props.media?.preview_end) === 0,
+    });
+
+    // Outro convenience: end auto-fills to the video duration on save
+    const toEnd = reactive({ outro: false });
+
+    function onNoneToggle(key) {
+      if (noneChecked[key]) {
+        form.value[key + "_start"] = "00:00";
+        form.value[key + "_end"] = "00:00";
+        if (key === "outro") toEnd.outro = false;
+      }
+    }
+
+    function stampCurrent(field) {
+      if (props.currentTime !== undefined && props.currentTime !== null) {
+        form.value[field] = formatSecToTime(props.currentTime);
+      }
+    }
+
+    async function save() {
+      if (!props.media?.id) return;
+      saving.value = true;
+
+      const payload = {};
+      for (const seg of SEGMENTS) {
+        const key = seg.key;
+        const rawStart = parseTimeToSec(form.value[key + "_start"]);
+        let rawEnd = parseTimeToSec(form.value[key + "_end"]);
+
+        // Sentinel - confirmed none
+        if (noneChecked[key]) {
+          payload[key + "_start"] = 0;
+          payload[key + "_end"] = 0;
+          continue;
+        }
+
+        const s = Number(rawStart) || 0;
+
+        // Outro: missing/to-end end ALWAYS resolves to the media's end.
+        // Client fills it when the duration is known; otherwise sends null
+        // and the SERVER measures the file via ffprobe. The saved record
+        // therefore always ends up with a concrete outro_end value.
+        if (key === "outro") {
+          if (toEnd.outro || !rawEnd || rawEnd === null) {
+            rawEnd = videoDuration > 0 ? Math.round(videoDuration) : null;
+          } else if (videoDuration > 0 && Math.abs(rawEnd - videoDuration) <= 10) {
+            rawEnd = Math.round(videoDuration);
+          }
+        }
+
+        // Untouched empty segment -> send nothing; server keeps old values.
+        // (For outro with a start but no end we DO send, end resolved above.)
+        if (!s && !rawEnd) continue;
+
+        if (!s) {
+          addToast(seg.label + ": start time is required", "error", 5000);
+          saving.value = false;
+          return;
+        }
+
+        if (rawEnd === null && key !== "outro") {
+          addToast(seg.label + ": end time is required", "error", 5000);
+          saving.value = false;
+          return;
+        }
+
+        const len = rawEnd - s;
+        if (len <= 0) {
+          addToast(seg.label + ": end must come after start", "error", 5000);
+          saving.value = false;
+          return;
+        }
+        if (len < 5) {
+          addToast(seg.label + ": segments must be at least 5 seconds long", "error", 5000);
+          saving.value = false;
+          return;
+        }
+        if (len > seg.max * 60) {
+          addToast(seg.label + ": cannot exceed " + seg.max + " minutes", "error", 5000);
+          saving.value = false;
+          return;
+        }
+
+        payload[key + "_start"] = s;
+        payload[key + "_end"] = rawEnd;
+      }
+
+      try {
+        await API.post(`/api/media/${props.media.id}/skip-timestamps`, payload);
+        emit("saved", payload);
+        emit("close");
+      } catch (e) {
+        addToast(e.message || "Failed to save skip timestamps", "error");
+      } finally {
+        saving.value = false;
+      }
+    }
+
+    return { form, saving, stampCurrent, save, noneChecked, toEnd, onNoneToggle };
+  }
+};
+
+// ─── Mount App ────────────────────────────────────────────────
+
+const app = createApp(App);
+app.component("skip-timestamps-modal", SkipTimestampsModal);
+app.use(router);
+app.mount("#app");

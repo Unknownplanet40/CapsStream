@@ -1,0 +1,30 @@
+# ─── Secrets & local config ─────────────────────────────────
+.env
+config.json
+skills-lock.json
+
+# ─── User data (database, metadata, artwork, subtitles) ─────
+# Keep only the fresh template database
+data/**
+!data/templates
+data/templates/**
+!data/templates/fresh_capsstream.db
+
+# ─── Media & large runtimes (user-provided, never committed) ─
+winpython/
+ffmpeg/
+
+# ─── Python artifacts ────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# ─── Tooling / local junk ────────────────────────────────────
+.agents/
+_update_tmp/
+*.log
+.DS_Store
+Thumbs.db

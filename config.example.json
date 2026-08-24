@@ -1,0 +1,31 @@
+{
+  "tmdb_api_key": "",
+  "omdb_api_key": "",
+  "hide_system_files": false,
+  "hide_unmounted_items": true,
+  "browser": "edge",
+  "metadata_sources": {
+    "enable_jikan": true,
+    "enable_omdb": true
+  },
+  "port": 8000,
+  "host": "127.0.0.1",
+  "media_paths": {
+  },
+  "subtitles": {
+    "auto_load": true,
+    "preferred_language": "en",
+    "font_size": "normal",
+    "appearance": {
+      "fontSize": "1.1rem",
+      "textColor": "#ffffff",
+      "bgOpacity": 0.5
+    }
+  },
+  "playback": {
+    "auto_play_next": true,
+    "auto_skip_intro": false,
+    "seek_step": 10,
+    "default_volume": 1
+  }
+}
