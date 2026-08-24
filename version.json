@@ -1,5 +1,6 @@
 {
   "name": "CapsStream",
-  "version": "2.0.0.0",
-  "channel": "stable"
+  "version": "2.1.0.0",
+  "channel": "stable",
+  "download_url": "https://github.com/Unknownplanet40/CapsStream/releases/download/v2.1.0.0/CapsStream-update-2.1.0.0.zip"
 }
