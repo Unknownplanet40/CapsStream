@@ -1821,10 +1821,11 @@ const SettingsPage = {
               {{ updateState.message || 'Check for updates to see if a new version is available.' }}
             </div>
 
-            <pre
+            <div
               v-if="updateState.changelog && updateState.status === 'available'"
-              style="margin:0;padding:10px 12px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:8px;font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:180px;overflow-y:auto"
-            >{{ updateState.changelog }}</pre>
+              class="changelog-box"
+              v-html="changelogHtml"
+            ></div>
 
             <div style="display:flex;gap:10px;flex-wrap:wrap">
               <button class="btn btn-secondary" @click="checkUpdates" :disabled="updateChecking">
@@ -2414,6 +2415,48 @@ const SettingsPage = {
       } catch (e) {}
     }
 
+    // ─── Changelog rendering: safe markdown → HTML ───────────
+    // Escapes everything first, then re-adds a small whitelist:
+    // headers, bullet lists, **bold**, *italic*, `code`.
+    function renderChangelog(md) {
+      if (!md) return "";
+      const esc = String(md).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const inline = (s) => s
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+        .replace(/`([^`]+)`/g, '<code class="cl-code">$1</code>');
+
+      let html = "";
+      let inList = false;
+      const closeList = () => { if (inList) { html += "</ul>"; inList = false; } };
+
+      for (const raw of esc.split(/\r?\n/)) {
+        const t = raw.trim();
+        if (!t) { closeList(); continue; }
+
+        const h = t.match(/^(#{1,4})\s+(.*)$/);
+        if (h) {
+          closeList();
+          const lvl = Math.min(h[1].length + 2, 6);
+          html += `<h${lvl} class="cl-h">${inline(h[2])}</h${lvl}>`;
+          continue;
+        }
+
+        if (/^[-*•]\s+/.test(t)) {
+          if (!inList) { html += '<ul class="cl-list">'; inList = true; }
+          html += `<li>${inline(t.replace(/^[-*•]\s+/, ""))}</li>`;
+          continue;
+        }
+
+        closeList();
+        html += `<p class="cl-p">${inline(t)}</p>`;
+      }
+      closeList();
+      return html;
+    }
+
+    const changelogHtml = computed(() => renderChangelog(updateState.value.changelog));
+
     async function checkUpdates() {
       updateChecking.value = true;
       updateState.value = { ...updateState.value, status: "checking", message: "Checking for updates..." };
@@ -2613,6 +2656,7 @@ const SettingsPage = {
       updateState,
       updateChecking,
       updateInstalling,
+      changelogHtml,
       checkUpdates,
       installUpdate,
       saveSettings,
@@ -2799,6 +2843,25 @@ const PlayerPage = {
           <button class="player-compat-dismiss" @click.stop="dismissPlaybackWarning" title="Dismiss">
             <i class="ph ph-x"></i>
           </button>
+        </div>
+      </transition>
+
+      <!-- Volume OSD (minimal vertical bar, right side) -->
+      <transition name="fade">
+        <div v-if="volumeOSD" class="player-volume-osd">
+          <i :class="isMuted || volume === 0 ? 'ph-fill ph-speaker-x' : volume < 0.5 ? 'ph-fill ph-speaker-low' : 'ph-fill ph-speaker-high'"></i>
+          <div class="player-volume-bar">
+            <div class="player-volume-fill" :style="{ height: volumeOSDPct + '%' }"></div>
+          </div>
+          <span>{{ volumeOSDPct }}%</span>
+        </div>
+      </transition>
+
+      <!-- Seek OSD (direction flash) -->
+      <transition name="fade">
+        <div v-if="seekOSD" class="player-seek-osd" :class="seekOSD.dir">
+          <i class="ph" :class="seekOSD.dir === 'forward' ? 'ph ph-arrow-clockwise' : 'ph ph-arrow-counter-clockwise'"></i>
+          <span>{{ seekOSD.dir === 'forward' ? '+' : '−' }}{{ seekOSD.seconds }}s</span>
         </div>
       </transition>
 
@@ -4091,9 +4154,33 @@ const PlayerPage = {
     function skip(seconds) {
       if (!videoRef.value) return;
       const step = seconds !== undefined && seconds !== null ? seconds : playerSettings.value?.playback?.seek_step || 10;
-      // currentTime is player time — seekTo expects CONTENT time
+      // currentTime is player time - seekTo expects CONTENT time
       const targetTime = Math.min(Math.max(0, playerToContent((currentTime.value || 0) + step)), duration.value || 0);
+      triggerSeekOSD(step >= 0 ? "forward" : "back", Math.abs(step));
       seekTo(targetTime);
+    }
+
+    // ─── Minimal OSDs (volume bar / seek flash) ──────────────
+    const volumeOSD = ref(false);
+    let volumeOSDTimer = null;
+    const volumeOSDPct = computed(() => {
+      if (isMuted.value) return 0;
+      return Math.max(0, Math.min(100, Math.round((Number(volume.value) || 0) * 100)));
+    });
+    function triggerVolumeOSD() {
+      volumeOSD.value = true;
+      clearTimeout(volumeOSDTimer);
+      volumeOSDTimer = setTimeout(() => { volumeOSD.value = false; }, 1000);
+    }
+    watch(volume, () => triggerVolumeOSD());
+    watch(isMuted, () => triggerVolumeOSD());
+
+    const seekOSD = ref(null);
+    let seekOSDTimer = null;
+    function triggerSeekOSD(dir, seconds) {
+      seekOSD.value = { dir, seconds };
+      clearTimeout(seekOSDTimer);
+      seekOSDTimer = setTimeout(() => { seekOSD.value = null; }, 800);
     }
 
     function onVideoSeeked() {
@@ -5249,6 +5336,9 @@ const PlayerPage = {
       endClockTime,
       displayDuration,
       displayTime,
+      volumeOSD,
+      volumeOSDPct,
+      seekOSD,
       showControls,
       showSkipModal,
       activeSkipAction,

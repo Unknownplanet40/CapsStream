@@ -20,6 +20,7 @@ jobs:
       skip: ${{ steps.tagged.outputs.skip }}
       bump_type: ${{ steps.bump.outputs.bump_type }}
       current_version: ${{ steps.bump.outputs.current_version }}
+      changelog: ${{ steps.commits.outputs.list }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -110,6 +111,24 @@ jobs:
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "Bump → $BUMP_TYPE ($CURRENT → $NEW_VERSION)"
 
+      - name: Collect commit list for the changelog
+        id: commits
+        if: steps.tagged.outputs.skip != 'true' && steps.bump.outputs.skip != 'true'
+        shell: bash
+        run: |
+          LAST_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+(\.[0-9]+){1,3}$' | head -n 1 || true)
+          if [ -n "$LAST_TAG" ]; then
+            RANGE="${LAST_TAG}..HEAD"
+          else
+            RANGE=""
+          fi
+          {
+            echo "list<<CHANGELOG_EOF"
+            git log ${RANGE:+"$RANGE"} --pretty=format:"- %s (%h)" || echo "- Initial release"
+            echo ""
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Update VERSION + version.json
         if: steps.tagged.outputs.skip != 'true' && steps.bump.outputs.skip != 'true'
         env:
@@ -199,6 +218,9 @@ jobs:
             **Type**: ${{ needs.semantic-bump.outputs.bump_type }}
             **From**: ${{ needs.semantic-bump.outputs.current_version }}
             **To**: ${{ needs.semantic-bump.outputs.new_version }}
+
+            **Commits**:
+            ${{ needs.semantic-bump.outputs.changelog }}
 
             Auto-released via conventional commits.
           generate_release_notes: true

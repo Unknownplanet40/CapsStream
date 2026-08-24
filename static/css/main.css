@@ -228,6 +228,54 @@ ol {
   font-weight: 600;
 }
 
+/* Changelog box (Settings → Updates) */
+.changelog-box {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  max-height: 220px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+.changelog-box .cl-h {
+  margin: 10px 0 6px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.changelog-box .cl-h:first-child {
+  margin-top: 0;
+}
+
+.changelog-box .cl-list {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+  list-style: disc;
+}
+
+.changelog-box .cl-list li {
+  margin-bottom: 3px;
+}
+
+.changelog-box .cl-p {
+  margin: 6px 0;
+}
+
+.changelog-box .cl-code {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.72rem;
+  color: #e2e8f0;
+}
+
 /* ─── Loading Screen ─────────────────────────────────────── */
 .loading-screen {
   position: fixed;
@@ -6098,6 +6146,92 @@ body.kids-mode-theme .suggestion-tag:hover {
   background: rgba(16, 185, 129, 0.2);
   border-color: rgba(16, 185, 129, 0.5);
   color: #10b981;
+}
+
+/* ─── Minimal Player OSDs (volume / seek) ───────────────────── */
+.player-volume-osd {
+  position: absolute;
+  right: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 9px;
+  border-radius: 14px;
+  background: rgba(10, 10, 15, 0.78);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+.player-volume-osd i {
+  font-size: 1.15rem;
+  color: #fff;
+}
+
+.player-volume-bar {
+  width: 4px;
+  height: 110px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.22);
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.player-volume-fill {
+  width: 100%;
+  background: #fff;
+  border-radius: 99px;
+  transition: height 0.12s ease;
+}
+
+.player-volume-osd span {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.player-seek-osd {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background: rgba(10, 10, 15, 0.72);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  animation: seek-osd-pop 0.18s ease-out;
+}
+
+.player-seek-osd i {
+  font-size: 1.7rem;
+  color: #fff;
+}
+
+.player-seek-osd span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.player-seek-osd.forward { right: 12%; }
+.player-seek-osd.back    { left: 12%; }
+
+@keyframes seek-osd-pop {
+  from { opacity: 0; transform: translateY(-50%) scale(0.85); }
+  to   { opacity: 1; transform: translateY(-50%) scale(1); }
 }
 
 .skip-seg-desc {
