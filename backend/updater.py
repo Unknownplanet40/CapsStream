@@ -139,6 +139,15 @@ def check_for_update():
         except Exception as e:
             print(f"[Updater] Raw version.json unavailable: {e}")
 
+    # The release asset name is deterministic (built by the Release
+    # workflow), so the download URL can always be constructed — even when
+    # version.json on the repo predates the release or omits the URL.
+    if latest and not download_url:
+        download_url = (
+            f"https://github.com/{GITHUB_REPO}/releases/download/"
+            f"v{latest}/CapsStream-update-{latest}.zip"
+        )
+
     result["latest"] = latest
     result["download_url"] = download_url
     result["changelog"] = changelog
