@@ -79,6 +79,7 @@ const store = reactive({
   scanMatched: 0,
   scanElapsed: 0,
   serverOnline: true,
+  updateInfo: null,      // set when an update is available
 });
 
 let isServerOfflineToastActive = false;
@@ -1791,6 +1792,59 @@ const SettingsPage = {
       </div>
 
       <template v-else>
+        <!-- 0. Updates -->
+        <div class="settings-section" id="settings-updates-section">
+          <div class="settings-section-title">
+            <i class="ph ph-arrow-circle-up" style="color:var(--accent)"></i>
+            <span>Updates</span>
+          </div>
+          <div class="settings-group" style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+              <div class="settings-label-container">
+                <div class="settings-label">Current version</div>
+                <div class="settings-desc">CapsStream v{{ sysInfo?.version || '…' }}</div>
+              </div>
+              <div class="settings-label-container" v-if="updateState.last_checked">
+                <div class="settings-label">Last checked</div>
+                <div class="settings-desc">{{ updateState.last_checked }}</div>
+              </div>
+              <div class="settings-label-container" v-if="updateState.latest && updateState.status !== 'up_to_date'">
+                <div class="settings-label">Latest available</div>
+                <div class="settings-desc" style="color:var(--accent)">v{{ updateState.latest }}</div>
+              </div>
+            </div>
+
+            <div
+              class="update-status-line"
+              :style="{ color: updateState.status === 'available' ? 'var(--accent)' : updateState.status === 'error' ? '#ef4444' : 'var(--text-secondary)' }"
+            >
+              {{ updateState.message || 'Check for updates to see if a new version is available.' }}
+            </div>
+
+            <pre
+              v-if="updateState.changelog && updateState.status === 'available'"
+              style="margin:0;padding:10px 12px;background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:8px;font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:180px;overflow-y:auto"
+            >{{ updateState.changelog }}</pre>
+
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn btn-secondary" @click="checkUpdates" :disabled="updateChecking">
+                <i :class="updateChecking ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="updateChecking ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+                {{ updateChecking ? 'Checking...' : 'Check for Updates' }}
+              </button>
+              <button
+                v-if="updateState.status === 'available'"
+                class="btn btn-primary"
+                @click="installUpdate"
+                :disabled="updateInstalling"
+                id="btn-install-update"
+              >
+                <i :class="updateInstalling ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="updateInstalling ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+                {{ updateInstalling ? 'Installing...' : 'Install Update' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- 1. Metadata Providers -->
         <div class="settings-section">
           <div class="settings-section-title">
@@ -2349,6 +2403,7 @@ const SettingsPage = {
       }
       loadSettings();
       loadCacheInfo();
+      loadSystemInfo();
       window.addEventListener("beforeunload", handleBeforeUnload);
     });
 
@@ -2484,11 +2539,17 @@ const SettingsPage = {
 
     return {
       store,
+      sysInfo,
       loading,
       saving,
       testingApi,
       form,
       newPaths,
+      updateState,
+      updateChecking,
+      updateInstalling,
+      checkUpdates,
+      installUpdate,
       saveSettings,
       testApi,
       addPath,
@@ -7825,6 +7886,23 @@ const App = {
         </div>
       </nav>
 
+      <!-- Update-available banner -->
+      <transition name="fade">
+        <div
+          class="update-banner"
+          v-if="store.updateInfo?.status === 'available' && !updateBannerDismissed && showNav"
+        >
+          <i class="ph ph-arrow-circle-up"></i>
+          <span>
+            Update available (v{{ store.updateInfo.latest }}) —
+            <a href="#" @click.prevent="router.push('/settings'); updateBannerDismissed = true">go to Settings to install</a>
+          </span>
+          <button class="update-banner-dismiss" @click="updateBannerDismissed = true" title="Dismiss">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+      </transition>
+
       <!-- Main content -->
       <main :style="{ paddingTop: showNav && isPlayerRoute && isDetailRoute ? 'var(--nav-height)' : '0' }">
         <router-view />
@@ -7934,6 +8012,26 @@ const App = {
         document.body.classList.toggle("kids-mode-theme", !!prof?.is_kids);
       },
       { immediate: true, deep: true }
+    );
+
+    // ─── Update banner state ─────────────────────────────────────
+    const updateBannerDismissed = ref(false);
+    let updateQuietChecked = false;
+    async function checkUpdateQuiet() {
+      if (updateQuietChecked) return;
+      updateQuietChecked = true;
+      try {
+        const r = await API.get("/api/system/check-update");
+        if (r && r.status === "available") store.updateInfo = r;
+      } catch (e) {}
+    }
+
+    // Quietly check once after the user logs in
+    watch(
+      () => store.profile,
+      (p) => {
+        if (p) checkUpdateQuiet();
+      }
     );
 
     function handleGlobalShortcutsKey(e) {
@@ -8187,6 +8285,7 @@ const App = {
       showShortcuts,
       appLoading,
       showNav,
+      updateBannerDismissed,
       isPlayerRoute,
       isDetailRoute,
       isRoute,

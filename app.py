@@ -43,6 +43,15 @@ app.secret_key = "capsstream_secret_key_fixed_v1"
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10MB max upload
 
 
+def get_app_version():
+    """Read the version from the VERSION file (fallback to 2.0.0.0)."""
+    try:
+        with open(os.path.join(BASE_DIR, "VERSION"), encoding="utf-8") as f:
+            return f.read().strip() or "2.0.0.0"
+    except Exception:
+        return "2.0.0.0"
+
+
 def load_config():
     # Delegate so .env / environment secrets are included
     from backend.settings import load_config as _load
@@ -832,6 +841,39 @@ def api_stream(media_id):
     return stream_file(media["file_path"])
 
 
+@app.route("/api/system/check-update", methods=["GET"])
+def api_check_update():
+    """Compare local VERSION with the latest GitHub release."""
+    from backend.updater import check_for_update
+    try:
+        result = check_for_update()
+        result["version"] = get_app_version()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "version": get_app_version(),
+        }), 500
+
+
+@app.route("/api/system/apply-update", methods=["POST"])
+def api_apply_update():
+    """Download and install the latest update package (code files only)."""
+    from backend.updater import apply_update
+    data = request.json or {}
+    try:
+        result = apply_update(data.get("download_url"))
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": str(e),
+            "restart_required": False,
+            "ui_only": False,
+        }), 500
+
+
 @app.route("/api/transcode-caps", methods=["GET"])
 def api_transcode_caps():
     """Reports the best available video encoder for compatibility playback."""
@@ -1362,6 +1404,7 @@ def api_system_info():
     import platform
     import json
     from backend.db import DB_PATH, get_conn
+    from backend.updater import _read_state as _updater_state
 
     db_size_str = "0 KB"
     if os.path.exists(DB_PATH):
@@ -1512,9 +1555,9 @@ def api_system_info():
     }
 
     return jsonify({
-        "version": "2.0.0.0",
+        "version": get_app_version(),
         "app_name": "CapsStream",
-        "engine_name": "CapsStream High-Perf Core v2.0.0.0",
+        "engine_name": f"CapsStream High-Perf Core v{get_app_version()}",
         "engine_features": "SQLite WAL Mode • Synced Audio Remux • Drive-Mount Cache",
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "platform": platform.platform(),
@@ -1527,6 +1570,8 @@ def api_system_info():
         "db_metrics": db_metrics,
         "api_statuses": api_statuses,
         "github_profile": github_profile,
+        "last_checked": _updater_state().get("last_checked"),
+        "latest_version": _updater_state().get("latest"),
         "storage_info": storage_info,
         "media_counts": {
             "total": total_count,
