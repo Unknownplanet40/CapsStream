@@ -7351,7 +7351,7 @@ const AboutPage = {
         </div>
         <h1 class="about-hero-title">Stream Everything You Own.</h1>
         <p class="about-hero-subtitle">
-          CapsStream is your personal streaming platform for movies, TV shows, music, and more. Built for self-hosting, it delivers a clean, Netflix-inspired experience with fast browsing, rich metadata, watch history, continue watching, and seamless playback.
+          CapsStream is your personal streaming platform for movies and TV shows. Built for self-hosting, it delivers a clean, Netflix-inspired experience with fast browsing, rich metadata, watch history, continue watching, and seamless playback.
         </p>
         <div class="about-hero-tags">
           <span class="about-tag">🎬 4K HEVC Ready</span>
@@ -7553,35 +7553,33 @@ const AboutPage = {
           </div>
         </div>
 
-        <!-- Live Storage Progress Meter -->
-        <div class="storage-progress-wrapper" v-if="sysInfo?.storage_info" style="margin-top:1.5rem">
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <div style="font-size:0.82rem;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px">
-              <i class="ph ph-hard-drives" style="color:var(--accent)"></i> MEDIA STORAGE BREAKDOWN
+        <!-- Media Storage Breakdown -->
+        <div class="storage-panel" v-if="sysInfo?.storage_info && sysInfo.storage_info.total_bytes > 0" style="margin-top:1.5rem">
+          <div class="storage-panel-head">
+            <div class="storage-panel-title">
+              <i class="ph ph-hard-drives"></i>
+              <span>Media Storage</span>
             </div>
-            <div style="font-size:0.85rem;font-weight:800;color:var(--accent)">
-              {{ sysInfo.storage_info.total_size }} Total
+            <div class="storage-panel-total">
+              {{ sysInfo.storage_info.total_size }}
+              <span>on disk</span>
             </div>
           </div>
 
-          <div class="storage-bar-track">
-            <div class="storage-segment-movies" :style="{ width: sysInfo.storage_info.movies_pct + '%' }" :title="'Movies: ' + sysInfo.storage_info.movies_size"></div>
-            <div class="storage-segment-series" :style="{ width: sysInfo.storage_info.series_pct + '%' }" :title="'Series: ' + sysInfo.storage_info.series_size"></div>
-            <div class="storage-segment-anime" :style="{ width: sysInfo.storage_info.anime_pct + '%' }" :title="'Anime: ' + sysInfo.storage_info.anime_size"></div>
-          </div>
-
-          <div style="display:flex;gap:1.25rem;font-size:0.78rem;color:var(--text-muted);flex-wrap:wrap;margin-top:4px">
-            <div style="display:flex;align-items:center;gap:6px">
-              <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block"></span>
-              Movies: <strong>{{ sysInfo.storage_info.movies_size }}</strong> ({{ sysInfo.storage_info.movies_pct }}%)
-            </div>
-            <div style="display:flex;align-items:center;gap:6px">
-              <span style="width:8px;height:8px;border-radius:50%;background:#38bdf8;display:inline-block"></span>
-              TV Series: <strong>{{ sysInfo.storage_info.series_size }}</strong> ({{ sysInfo.storage_info.series_pct }}%)
-            </div>
-            <div style="display:flex;align-items:center;gap:6px">
-              <span style="width:8px;height:8px;border-radius:50%;background:#a855f7;display:inline-block"></span>
-              Anime: <strong>{{ sysInfo.storage_info.anime_size }}</strong> ({{ sysInfo.storage_info.anime_pct }}%)
+          <div class="storage-tiles">
+            <div class="storage-tile" v-for="seg in [
+              { name: 'Movies', size: sysInfo.storage_info.movies_size, pct: sysInfo.storage_info.movies_pct, count: sysInfo.media_counts?.movies },
+              { name: 'Series', size: sysInfo.storage_info.series_size, pct: sysInfo.storage_info.series_pct, count: sysInfo.media_counts?.series },
+              { name: 'Anime',  size: sysInfo.storage_info.anime_size,  pct: sysInfo.storage_info.anime_pct,  count: sysInfo.media_counts?.anime },
+            ]" :key="seg.name">
+              <i class="ph ph-hard-drive storage-tile-icon"></i>
+              <div class="storage-tile-info">
+                <div class="storage-tile-name">{{ seg.name }}<template v-if="seg.count != null"> ({{ seg.count }})</template></div>
+                <div class="storage-tile-bar">
+                  <div class="storage-tile-fill" :style="{ width: seg.pct + '%' }"></div>
+                </div>
+                <div class="storage-tile-cap">{{ seg.size }} of {{ sysInfo.storage_info.total_size }} — {{ seg.pct }}%</div>
+              </div>
             </div>
           </div>
         </div>

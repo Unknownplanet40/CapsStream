@@ -7815,33 +7815,108 @@ kbd.about-kbd {
   color: var(--text-muted);
 }
 
-/* Live Storage Progress Bar */
-.storage-progress-wrapper {
+/* Media Storage Breakdown panel */
+.storage-panel {
   margin-top: 1.25rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  padding: 1.25rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 18px 20px;
 }
 
-.storage-bar-track {
-  height: 12px;
-  width: 100%;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 99px;
-  overflow: hidden;
+.storage-panel-head {
   display: flex;
-  margin: 10px 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
 }
 
-.storage-segment-movies {
-  background: var(--accent);
+.storage-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
-.storage-segment-series {
-  background: #38bdf8;
+
+.storage-panel-title i {
+  font-size: 1rem;
+  color: var(--text-muted);
 }
-.storage-segment-anime {
-  background: #a855f7;
+
+.storage-panel-total {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-panel-total span {
+  margin-left: 4px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/* Media Storage — Windows 11 "Devices and drives" style tiles */
+.storage-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px 24px;
+}
+
+.storage-tile {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  min-width: 0;
+}
+
+.storage-tile-icon {
+  flex-shrink: 0;
+  font-size: 1.5rem;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.storage-tile-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.storage-tile-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 5px;
+}
+
+.storage-tile-bar {
+  height: 5px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.storage-tile-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: #4cc2ff;
+  transition: width 0.4s ease;
+}
+
+.storage-tile-cap {
+  margin-top: 5px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ─── 3-Section Glass Cards Layout ───────────────────────────── */

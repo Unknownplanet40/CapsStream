@@ -1431,8 +1431,16 @@ def api_system_info():
                 series_count = r[1]
             elif r[0] == "anime":
                 anime_count = r[1]
+        # Count only real markers — columns default to 0 (a 0/0 pair means
+        # "confirmed none"), so IS NOT NULL would match every library row.
         skip_markers_count = conn.execute(
-            "SELECT COUNT(*) FROM media WHERE intro_start IS NOT NULL OR outro_start IS NOT NULL OR recap_start IS NOT NULL"
+            """
+            SELECT COUNT(*) FROM media WHERE
+              (recap_start  IS NOT NULL AND recap_start  > 0) OR
+              (intro_start  IS NOT NULL AND intro_start  > 0) OR
+              (outro_start  IS NOT NULL AND outro_start  > 0) OR
+              (preview_start IS NOT NULL AND preview_start > 0)
+            """
         ).fetchone()[0] or 0
         conn.close()
     except Exception:
