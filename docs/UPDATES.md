@@ -35,26 +35,44 @@ touched.
 
 ## For developers (publishing a release)
 
-1. Set your repository in **`backend/updater.py` → `GITHUB_REPO`**
-   (`"USERNAME/CapsStream"`).
-2. Make sure the GitHub workflow files (`.github/workflows/`) are pushed and
-   Actions are enabled for the repo.
-3. Bump and publish in one step:
+### Automatic (recommended) — conventional commits
 
-   ```bash
-   ./scripts/release.sh 2.0.1
-   ```
+Every push to `main` is analyzed by the **Semantic Version Auto Release**
+workflow. It reads commit subjects since the last tag and bumps the version
+automatically:
 
-   This writes `VERSION`, commits, tags `v2.0.1`, and pushes. The tag
-   triggers the **Release** workflow which:
+| Commit message | Bump |
+|---|---|
+| `feat: …` / `feat(scope): …` / `feature:` | **Minor** |
+| `fix:` / `docs:` / `style:` / `refactor:` / `perf:` / `test:` / `chore:` | **Patch** |
+| `BREAKING CHANGE` in body, `!:` suffix, or `+semver: major` | **Major** |
+| anything else (no recognized prefix) | no release |
 
-   - Verifies `VERSION` matches the tag,
-   - Builds `CapsStream-update-2.0.1.zip` (code only: `app.py`, `backend/`,
-     `static/`, `templates/`, `requirements.txt`, `start.bat`, `update.bat`,
-     `VERSION`),
-   - Generates a changelog from commits,
-   - Publishes the GitHub Release with the zip attached,
-   - Updates `version.json` on `main` so clients see the new version.
+CapsStream's 4-part scheme maps as **Major.Minor.Build.Revision** — a minor
+bump resets Build/Revision, a patch bump increments Build only.
+
+The workflow then updates `VERSION` + `version.json`, commits as
+`github-actions[bot]` with `[skip ci]`, tags `vX.Y.Z.W`, and pushes — which
+chains into the **Release** workflow that builds the update zip and
+publishes the GitHub Release with a commit-based changelog.
+
+Just push with proper prefixes:
+
+```bash
+git commit -m "feat: add downloads page" && git push
+```
+
+That's it. ~1 minute later the release is live and clients see the update.
+
+### Manual
+
+Set your repository in **`backend/updater.py` → `GITHUB_REPO`**
+(`"Unknownplanet40/CapsStream"`), then either run the Auto Release flow by
+pushing a conventional commit, or tag manually:
+
+```bash
+./scripts/release.sh 2.0.1
+```
 
 ### Version scheme
 
@@ -62,11 +80,12 @@ touched.
 |---|---|
 | Major | Breaking changes / major rewrites |
 | Minor | New features or significant enhancements |
-| Build | Recompilation of same/updated source |
+| Build | Updated source (incremented by `fix:`/`chore:`/etc.) |
 | Revision | Hotfixes, patches, interchangeable adjustments |
 
 ### Client resolution order
 
 1. `GET https://api.github.com/repos/<repo>/releases/latest` — gives the tag,
    changelog body, and zip asset URL.
-2. Fallback: raw `version.json` from the default branch.
+2. Fallback: raw `version.json` from the default branch (the download URL is
+   also constructed deterministically from the tag if missing).
