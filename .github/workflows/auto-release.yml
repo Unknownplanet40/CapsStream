@@ -5,13 +5,21 @@ on:
     branches:
       - main
       - rebuild/*
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  # ── Job 1: detect bump from commits, update VERSION + version.json,
+  #           commit, tag, push.
   semantic-bump:
     runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+      skip: ${{ steps.tagged.outputs.skip }}
+      bump_type: ${{ steps.bump.outputs.bump_type }}
+      current_version: ${{ steps.bump.outputs.current_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,8 +29,19 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      - name: Skip if HEAD is already tagged
+        id: tagged
+        run: |
+          if git describe --exact-match --tags HEAD >/dev/null 2>&1; then
+            echo "HEAD is already tagged — nothing to release"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Determine version bump from commits
         id: bump
+        if: steps.tagged.outputs.skip != 'true'
         run: |
           set -euo pipefail
 
@@ -74,14 +93,12 @@ jobs:
             CLEAN_VERSION="2.0.0.0"
           fi
 
-          # Split safely (CapsStream scheme: Major.Minor.Build.Revision)
+          # CapsStream scheme: Major.Minor.Build.Revision
           IFS='.' read -r MAJOR MINOR BUILD REVISION <<< "$CLEAN_VERSION"
           MAJOR=${MAJOR:-0}
           MINOR=${MINOR:-0}
           BUILD=${BUILD:-0}
           REVISION=${REVISION:-0}
-
-          echo "DEBUG: Parsed MAJOR=$MAJOR MINOR=$MINOR BUILD=$BUILD REVISION=$REVISION"
 
           case "$BUMP_TYPE" in
             major) ((MAJOR += 1)); MINOR=0; BUILD=0; REVISION=0 ;;
@@ -94,7 +111,7 @@ jobs:
           echo "Bump → $BUMP_TYPE ($CURRENT → $NEW_VERSION)"
 
       - name: Update VERSION + version.json
-        if: steps.bump.outputs.skip != 'true'
+        if: steps.tagged.outputs.skip != 'true' && steps.bump.outputs.skip != 'true'
         env:
           NEW_VER: ${{ steps.bump.outputs.new_version }}
           REPO: ${{ github.repository }}
@@ -106,7 +123,7 @@ jobs:
             && mv tmp.json version.json
 
       - name: Commit version bump
-        if: steps.bump.outputs.skip != 'true'
+        if: steps.tagged.outputs.skip != 'true' && steps.bump.outputs.skip != 'true'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -117,12 +134,72 @@ jobs:
             git commit -m "chore(release): ${{ steps.bump.outputs.bump_type }} bump to ${{ steps.bump.outputs.new_version }} [skip ci]"
 
       - name: Push version bump commit
-        if: steps.bump.outputs.skip != 'true'
+        if: steps.tagged.outputs.skip != 'true' && steps.bump.outputs.skip != 'true'
         run: git push
 
       - name: Create & push git tag
-        if: steps.bump.outputs.skip != 'true'
+        if: steps.tagged.outputs.skip != 'true' && steps.bump.outputs.skip != 'true'
         run: |
           NEW_VER="${{ steps.bump.outputs.new_version }}"
           git tag "v${NEW_VER}"
           git push origin "v${NEW_VER}"
+
+  # ── Job 2: build the code-only zip and publish the GitHub Release.
+  #           Runs in the SAME workflow (GITHUB_TOKEN tag pushes can't
+  #           trigger other workflows, so this must live here).
+  release:
+    needs: semantic-bump
+    if: needs.semantic-bump.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.semantic-bump.outputs.new_version }}
+
+      - name: Verify VERSION matches the tag
+        shell: bash
+        run: |
+          TAG="${{ needs.semantic-bump.outputs.new_version }}"
+          FILE_VER=$(tr -d ' \n\r' < VERSION)
+          echo "tag=$TAG file=$FILE_VER"
+          if [ "$TAG" != "$FILE_VER" ]; then
+            echo "::error::VERSION ($FILE_VER) does not match tag ($TAG)"
+            exit 1
+          fi
+
+      - name: Build code-only update zip
+        shell: bash
+        run: |
+          NEW_VER="${{ needs.semantic-bump.outputs.new_version }}"
+          ZIP="CapsStream-update-${NEW_VER}.zip"
+          zip -r "$ZIP" \
+            app.py \
+            backend \
+            -x "backend/__pycache__/*" "backend/**/__pycache__/*"
+          zip "$ZIP" \
+            static/js/app.js \
+            static/css/main.css \
+            static/img/favicon.png \
+            static/sfx/bell.wav \
+            templates/index.html \
+            requirements.txt \
+            start.bat \
+            update.bat \
+            VERSION
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+          unzip -l "$ZIP"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.semantic-bump.outputs.new_version }}
+          name: CapsStream v${{ needs.semantic-bump.outputs.new_version }}
+          body: |
+            **Type**: ${{ needs.semantic-bump.outputs.bump_type }}
+            **From**: ${{ needs.semantic-bump.outputs.current_version }}
+            **To**: ${{ needs.semantic-bump.outputs.new_version }}
+
+            Auto-released via conventional commits.
+          generate_release_notes: true
+          files: ${{ env.ZIP }}

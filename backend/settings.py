@@ -312,6 +312,7 @@ def is_browser_already_open(url):
         PROCESS_VM_READ = 0x0010
 
         url_clean = url.replace("http://", "").replace("https://", "").lower()
+        url_full = url.lower()
 
         windows = []
         def foreach_window(hwnd, lParam):
@@ -340,7 +341,11 @@ def is_browser_already_open(url):
             # Strictly restrict detection to actual browser processes
             if any(b in pname for b in ["msedge", "chrome", "brave", "opera", "vivaldi"]):
                 t_lower = title.lower()
-                if t_lower == "capsstream" or "capsstream" in t_lower or url_clean in t_lower or "127.0.0.1" in t_lower or "localhost" in t_lower:
+                # STRICT: the window title must contain the FULL app URL
+                # (e.g. "127.0.0.1:8000"). Loose matches like the word
+                # "capsstream" or a bare "localhost" caused false positives
+                # that suppressed launching.
+                if url_clean in t_lower or url_full in t_lower:
                     return True
     except Exception:
         pass
@@ -354,13 +359,16 @@ def is_browser_already_open(url):
         ).decode("utf-8", errors="ignore")
         
         target = f"--app={url}".lower()
-        target_host = url.replace("http://", "").replace("https://", "").lower()
-        
+
         for line in out.splitlines():
             l = line.lower()
             if "python" in l or "cmd.exe" in l or "powershell" in l:
                 continue
-            if ("chrome" in l or "msedge" in l or "brave" in l) and (target in l or target_host in l):
+            # STRICT: require the exact --app flag for THIS URL. Edge keeps
+            # background processes (with their original command lines) alive
+            # after the window is closed — a bare host match caused false
+            # positives that suppressed launching.
+            if ("msedge" in l or "chrome" in l or "brave" in l) and target in l:
                 return True
     except Exception:
         pass
