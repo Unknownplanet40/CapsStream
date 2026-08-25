@@ -9,6 +9,8 @@ import base64
 import zipfile
 import io
 
+from backend.proc_utils import CREATE_NO_WINDOW
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FFPROBE_BIN = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe")
 FFMPEG_BIN  = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffmpeg.exe")
@@ -223,6 +225,13 @@ def get_all_subtitles(video_path, media_id):
                 })
 
     # 2. Embedded Subtitles in Video Container (via ffprobe)
+    # Bitmap subtitle codecs cannot be converted to WebVTT by ffmpeg —
+    # offering them only produces 404s when the player requests extraction.
+    UNSUPPORTED_TEXT_CODECS = {
+        "hdmv_pgs_subtitle", "pgssub",   # Blu-ray bitmap subs
+        "dvd_subtitle", "dvbsub",        # DVD / DVB bitmap subs
+        "arib_caption",                  # Japanese broadcast bitmap subs
+    }
     if os.path.exists(FFPROBE_BIN):
         try:
             cmd = [
@@ -230,13 +239,16 @@ def get_all_subtitles(video_path, media_id):
                 "-print_format", "json",
                 "-show_streams", video_path
             ]
-            out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=10)
+            out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=10,
+                                          creationflags=CREATE_NO_WINDOW)
             data = json.loads(out.decode("utf-8", errors="ignore"))
             streams = data.get("streams", [])
 
             sub_idx = 0
             for s in streams:
                 if s.get("codec_type") == "subtitle":
+                    if s.get("codec_name", "").lower() in UNSUPPORTED_TEXT_CODECS:
+                        continue
                     tags = s.get("tags", {})
                     lang = (tags.get("language") or tags.get("LANGUAGE") or "und").lower()
                     title_tag = tags.get("title") or tags.get("TITLE") or ""
@@ -297,7 +309,8 @@ def extract_embedded_vtt(video_path, stream_index, media_id):
             "-f", "webvtt",
             out_tmp
         ]
-        subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=30)
+        subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=30,
+                                creationflags=CREATE_NO_WINDOW)
         if os.path.exists(out_tmp):
             os.makedirs(SUB_CACHE_DIR, exist_ok=True)
             os.replace(out_tmp, out_vtt)
@@ -340,7 +353,8 @@ def get_vtt_path(sub_path):
     if os.path.exists(FFMPEG_BIN):
         try:
             cmd = [FFMPEG_BIN, "-y", "-i", sub_path, "-f", "webvtt", vtt_path]
-            subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=15)
+            subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=15,
+                                    creationflags=CREATE_NO_WINDOW)
             if os.path.exists(vtt_path) and os.path.getsize(vtt_path) > 0:
                 return vtt_path
         except Exception as e:

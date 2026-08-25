@@ -3322,6 +3322,82 @@ main::-webkit-scrollbar {
   flex-shrink: 0;
 }
 
+/* ─── Home Page Loading Skeleton (mirrors real layout) ────── */
+.home-skeleton {
+  padding-bottom: 2.5rem;
+}
+
+.home-skeleton .sk-line {
+  margin-bottom: 0;
+}
+
+/* Hero */
+.sk-hero {
+  position: relative;
+  margin-bottom: 2.75rem;
+}
+
+.sk-hero-backdrop {
+  width: 100%;
+  height: 56vh;
+  min-height: 380px;
+  border-radius: 0 0 var(--radius-lg, 18px) var(--radius-lg, 18px);
+}
+
+.sk-hero-content {
+  position: absolute;
+  left: max(var(--space-xl), 4%);
+  bottom: 2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 560px;
+}
+
+.sk-hero-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* Content rows */
+.sk-row {
+  margin-bottom: 2.5rem;
+}
+
+.sk-row-title {
+  width: 180px;
+  height: 20px;
+  border-radius: 6px;
+  margin-bottom: 0.9rem !important;
+}
+
+.sk-card {
+  width: var(--card-width);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sk-poster {
+  width: 100%;
+  aspect-ratio: 2/3;
+  border-radius: var(--radius-md);
+  margin-bottom: 2px;
+}
+
+/* Staggered shimmer wave across each row's cards */
+.sk-card .skeleton {
+  animation-delay: var(--sk-delay, 0s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-skeleton .skeleton {
+    animation: none;
+  }
+}
+
 /* ─── Transitions ─────────────────────────────────────────── */
 .fade-enter-active,
 .fade-leave-active {
@@ -6241,6 +6317,18 @@ body.kids-mode-theme .suggestion-tag:hover {
   margin-bottom: 4px;
 }
 
+.skip-src-badge {
+  padding: 1px 7px;
+  border-radius: 99px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0.03em;
+  color: #0b0e14;
+  background: linear-gradient(135deg, #38bdf8, #a855f7);
+  white-space: nowrap;
+}
+
 /* ─── Per-Episode Skip Marker Button ────────────────────────── */
 .episode-skip-btn {
   position: absolute;
@@ -8039,6 +8127,119 @@ kbd.about-kbd {
   gap: 1rem;
   color: #fca5a5;
   font-size: 0.9rem;
+}
+
+/* ─── Live Log Viewer ────────────────────────────────────────── */
+.logs-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: calc(var(--nav-height) + 2rem) 1.5rem 3rem;
+}
+
+.logs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.logs-file-select {
+  width: 240px;
+  font-size: 0.85rem;
+}
+
+.logs-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0.75rem 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 8px;
+  color: #fca5a5;
+  font-size: 0.85rem;
+}
+
+.logs-body {
+  margin-top: 1rem;
+  height: calc(100vh - 260px);
+  min-height: 320px;
+  overflow-y: auto;
+  background: #0b0e14;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: #c9d4e3;
+}
+
+.log-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-error { color: #f87171; }
+.log-warn  { color: #fbbf24; }
+.log-launcher { color: #7dd3fc; }
+
+.logs-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  color: var(--text-muted);
+  padding: 2rem;
+}
+
+.logs-empty i {
+  font-size: 2.5rem;
+  opacity: 0.5;
+}
+
+.logs-empty-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.logs-empty-sub {
+  font-size: 0.82rem;
+  max-width: 420px;
+}
+
+.logs-empty code {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.logs-jump {
+  position: fixed;
+  bottom: 5.5rem;
+  right: 2rem;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.logs-jump:hover {
+  filter: brightness(1.1);
 }
 
 /* ─── Sticky Floating Bottom Page Number Bar Pagination ──────────────────────── */

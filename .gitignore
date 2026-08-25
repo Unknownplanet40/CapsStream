@@ -25,6 +25,7 @@ venv/
 # ─── Tooling / local junk ────────────────────────────────────
 .agents/
 _update_tmp/
+logs/
 *.log
 .DS_Store
 Thumbs.db

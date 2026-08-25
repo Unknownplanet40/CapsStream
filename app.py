@@ -6,6 +6,7 @@ Or double-click start.bat
 """
 
 import os
+import re
 import json
 import hashlib
 import threading
@@ -536,6 +537,90 @@ def api_library():
     return _jsonify_rows(get_unique_shows(media_type if media_type else None))
 
 
+# ─── Anime Detection (Series → Anime reclassification) ────────────────────────
+
+_ANIME_DETECT = {
+    "running": False, "done": False, "total": 0,
+    "processed": 0, "reclassified": 0, "error": None,
+}
+
+
+def _is_anime_detail(detail):
+    """Strict anime test: Animation genre AND Japanese origin/language."""
+    if not detail:
+        return False
+    genres = ", ".join(g.get("name", "") for g in detail.get("genres", []))
+    origin = detail.get("origin_country") or []
+    return "Animation" in genres and (
+        detail.get("original_language") == "ja" or "JP" in origin
+    )
+
+
+def _detect_anime_job():
+    """Re-type Japanese-animation shows from 'series' to 'anime'.
+
+    Iterates distinct series tmdb_ids (never individual episode rows) and
+    re-types each show atomically so season/episode queries never split.
+    """
+    from backend.db import get_conn
+    from backend.matcher import _tmdb_get
+    try:
+        conn = get_conn()
+        shows = conn.execute(
+            "SELECT tmdb_id, MIN(title) AS title FROM media "
+            "WHERE type='series' AND tmdb_id IS NOT NULL GROUP BY tmdb_id"
+        ).fetchall()
+        conn.close()
+        _ANIME_DETECT["total"] = len(shows)
+        reclassified = 0
+
+        for idx, row in enumerate(shows):
+            tmdb_id, title = row[0], row[1]
+            try:
+                detail = _tmdb_get(f"tv/{tmdb_id}", {"language": "en-US"})
+                if detail and _is_anime_detail(detail):
+                    conn = get_conn()
+                    cur = conn.execute(
+                        "UPDATE media SET type='anime' WHERE tmdb_id=? AND type='series'",
+                        (tmdb_id,),
+                    )
+                    conn.commit()
+                    conn.close()
+                    if cur.rowcount:
+                        reclassified += 1
+                        print(f"[AnimeDetect] '{title}' → anime ({cur.rowcount} episode rows re-typed)")
+            except Exception as e:
+                print(f"[AnimeDetect] Error for tmdb_id {tmdb_id}: {e}")
+            finally:
+                _ANIME_DETECT["processed"] = idx + 1
+
+        _ANIME_DETECT["reclassified"] = reclassified
+        print(f"[AnimeDetect] Done — {reclassified} show(s) moved to Anime")
+    except Exception as e:
+        _ANIME_DETECT["error"] = str(e)
+        print(f"[AnimeDetect] Job failed: {e}")
+    finally:
+        _ANIME_DETECT["running"] = False
+        _ANIME_DETECT["done"] = True
+
+
+@app.route("/api/library/detect-anime", methods=["POST"])
+def api_detect_anime_start():
+    if _ANIME_DETECT["running"]:
+        return jsonify({"started": False, "message": "Detection is already running"})
+    _ANIME_DETECT.update({
+        "running": True, "done": False, "total": 0,
+        "processed": 0, "reclassified": 0, "error": None,
+    })
+    threading.Thread(target=_detect_anime_job, daemon=True).start()
+    return jsonify({"started": True})
+
+
+@app.route("/api/library/detect-anime/status", methods=["GET"])
+def api_detect_anime_status():
+    return jsonify(dict(_ANIME_DETECT))
+
+
 @app.route("/api/media/<int:media_id>", methods=["GET"])
 def api_media_detail(media_id):
     media = get_best_media_source(media_id)
@@ -930,6 +1015,105 @@ def api_apply_update():
         }), 500
 
 
+# ─── Live Server Logs ─────────────────────────────────────────────────────────
+
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+LOG_NAME_RE = re.compile(r"^capsstream_\d{8}\.log$")
+
+
+def _safe_log_path(name):
+    """Validate a log filename against the whitelist and return its full path, or None."""
+    if not name or not LOG_NAME_RE.match(name.strip()):
+        return None
+    return os.path.join(LOG_DIR, name.strip())
+
+
+@app.route("/api/system/logs", methods=["GET"])
+def api_system_logs():
+    """List available server log files, newest first."""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    files = []
+    try:
+        for name in os.listdir(LOG_DIR):
+            fp = _safe_log_path(name)
+            if fp and os.path.isfile(fp):
+                files.append({
+                    "name": name,
+                    "size": os.path.getsize(fp),
+                    "modified": int(os.path.getmtime(fp)),
+                })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    files.sort(key=lambda f: f["modified"], reverse=True)
+    return jsonify(files)
+
+
+@app.route("/api/system/logs/tail", methods=["GET"])
+def api_system_log_tail():
+    """
+    Incremental log tail. The client sends the byte offset it already has;
+    the server returns only appended content. offset=0 returns the last
+    `max_bytes` of the file (initial view).
+    """
+    fp = _safe_log_path(request.args.get("file") or "")
+    if not fp:
+        return jsonify({"error": "Invalid log file name"}), 400
+
+    try:
+        offset = max(0, int(request.args.get("offset", 0)))
+    except (TypeError, ValueError):
+        offset = 0
+    try:
+        max_bytes = min(262144, max(1024, int(request.args.get("max_bytes", 32768))))
+    except (TypeError, ValueError):
+        max_bytes = 32768
+
+    if not os.path.isfile(fp):
+        return jsonify({"data": "", "offset": 0, "size": 0, "reset": True})
+
+    size = os.path.getsize(fp)
+
+    if offset > size:
+        # File was truncated or rotated — tell the client to reset
+        return jsonify({"data": "", "offset": 0, "size": size, "reset": True})
+
+    if offset == 0:
+        # Initial view: last max_bytes, trimmed to a clean line boundary
+        start = max(0, size - max_bytes)
+        with open(fp, "rb") as f:
+            f.seek(start)
+            data = f.read().decode("utf-8", errors="replace")
+        if start > 0:
+            nl = data.find("\n")
+            if nl != -1:
+                data = data[nl + 1:]
+        return jsonify({"data": data, "offset": size, "size": size, "reset": False})
+
+    with open(fp, "rb") as f:
+        f.seek(offset)
+        chunk = f.read(max_bytes)
+    data = chunk.decode("utf-8", errors="replace")
+    new_offset = offset + len(chunk)
+
+    # Avoid splitting a line across polls: trim back to the last newline
+    if new_offset < size:
+        nl = data.rfind("\n")
+        if nl != -1:
+            data = data[:nl + 1]
+            new_offset = offset + len(data.encode("utf-8"))
+
+    return jsonify({"data": data, "offset": new_offset, "size": size, "reset": False})
+
+
+@app.route("/api/system/logs/download", methods=["GET"])
+def api_system_log_download():
+    """Download a full log file."""
+    fp = _safe_log_path(request.args.get("file") or "")
+    if not fp or not os.path.isfile(fp):
+        abort(404)
+    return send_file(fp, as_attachment=True, download_name=os.path.basename(fp))
+
+
 @app.route("/api/transcode-caps", methods=["GET"])
 def api_transcode_caps():
     """Reports the best available video encoder for compatibility playback."""
@@ -1317,9 +1501,11 @@ def _media_duration_seconds(file_path):
     if not file_path or not os.path.isfile(ffprobe):
         return 0.0
     try:
+        from backend.proc_utils import CREATE_NO_WINDOW
         out = subprocess.run(
             [ffprobe, "-v", "quiet", "-print_format", "json", "-show_format", file_path],
             capture_output=True, text=True, timeout=10,
+            creationflags=CREATE_NO_WINDOW,
         )
         info = json.loads(out.stdout)
         return round(float(info.get("format", {}).get("duration") or 0), 3)
@@ -1487,17 +1673,27 @@ def api_system_info():
                 series_count = r[1]
             elif r[0] == "anime":
                 anime_count = r[1]
-        # Count only real markers — columns default to 0 (a 0/0 pair means
-        # "confirmed none"), so IS NOT NULL would match every library row.
-        skip_markers_count = conn.execute(
-            """
-            SELECT COUNT(*) FROM media WHERE
-              (recap_start  IS NOT NULL AND recap_start  > 0) OR
-              (intro_start  IS NOT NULL AND intro_start  > 0) OR
-              (outro_start  IS NOT NULL AND outro_start  > 0) OR
-              (preview_start IS NOT NULL AND preview_start > 0)
-            """
-        ).fetchone()[0] or 0
+        # Count media that has markers — either manual DB values (a 0/0 pair
+        # means "confirmed none", so only count > 0) OR a resolved skip-time
+        # cache entry (AniSkip / chapter detection), which the player uses too.
+        manual_marker_ids = {
+            row[0] for row in conn.execute("""
+                SELECT id FROM media WHERE
+                  (recap_start  IS NOT NULL AND recap_start  > 0) OR
+                  (intro_start  IS NOT NULL AND intro_start  > 0) OR
+                  (outro_start  IS NOT NULL AND outro_start  > 0) OR
+                  (preview_start IS NOT NULL AND preview_start > 0)
+            """).fetchall()
+        }
+        all_media_ids = {row[0] for row in conn.execute("SELECT id FROM media").fetchall()}
+        auto_marker_ids = set()
+        skip_cache_dir = os.path.join(BASE_DIR, "data", "metadata", "skip_times")
+        if os.path.isdir(skip_cache_dir):
+            for fname in os.listdir(skip_cache_dir):
+                base = os.path.splitext(fname)[0]
+                if base.isdigit():
+                    auto_marker_ids.add(int(base))
+        skip_markers_count = len(manual_marker_ids | (auto_marker_ids & all_media_ids))
         conn.close()
     except Exception:
         pass

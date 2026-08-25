@@ -321,14 +321,23 @@ def _fetch_show_detail(tmdb_id, default_title="", year=None, media_type="series"
     first_air = detail.get("first_air_date", "")
     show_year = int(first_air[:4]) if first_air and len(first_air) >= 4 else year
 
+    # Strict anime detection: Animation genre AND Japanese origin.
+    # Western animation (Arcane, Family Guy, ...) stays "series".
+    origin_country = detail.get("origin_country") or []
+    is_anime = (
+        "Animation" in genres
+        and (detail.get("original_language") == "ja" or "JP" in origin_country)
+    )
+
     result = {
         "tmdb_id":       tmdb_id,
-        "type":          media_type,
+        "type":          "anime" if (media_type == "series" and is_anime) else media_type,
+        "is_anime":      is_anime,
         "title":         detail.get("name", default_title),
         "original_title": detail.get("original_name"),
         "year":          show_year,
         "overview":      detail.get("overview"),
-        "tagline":       detail.get("tagline"),
+        "tagline":        detail.get("tagline"),
         "genres":        genres,
         "rating":        detail.get("vote_average", 0),
         "vote_count":    detail.get("vote_count", 0),
@@ -340,7 +349,8 @@ def _fetch_show_detail(tmdb_id, default_title="", year=None, media_type="series"
         "seasons":       detail.get("number_of_seasons", 1),
     }
     _save_cache(media_type, tmdb_id, result)
-    print(f"[Matcher] Matched show: {result['title']} ({result['year']})")
+    print(f"[Matcher] Matched show: {result['title']} ({result['year']})"
+          + (" [anime]" if is_anime else ""))
     return result
 
 

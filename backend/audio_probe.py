@@ -2,6 +2,8 @@ import os
 import subprocess
 import json
 
+from backend.proc_utils import CREATE_NO_WINDOW
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FFPROBE_BIN = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe")
 FFMPEG_BIN  = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffmpeg.exe")
@@ -45,7 +47,8 @@ def probe_audio_tracks(file_path):
             "-show_streams",
             file_path
         ]
-        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=10)
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=10,
+                                      creationflags=CREATE_NO_WINDOW)
         data = json.loads(out.decode("utf-8", errors="ignore"))
         streams = data.get("streams", [])
 

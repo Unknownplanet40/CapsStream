@@ -15,6 +15,7 @@ import json
 import subprocess
 import requests
 from backend.db import get_media_by_id
+from backend.proc_utils import CREATE_NO_WINDOW
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP_CACHE_DIR = os.path.join(BASE_DIR, "data", "metadata", "skip_times")
@@ -125,7 +126,8 @@ def probe_chapters_for_skips(file_path):
         file_path
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=6)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=6,
+                             creationflags=CREATE_NO_WINDOW)
         if res.returncode == 0:
             data = json.loads(res.stdout)
             chapters = data.get("chapters", [])

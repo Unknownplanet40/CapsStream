@@ -7,6 +7,8 @@ import subprocess
 
 from dotenv import load_dotenv
 
+from backend.proc_utils import CREATE_NO_WINDOW
+
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
 ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 
@@ -140,7 +142,8 @@ def set_file_hidden(path, hide=True):
     try:
         if os.name == "nt":
             cmd = f'attrib {"+h +s" if hide else "-h -s"} "{path}"'
-            subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           creationflags=CREATE_NO_WINDOW)
     except Exception as e:
         print(f"[Settings] Error setting hidden attribute on {path}: {e}")
 
@@ -156,14 +159,17 @@ def apply_system_file_hiding():
             for entry in os.listdir(ROOT_DIR):
                 full_path = os.path.join(ROOT_DIR, entry)
                 if should_hide and entry.lower() not in exempt_names:
-                    subprocess.run(f'attrib +h +s "{full_path}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(f'attrib +h +s "{full_path}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   creationflags=CREATE_NO_WINDOW)
                 else:
-                    subprocess.run(f'attrib -h -s "{full_path}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(f'attrib -h -s "{full_path}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   creationflags=CREATE_NO_WINDOW)
 
             # Ensure start.bat is explicitly unhidden (-h -s)
             start_bat = os.path.join(ROOT_DIR, "start.bat")
             if os.path.exists(start_bat):
-                subprocess.run(f'attrib -h -s "{start_bat}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(f'attrib -h -s "{start_bat}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               creationflags=CREATE_NO_WINDOW)
 
         print(f"[Settings] System file hiding updated (hide_system_files={should_hide})")
     except Exception as e:
@@ -252,7 +258,8 @@ def browse_folder_dialog():
                 '$dialog.Description = "Select Media Folder"; '
                 'if ($dialog.ShowDialog() -eq "OK") { Write-Output $dialog.SelectedPath }'
             )
-            res = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True, timeout=30)
+            res = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True, timeout=30,
+                                 creationflags=CREATE_NO_WINDOW)
             out = res.stdout.strip()
             if out:
                 selected_path = out
@@ -364,7 +371,8 @@ def is_browser_already_open(url):
         import subprocess
         out = subprocess.check_output(
             ["powershell", "-NoProfile", "Get-CimInstance Win32_Process | Select-Object -ExpandProperty CommandLine"],
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
+            creationflags=CREATE_NO_WINDOW,
         ).decode("utf-8", errors="ignore")
         
         target = f"--app={url}".lower()
@@ -424,7 +432,8 @@ def launch_browser():
                 print(f"[Launcher] Opened Microsoft Edge in standalone app mode ({url})")
                 return
         if os.name == "nt":
-            subprocess.Popen(f'start msedge --app={url} --start-maximized', shell=True)
+            subprocess.Popen(f'start msedge --app={url} --start-maximized', shell=True,
+                             creationflags=CREATE_NO_WINDOW)
             print(f"[Launcher] Launched msedge ({url})")
             return
 
@@ -435,7 +444,8 @@ def launch_browser():
                 print(f"[Launcher] Opened Google Chrome in standalone app mode ({url})")
                 return
         if os.name == "nt":
-            subprocess.Popen(f'start chrome --app={url} --start-maximized', shell=True)
+            subprocess.Popen(f'start chrome --app={url} --start-maximized', shell=True,
+                             creationflags=CREATE_NO_WINDOW)
             print(f"[Launcher] Launched chrome ({url})")
             return
 

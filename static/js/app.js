@@ -464,8 +464,8 @@ const MediaCard = {
           <i class="ph ph-hard-drive"></i> Unmounted
         </div>
 
-        <span v-if="showBadge !== false && cardItem.is_mounted !== false" class="card-badge" :class="cardItem.type">
-          {{ cardItem.type === 'anime' ? '🎌 Anime' : cardItem.type === 'series' ? '📺 Series' : '🎬 Movie' }}
+        <span v-if="showBadge !== false && cardItem.is_mounted !== false && cardItem.type !== 'anime'" class="card-badge" :class="cardItem.type">
+          {{ cardItem.type === 'series' ? '📺 Series' : '🎬 Movie' }}
         </span>
 
         <span v-if="isContinue && calcTimeLeft(cardItem)" class="card-badge" style="right:var(--space-sm);left:auto;background:rgba(10,10,15,0.85);border:1px solid var(--border-strong)">
@@ -740,8 +740,39 @@ const HomePage = {
       />
 
       <div class="home-content">
-        <div v-if="loading" class="cards-scroller" style="margin-bottom:2.5rem">
-          <div v-for="i in 6" :key="i" class="skeleton skeleton-card"></div>
+        <!-- Structured loading skeleton — mirrors the real page layout -->
+        <div v-if="loading" class="home-skeleton" aria-hidden="true">
+          <!-- Hero skeleton -->
+          <div class="sk-hero">
+            <div class="sk-hero-backdrop skeleton"></div>
+            <div class="sk-hero-content">
+              <div class="sk-line skeleton" style="width:70px;height:20px;border-radius:6px"></div>
+              <div class="sk-line skeleton" style="width:42%;height:34px"></div>
+              <div class="sk-line skeleton" style="width:56%;height:13px"></div>
+              <div class="sk-line skeleton" style="width:47%;height:13px"></div>
+              <div class="sk-hero-actions">
+                <div class="sk-line skeleton" style="width:118px;height:42px;border-radius:8px"></div>
+                <div class="sk-line skeleton" style="width:118px;height:42px;border-radius:8px"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Content-row skeletons -->
+          <div v-for="r in 3" :key="r" class="sk-row">
+            <div class="sk-line skeleton sk-row-title"></div>
+            <div class="cards-scroller">
+              <div
+                v-for="i in 8"
+                :key="i"
+                class="sk-card"
+                :style="{ '--sk-delay': (0.12 + i * 0.09) + 's' }"
+              >
+                <div class="sk-poster skeleton"></div>
+                <div class="sk-line skeleton" style="width:86%;height:11px"></div>
+                <div class="sk-line skeleton" style="width:54%;height:11px"></div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div v-else-if="!loading && rows.length === 0" class="empty-state" style="padding-top: calc(var(--nav-height) + 2rem); text-align: center; max-width: 600px; margin: 0 auto;">
@@ -1932,6 +1963,12 @@ const SettingsPage = {
               <i class="ph ph-warning" style="margin-right:4px"></i>
               Host and Port changes take effect after restarting CapsStream (close the server and run start.bat again).
             </div>
+
+            <div>
+              <button class="btn btn-secondary btn-sm" @click="$router.push('/logs')" title="View live server log">
+                <i class="ph ph-scroll" style="margin-right:4px"></i> View Live Logs
+              </button>
+            </div>
           </div>
         </div>
 
@@ -2092,6 +2129,26 @@ const SettingsPage = {
                 <div class="settings-desc">Comma-separated keywords — files or folders whose name contains any of these are ignored during scans (e.g. samples, trailers, extras).</div>
               </div>
               <input type="text" v-model="form.library.skip_patterns" class="form-input" style="width:280px" placeholder="sample,trailer,extras" />
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Detect Anime in Series</div>
+                <div class="settings-desc">Scans your Series library against TMDb and moves Japanese animation shows (Animation genre + Japanese origin) to the Anime page — including every episode. Safe to re-run.</div>
+                <div v-if="animeDetect.running" style="font-size:0.8rem;color:var(--accent);font-weight:700;margin-top:4px">
+                  Scanning {{ animeDetect.processed }}/{{ animeDetect.total }} shows…
+                </div>
+                <div v-else-if="animeDetect.done && !animeDetect.error" style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
+                  Last run: {{ animeDetect.reclassified }} show(s) moved to Anime.
+                </div>
+                <div v-else-if="animeDetect.error" style="font-size:0.8rem;color:#ef4444;margin-top:4px">
+                  Error: {{ animeDetect.error }}
+                </div>
+              </div>
+              <button class="btn btn-primary btn-sm" @click="startAnimeDetect" :disabled="animeDetect.running" id="btn-detect-anime">
+                <i :class="animeDetect.running ? 'ph ph-circle-notch' : 'ph ph-magic-wand'" :style="animeDetect.running ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+                {{ animeDetect.running ? 'Detecting…' : 'Detect Anime' }}
+              </button>
             </div>
           </div>
         </div>
@@ -2721,6 +2778,7 @@ const SettingsPage = {
 
     onUnmounted(() => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
+      if (animeDetectTimer) clearInterval(animeDetectTimer);
     });
 
     async function testApi(provider, key) {
@@ -2812,6 +2870,39 @@ const SettingsPage = {
       } catch (e) {}
     }
 
+    // ─── Anime detection (Series → Anime) ──────────────────────
+    const animeDetect = ref({ running: false, done: false, total: 0, processed: 0, reclassified: 0, error: null });
+    let animeDetectTimer = null;
+
+    async function startAnimeDetect() {
+      if (animeDetect.value.running) return;
+      try {
+        const r = await API.post("/api/library/detect-anime", {});
+        if (!r.started) {
+          addToast(r.message || "Detection already running", "warning");
+          return;
+        }
+        animeDetect.value = { running: true, done: false, total: 0, processed: 0, reclassified: 0, error: null };
+        animeDetectTimer = setInterval(async () => {
+          try {
+            const s = await API.get("/api/library/detect-anime/status");
+            animeDetect.value = s;
+            if (!s.running && s.done) {
+              clearInterval(animeDetectTimer);
+              animeDetectTimer = null;
+              if (s.error) {
+                addToast("Anime detection failed: " + s.error, "error");
+              } else {
+                addToast(`Anime detection complete — ${s.reclassified} show(s) moved to Anime`, "success");
+              }
+            }
+          } catch (e) {}
+        }, 1000);
+      } catch (e) {
+        addToast(e.message || "Failed to start anime detection", "error");
+      }
+    }
+
     async function handleClearCache() {
       clearingCache.value = true;
       try {
@@ -2888,6 +2979,8 @@ const SettingsPage = {
       removePath,
       movePath,
       togglePath,
+      animeDetect,
+      startAnimeDetect,
       cacheInfo,
       clearingCache,
       resetting,
@@ -7688,9 +7781,14 @@ const AboutPage = {
             <i class="ph ph-cpu" style="color:var(--accent);font-size:1.5rem"></i>
             <span>Live Server & Enterprise Diagnostics Suite</span>
           </div>
-          <div :class="['server-status-pill', store.serverOnline ? 'online' : 'offline']">
-            <span class="status-dot"></span>
-            <span>{{ store.serverOnline ? 'Server Online' : 'Server Offline / Disconnected' }}</span>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-secondary btn-sm" @click="$router.push('/logs')" title="View live server log">
+              <i class="ph ph-scroll" style="margin-right:4px"></i> Live Logs
+            </button>
+            <div :class="['server-status-pill', store.serverOnline ? 'online' : 'offline']">
+              <span class="status-dot"></span>
+              <span>{{ store.serverOnline ? 'Server Online' : 'Server Offline / Disconnected' }}</span>
+            </div>
           </div>
         </div>
 
@@ -8011,6 +8109,190 @@ const AboutPage = {
   }
 };
 
+// ─── Live Log Viewer Page ─────────────────────────────────────
+
+const LogViewerPage = {
+  template: `
+    <div class="logs-page">
+      <div class="page-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="btn btn-secondary btn-sm" @click="$router.back()" title="Go back">
+            <i class="ph ph-arrow-left"></i>
+          </button>
+          <h1 class="page-title" style="margin:0"><i class="ph ph-scroll" style="margin-right:8px"></i>Live Server Log</h1>
+        </div>
+        <div class="logs-toolbar">
+          <select v-model="selectedFile" @change="onFileChange" class="form-input logs-file-select" id="logs-file-select">
+            <option v-for="f in files" :key="f.name" :value="f.name">{{ f.name }} ({{ formatSize(f.size) }})</option>
+          </select>
+          <button class="btn btn-sm" :class="autoRefresh ? 'btn-primary' : 'btn-secondary'" @click="toggleRefresh" id="logs-refresh-toggle" :title="autoRefresh ? 'Pause live tailing' : 'Resume live tailing'">
+            <i :class="autoRefresh ? 'ph ph-pause' : 'ph ph-play'" style="margin-right:4px"></i>
+            {{ autoRefresh ? 'Live' : 'Paused' }}
+          </button>
+          <button class="btn btn-secondary btn-sm" @click="clearView" title="Clear the view (log file is untouched)">
+            <i class="ph ph-eraser" style="margin-right:4px"></i> Clear View
+          </button>
+          <a class="btn btn-secondary btn-sm" :href="'/api/system/logs/download?file=' + encodeURIComponent(selectedFile)" v-if="selectedFile">
+            <i class="ph ph-download-simple" style="margin-right:4px"></i> Download
+          </a>
+        </div>
+      </div>
+
+      <div v-if="lastError" class="logs-error-banner">
+        <i class="ph ph-warning"></i> {{ lastError }}
+      </div>
+
+      <div class="logs-body" ref="logBody" @scroll="onScroll">
+        <div v-if="!lines.length" class="logs-empty">
+          <i class="ph ph-scroll"></i>
+          <div class="logs-empty-title">No log content yet</div>
+          <div class="logs-empty-sub">Log files appear under <code>logs/</code> once the server writes output. Launch with the silent launcher or start.bat to populate them.</div>
+        </div>
+        <div v-else>
+          <div v-for="(l, i) in lines" :key="i" class="log-line" :class="lineClass(l)">{{ l || '\u00A0' }}</div>
+        </div>
+      </div>
+
+      <transition name="fade">
+        <button v-if="!atBottom && lines.length" class="logs-jump" @click="scrollToBottom(true)">
+          <i class="ph ph-arrow-down"></i> Jump to latest
+        </button>
+      </transition>
+    </div>
+  `,
+  setup() {
+    const files = ref([]);
+    const selectedFile = ref("");
+    const lines = ref([]);
+    const autoRefresh = ref(true);
+    const atBottom = ref(true);
+    const lastError = ref("");
+    const logBody = ref(null);
+    let offset = 0;
+    let pollTimer = null;
+
+    function formatSize(bytes) {
+      if (!bytes) return "0 KB";
+      if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+      return Math.max(1, Math.round(bytes / 1024)) + " KB";
+    }
+
+    function lineClass(l) {
+      const up = l.toUpperCase();
+      if (up.includes("ERROR") || up.includes("TRACEBACK") || up.includes("EXCEPTION")) return "log-error";
+      if (up.includes("WARNING") || up.includes("WARN")) return "log-warn";
+      if (up.includes("[LAUNCHER]") || up.includes("[UPDATER]") || up.includes("[SETTINGS]")) return "log-launcher";
+      return "";
+    }
+
+    function scrollToBottom(smooth) {
+      const el = logBody.value;
+      if (!el) return;
+      el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+    }
+
+    function isScrolledToBottom() {
+      const el = logBody.value;
+      if (!el) return true;
+      return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    }
+
+    function onScroll() {
+      atBottom.value = isScrolledToBottom();
+    }
+
+    function clearView() {
+      lines.value = [];
+      offset = 0;
+      pollOnce();
+    }
+
+    function onFileChange() {
+      lines.value = [];
+      offset = 0;
+      lastError.value = "";
+      pollOnce();
+    }
+
+    function toggleRefresh() {
+      autoRefresh.value = !autoRefresh.value;
+      if (autoRefresh.value) pollOnce();
+    }
+
+    async function pollOnce() {
+      if (!selectedFile.value) return;
+      try {
+        const r = await API.get(`/api/system/logs/tail?file=${encodeURIComponent(selectedFile.value)}&offset=${offset}`);
+        lastError.value = "";
+        if (r.reset) {
+          lines.value = [];
+          offset = 0;
+        }
+        if (r.data) {
+          // Measure stickiness fresh from the DOM — never trust stale state
+          const stick = isScrolledToBottom();
+          const newLines = r.data.split("\n");
+          // Drop trailing empty piece from the final newline
+          while (newLines.length && newLines[newLines.length - 1] === "") newLines.pop();
+          lines.value.push(...newLines);
+          offset = r.offset;
+          // Keep the log from growing unbounded in memory
+          if (lines.value.length > 5000) lines.value.splice(0, lines.value.length - 5000);
+          if (stick) {
+            await nextTick();
+            const el = logBody.value;
+            if (el) el.scrollTop = el.scrollHeight;
+          }
+        }
+      } catch (e) {
+        lastError.value = "Failed to fetch log: " + (e.message || "unknown error");
+      }
+    }
+
+    async function loadFiles(pick = true) {
+      try {
+        const list = await API.get("/api/system/logs");
+        files.value = Array.isArray(list) ? list : [];
+        if (pick) {
+          const currentStillExists = files.value.some((f) => f.name === selectedFile.value);
+          if (!currentStillExists) {
+            selectedFile.value = files.value[0]?.name || "";
+            lines.value = [];
+            offset = 0;
+          }
+        }
+      } catch (e) {
+        lastError.value = "Failed to list log files: " + (e.message || "unknown error");
+      }
+    }
+
+    onMounted(async () => {
+      if (store.profile?.is_kids) {
+        addToast("Server logs are locked in Kids Mode", "warning");
+        router.push("/");
+        return;
+      }
+      await loadFiles();
+      if (selectedFile.value) await pollOnce();
+      pollTimer = setInterval(async () => {
+        if (!autoRefresh.value) return;
+        await pollOnce();
+        // Pick up newly created log files without disturbing the selection
+        loadFiles(false);
+      }, 2000);
+    });
+
+    onUnmounted(() => {
+      if (pollTimer) clearInterval(pollTimer);
+    });
+
+    return {
+      files, selectedFile, lines, autoRefresh, atBottom, lastError, logBody,
+      formatSize, lineClass, onScroll, scrollToBottom, clearView, onFileChange, toggleRefresh,
+    };
+  }
+};
+
 // ─── Router ───────────────────────────────────────────────────
 
 const router = createRouter({
@@ -8028,6 +8310,7 @@ const router = createRouter({
     { path: "/favorites", component: FavoritesPage },
     { path: "/stats", component: StatsPage },
     { path: "/settings", component: SettingsPage },
+    { path: "/logs", component: LogViewerPage },
     { path: "/about", component: AboutPage },
   ],
   scrollBehavior(to, from, saved) {
@@ -8788,10 +9071,11 @@ const SkipTimestampsModal = {
           <div style="display:flex;flex-direction:column;gap:1.25rem;margin-bottom:1.5rem">
             <!-- 1. Recap Section -->
             <div class="skip-timestamp-group">
-              <div style="font-size:0.88rem;font-weight:700;color:var(--accent);margin-bottom:2px;display:flex;align-items:center;gap:6px">
-                <i class="ph ph-rewind"></i> Recap
-                <span style="font-weight:600;color:var(--text-muted);font-size:0.65rem;text-transform:none">max 5 min</span>
-              </div>
+                <div style="font-size:0.88rem;font-weight:700;color:var(--accent);margin-bottom:2px;display:flex;align-items:center;gap:6px">
+                  <i class="ph ph-rewind"></i> Recap
+                  <span style="font-weight:600;color:var(--text-muted);font-size:0.65rem;text-transform:none">max 5 min</span>
+                  <span v-if="sourceInfo.recap" class="skip-src-badge" title="Auto-detected values prefilled below — saving adopts them as manual markers">{{ sourceInfo.recap }}</span>
+                </div>
               <div class="skip-seg-desc">"Previously on…" catch-up before the episode proper starts.</div>
               <label style="display:flex;align-items:center;gap:7px;margin:4px 0 6px;font-size:0.72rem;color:var(--text-muted);cursor:pointer">
                 <input type="checkbox" v-model="noneChecked.recap" @change="onNoneToggle('recap')" />
@@ -8817,10 +9101,11 @@ const SkipTimestampsModal = {
 
             <!-- 2. Intro Section -->
             <div class="skip-timestamp-group">
-              <div style="font-size:0.88rem;font-weight:700;color:#38bdf8;margin-bottom:2px;display:flex;align-items:center;gap:6px">
-                <i class="ph ph-fast-forward"></i> Intro
-                <span style="font-weight:600;color:var(--text-muted);font-size:0.65rem;text-transform:none">max 5 min</span>
-              </div>
+                <div style="font-size:0.88rem;font-weight:700;color:#38bdf8;margin-bottom:2px;display:flex;align-items:center;gap:6px">
+                  <i class="ph ph-fast-forward"></i> Intro
+                  <span style="font-weight:600;color:var(--text-muted);font-size:0.65rem;text-transform:none">max 5 min</span>
+                  <span v-if="sourceInfo.intro" class="skip-src-badge" title="Auto-detected values prefilled below — saving adopts them as manual markers">{{ sourceInfo.intro }}</span>
+                </div>
               <div class="skip-seg-desc">Opening titles / theme song.</div>
               <label style="display:flex;align-items:center;gap:7px;margin:4px 0 6px;font-size:0.72rem;color:var(--text-muted);cursor:pointer">
                 <input type="checkbox" v-model="noneChecked.intro" @change="onNoneToggle('intro')" />
@@ -8849,6 +9134,7 @@ const SkipTimestampsModal = {
               <div style="font-size:0.88rem;font-weight:700;color:#10b981;margin-bottom:2px;display:flex;align-items:center;gap:6px">
                 <i class="ph ph-flag"></i> Outro
                 <span style="font-weight:600;color:var(--text-muted);font-size:0.65rem;text-transform:none">max 15 min</span>
+                <span v-if="sourceInfo.outro" class="skip-src-badge" title="Auto-detected values prefilled below — saving adopts them as manual markers">{{ sourceInfo.outro }}</span>
               </div>
               <div class="skip-seg-desc">End credits.</div>
               <label style="display:flex;align-items:center;gap:7px;margin:4px 0 6px;font-size:0.72rem;color:var(--text-muted);cursor:pointer">
@@ -8882,6 +9168,7 @@ const SkipTimestampsModal = {
               <div style="font-size:0.88rem;font-weight:700;color:#c084fc;margin-bottom:2px;display:flex;align-items:center;gap:6px">
                 <i class="ph ph-telescope"></i> Preview
                 <span style="font-weight:600;color:var(--text-muted);font-size:0.65rem;text-transform:none">max 15 min</span>
+                <span v-if="sourceInfo.preview" class="skip-src-badge" title="Auto-detected values prefilled below — saving adopts them as manual markers">{{ sourceInfo.preview }}</span>
               </div>
               <div class="skip-seg-desc">"Next time on…" teaser for the following episode.</div>
               <label style="display:flex;align-items:center;gap:7px;margin:4px 0 6px;font-size:0.72rem;color:var(--text-muted);cursor:pointer">
@@ -8952,6 +9239,34 @@ const SkipTimestampsModal = {
 
     // Outro convenience: end auto-fills to the video duration on save
     const toEnd = reactive({ outro: false });
+
+    // Where prefilled values came from ("" = manual/empty). Resolved skip
+    // data (manual DB → AniSkip → ffprobe chapters) is fetched so the modal
+    // shows the same markers the player uses — not just the DB columns.
+    const sourceInfo = reactive({ recap: "", intro: "", outro: "", preview: "" });
+    const SEG_TO_RESOLVED = { recap: "recap", intro: "op", outro: "ed", preview: "preview" };
+    const SOURCE_LABELS = { manual: "Manual", aniskip: "AniSkip", chapters: "Chapters" };
+
+    onMounted(async () => {
+      try {
+        const resolved = await API.get(`/api/skip-times/${props.media.id}`);
+        if (!resolved) return;
+        for (const [seg, key] of Object.entries(SEG_TO_RESOLVED)) {
+          const s = resolved[key];
+          if (!s || s.source === "manual") continue;
+          const start = Number(s.start), end = Number(s.end);
+          if (!end || end <= start) continue;
+          // Manual DB values always win — only prefill truly empty fields,
+          // and never over a user-confirmed "none" sentinel.
+          const dbStart = Number(props.media?.[seg + "_start"]) || 0;
+          const dbEnd = Number(props.media?.[seg + "_end"]) || 0;
+          if (dbStart > 0 || dbEnd > 0 || noneChecked[seg]) continue;
+          form.value[seg + "_start"] = formatSecToTime(start);
+          form.value[seg + "_end"] = formatSecToTime(end);
+          sourceInfo[seg] = SOURCE_LABELS[s.source] || s.source;
+        }
+      } catch (e) { /* resolved data unavailable — manual-only view */ }
+    });
 
     function onNoneToggle(key) {
       if (noneChecked[key]) {
@@ -9046,7 +9361,7 @@ const SkipTimestampsModal = {
       }
     }
 
-    return { form, saving, stampCurrent, save, noneChecked, toEnd, onNoneToggle };
+    return { form, saving, stampCurrent, save, noneChecked, toEnd, onNoneToggle, sourceInfo };
   }
 };
 

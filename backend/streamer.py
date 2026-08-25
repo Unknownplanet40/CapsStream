@@ -13,6 +13,8 @@ import subprocess
 import threading
 from flask import Response, request, abort
 
+from backend.proc_utils import CREATE_NO_WINDOW
+
 # Active ffmpeg transcodes keyed by absolute file path — switching audio
 # tracks rapidly used to stack multiple ffmpeg processes per file.
 _TRANSCODE_LOCK = threading.Lock()
@@ -62,7 +64,8 @@ def find_keyframe_before(file_path, t):
                 "-read_intervals", f"{window_start:.3f}%{t + 0.5:.3f}",
                 file_path,
             ]
-            out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=15)
+            out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=15,
+                                          creationflags=CREATE_NO_WINDOW)
             data = json.loads(out.decode("utf-8", errors="ignore"))
             best = None
             for pkt in data.get("packets", []):
@@ -221,7 +224,8 @@ def _encoder_selftest(encoder, extra_opts):
             "-c:v", encoder, *extra_opts,
             "-f", "null", "-",
         ]
-        res = subprocess.run(cmd, capture_output=True, timeout=15)
+        res = subprocess.run(cmd, capture_output=True, timeout=15,
+                             creationflags=CREATE_NO_WINDOW)
         return res.returncode == 0
     except Exception:
         return False
@@ -245,6 +249,7 @@ def describe_hw_encoder(force=False):
                 res = subprocess.run(
                     [ff, "-hide_banner", "-encoders"],
                     capture_output=True, text=True, timeout=15,
+                    creationflags=CREATE_NO_WINDOW,
                 )
                 encoders_text = res.stdout or ""
                 for name, extra, is_hw in _HW_CANDIDATES:
@@ -335,7 +340,7 @@ def stream_video_convert(file_path, audio_track_index, start_time=0.0, max_heigh
             pass
 
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
 
         def generate():
             try:
@@ -406,7 +411,7 @@ def stream_audio_only(file_path, track_index, start_time=0.0):
             pass
 
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
         with _TRANSCODE_LOCK:
             _ACTIVE_AUDIO_STREAMS[key] = proc
 
@@ -504,7 +509,7 @@ def stream_transcoded(file_path, audio_track_index=0, start_time=0.0):
             pass
 
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
         with _TRANSCODE_LOCK:
             _ACTIVE_TRANSCODES[key] = proc
 
