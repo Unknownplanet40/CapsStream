@@ -1821,7 +1821,7 @@ const SettingsPage = {
             <div class="settings-row">
               <div class="settings-label-container">
                 <div class="settings-label">Automatic Update Checks</div>
-                <div class="settings-desc">Check GitHub for new releases after login and show the update banner. Turn this OFF on machines where you develop unreleased changes — installing an update overwrites local code files with the released versions.</div>
+                <div class="settings-desc">Periodically check for new CapsStream releases and show a banner when one is available.</div>
               </div>
               <label class="toggle-switch">
                 <input type="checkbox" v-model="form.updates.auto_check" />
