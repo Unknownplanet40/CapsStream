@@ -41,6 +41,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = "capsstream_secret_key_fixed_v1"
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10MB max upload
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 
 def get_app_version():
@@ -130,7 +131,7 @@ def _get_github_profile():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", version=get_app_version(), t=int(time.time()))
 
 
 @app.route("/.well-known/appspecific/com.chrome.devtools.json")

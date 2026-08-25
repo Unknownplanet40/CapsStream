@@ -319,7 +319,26 @@ def scan_library(callback=None):
 
     movies_paths = _resolve_paths(media_paths.get("movies", []))
     series_paths = _resolve_paths(media_paths.get("series", []))
-    anime_paths  = _resolve_paths(media_paths.get("anime", []))
+    anime_paths  = _resolve_paths(media_paths.get("anime",  []))
+
+    # Filter out user-disabled directories
+    disabled = cfg.get("disabled_paths", {})
+    def _filter_disabled(paths, category):
+        off = set(disabled.get(category, []))
+        if not off:
+            return paths
+        kept = [p for p in paths if not any(
+            os.path.normpath(p) == os.path.normpath(d if os.path.isabs(d) else os.path.join(BASE_DIR, d))
+            for d in off
+        )]
+        skipped = len(paths) - len(kept)
+        if skipped:
+            log(f"Skipping {skipped} disabled path(s) in '{category}'")
+        return kept
+
+    movies_paths = _filter_disabled(movies_paths, "movies")
+    series_paths = _filter_disabled(series_paths, "series")
+    anime_paths  = _filter_disabled(anime_paths,  "anime")
 
     def _has_valid_image(m):
         p = m.get("poster_path")

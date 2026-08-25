@@ -80,6 +80,8 @@ const store = reactive({
   scanElapsed: 0,
   serverOnline: true,
   updateInfo: null,      // set when an update is available
+  pendingScanAfterCacheCleared: false, // triggers auto-scan when returning home after cache clear
+  pendingUpdateCheck: false,           // triggers auto-check for updates when Settings opens from the banner
 });
 
 let isServerOfflineToastActive = false;
@@ -668,17 +670,11 @@ const HeroBanner = {
               <i class="ph-fill ph-play" style="font-size:0.9rem"></i>
             </div>
           </button>
-          <button class="btn btn-secondary btn-lg" @click="$emit('trailer', current)" id="hero-trailer-btn">
-            <span>Trailer</span>
-            <div class="btn-icon-wrapper">
-              <i class="ph ph-film-strip" style="font-size:0.95rem"></i>
-            </div>
+          <button class="btn btn-secondary btn-lg" @click="$emit('trailer', current)" id="hero-trailer-btn" title="Trailer">
+            <i class="ph ph-film-strip" style="font-size:1.15rem"></i>
           </button>
-          <button class="btn btn-secondary btn-lg" @click="$emit('detail', current)" id="hero-info-btn">
-            <span>More Info</span>
-            <div class="btn-icon-wrapper">
-              <i class="ph ph-info" style="font-size:0.95rem"></i>
-            </div>
+          <button class="btn btn-secondary btn-lg" @click="$emit('detail', current)" id="hero-info-btn" title="More Info">
+            <i class="ph ph-info" style="font-size:1.15rem"></i>
           </button>
         </div>
       </div>
@@ -823,6 +819,11 @@ const HomePage = {
       (newPath) => {
         if (newPath === "/") {
           loadHome();
+          // If the user just cleared the cache, kick off a fresh scan automatically
+          if (store.pendingScanAfterCacheCleared) {
+            store.pendingScanAfterCacheCleared = false;
+            startLibraryScan(true);
+          }
         }
       },
     );
@@ -1036,27 +1037,20 @@ const DetailPage = {
                 <i class="ph-fill ph-play" style="font-size:0.9rem"></i>
               </div>
             </button>
-            <button class="btn btn-secondary btn-lg" @click="watchTrailer" id="detail-trailer-btn">
-              <span>Trailer</span>
-              <div class="btn-icon-wrapper">
-                <i class="ph ph-film-strip" style="font-size:0.95rem"></i>
-              </div>
+            <button class="btn btn-secondary btn-lg" @click="watchTrailer" id="detail-trailer-btn" title="Trailer">
+              <i class="ph ph-film-strip" style="font-size:1.15rem"></i>
             </button>
-            <button class="btn btn-secondary btn-lg" @click="toggleFav" id="detail-fav-btn">
-              <span>{{ media.is_favorite ? 'In Watchlist' : 'Watchlist' }}</span>
-              <div class="btn-icon-wrapper">
-                <i :class="media.is_favorite ? 'ph-fill ph-heart' : 'ph ph-heart'" style="font-size:0.95rem"></i>
-              </div>
+            <button class="btn btn-secondary btn-lg" @click="toggleFav" id="detail-fav-btn" :title="media.is_favorite ? 'Remove from Watchlist' : 'Add to Watchlist'">
+              <i :class="media.is_favorite ? 'ph-fill ph-heart' : 'ph ph-heart'" style="font-size:1.15rem" :style="{ color: media.is_favorite ? 'var(--accent)' : 'inherit' }"></i>
             </button>
-            <button class="btn btn-ghost btn-lg" @click="showCollectionModal = true" id="detail-collection-btn">
-              <i class="ph ph-plus-circle"></i> Add to List
+            <button class="btn btn-ghost btn-lg" @click="showCollectionModal = true" id="detail-collection-btn" title="Add to List">
+              <i class="ph ph-plus-circle" style="font-size:1.15rem"></i>
             </button>
-            <button class="btn btn-ghost btn-lg" @click="openFixMatchModal" id="detail-fix-match-btn">
-              <i class="ph ph-wrench"></i> Fix Match
+            <button class="btn btn-ghost btn-lg" @click="openFixMatchModal" id="detail-fix-match-btn" title="Fix Match">
+              <i class="ph ph-wrench" style="font-size:1.15rem"></i>
             </button>
-            <button class="btn btn-ghost btn-lg" @click="recacheInfo" :disabled="recaching" id="detail-recache-btn">
-              <i :class="recaching ? 'ph ph-circle-notch' : 'ph ph-database'" :style="recaching ? 'animation:spin 1s linear infinite' : ''"></i>
-              {{ recaching ? 'Re-caching...' : 'Re-cache' }}
+            <button class="btn btn-ghost btn-lg" @click="recacheInfo" :disabled="recaching" id="detail-recache-btn" :title="recaching ? 'Re-caching...' : 'Re-cache'">
+              <i :class="recaching ? 'ph ph-circle-notch' : 'ph ph-database'" :style="{ animation: recaching ? 'spin 1s linear infinite' : 'none', fontSize: '1.15rem' }"></i>
             </button>
           </div>
 
@@ -1822,7 +1816,7 @@ const SettingsPage = {
             </div>
 
             <div
-              v-if="updateState.changelog && updateState.status === 'available'"
+              v-if="updateState.changelog"
               class="changelog-box"
               v-html="changelogHtml"
             ></div>
@@ -1962,6 +1956,7 @@ const SettingsPage = {
                       <span class="path-cat-name">{{ cat === 'anime' ? 'Anime' : cat.charAt(0).toUpperCase() + cat.slice(1) }}</span>
                       <span class="path-cat-count">
                         {{ (form.media_paths[cat] || []).length }} {{ (form.media_paths[cat] || []).length === 1 ? 'path' : 'paths' }}
+                          <span v-if="(form.disabled_paths[cat] || []).length" style="color:var(--text-muted,#888);font-size:0.78em;margin-left:4px">({{ (form.disabled_paths[cat] || []).length }} disabled)</span>
                       </span>
                     </div>
                   </div>
@@ -1972,6 +1967,7 @@ const SettingsPage = {
                       v-for="(p, idx) in (form.media_paths[cat] || [])"
                       :key="idx"
                       class="path-list-item"
+                      :class="{ 'path-disabled': (form.disabled_paths[cat] || []).includes(p) }"
                     >
                       <span
                         class="path-status-dot"
@@ -1992,6 +1988,13 @@ const SettingsPage = {
                         </button>
                         <button class="path-act-btn" @click.stop="movePath(cat, idx, 1)" :disabled="idx === (form.media_paths[cat]?.length || 0) - 1" title="Move Down">
                           <i class="ph ph-caret-down"></i>
+                        </button>
+                        <button
+                          class="path-act-btn toggle-btn"
+                          @click.stop="togglePath(cat, idx)"
+                          :title="(form.disabled_paths[cat] || []).includes(p) ? 'Enable this path' : 'Disable this path'"
+                        >
+                          <i :class="(form.disabled_paths[cat] || []).includes(p) ? 'ph ph-eye-slash' : 'ph ph-eye'"></i>
                         </button>
                         <button class="path-act-btn danger" @click.stop="removePath(cat, idx)" title="Remove Path">
                           <i class="ph ph-trash"></i>
@@ -2266,6 +2269,11 @@ const SettingsPage = {
         series: [],
         anime: [],
       },
+      disabled_paths: {
+        movies: [],
+        series: [],
+        anime: [],
+      },
       subtitles: { auto_load: true, preferred_language: "Auto", font_size: "normal" },
       playback: { auto_play_next: true, seek_step: 10, default_volume: 1 },
     });
@@ -2323,6 +2331,11 @@ const SettingsPage = {
             ...data,
             metadata_sources: { ...form.value.metadata_sources, ...(data.metadata_sources || {}) },
             media_paths: { ...form.value.media_paths, ...(data.media_paths || {}) },
+            disabled_paths: {
+              movies: [...(data.disabled_paths?.movies || [])],
+              series: [...(data.disabled_paths?.series || [])],
+              anime:  [...(data.disabled_paths?.anime  || [])],
+            },
             subtitles: { ...form.value.subtitles, ...(data.subtitles || {}) },
             playback: { ...form.value.playback, ...(data.playback || {}) },
           };
@@ -2513,6 +2526,11 @@ const SettingsPage = {
       loadCacheInfo();
       loadSystemInfo();
       window.addEventListener("beforeunload", handleBeforeUnload);
+      // Auto-run the update check when arriving from the update banner
+      if (store.pendingUpdateCheck) {
+        store.pendingUpdateCheck = false;
+        checkUpdates();
+      }
     });
 
     onUnmounted(() => {
@@ -2568,6 +2586,9 @@ const SettingsPage = {
       });
       if (!ok) return;
       form.value.media_paths[cat].splice(idx, 1);
+      // Also remove from disabled_paths if present
+      const di = (form.value.disabled_paths[cat] || []).indexOf(p);
+      if (di !== -1) form.value.disabled_paths[cat].splice(di, 1);
     }
 
     function movePath(cat, idx, direction) {
@@ -2576,6 +2597,19 @@ const SettingsPage = {
       if (!list || target < 0 || target >= list.length) return;
       const item = list.splice(idx, 1)[0];
       list.splice(target, 0, item);
+    }
+
+    function togglePath(cat, idx) {
+      const p = form.value.media_paths[cat][idx];
+      if (!form.value.disabled_paths[cat]) form.value.disabled_paths[cat] = [];
+      const di = form.value.disabled_paths[cat].indexOf(p);
+      if (di === -1) {
+        form.value.disabled_paths[cat].push(p);
+        addToast(`Disabled "${p}" — media from this path is now hidden`, "info");
+      } else {
+        form.value.disabled_paths[cat].splice(di, 1);
+        addToast(`Enabled "${p}"`, "success");
+      }
     }
 
     const cacheInfo = ref({ file_count: 0, size_formatted: "0 KB" });
@@ -2596,8 +2630,11 @@ const SettingsPage = {
       clearingCache.value = true;
       try {
         const res = await API.del("/api/system/cache");
-        addToast(`Cache cleared! (${res.cleared || 0} files removed)`, "success");
+        addToast(`Cache cleared! (${res.cleared || 0} files removed) — scanning for new metadata…`, "success");
         await loadCacheInfo();
+        // Signal HomePage to auto-start a scan when we arrive there
+        store.pendingScanAfterCacheCleared = true;
+        router.push("/");
       } catch (e) {
         addToast("Failed to clear cache", "error");
       } finally {
@@ -2664,6 +2701,7 @@ const SettingsPage = {
       addPath,
       removePath,
       movePath,
+      togglePath,
       cacheInfo,
       clearingCache,
       resetting,
@@ -8048,7 +8086,7 @@ const App = {
           <i class="ph ph-arrow-circle-up"></i>
           <span>
             Update available (v{{ store.updateInfo.latest }}) —
-            <a href="#" @click.prevent="router.push('/settings'); updateBannerDismissed = true">go to Settings to install</a>
+            <a href="#" @click.prevent="store.pendingUpdateCheck = true; router.push('/settings'); updateBannerDismissed = true">go to Settings to install</a>
           </span>
           <button class="update-banner-dismiss" @click="updateBannerDismissed = true" title="Dismiss">
             <i class="ph ph-x"></i>

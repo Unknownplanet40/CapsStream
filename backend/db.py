@@ -220,6 +220,59 @@ def enrich_mounted(item):
     return item
 
 
+def get_disabled_path_roots(cfg=None):
+    if cfg is None:
+        try:
+            from backend.settings import load_config
+            cfg = load_config()
+        except Exception:
+            return []
+
+    disabled_cfg = cfg.get("disabled_paths", {})
+    all_disabled = []
+    if isinstance(disabled_cfg, dict):
+        for cat_paths in disabled_cfg.values():
+            if isinstance(cat_paths, list):
+                all_disabled.extend(cat_paths)
+    elif isinstance(disabled_cfg, list):
+        all_disabled.extend(disabled_cfg)
+
+    from backend.settings import ROOT_DIR
+    roots = []
+    for p in all_disabled:
+        if not p or not str(p).strip():
+            continue
+        p_str = str(p).strip()
+        abs_p = p_str if os.path.isabs(p_str) else os.path.join(ROOT_DIR, p_str)
+        clean_p = abs_p.replace("/", "\\").lower().rstrip("\\")
+        if clean_p:
+            roots.append(clean_p)
+    return roots
+
+
+def is_file_path_disabled(file_path, disabled_roots=None):
+    if not file_path:
+        return False
+    if disabled_roots is None:
+        disabled_roots = get_disabled_path_roots()
+    if not disabled_roots:
+        return False
+
+    fp = file_path.replace("/", "\\").lower()
+    for root in disabled_roots:
+        if fp == root or fp.startswith(root + "\\"):
+            return True
+    return False
+
+
+def is_item_disabled(item, disabled_roots=None):
+    if not item or not isinstance(item, dict):
+        return False
+    fp = item.get("file_path")
+    return is_file_path_disabled(fp, disabled_roots)
+
+
+
 def get_all_sources_for_media(media):
     """
     Find all media records in SQLite for the same title/episode across multiple sources.
@@ -269,6 +322,10 @@ def get_all_sources_for_media(media):
                 i for i in items 
                 if os.path.dirname(i.get("file_path", "")) != target_dir or os.path.basename(i.get("file_path", "")) == target_file
             ]
+
+    disabled_roots = get_disabled_path_roots()
+    if disabled_roots:
+        items = [i for i in items if not is_item_disabled(i, disabled_roots)]
 
     for item in items:
         item["is_mounted"] = is_item_mounted(item)
@@ -404,18 +461,25 @@ def enrich_mounted_list(items):
     if not items:
         return []
 
+    try:
+        from backend.settings import load_config
+        cfg = load_config()
+        disabled_roots = get_disabled_path_roots(cfg)
+    except Exception:
+        cfg = {}
+        disabled_roots = []
+
+    # Hide media items from disabled storage locations
+    if disabled_roots:
+        items = [item for item in items if isinstance(item, dict) and not is_item_disabled(item, disabled_roots)]
+
     # Fast in-memory drive mount enrichment without nested SQL queries per item
     for item in items:
         if isinstance(item, dict):
             item["is_mounted"] = is_item_mounted(item)
 
-    try:
-        from backend.settings import load_config
-        cfg = load_config()
-        if cfg.get("hide_unmounted_items", False):
-            items = [item for item in items if isinstance(item, dict) and item.get("is_mounted", True)]
-    except Exception:
-        pass
+    if cfg.get("hide_unmounted_items", False):
+        items = [item for item in items if isinstance(item, dict) and item.get("is_mounted", True)]
 
     return items
 
@@ -438,7 +502,12 @@ def get_media_by_id(media_id):
     conn = get_conn()
     row = conn.execute("SELECT * FROM media WHERE id=?", (media_id,)).fetchone()
     conn.close()
-    return enrich_mounted(dict(row)) if row else None
+    if not row:
+        return None
+    item = dict(row)
+    if is_item_disabled(item):
+        return None
+    return enrich_mounted(item)
 
 
 def update_skip_timestamps(media_id, data):
@@ -488,6 +557,10 @@ def get_media_by_tmdb(tmdb_id, media_type=None):
     conn.close()
 
     items = [dict(r) for r in rows]
+    disabled_roots = get_disabled_path_roots()
+    if disabled_roots:
+        items = [ep for ep in items if not is_item_disabled(ep, disabled_roots)]
+
     grouped = {}
     for ep in items:
         key = (ep.get("season"), ep.get("episode"))
@@ -526,68 +599,146 @@ def get_unique_shows(media_type=None):
     conn = get_conn()
     type_filter = f"WHERE type='{media_type}'" if media_type else ""
     rows = conn.execute(f"""
-        SELECT tmdb_id, title, MAX(year) as year, 
-               MAX(poster_path) as poster_path, MAX(backdrop_path) as backdrop_path, MAX(logo_path) as logo_path,
-               MAX(rating) as rating, MAX(overview) as overview, MAX(genres) as genres, type, MIN(id) as id,
-               MAX(added_at) as added_at, MAX(file_path) as file_path
-        FROM media
+        SELECT * FROM media
         {type_filter}
-        GROUP BY COALESCE(tmdb_id, title)
-        ORDER BY title
+        ORDER BY added_at DESC
     """).fetchall()
     conn.close()
-    return enrich_mounted_list([dict(r) for r in rows])
+
+    disabled_roots = get_disabled_path_roots()
+    if disabled_roots:
+        items = [dict(r) for r in rows if not is_file_path_disabled(r["file_path"], disabled_roots)]
+    else:
+        items = [dict(r) for r in rows]
+
+    grouped = {}
+    for item in items:
+        key = item.get("tmdb_id") or item.get("title")
+        if not key:
+            continue
+        if key not in grouped:
+            grouped[key] = item
+        else:
+            if not grouped[key].get("poster_path") and item.get("poster_path"):
+                grouped[key] = item
+
+    result = list(grouped.values())
+    result.sort(key=lambda x: (x.get("title") or "").lower())
+    return enrich_mounted_list(result)
 
 
 def get_recently_added(limit=20):
     conn = get_conn()
     rows = conn.execute("""
-        SELECT tmdb_id, title, MAX(year) as year, 
-               MAX(poster_path) as poster_path, MAX(backdrop_path) as backdrop_path, MAX(logo_path) as logo_path,
-               MAX(rating) as rating, MAX(overview) as overview, MAX(genres) as genres, type, MIN(id) as id,
-               MAX(added_at) as added_at, MAX(file_path) as file_path
-        FROM media
-        GROUP BY COALESCE(tmdb_id, title)
+        SELECT * FROM media
         ORDER BY added_at DESC
-        LIMIT ?
-    """, (limit,)).fetchall()
+    """).fetchall()
     conn.close()
-    return enrich_mounted_list([dict(r) for r in rows])
+
+    disabled_roots = get_disabled_path_roots()
+    if disabled_roots:
+        items = [dict(r) for r in rows if not is_file_path_disabled(r["file_path"], disabled_roots)]
+    else:
+        items = [dict(r) for r in rows]
+
+    grouped = {}
+    for item in items:
+        key = item.get("tmdb_id") or item.get("title")
+        if not key:
+            continue
+        if key not in grouped:
+            grouped[key] = item
+
+    result = list(grouped.values())
+    result.sort(key=lambda x: x.get("added_at") or 0, reverse=True)
+    return enrich_mounted_list(result[:limit])
 
 
 def get_top_rated(limit=20, media_type=None):
     conn = get_conn()
-    type_filter = f"AND type='{media_type}'" if media_type else ""
+    type_filter = f"WHERE type='{media_type}'" if media_type else ""
     rows = conn.execute(f"""
-        SELECT tmdb_id, title, MAX(year) as year, 
-               MAX(poster_path) as poster_path, MAX(backdrop_path) as backdrop_path, MAX(logo_path) as logo_path,
-               MAX(rating) as rating, MAX(vote_count) as vote_count, MAX(overview) as overview, MAX(genres) as genres, type, MIN(id) as id,
-               MAX(added_at) as added_at, MAX(file_path) as file_path
-        FROM media
-        WHERE rating > 0 {type_filter}
-        GROUP BY COALESCE(tmdb_id, title)
+        SELECT * FROM media
+        {type_filter}
         ORDER BY rating DESC, vote_count DESC
-        LIMIT ?
-    """, (limit,)).fetchall()
+    """).fetchall()
     conn.close()
-    return enrich_mounted_list([dict(r) for r in rows])
+
+    disabled_roots = get_disabled_path_roots()
+    if disabled_roots:
+        items = [dict(r) for r in rows if not is_file_path_disabled(r["file_path"], disabled_roots)]
+    else:
+        items = [dict(r) for r in rows]
+
+    grouped = {}
+    for item in items:
+        if not (item.get("rating") and item["rating"] > 0):
+            continue
+        key = item.get("tmdb_id") or item.get("title")
+        if not key:
+            continue
+        if key not in grouped:
+            grouped[key] = item
+
+    result = list(grouped.values())
+    result.sort(key=lambda x: (x.get("rating") or 0, x.get("vote_count") or 0), reverse=True)
+    return enrich_mounted_list(result[:limit])
 
 
 def get_by_genre(genre, limit=20):
     conn = get_conn()
     rows = conn.execute("""
-        SELECT tmdb_id, title, MAX(year) as year, 
-               MAX(poster_path) as poster_path, MAX(backdrop_path) as backdrop_path, MAX(logo_path) as logo_path,
-               MAX(rating) as rating, MAX(overview) as overview, MAX(genres) as genres, type, MIN(id) as id,
-               MAX(added_at) as added_at, MAX(file_path) as file_path
-        FROM media
+        SELECT * FROM media
         WHERE genres LIKE ?
-        GROUP BY COALESCE(tmdb_id, title)
         ORDER BY rating DESC
-        LIMIT ?
-    """, (f"%{genre}%", limit)).fetchall()
+    """, (f"%{genre}%",)).fetchall()
     conn.close()
-    return enrich_mounted_list([dict(r) for r in rows])
+
+    disabled_roots = get_disabled_path_roots()
+    if disabled_roots:
+        items = [dict(r) for r in rows if not is_file_path_disabled(r["file_path"], disabled_roots)]
+    else:
+        items = [dict(r) for r in rows]
+
+    grouped = {}
+    for item in items:
+        key = item.get("tmdb_id") or item.get("title")
+        if not key:
+            continue
+        if key not in grouped:
+            grouped[key] = item
+
+    result = list(grouped.values())
+    result.sort(key=lambda x: x.get("rating") or 0, reverse=True)
+    return enrich_mounted_list(result[:limit])
+
+
+def get_random_pick(limit=10):
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT * FROM media
+        WHERE poster_path IS NOT NULL
+    """).fetchall()
+    conn.close()
+
+    disabled_roots = get_disabled_path_roots()
+    if disabled_roots:
+        items = [dict(r) for r in rows if not is_file_path_disabled(r["file_path"], disabled_roots)]
+    else:
+        items = [dict(r) for r in rows]
+
+    grouped = {}
+    for item in items:
+        key = item.get("tmdb_id") or item.get("title")
+        if not key:
+            continue
+        if key not in grouped:
+            grouped[key] = item
+
+    import random
+    result = list(grouped.values())
+    random.shuffle(result)
+    return enrich_mounted_list(result[:limit])
 
 
 def get_all_genres():
@@ -603,20 +754,6 @@ def get_all_genres():
                     genres.add(g)
     return sorted(genres)
 
-
-def get_random_pick(limit=10):
-    conn = get_conn()
-    rows = conn.execute("""
-        SELECT tmdb_id, title, year, poster_path, backdrop_path, MAX(logo_path) as logo_path,
-               rating, overview, genres, type, MIN(id) as id, MAX(file_path) as file_path
-        FROM media
-        WHERE poster_path IS NOT NULL
-        GROUP BY COALESCE(tmdb_id, title)
-        ORDER BY RANDOM()
-        LIMIT ?
-    """, (limit,)).fetchall()
-    conn.close()
-    return enrich_mounted_list([dict(r) for r in rows])
 
 
 def upsert_media(data):
@@ -686,7 +823,7 @@ def get_unmatched():
         "SELECT * FROM media WHERE tmdb_matched=0 ORDER BY title"
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return enrich_mounted_list([dict(r) for r in rows])
 
 
 # ─── Profile Queries ──────────────────────────────────────────────────────────
@@ -2024,7 +2161,7 @@ def get_collections(profile_id):
             WHERE ci.collection_id=?
             ORDER BY ci.sort_order
         """, (col["id"],)).fetchall()
-        col["items"] = [dict(i) for i in items]
+        col["items"] = enrich_mounted_list([dict(i) for i in items])
         result.append(col)
     conn.close()
     return result
@@ -2164,4 +2301,5 @@ def search_media(query="", media_type=None, genre=None, sort_by="relevance"):
                     filtered.append(m)
         results = filtered
 
+    results = enrich_mounted_list(results)
     return results[:60]
