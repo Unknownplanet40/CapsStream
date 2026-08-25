@@ -259,6 +259,7 @@ def launch_app_window(cfg, url):
     return subprocess.Popen(
         [exe, f"--app={url}", "--user-data-dir=" + APP_PROFILE_DIR,
          "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+         "--autoplay-policy=no-user-gesture-required",
          "--start-maximized"],
         creationflags=creationflags,
     )

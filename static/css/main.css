@@ -1075,13 +1075,17 @@ ol {
 .modal-backdrop {
   position: fixed;
   inset: 0;
+  display: flex;
+  flex-direction: column;
   background: rgba(0, 0, 0, 0.8);
   backdrop-filter: blur(4px);
-  z-index: 500;
+  /* Above the fixed navbar (z-index 1000) so modals never sit behind it */
+  z-index: 1500;
   animation: fade-in 0.2s ease;
   /* Tall modals scroll INSIDE the backdrop. Centering comes from the
-     child's auto margins — using flex align-items:center here would clip
-     the top of oversized cards and push wheel-scrolling to the page. */
+     child's auto margins — flex + margin:auto centers small cards fully
+     while oversized cards degrade to top-aligned scrollable (auto margins
+     resolve to 0, so the top edge stays reachable — no clipping). */
   overflow-y: auto;
   overscroll-behavior: contain;
 }

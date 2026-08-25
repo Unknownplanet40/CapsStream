@@ -85,8 +85,20 @@
 
       var bell = new Audio("/static/sfx/bell.wav");
       bell.volume = 1;
-      var p = bell.play();
-      if (p && p.catch) p.catch(function () {});
+      var bellPlayed = false;
+      function tryBell() {
+        if (bellPlayed) return;
+        var p = bell.play();
+        if (p && p.then) p.then(function () { bellPlayed = true; })
+                        .catch(function () { /* still blocked — retry on next gesture */ });
+        else bellPlayed = true;
+      }
+      tryBell();
+      // Autoplay policy fallback: some profiles (e.g. fresh app-mode
+      // profiles) block audible autoplay until the user interacts.
+      ["pointerdown", "keydown"].forEach(function (evt) {
+        window.addEventListener(evt, tryBell);
+      });
 
       // Brackets are visible immediately; only the two words pop in
       var words = splash.querySelectorAll(".part");

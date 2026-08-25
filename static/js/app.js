@@ -355,6 +355,31 @@ async function pollScanStatus() {
   }, 1500);
 }
 
+// Module-level achievement unlock — toasts on unlock. Used by UI actions
+// outside the player (search, filters, scans, IMDb links, trailers).
+function unlockAchievement(achievementId) {
+  API.post("/api/achievements/unlock", { achievement_id: achievementId })
+    .then((res) => {
+      if (res && res.unlocked) {
+        addToast(`🏆 Achievement Unlocked: ${res.unlocked.icon} ${res.unlocked.title}!`, "success");
+      }
+    })
+    .catch(() => {});
+}
+
+// Player-feature tracking for the "Player Grandmaster" achievement —
+// unlocks once subtitles, audio, speed, AND quality have all been used.
+function trackPlayerFeature(feature) {
+  try {
+    const used = new Set(JSON.parse(localStorage.getItem("cs_player_features") || "[]"));
+    used.add(feature);
+    localStorage.setItem("cs_player_features", JSON.stringify([...used]));
+    if (["subs", "audio", "speed", "quality"].every((f) => used.has(f))) {
+      unlockAchievement("player_god");
+    }
+  } catch (e) {}
+}
+
 function imgUrl(path) {
   if (!path) return null;
   if (path.startsWith("http")) return path;
@@ -962,6 +987,7 @@ const HomePage = {
         const id = item.id || item.tmdb_id;
         const res = await API.get(`/api/media/${id}/trailer`);
         if (res && res.embed_url) {
+          unlockAchievement("trailer_buff");
           trailerModalUrl.value = res.embed_url;
           trailerModalTitle.value = `${item.title} — ${res.title || 'Official Trailer'}`;
         } else {
@@ -1048,7 +1074,7 @@ const DetailPage = {
             <span v-if="media.rating" class="detail-rating">⭐ {{ formatRating(media.rating) }}</span>
             <span v-if="media.vote_count" style="font-size:0.8rem;color:var(--text-muted)">{{ media.vote_count.toLocaleString() }} votes</span>
             <span v-if="media.runtime">{{ formatDuration(media.runtime * 60) }}</span>
-            <a v-if="media.imdb_id" :href="'https://www.imdb.com/title/' + media.imdb_id" target="_blank" class="imdb-link-badge" title="Open IMDb Page">
+            <a v-if="media.imdb_id" :href="'https://www.imdb.com/title/' + media.imdb_id" target="_blank" class="imdb-link-badge" title="Open IMDb Page" @click="unlockAchievement('imdb_surfer')">
               <span class="imdb-badge-logo">IMDb</span>
               <span class="imdb-id-text">{{ media.imdb_id }}</span>
             </a>
@@ -1173,7 +1199,7 @@ const DetailPage = {
 
                 <!-- Badges Row -->
                 <div class="file-details-pills">
-                  <a v-if="media.imdb_id" :href="'https://www.imdb.com/title/' + media.imdb_id" target="_blank" class="file-pill imdb-pill" title="View on IMDb">
+                  <a v-if="media.imdb_id" :href="'https://www.imdb.com/title/' + media.imdb_id" target="_blank" class="file-pill imdb-pill" title="View on IMDb" @click="unlockAchievement('imdb_surfer')">
                     <i class="ph ph-arrow-square-out"></i>
                     <span>IMDb: {{ media.imdb_id }}</span>
                   </a>
@@ -1706,6 +1732,7 @@ const DetailPage = {
       try {
         const res = await API.get(`/api/media/${mediaId}/trailer`);
         if (res && res.embed_url) {
+          unlockAchievement("trailer_buff");
           trailerModalUrl.value = res.embed_url;
           trailerModalTitle.value = `${media.value.title} — ${res.title || 'Official Trailer'}`;
         } else {
@@ -2121,6 +2148,20 @@ const SettingsPage = {
                 <input type="checkbox" v-model="form.library.scan_on_startup" />
                 <span class="toggle-slider"></span>
               </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Manual Library Scan</div>
+                <div class="settings-desc">Run a full disk scan now to pick up new files, refresh metadata, and apply any library changes.</div>
+                <div v-if="store.scanRunning" style="font-size:0.8rem;color:var(--accent);font-weight:700;margin-top:4px">
+                  Scan in progress…
+                </div>
+              </div>
+              <button class="btn btn-primary btn-sm" @click="manualScan" :disabled="store.scanRunning" id="btn-settings-scan">
+                <i :class="store.scanRunning ? 'ph ph-circle-notch' : 'ph ph-arrows-clockwise'" :style="store.scanRunning ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+                {{ store.scanRunning ? 'Scanning…' : 'Scan Library Now' }}
+              </button>
             </div>
 
             <div class="settings-row">
@@ -2874,6 +2915,11 @@ const SettingsPage = {
     const animeDetect = ref({ running: false, done: false, total: 0, processed: 0, reclassified: 0, error: null });
     let animeDetectTimer = null;
 
+    function manualScan() {
+      unlockAchievement("scan_master");
+      startLibraryScan(true);
+    }
+
     async function startAnimeDetect() {
       if (animeDetect.value.running) return;
       try {
@@ -2981,6 +3027,7 @@ const SettingsPage = {
       togglePath,
       animeDetect,
       startAnimeDetect,
+      manualScan,
       cacheInfo,
       clearingCache,
       resetting,
@@ -4053,6 +4100,7 @@ const PlayerPage = {
 
       streamState.audioTrack = index;
       showAudioMenu.value = false;
+      trackPlayerFeature("audio");
 
       // NOTE: the <video> element is NOT reloaded. Only the audio routing
       // changes, so playback continues seamlessly at the exact same frame.
@@ -4099,6 +4147,7 @@ const PlayerPage = {
         return;
       }
       showQualityMenu.value = false;
+      trackPlayerFeature("quality");
       suppressResume = true;
       saveProgressNow();
 
@@ -4226,6 +4275,13 @@ const PlayerPage = {
       // Outro: always just skip PAST the credits window — the Next Episode
       // pill takes over afterwards when there's a following episode.
       seekTo(action.end);
+
+      // Skip Champion: count intro/recap/outro skip uses across sessions
+      try {
+        const count = (parseInt(localStorage.getItem("cs_skip_count") || "0", 10) || 0) + 1;
+        localStorage.setItem("cs_skip_count", String(count));
+        if (count >= 10) unlockAchievementSilently("skip_champion");
+      } catch (e) {}
     }
 
     // ─── 4K HEVC Playback Risk Guard ────────────────────────────────
@@ -4694,6 +4750,7 @@ const PlayerPage = {
       // Mirror playback speed to the remote audio element
       if (isRemoteAudioActive() && remoteAudioEl) remoteAudioEl.playbackRate = rate;
       showSpeedMenu.value = false;
+      trackPlayerFeature("speed");
 
       let achId = null;
       if (rate >= 2.0) achId = "double_speed";
@@ -4775,6 +4832,7 @@ const PlayerPage = {
       showSubMenu.value = false;
       if (index >= 0) {
         unlockAchievementSilently("sub_master");
+        trackPlayerFeature("subs");
       }
       nextTick(() => {
         syncTextTracks();
@@ -5192,6 +5250,15 @@ const PlayerPage = {
       }
       if (playbackRate.value) {
         videoRef.value.playbackRate = playbackRate.value;
+      }
+      // Resolution-based achievements (direct play reports true height;
+      // transcodes fall back to the quality option height if present)
+      const vHeight = videoRef.value.videoHeight || 0;
+      if (vHeight >= 2160) {
+        unlockAchievementSilently("four_k_king");
+        unlockAchievementSilently("hd_master");
+      } else if (vHeight >= 1080) {
+        unlockAchievementSilently("hd_master");
       }
       bindPipListeners();
       syncTextTracks();
@@ -5890,6 +5957,7 @@ const BrowsePage = {
     function setType(t) {
       activeType.value = t;
       currentPage.value = 1;
+      if (t) unlockAchievement("filter_pro");
       if (t) {
         router.push({ path: "/browse", query: { type: t } });
       } else {
@@ -7218,6 +7286,7 @@ const SearchPage = {
       loading.value = true;
       searched.value = true;
       currentPage.value = 1;
+      if (query.value && query.value.trim()) unlockAchievement("search_master");
       try {
         const res = await API.get(`/api/search?q=${encodeURIComponent(query.value)}&type=${selectedType.value}&genre=${selectedGenre.value}&sort=${selectedSort.value}`);
         results.value = kidsFilter(res || []);
@@ -8861,6 +8930,7 @@ const App = {
 
     async function triggerScan() {
       try {
+        unlockAchievement("scan_master");
         await API.post("/api/scan", {});
         store.scanRunning = true;
         pollScanStatus();

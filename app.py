@@ -885,6 +885,52 @@ def api_show_detail(tmdb_id):
 
         seasons[str(s_num)] = sorted(merged_list, key=lambda e: e.get("episode") or 0)
 
+    # ── Missing seasons (Jellyfin-style) ─────────────────────────
+    # Seasons the library has no local episode rows for still need to
+    # appear (grayed tab + "Not Downloaded" placeholder episodes).
+    # Expected count comes from the matcher's cached TMDb show detail
+    # (number_of_seasons), falling back to a live TMDb lookup.
+    expected_seasons = 0
+    if tmdb_id:
+        from backend.matcher import _load_cache, _tmdb_get
+        for cache_type in (media_type, "series", "anime"):
+            cached_show = _load_cache(cache_type, tmdb_id)
+            if cached_show and cached_show.get("seasons"):
+                try:
+                    expected_seasons = int(cached_show["seasons"])
+                    break
+                except (TypeError, ValueError):
+                    continue
+        if expected_seasons <= 0:
+            detail = _tmdb_get(f"tv/{tmdb_id}", {"language": "en-US"})
+            if detail:
+                try:
+                    expected_seasons = int(detail.get("number_of_seasons") or 0)
+                except (TypeError, ValueError):
+                    expected_seasons = 0
+
+    for s_num in range(1, expected_seasons + 1):
+        if s_num in s_nums:
+            continue
+        tmdb_eps = fetch_season_episodes(tmdb_id, s_num) if tmdb_id else []
+        if not tmdb_eps:
+            continue  # unaired / no metadata for this season
+        placeholder_list = []
+        for meta in tmdb_eps:
+            placeholder_list.append({
+                "id": None,
+                "is_local": False,
+                "season": s_num,
+                "episode": meta.get("episode_number"),
+                "ep_title": meta.get("name"),
+                "overview": meta.get("overview"),
+                "still_path": meta.get("still_path") or show.get("backdrop_path"),
+                "duration": (meta.get("runtime") * 60) if meta.get("runtime") else None,
+                "title": show.get("title"),
+                "progress": None,
+            })
+        seasons[str(s_num)] = sorted(placeholder_list, key=lambda e: e.get("episode") or 0)
+
     show["seasons"] = seasons
     if pid and episodes:
         show["is_favorite"] = is_favorite(pid, episodes[0]["id"])

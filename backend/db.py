@@ -1771,6 +1771,7 @@ def unlock_achievement(profile_id, achievement_id):
 
 
 def check_and_unlock_achievements(profile_id):
+    from datetime import datetime
     conn = get_conn()
 
     unlocked_ids = set(
@@ -1863,6 +1864,226 @@ def check_and_unlock_achievements(profile_id):
     if p_row:
         if "pin_defender" not in unlocked_ids and p_row["pin_hash"]: new_unlocked.append("pin_defender")
         if "kids_creator" not in unlocked_ids and p_row["is_kids"]: new_unlocked.append("kids_creator")
+
+    # 5b. Theme — the entire interface is the premium dark theme, so this
+    # unlocks for any active profile that checks their trophy case.
+    if "theme_master" not in unlocked_ids:
+        new_unlocked.append("theme_master")
+
+    # 5c. Library storage & drive milestones (library-wide, not per-profile)
+    lib_stats = conn.execute("""
+        SELECT COALESCE(SUM(file_size), 0) AS total_bytes,
+               COUNT(DISTINCT CASE WHEN file_size >= 2000000000 THEN
+                   COALESCE(tmdb_id, title) END) AS hd_titles
+        FROM media
+    """).fetchone()
+    if "storage_gigabyte" not in unlocked_ids and lib_stats["total_bytes"] >= 10 * 1024**3:
+        new_unlocked.append("storage_gigabyte")
+    if "storage_terabyte" not in unlocked_ids and lib_stats["total_bytes"] >= 100 * 1024**3:
+        new_unlocked.append("storage_terabyte")
+    if "hd_collector" not in unlocked_ids and lib_stats["hd_titles"] >= 10:
+        new_unlocked.append("hd_collector")
+
+    drive_roots = {
+        (row[0] or "")[:3] for row in conn.execute(
+            "SELECT DISTINCT file_path FROM media WHERE file_path IS NOT NULL"
+        ).fetchall()
+    }
+    if "drive_mounter" not in unlocked_ids and len(drive_roots) >= 2:
+        new_unlocked.append("drive_mounter")
+    if "multi_drive" not in unlocked_ids and len(drive_roots) >= 3:
+        new_unlocked.append("multi_drive")
+    if "profile_customizer" not in unlocked_ids and p_row and (
+        (p_row["avatar"] or "").strip() or (p_row["color"] or "").strip()
+    ):
+        new_unlocked.append("profile_customizer")
+
+    # 6. Time-of-day, streaks & session habits — computed from raw progress
+    # rows (one query, all Python-side; timestamps are "YYYY-MM-DD HH:MM:SS")
+    raw_rows = conn.execute("""
+        SELECT wp.updated_at, wp.position, wp.duration, wp.completed, wp.media_id,
+               m.type, m.tmdb_id, m.season, m.episode, m.genres
+        FROM watch_progress wp JOIN media m ON m.id = wp.media_id
+        WHERE wp.profile_id=?
+    """, (profile_id,)).fetchall()
+
+    day_hours = {}     # date -> set(hours)
+    day_titles = {}    # date -> set(media_id)
+    day_seconds = {}   # date -> approximate watched seconds
+    day_movie_done = {}  # date -> count completed movies
+    show_day_eps = {}  # (tmdb_id, season, date) -> set(episode numbers completed)
+    hour_dates = {}    # hour -> set(dates)
+    genres_watched = {}  # genre keyword -> set(media_id)
+    max_episode_cache = {}
+
+    for r in raw_rows:
+        ts = r["updated_at"] or ""
+        if len(ts) < 13:
+            continue
+        date_s, hour_s = ts[:10], ts[11:13]
+        try:
+            hour = int(hour_s)
+        except ValueError:
+            continue
+        minute = int(ts[14:16]) if len(ts) >= 16 and ts[14:16].isdigit() else 0
+        weekday = datetime.strptime(date_s, "%Y-%m-%d").weekday()  # 0=Mon
+
+        day_hours.setdefault(date_s, set()).add(hour)
+        day_titles.setdefault(date_s, set()).add(r["media_id"])
+        hour_dates.setdefault(hour, set()).add(date_s)
+
+        pos = r["position"] or 0
+        dur = r["duration"] or 0
+        day_seconds[date_s] = day_seconds.get(date_s, 0) + min(pos, dur) if dur else day_seconds.get(date_s, 0)
+
+        if r["completed"] and r["type"] == "movie":
+            day_movie_done[date_s] = day_movie_done.get(date_s, 0) + 1
+
+        if r["completed"] and r["type"] != "movie" and r["tmdb_id"]:
+            key = (r["tmdb_id"], r["season"], date_s)
+            show_day_eps.setdefault(key, set()).add(r["episode"])
+
+        for kw in ("Action", "Comedy", "Drama", "Science Fiction", "Horror",
+                   "Thriller", "Romance", "Documentary", "Animation",
+                   "Crime", "Mystery", "Fantasy"):
+            if kw in (r["genres"] or ""):
+                genres_watched.setdefault(kw, set()).add(r["media_id"])
+
+    def consecutive_days(dates, needed):
+        if len(dates) < needed:
+            return False
+        ds = sorted(datetime.strptime(d, "%Y-%m-%d").toordinal() for d in dates)
+        run, best = 1, 1
+        for i in range(1, len(ds)):
+            run = run + 1 if ds[i] - ds[i - 1] == 1 else 1
+            best = max(best, run)
+        return best >= needed
+
+    all_dates = set(day_hours.keys())
+    if "streak_3" not in unlocked_ids and consecutive_days(all_dates, 3): new_unlocked.append("streak_3")
+    if "streak_7" not in unlocked_ids and consecutive_days(all_dates, 7): new_unlocked.append("streak_7")
+    if "streak_30" not in unlocked_ids and consecutive_days(all_dates, 30): new_unlocked.append("streak_30")
+    if "daily_dose" not in unlocked_ids and consecutive_days(all_dates, 5): new_unlocked.append("daily_dose")
+    if "constant_streamer" not in unlocked_ids and consecutive_days(all_dates, 14): new_unlocked.append("constant_streamer")
+    if "clockwork" not in unlocked_ids and any(len(hour_dates.get(h, set())) >= 3 for h in range(24)):
+        new_unlocked.append("clockwork")
+
+    if "midnight_marauder" not in unlocked_ids:
+        if any(r["updated_at"][11:16] == "00:00" or (r["updated_at"][11:13] == "00" and int(r["updated_at"][14:16] or 99) < 10)
+               for r in raw_rows if len(r["updated_at"] or "") >= 16):
+            new_unlocked.append("midnight_marauder")
+    if "lunchtime_streamer" not in unlocked_ids and any(12 <= h <= 13 for h in set().union(*day_hours.values()) if day_hours):
+        new_unlocked.append("lunchtime_streamer")
+    if "primetime_viewer" not in unlocked_ids and any(20 <= h <= 21 for h in set().union(*day_hours.values()) if day_hours):
+        new_unlocked.append("primetime_viewer")
+    if "dawn_patrol" not in unlocked_ids and any(5 <= h <= 6 for h in set().union(*day_hours.values()) if day_hours):
+        new_unlocked.append("dawn_patrol")
+    if "tea_time" not in unlocked_ids and any(
+        15 <= h <= 16 and 0 < (r["duration"] or 0) <= 1800
+        for r in raw_rows for h in [int(r["updated_at"][11:13])] if len(r["updated_at"] or "") >= 13
+    ):
+        new_unlocked.append("tea_time")
+    if "afternoon_delight" not in unlocked_ids and any(
+        r["type"] == "movie" and 14 <= int(r["updated_at"][11:13]) <= 16
+        for r in raw_rows if len(r["updated_at"] or "") >= 13
+    ):
+        new_unlocked.append("afternoon_delight")
+    if "friday_night" not in unlocked_ids and any(
+        r["type"] == "movie" and datetime.strptime(r["updated_at"][:10], "%Y-%m-%d").weekday() == 4
+        and int(r["updated_at"][11:13]) >= 18
+        for r in raw_rows if len(r["updated_at"] or "") >= 13
+    ):
+        new_unlocked.append("friday_night")
+    if "monday_blues" not in unlocked_ids and any(
+        datetime.strptime(d, "%Y-%m-%d").weekday() == 0 for d in all_dates
+    ):
+        new_unlocked.append("monday_blues")
+    if "weekend_warrior" not in unlocked_ids and any(
+        datetime.strptime(d, "%Y-%m-%d").weekday() >= 5 and len(t) >= 5
+        for d, t in day_titles.items()
+    ):
+        new_unlocked.append("weekend_warrior")
+    if "holiday_binge" not in unlocked_ids and any(
+        datetime.strptime(d, "%Y-%m-%d").weekday() >= 5 and len(t) >= 3
+        for d, t in day_titles.items()
+    ):
+        new_unlocked.append("holiday_binge")
+    if "all_nighter" not in unlocked_ids and any(
+        (h1 in hours and h2 in hours)
+        for d, hours in day_hours.items()
+        for h1, h2 in [(1, 5), (1, 6), (2, 6)]
+    ):
+        new_unlocked.append("all_nighter")
+    if "triple_threat" not in unlocked_ids and any(c >= 3 for c in day_movie_done.values()):
+        new_unlocked.append("triple_threat")
+    if "binge_session" not in unlocked_ids and any(len(e) >= 3 for e in show_day_eps.values()):
+        new_unlocked.append("binge_session")
+    if "quick_session" not in unlocked_ids and any(
+        r["completed"] and 0 < (r["duration"] or 0) <= 900 for r in raw_rows
+    ):
+        new_unlocked.append("quick_session")
+    if "long_session" not in unlocked_ids and any(s >= 7200 for s in day_seconds.values()):
+        new_unlocked.append("long_session")
+    if "marathon_session" not in unlocked_ids and any(s >= 14400 for s in day_seconds.values()):
+        new_unlocked.append("marathon_session")
+    if "silent_watcher" not in unlocked_ids and any(0 <= h <= 4 for h in set().union(*day_hours.values()) if day_hours):
+        new_unlocked.append("silent_watcher")
+    if "halfway_there" not in unlocked_ids and any(
+        r["type"] in ("series", "anime") and (r["duration"] or 0) > 0
+        and (r["position"] or 0) / r["duration"] >= 0.45
+        for r in raw_rows
+    ):
+        new_unlocked.append("halfway_there")
+    if "season_finale" not in unlocked_ids:
+        for r in raw_rows:
+            if not (r["completed"] and r["type"] != "movie" and r["tmdb_id"] and r["season"] is not None):
+                continue
+            cache_key = (r["tmdb_id"], r["season"])
+            if cache_key not in max_episode_cache:
+                row = conn.execute(
+                    "SELECT MAX(episode) FROM media WHERE tmdb_id=? AND season=?",
+                    (r["tmdb_id"], r["season"]),
+                ).fetchone()
+                max_episode_cache[cache_key] = row[0]
+            if r["episode"] is not None and r["episode"] == max_episode_cache[cache_key]:
+                new_unlocked.append("season_finale")
+                break
+    if "marathon_master" not in unlocked_ids:
+        season_spans = {}
+        for r in raw_rows:
+            if r["completed"] and r["type"] != "movie" and r["tmdb_id"] and r["season"] is not None:
+                key = (r["tmdb_id"], r["season"])
+                span = season_spans.setdefault(key, {"dates": set(), "eps": set()})
+                span["dates"].add(r["updated_at"][:10])
+                span["eps"].add(r["episode"])
+        for span in season_spans.values():
+            if len(span["eps"]) >= 3 and len(span["dates"]) >= 1:
+                ds = sorted(datetime.strptime(d, "%Y-%m-%d").toordinal() for d in span["dates"])
+                if (ds[-1] - ds[0]) <= 2:  # within 48 hours
+                    new_unlocked.append("marathon_master")
+                    break
+
+    # 6b. Genre exploration (distinct watched titles per genre keyword)
+    genre_goals = {
+        "action_junkie": (("Action",), 3),
+        "comedy_lover": (("Comedy",), 3),
+        "drama_queen": (("Drama",), 3),
+        "sci_fi_fan": (("Science Fiction", "Sci-Fi"), 3),
+        "horror_seeker": (("Horror", "Thriller"), 3),
+        "romance_hopeless": (("Romance",), 3),
+        "docu_fanatic": (("Documentary",), 2),
+        "animation_fan": (("Animation",), 3),
+        "crime_detective": (("Crime", "Mystery"), 3),
+        "fantasy_realm": (("Fantasy",), 3),
+    }
+    for aid, (keywords, needed) in genre_goals.items():
+        if aid in unlocked_ids:
+            continue
+        count = set()
+        for kw in keywords:
+            count |= genres_watched.get(kw, set())
+        if len(count) >= needed:
+            new_unlocked.append(aid)
 
     # 6. Trophy Case Collector Milestones
     current_total_unlocked = len(unlocked_ids) + len(new_unlocked)
