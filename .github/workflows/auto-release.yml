@@ -64,7 +64,7 @@ jobs:
 
           if echo "$LOG" | grep -qiE "(BREAKING CHANGE|!:|\+semver:\s*(major|breaking))"; then
             BUMP_TYPE="major"
-          if echo "$LOG" | grep -qiE "^feat(\(.+\))?:|^feature(\(.+\))?:|\+semver:\s*minor"; then
+          elif echo "$LOG" | grep -qiE "^feat(\(.+\))?:|^feature(\(.+\))?:|\+semver:\s*minor"; then
             BUMP_TYPE="minor"
           elif echo "$LOG" | grep -qiE "^fix(\(.+\))?:|^docs(\(.+\))?:|^style(\(.+\))?:|^refactor(\(.+\))?:|^perf(\(.+\))?:|^test(\(.+\))?:|^chore(\(.+\))?:|\+semver:\s*patch"; then
             BUMP_TYPE="patch"
