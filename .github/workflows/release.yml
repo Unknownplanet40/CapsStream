@@ -64,17 +64,19 @@ jobs:
           else
             RANGE="${GITHUB_REF_NAME}"
           fi
-          # Subject + indented body for every commit since the previous tag
-          git log --pretty=format:"%h%x09%s%x09%b" "$RANGE" | awk -F'\t' '
+          # \x1e separates commits so multi-line bodies stay in one awk record
+          git log --pretty=format:"%h%x09%s%x09%b%x1e" "$RANGE" | awk -F'\t' '
+          BEGIN { RS = "\x1e" }
           {
-            hash = $1
-            if ($2 != "") print "- " $2 " (" hash ")"
+            sub(/\n$/, "")
+            if ($0 == "" || $2 == "") next
+            printf "- %s (%s)\n", $2, $1
             if ($3 != "") {
               n = split($3, lines, "\n")
               for (i = 1; i <= n; i++)
-                if (lines[i] != "") print "  " lines[i]
+                if (lines[i] != "") printf "  %s\n", lines[i]
             }
-            print ""
+            printf "\n"
           }' > changelog.txt
           # Write to a temp file so multi-line output survives
           {
