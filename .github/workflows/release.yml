@@ -50,6 +50,8 @@ jobs:
             requirements.txt \
             start.bat \
             update.bat \
+            "Start CapsStream Silent.vbs" \
+            silent_launcher.py \
             VERSION
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
           unzip -l "$ZIP"

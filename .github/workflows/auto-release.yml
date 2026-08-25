@@ -208,6 +208,7 @@ jobs:
           zip -r "$ZIP" \
             app.py \
             backend \
+            silent_launcher.py \
             -x "backend/__pycache__/*" "backend/**/__pycache__/*"
           zip "$ZIP" \
             static/js/app.js \
@@ -218,6 +219,7 @@ jobs:
             requirements.txt \
             start.bat \
             update.bat \
+            "Start CapsStream Silent.vbs" \
             VERSION
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
           unzip -l "$ZIP"

@@ -47,7 +47,10 @@ RAW_VERSION_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 # Top-level entries an update package may contain
-ALLOWED_FILES = {"app.py", "requirements.txt", "start.bat", "update.bat", "VERSION"}
+ALLOWED_FILES = {
+    "app.py", "requirements.txt", "start.bat", "update.bat", "VERSION",
+    "silent_launcher.py", "Start CapsStream Silent.vbs",
+}
 ALLOWED_DIRS = ("backend", "static", "templates")
 
 # Files/dirs an update may NEVER touch (defense in depth — the allow-list
