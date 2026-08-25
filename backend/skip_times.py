@@ -85,6 +85,14 @@ def get_mal_id_for_title(title, tmdb_id=None):
         print(f"[Skips] AniList GraphQL error for {title}: {e}")
 
     try:
+        # Respect the user's "Enable Jikan API" setting (Settings → Metadata Providers)
+        try:
+            from backend.settings import load_config
+            if not (load_config().get("metadata_sources") or {}).get("enable_jikan", True):
+                return None
+        except Exception:
+            pass
+
         url = f"https://api.jikan.moe/v4/anime?q={requests.utils.quote(title)}&limit=1"
         r = requests.get(url, headers=HEADERS, timeout=6)
         if r.status_code == 200:

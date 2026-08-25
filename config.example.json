@@ -1,16 +1,19 @@
 {
   "tmdb_api_key": "",
-  "omdb_api_key": "",
   "hide_system_files": false,
   "hide_unmounted_items": true,
   "browser": "edge",
+  "launch_browser_on_start": true,
   "metadata_sources": {
-    "enable_jikan": true,
-    "enable_omdb": true
+    "enable_jikan": true
   },
   "port": 8000,
   "host": "127.0.0.1",
   "media_paths": {
+  },
+  "library": {
+    "scan_on_startup": true,
+    "skip_patterns": "sample,trailer"
   },
   "subtitles": {
     "auto_load": true,
@@ -26,6 +29,10 @@
     "auto_play_next": true,
     "auto_skip_intro": false,
     "seek_step": 10,
-    "default_volume": 1
+    "default_volume": 1,
+    "default_speed": 1,
+    "resume_behavior": "ask",
+    "auto_fullscreen": false,
+    "start_muted": false
   }
 }

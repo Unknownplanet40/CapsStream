@@ -2,9 +2,9 @@
 
 **CapsStream** is a self-hosted, Netflix-style media server for your personal
 movie, series, and anime collection. Point it at your own folders, and it
-scans them, matches your files against TMDb (with TheTVDB/OMDb as optional
-fallbacks), downloads artwork and metadata, and serves everything through a
-polished web interface with a custom HTML5 player.
+scans them, matches your files against TMDb, downloads artwork and metadata,
+and serves everything through a polished web interface with a custom HTML5
+player.
 
 > ⚠️ CapsStream is for **your own media files only**. No content is bundled
 > or provided — you supply the sources.
@@ -30,7 +30,6 @@ polished web interface with a custom HTML5 player.
 | **Python 3.12+** | Any CPython build works (a portable WinPython also works — see below) |
 | **FFmpeg + FFprobe** | Required for streaming, probing, subtitles, and transcoding |
 | **TMDb API key** (free) | Required for metadata — [get one here](https://www.themoviedb.org/settings/api) |
-| **OMDb API key** (optional, free) | Fallback provider — [get one here](https://www.omdbapi.com/apikey.aspx) |
 
 ---
 
@@ -54,7 +53,6 @@ notepad .env
 
 ```
 TMDB_API_KEY=your_real_tmdb_key
-OMDB_API_KEY=your_real_omdb_key
 ```
 
 > `.env` is gitignored — your keys never get committed.

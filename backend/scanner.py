@@ -86,6 +86,30 @@ def _is_video(filename):
     return os.path.splitext(filename)[1].lower() in VIDEO_EXTS
 
 
+_SKIP_PATTERNS = []
+
+
+def _load_skip_patterns(cfg=None):
+    """Load comma-separated skip patterns from config (e.g. 'sample,trailer')."""
+    global _SKIP_PATTERNS
+    try:
+        if cfg is None:
+            cfg = _load_config()
+        raw = str((cfg.get("library") or {}).get("skip_patterns", "") or "")
+        _SKIP_PATTERNS = [p.strip().lower() for p in raw.split(",") if p.strip()]
+    except Exception:
+        _SKIP_PATTERNS = []
+    return _SKIP_PATTERNS
+
+
+def _should_skip(name):
+    """True if a file/folder name contains any user-configured skip pattern."""
+    if not _SKIP_PATTERNS:
+        return False
+    low = name.lower()
+    return any(p in low for p in _SKIP_PATTERNS)
+
+
 def _parse_episode(filename):
     """
     Try to extract season and episode number from a filename.
@@ -187,6 +211,8 @@ def _scan_movies(path_list, existing_paths, on_progress=None):
     for done, (base, entry) in enumerate(entries, 1):
         if on_progress:
             on_progress(done - 1, total, entry.name)
+        if _should_skip(entry.name):
+            continue
         if not entry.is_dir():
             # Also handle flat file directly in movies folder
             if entry.is_file() and _is_video(entry.name):
@@ -200,9 +226,9 @@ def _scan_movies(path_list, existing_paths, on_progress=None):
         folder_name = entry.name
         # Find video files inside this folder (recursive)
         for root, dirs, files in os.walk(entry.path):
-            dirs.sort()
+            dirs[:] = [d for d in sorted(dirs) if not _should_skip(d)]
             for fname in sorted(files):
-                if _is_video(fname):
+                if _is_video(fname) and not _should_skip(fname):
                     fpath = os.path.join(root, fname)
                     if fpath not in existing_paths:
                         results.append({
@@ -231,6 +257,8 @@ def _scan_shows(path_list, existing_paths, media_type, on_progress=None):
     for done, (base, show_entry) in enumerate(entries, 1):
         if on_progress:
             on_progress(done - 1, total, show_entry.name)
+        if _should_skip(show_entry.name):
+            continue
         if not show_entry.is_dir():
             if show_entry.is_file() and _is_video(show_entry.name):
                 fpath = show_entry.path
@@ -247,11 +275,11 @@ def _scan_shows(path_list, existing_paths, media_type, on_progress=None):
         show_name = show_entry.name
         # Walk inside show folder looking for video files
         for root, dirs, files in os.walk(show_entry.path):
-            dirs.sort()
+            dirs[:] = [d for d in sorted(dirs) if not _should_skip(d)]
             rel = os.path.relpath(root, show_entry.path)
             season_from_dir = _parse_season_dir(rel)
 
-            video_files = [f for f in sorted(files) if _is_video(f)]
+            video_files = [f for f in sorted(files) if _is_video(f) and not _should_skip(f)]
             for idx, fname in enumerate(video_files):
                 fpath = os.path.join(root, fname)
                 if fpath in existing_paths:
@@ -316,6 +344,7 @@ def scan_library(callback=None):
 
     cfg = _load_config()
     media_paths = cfg.get("media_paths", {})
+    _load_skip_patterns(cfg)
 
     movies_paths = _resolve_paths(media_paths.get("movies", []))
     series_paths = _resolve_paths(media_paths.get("series", []))

@@ -15,13 +15,12 @@ load_dotenv(ENV_PATH)
 
 DEFAULT_CONFIG = {
     "tmdb_api_key": "",
-    "omdb_api_key": "",
     "hide_system_files": False,
     "hide_unmounted_items": False,
     "browser": "edge",
+    "launch_browser_on_start": True,
     "metadata_sources": {
-        "enable_jikan": True,
-        "enable_omdb": True
+        "enable_jikan": True
     },
     "port": 8000,
     "host": "127.0.0.1",
@@ -34,6 +33,10 @@ DEFAULT_CONFIG = {
         "movies": [],
         "series": [],
         "anime": []
+    },
+    "library": {
+        "scan_on_startup": True,
+        "skip_patterns": "sample,trailer"
     },
     "subtitles": {
         "auto_load": True,
@@ -49,7 +52,11 @@ DEFAULT_CONFIG = {
         "auto_play_next": True,
         "auto_skip_intro": False,
         "seek_step": 10,
-        "default_volume": 1
+        "default_volume": 1,
+        "default_speed": 1,
+        "resume_behavior": "ask",
+        "auto_fullscreen": False,
+        "start_muted": False
     }
 }
 
@@ -70,7 +77,7 @@ def load_config():
         merged.update(data)
 
         # Deep merge nested dicts
-        for key in ["metadata_sources", "media_paths", "disabled_paths", "subtitles", "playback"]:
+        for key in ["metadata_sources", "media_paths", "disabled_paths", "library", "subtitles", "playback"]:
             if key in data and isinstance(data[key], dict):
                 default_sub = dict(DEFAULT_CONFIG.get(key, {}))
                 for sub_k, sub_v in data[key].items():
@@ -101,9 +108,15 @@ def load_config():
                     print(f"[Settings] Removed legacy built-in path(s) from '{category}'")
                     mp[category] = filtered
 
+        # Migration: OMDb support was removed — drop stale keys from old configs
+        if "omdb_api_key" in merged:
+            merged.pop("omdb_api_key", None)
+        if isinstance(merged.get("metadata_sources"), dict):
+            merged["metadata_sources"].pop("enable_omdb", None)
+
         # Secrets are provided via environment / .env — env values win over
         # anything stale in config.json, and empty config values get filled.
-        for secret in ("tmdb_api_key", "omdb_api_key"):
+        for secret in ("tmdb_api_key",):
             env_val = os.environ.get(secret.upper())
             if env_val:
                 merged[secret] = env_val
@@ -185,7 +198,7 @@ def save_config(new_data):
 
 
 def test_api_key(provider, api_key):
-    """Test a TMDb or OMDb API key live."""
+    """Test a TMDb API key live."""
     if not api_key or not api_key.strip():
         return False, "API key cannot be empty"
 
@@ -207,18 +220,6 @@ def test_api_key(provider, api_key):
                 return False, f"HTTP Error {e.code}: Invalid TMDB API key"
         except Exception as e:
             return False, f"Connection error: {str(e)}"
-
-    elif provider.lower() == "omdb":
-        url = f"https://www.omdbapi.com/?apikey={key}&t=Inception"
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "CapsStream/1.0"})
-            with urllib.request.urlopen(req, timeout=5) as res:
-                data = json.loads(res.read().decode("utf-8"))
-                if data.get("Response") == "True":
-                    return True, "OMDB API key valid ✓"
-                return False, data.get("Error", "Invalid OMDB API key")
-        except Exception as e:
-            return False, f"OMDB connection error: {str(e)}"
 
     return False, "Unknown provider"
 
@@ -387,6 +388,12 @@ def launch_browser():
     import webbrowser
 
     config = load_config()
+
+    # Respect the user's "open browser on launch" preference
+    if not config.get("launch_browser_on_start", True):
+        print("[Launcher] launch_browser_on_start is disabled — skipping browser launch")
+        return
+
     browser_choice = str(config.get("browser", "edge")).lower().strip()
     host = config.get("host", "127.0.0.1")
     port = config.get("port", 8000)
@@ -509,6 +516,12 @@ def reset_application(clear_media_files=False):
         "series": [],
         "anime": []
     }
+    config["disabled_paths"] = {
+        "movies": [],
+        "series": [],
+        "anime": []
+    }
+    config["library"] = dict(DEFAULT_CONFIG.get("library", {}))
     save_config(config)
 
     # Delete database file

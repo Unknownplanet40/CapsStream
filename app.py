@@ -82,6 +82,61 @@ def _jsonify_rows(rows):
 
 _GITHUB_PROFILE_CACHE = {"data": None, "fetched_at": 0.0}
 
+_API_HEALTH_CACHE = {"ts": 0.0, "data": None}
+API_HEALTH_TTL_SEC = 120
+
+
+def _probe_url(url, timeout=4):
+    """Return (reachable, latency_ms). Any HTTP response counts as reachable."""
+    import urllib.request
+    import urllib.error
+    start = time.monotonic()
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "CapsStream-Diagnostics"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp.read(256)
+        return True, int((time.monotonic() - start) * 1000)
+    except urllib.error.HTTPError:
+        # Server answered (4xx/5xx) — endpoint itself is reachable
+        return True, int((time.monotonic() - start) * 1000)
+    except Exception:
+        return False, None
+
+
+def _get_api_health(config):
+    """
+    Real reachability probes for external services, cached for 120s so the
+    3s frontend poll never spams third-party APIs. Returns:
+      { name: { status: ok|error|unconfigured|disabled, latency_ms } }
+    """
+    now = time.time()
+    if _API_HEALTH_CACHE["data"] is not None and now - _API_HEALTH_CACHE["ts"] < API_HEALTH_TTL_SEC:
+        return _API_HEALTH_CACHE["data"]
+
+    health = {}
+
+    tmdb_key = (config.get("tmdb_api_key") or "").strip()
+    if tmdb_key:
+        ok, ms = _probe_url(f"https://api.themoviedb.org/3/configuration?api_key={tmdb_key}")
+        health["tmdb"] = {"status": "ok" if ok else "error", "latency_ms": ms}
+    else:
+        health["tmdb"] = {"status": "unconfigured", "latency_ms": None}
+
+    ok, ms = _probe_url("https://api.aniskip.com/v2/health")
+    health["aniskip"] = {"status": "ok" if ok else "error", "latency_ms": None}
+
+    # Poster/metadata cache is fully local — healthy when its directory is usable
+    try:
+        os.makedirs(os.path.join(BASE_DIR, "data", "metadata"), exist_ok=True)
+        health["poster_cache"] = {"status": "ok", "latency_ms": None}
+    except Exception:
+        health["poster_cache"] = {"status": "error", "latency_ms": None}
+
+    _API_HEALTH_CACHE["data"] = health
+    _API_HEALTH_CACHE["ts"] = now
+    return health
+
+
 def _get_github_profile():
     """Cached GitHub profile — refreshed at most once per hour, falls back to defaults offline."""
     import time as _time
@@ -1553,21 +1608,13 @@ def api_system_info():
     except Exception:
         pass
 
-    # External API Health
+    # External API Health (real probes, cached)
     config = load_config()
-    tmdb_key = config.get("tmdb_api_key", "")
-    api_statuses = {
-        "tmdb": "🟢 Active (Configured)" if tmdb_key else "🟡 Free / Backup Mode",
-        "omdb": "🟢 Active (Backup Ratings)",
-        "aniskip": "🟢 Connected (Free AniSkip)",
-        "poster_proxy": "🟢 Active (Image Proxy)"
-    }
+    api_health = _get_api_health(config)
 
     return jsonify({
         "version": get_app_version(),
         "app_name": "CapsStream",
-        "engine_name": f"CapsStream High-Perf Core v{get_app_version()}",
-        "engine_features": "SQLite WAL Mode • Synced Audio Remux • Drive-Mount Cache",
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "platform": platform.platform(),
         "os_name": os.name,
@@ -1577,8 +1624,9 @@ def api_system_info():
         "has_ffprobe": has_ffprobe,
         "ram_info": ram_info,
         "db_metrics": db_metrics,
-        "api_statuses": api_statuses,
+        "api_health": api_health,
         "github_profile": github_profile,
+        "server_addr": f"{config.get('host', '127.0.0.1')}:{config.get('port', 8000)}",
         "last_checked": _updater_state().get("last_checked"),
         "latest_version": _updater_state().get("latest"),
         "storage_info": storage_info,

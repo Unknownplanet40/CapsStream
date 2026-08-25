@@ -306,10 +306,20 @@ function applyScanStatus(status) {
 }
 
 // Starts the library scan at most once per session (unless forced).
-// Used after profile login — never before.
+// Used after profile login — never before. Respects the user's
+// "Scan Library on Startup" setting unless forced (manual scan buttons).
 async function startLibraryScan(force = false) {
   if (!store.profile && !force) return false;
   if (!force && (sessionScanStarted || store.scanRunning)) return false;
+  if (!force) {
+    try {
+      const cfg = await API.get("/api/settings");
+      if (cfg && cfg.library && cfg.library.scan_on_startup === false) {
+        sessionScanStarted = true; // don't retry later in the session
+        return false;
+      }
+    } catch (e) {}
+  }
   sessionScanStarted = true;
   try {
     await API.post("/api/scan", {});
@@ -1860,19 +1870,6 @@ const SettingsPage = {
               </div>
             </div>
 
-            <div class="settings-row" style="flex-direction:column;align-items:flex-start;margin-top:8px">
-              <div class="settings-label-container">
-                <div class="settings-label">OMDb API Key</div>
-                <div class="settings-desc">Fallback provider to look up TMDb / IMDb IDs from title names.</div>
-              </div>
-              <div style="display:flex;gap:8px;width:100%;margin-top:8px">
-                <input type="password" v-model="form.omdb_api_key" class="form-input" placeholder="Enter OMDb API key..." style="flex:1" />
-                <button class="btn btn-secondary" @click="testApi('omdb', form.omdb_api_key)" :disabled="testingApi === 'omdb'">
-                  {{ testingApi === 'omdb' ? 'Testing...' : 'Test API' }}
-                </button>
-              </div>
-            </div>
-
             <div class="settings-row">
               <div class="settings-label-container">
                 <div class="settings-label">Enable Jikan API (Anime Metadata Fallback)</div>
@@ -1883,16 +1880,46 @@ const SettingsPage = {
                 <span class="toggle-slider"></span>
               </label>
             </div>
+          </div>
+        </div>
+
+        <!-- 1b. Server -->
+        <div class="settings-section">
+          <div class="settings-section-title">
+            <i class="ph ph-hard-drives" style="color:var(--accent)"></i>
+            <span>Server</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Host Address</div>
+                <div class="settings-desc">Network interface the server binds to. Use 127.0.0.1 for this PC only, or 0.0.0.0 to allow other devices on your network.</div>
+              </div>
+              <input type="text" v-model="form.host" class="form-input" style="width:180px" placeholder="127.0.0.1" />
+            </div>
 
             <div class="settings-row">
               <div class="settings-label-container">
-                <div class="settings-label">Enable OMDb Fallback</div>
-                <div class="settings-desc">Enable OMDb API for fallback title searches if TMDb matching yields no results.</div>
+                <div class="settings-label">Port</div>
+                <div class="settings-desc">TCP port the server listens on (1–65535).</div>
+              </div>
+              <input type="number" v-model.number="form.port" min="1" max="65535" class="form-input" style="width:120px" />
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Open Browser on Launch</div>
+                <div class="settings-desc">Automatically open CapsStream in your browser when start.bat runs.</div>
               </div>
               <label class="toggle-switch">
-                <input type="checkbox" v-model="form.metadata_sources.enable_omdb" />
+                <input type="checkbox" v-model="form.launch_browser_on_start" />
                 <span class="toggle-slider"></span>
               </label>
+            </div>
+
+            <div class="settings-desc" style="color:#f59e0b">
+              <i class="ph ph-warning" style="margin-right:4px"></i>
+              Host and Port changes take effect after restarting CapsStream (close the server and run start.bat again).
             </div>
           </div>
         </div>
@@ -2030,6 +2057,34 @@ const SettingsPage = {
           </div>
         </div>
 
+        <!-- 2b. Library & Scanning -->
+        <div class="settings-section">
+          <div class="settings-section-title">
+            <i class="ph ph-file-video" style="color:var(--accent)"></i>
+            <span>Library & Scanning</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Scan Library on Startup</div>
+                <div class="settings-desc">Automatically scan your media folders for new files when you log in.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.library.scan_on_startup" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Skip Patterns</div>
+                <div class="settings-desc">Comma-separated keywords — files or folders whose name contains any of these are ignored during scans (e.g. samples, trailers, extras).</div>
+              </div>
+              <input type="text" v-model="form.library.skip_patterns" class="form-input" style="width:280px" placeholder="sample,trailer,extras" />
+            </div>
+          </div>
+        </div>
+
         <!-- 3. Subtitles & Player Defaults -->
         <div class="settings-section">
           <div class="settings-section-title">
@@ -2087,6 +2142,55 @@ const SettingsPage = {
 
             <div class="settings-row">
               <div class="settings-label-container">
+                <div class="settings-label">Playback — Resume Behavior</div>
+                <div class="settings-desc">What to do when a video has saved watch progress.</div>
+              </div>
+              <select v-model="form.playback.resume_behavior" class="form-input" style="width:220px">
+                <option value="ask">Ask Every Time</option>
+                <option value="always">Always Resume</option>
+                <option value="never">Always Start Over</option>
+              </select>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Playback — Default Speed</div>
+                <div class="settings-desc">Playback speed applied when a video starts.</div>
+              </div>
+              <select v-model.number="form.playback.default_speed" class="form-input" style="width:140px">
+                <option :value="0.5">0.5x</option>
+                <option :value="0.75">0.75x</option>
+                <option :value="1">1x (Normal)</option>
+                <option :value="1.25">1.25x</option>
+                <option :value="1.5">1.5x</option>
+                <option :value="2">2x</option>
+              </select>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Playback — Auto-Fullscreen</div>
+                <div class="settings-desc">Automatically enter fullscreen mode when video playback starts.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.playback.auto_fullscreen" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Playback — Start Muted</div>
+                <div class="settings-desc">Launch videos muted regardless of the default volume level.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.playback.start_muted" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
                 <div class="settings-label">Subtitles — Font Size</div>
                 <div class="settings-desc">Default font size scaling for subtitle text in the player.</div>
               </div>
@@ -2098,15 +2202,57 @@ const SettingsPage = {
               </select>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start">
               <div class="settings-label-container">
-                <div class="settings-label">Playback — Auto Play Next Episode</div>
-                <div class="settings-desc">Automatically show 5s countdown and advance to the next episode on video end.</div>
+                <div class="settings-label">Subtitles — Appearance</div>
+                <div class="settings-desc">Default subtitle text color, size, and background box opacity in the player.</div>
               </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.playback.auto_play_next" />
-                <span class="toggle-slider"></span>
-              </label>
+              <div style="display:flex;flex-direction:column;gap:12px;margin-top:10px;width:100%">
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                  <span style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);min-width:110px">Text Color</span>
+                  <button
+                    v-for="c in ['#ffffff', '#ffd700', '#4cc2ff', '#4ade80']"
+                    :key="c"
+                    @click="form.subtitles.appearance.textColor = c"
+                    :style="{
+                      width: '26px', height: '26px', borderRadius: '50%', cursor: 'pointer',
+                      background: c, border: form.subtitles.appearance.textColor === c ? '2px solid var(--accent)' : '2px solid var(--border-subtle)'
+                    }"
+                    :title="c"
+                  ></button>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                  <span style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);min-width:110px">Text Size</span>
+                  <button
+                    v-for="s in [
+                      { label: 'S', v: '0.85rem' },
+                      { label: 'M', v: '1.1rem' },
+                      { label: 'L', v: '1.4rem' },
+                      { label: 'XL', v: '1.8rem' },
+                    ]"
+                    :key="s.v"
+                    class="btn btn-sm"
+                    :class="form.subtitles.appearance.fontSize === s.v ? 'btn-primary' : 'btn-secondary'"
+                    @click="form.subtitles.appearance.fontSize = s.v"
+                    style="min-width:38px"
+                  >{{ s.label }}</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                  <span style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);min-width:110px">Box Opacity</span>
+                  <button
+                    v-for="o in [
+                      { label: 'Off', v: 0 },
+                      { label: '50%', v: 0.5 },
+                      { label: 'Solid', v: 0.85 },
+                    ]"
+                    :key="o.v"
+                    class="btn btn-sm"
+                    :class="form.subtitles.appearance.bgOpacity === o.v ? 'btn-primary' : 'btn-secondary'"
+                    @click="form.subtitles.appearance.bgOpacity = o.v"
+                    style="min-width:56px"
+                  >{{ o.label }}</button>
+                </div>
+              </div>
             </div>
 
             <div class="settings-row">
@@ -2261,9 +2407,11 @@ const SettingsPage = {
     const form = ref({
       browser: "edge",
       tmdb_api_key: "264a7dcdd8291a83c4a51727755343bc",
-      omdb_api_key: "11361685",
       hide_system_files: false,
-      metadata_sources: { enable_jikan: true, enable_omdb: true },
+      launch_browser_on_start: true,
+      host: "127.0.0.1",
+      port: 8000,
+      metadata_sources: { enable_jikan: true },
       media_paths: {
         movies: [],
         series: [],
@@ -2274,8 +2422,26 @@ const SettingsPage = {
         series: [],
         anime: [],
       },
-      subtitles: { auto_load: true, preferred_language: "Auto", font_size: "normal" },
-      playback: { auto_play_next: true, seek_step: 10, default_volume: 1 },
+      library: {
+        scan_on_startup: true,
+        skip_patterns: "sample,trailer",
+      },
+      subtitles: {
+        auto_load: true,
+        preferred_language: "Auto",
+        font_size: "normal",
+        appearance: { fontSize: "1.1rem", textColor: "#ffffff", bgOpacity: 0.5 },
+      },
+      playback: {
+        auto_play_next: true,
+        auto_skip_intro: false,
+        seek_step: 10,
+        default_volume: 1,
+        default_speed: 1,
+        resume_behavior: "ask",
+        auto_fullscreen: false,
+        start_muted: false,
+      },
     });
 
     // Built-in default media folders were removed — all paths are user-provided.
@@ -2336,7 +2502,12 @@ const SettingsPage = {
               series: [...(data.disabled_paths?.series || [])],
               anime:  [...(data.disabled_paths?.anime  || [])],
             },
-            subtitles: { ...form.value.subtitles, ...(data.subtitles || {}) },
+            library: { ...form.value.library, ...(data.library || {}) },
+            subtitles: {
+              ...form.value.subtitles,
+              ...(data.subtitles || {}),
+              appearance: { ...form.value.subtitles.appearance, ...(data.subtitles?.appearance || {}) },
+            },
             playback: { ...form.value.playback, ...(data.playback || {}) },
           };
         }
@@ -4162,6 +4333,8 @@ const PlayerPage = {
       if (document.hidden) saveProgressNow();
     }
 
+    let hasAutoFullscreened = false;
+
     function togglePlay() {
       if (!videoRef.value) return;
       if (videoRef.value.paused) {
@@ -4170,17 +4343,30 @@ const PlayerPage = {
           p.then(() => {
             isPlaying.value = true;
             playerError.value = null;
+            maybeAutoFullscreen();
           }).catch((err) => {
             console.log("Autoplay / play interaction handled:", err);
             isPlaying.value = false;
           });
         } else {
           isPlaying.value = true;
+          maybeAutoFullscreen();
         }
       } else {
         videoRef.value.pause();
         isPlaying.value = false;
         saveProgressNow();
+      }
+    }
+
+    function maybeAutoFullscreen() {
+      if (hasAutoFullscreened) return;
+      if (!playerSettings.value?.playback?.auto_fullscreen) return;
+      hasAutoFullscreened = true;
+      const container = videoRef.value?.closest(".custom-player-wrapper") || videoRef.value?.parentElement;
+      if (container && container.requestFullscreen) {
+        container.requestFullscreen().catch(() => {});
+        isFullscreen.value = true;
       }
     }
 
@@ -4842,8 +5028,17 @@ const PlayerPage = {
         const dur = media.value.duration || duration.value || 0;
         if (dur > 0 && progress.position >= dur * 0.9) return;
         resumeTime.value = progress.position;
-        showResumeModal.value = true;
         hasResumedProgress = true;
+
+        // Resume behavior: ask (modal) / always (auto-resume) / never (start over)
+        const behavior = playerSettings.value?.playback?.resume_behavior || "ask";
+        if (behavior === "never") return;
+        if (behavior === "always") {
+          confirmResume();
+          return;
+        }
+
+        showResumeModal.value = true;
         if (videoRef.value) {
           videoRef.value.pause();
         }
@@ -5143,6 +5338,19 @@ const PlayerPage = {
           const defaultVol = rawVol <= 1 ? rawVol : Math.min(1, Math.max(0, rawVol / 100));
           volume.value = defaultVol;
           if (videoRef.value) videoRef.value.volume = defaultVol;
+        }
+
+        if (pb.start_muted && videoRef.value) {
+          videoRef.value.muted = true;
+          isMuted.value = true;
+          if (remoteAudioEl) remoteAudioEl.muted = true;
+        }
+
+        if (pb.default_speed !== undefined) {
+          const rate = Number(pb.default_speed) || 1;
+          playbackRate.value = rate;
+          if (videoRef.value) videoRef.value.playbackRate = rate;
+          if (isRemoteAudioActive() && remoteAudioEl) remoteAudioEl.playbackRate = rate;
         }
 
         if (sub.font_size) {
@@ -7488,104 +7696,89 @@ const AboutPage = {
           <div class="diag-section-card">
             <div class="diag-section-header">
               <i class="ph ph-heartbeat" style="color:#10b981"></i>
-              <span>System & Memory Health</span>
+              <span>Server Health</span>
             </div>
 
             <div class="diagnostics-grid">
               <div class="diag-item">
-                <div class="diag-label">SYSTEM ENGINE</div>
-                <div class="diag-val" style="color:var(--accent);font-weight:700">
-                  ⚡ {{ sysInfo.engine_name || ('CapsStream Core v' + sysInfo.version) }}
-                </div>
-                <div class="diag-sub">Python {{ sysInfo.python_version }} • {{ sysInfo.engine_features || 'WAL Mode • Synced Remux' }}</div>
+                <div class="diag-label">APP VERSION</div>
+                <div class="diag-val" style="color:var(--accent);font-weight:700">v{{ sysInfo.version }}</div>
+                <div class="diag-sub">Python {{ sysInfo.python_version }}</div>
               </div>
               <div class="diag-item">
                 <div class="diag-label">SERVER UPTIME</div>
-                <div class="diag-val" style="color:#10b981">⚡ {{ sysInfo.server_uptime || 'Active' }}</div>
-                <div class="diag-sub">Continuous Runtime</div>
+                <div class="diag-val" style="color:#10b981">{{ sysInfo.server_uptime || 'Active' }}</div>
+                <div class="diag-sub">Serving at {{ sysInfo.server_addr || '127.0.0.1:8000' }}</div>
               </div>
-              <div class="diag-item" style="grid-column:1 / -1" v-if="sysInfo.ram_info">
+              <div class="diag-item">
+                <div class="diag-label">HOST OS</div>
+                <div class="diag-val">{{ sysInfo.os_name === 'nt' ? 'Windows' : sysInfo.os_name }}</div>
+                <div class="diag-sub" :title="sysInfo.platform">{{ sysInfo.platform }}</div>
+              </div>
+              <div class="diag-item">
+                <div class="diag-label">FFMPEG / FFPROBE</div>
+                <div class="diag-val" :style="{ color: sysInfo.has_ffmpeg ? '#10b981' : '#ef4444' }">
+                  {{ sysInfo.has_ffmpeg && sysInfo.has_ffprobe ? 'Ready' : !sysInfo.has_ffmpeg ? 'ffmpeg missing' : 'ffprobe missing' }}
+                </div>
+                <div class="diag-sub">Transcoding & remux pipeline</div>
+              </div>
+              <div class="diag-item" style="grid-column:1 / -1" v-if="sysInfo.ram_info && sysInfo.ram_info.total_gb">
                 <div class="diag-label" style="display:flex;justify-content:space-between">
-                  <span>SYSTEM RAM LOAD</span>
+                  <span>SYSTEM MEMORY</span>
                   <span style="color:var(--text-primary)">{{ sysInfo.ram_info.used_gb }} GB / {{ sysInfo.ram_info.total_gb }} GB ({{ sysInfo.ram_info.load_pct }}%)</span>
                 </div>
                 <div class="ram-meter-track">
                   <div class="ram-meter-fill" :style="{ width: sysInfo.ram_info.load_pct + '%' }"></div>
                 </div>
               </div>
-              <div class="diag-item">
-                <div class="diag-label">HOST OS</div>
-                <div class="diag-val">{{ sysInfo.os_name === 'nt' ? 'Windows OS' : sysInfo.os_name }}</div>
-                <div class="diag-sub" :title="sysInfo.platform">{{ sysInfo.platform }}</div>
-              </div>
-              <div class="diag-item">
-                <div class="diag-label">FFMPEG TRANSCODER</div>
-                <div class="diag-val" :style="{ color: sysInfo.has_ffmpeg ? '#10b981' : '#ef4444' }">
-                  {{ sysInfo.has_ffmpeg && sysInfo.has_ffprobe ? '🟢 Active' : '🔴 Missing' }}
-                </div>
-                <div class="diag-sub">Hardware Pipeline</div>
-              </div>
             </div>
           </div>
 
-          <!-- Card 2: External API Integrations Health -->
+          <!-- Card 2: External Service Health (live probes) -->
           <div class="diag-section-card">
             <div class="diag-section-header">
               <i class="ph ph-globe-hemisphere-west" style="color:#38bdf8"></i>
-              <span>External API Integrations</span>
+              <span>External Services</span>
             </div>
 
-            <div class="diagnostics-grid" v-if="sysInfo.api_statuses">
-              <div class="diag-item">
-                <div class="diag-label">TMDB METADATA</div>
-                <div class="diag-val" style="color:#10b981">🟢 Active</div>
-                <div class="diag-sub">Movie & TV Details</div>
-              </div>
-              <div class="diag-item">
-                <div class="diag-label">OMDB RATINGS</div>
-                <div class="diag-val" style="color:#38bdf8">🟢 Active</div>
-                <div class="diag-sub">Backup Ratings API</div>
-              </div>
-              <div class="diag-item">
-                <div class="diag-label">ANISKIP API</div>
-                <div class="diag-val" style="color:#a855f7">🟢 Connected</div>
-                <div class="diag-sub">Intro/Outro Skip Markers</div>
-              </div>
-              <div class="diag-item">
-                <div class="diag-label">POSTER CDN PROXY</div>
-                <div class="diag-val" style="color:#10b981">🟢 Active</div>
-                <div class="diag-sub">Image Caching Proxy</div>
+            <div class="diagnostics-grid" v-if="sysInfo.api_health">
+              <div class="diag-item" v-for="svc in serviceList" :key="svc.key">
+                <div class="diag-label">{{ svc.label }}</div>
+                <div class="diag-val" :style="{ color: serviceColor(sysInfo.api_health[svc.key]?.status) }">
+                  {{ serviceText(svc, sysInfo.api_health[svc.key]) }}
+                </div>
+                <div class="diag-sub">{{ svc.sub }}</div>
               </div>
             </div>
           </div>
 
-          <!-- Card 3: Database & Profile Metrics -->
+          <!-- Card 3: Library & Database -->
           <div class="diag-section-card">
             <div class="diag-section-header">
               <i class="ph ph-database" style="color:#a855f7"></i>
-              <span>Database & Profile Metrics</span>
+              <span>Library & Database</span>
             </div>
 
-            <div class="diagnostics-grid" v-if="sysInfo.db_metrics">
+            <div class="diagnostics-grid">
+              <div class="diag-item">
+                <div class="diag-label">LIBRARY ITEMS</div>
+                <div class="diag-val">{{ sysInfo.media_counts?.total ?? 0 }}</div>
+                <div class="diag-sub">{{ sysInfo.media_counts?.movies || 0 }} movies • {{ sysInfo.media_counts?.series || 0 }} series • {{ sysInfo.media_counts?.anime || 0 }} anime</div>
+              </div>
               <div class="diag-item">
                 <div class="diag-label">DATABASE SIZE</div>
                 <div class="diag-val">{{ sysInfo.database_size }}</div>
-                <div class="diag-sub">SQLite DB File</div>
-              </div>
-              <div class="diag-item">
-                <div class="diag-label">PROFILES CREATED</div>
-                <div class="diag-val">👤 {{ sysInfo.db_metrics.profiles_count }}</div>
-                <div class="diag-sub">Multi-User Profiles</div>
+                <div class="diag-sub">SQLite DB file</div>
               </div>
               <div class="diag-item">
                 <div class="diag-label">WATCH HISTORY</div>
-                <div class="diag-val">⏱️ {{ sysInfo.db_metrics.progress_count }}</div>
-                <div class="diag-sub">Tracked Positions</div>
+                <div class="diag-val">{{ sysInfo.db_metrics?.progress_count ?? 0 }}</div>
+                <div class="diag-sub">Tracked positions</div>
               </div>
               <div class="diag-item">
-                <div class="diag-label">CUSTOM SKIP MARKERS</div>
-                <div class="diag-val">⏩ {{ sysInfo.db_metrics.skip_markers_count }}</div>
-                <div class="diag-sub">Manual Timestamps</div>
+                <div class="diag-label">SKIP MARKERS</div>
+                <div class="diag-val">{{ sysInfo.db_metrics?.skip_markers_count ?? 0 }}</div>
+                <div class="diag-sub">Detected / manual timestamps</div>
               </div>
             </div>
           </div>
@@ -7693,7 +7886,7 @@ const AboutPage = {
           <div class="tech-badge"><span>🗄️ SQLite3</span></div>
           <div class="tech-badge"><span>🎞️ FFmpeg & FFprobe</span></div>
           <div class="tech-badge"><span>✨ Phosphor Icons</span></div>
-          <div class="tech-badge"><span>🎬 TMDb & OMDb API</span></div>
+          <div class="tech-badge"><span>🎬 TMDb API</span></div>
           <a href="https://github.com/Unknownplanet40/" target="_blank" rel="noopener noreferrer" class="tech-badge" style="text-decoration:none;color:var(--text-primary)">
             <i class="ph ph-github-logo" style="margin-right:4px"></i><span>GitHub @Unknownplanet40</span>
           </a>
@@ -7756,6 +7949,25 @@ const AboutPage = {
     const loadingSysInfo = ref(true);
     let pollTimer = null;
 
+    const serviceList = [
+      { key: "tmdb", label: "TMDB METADATA", sub: "Movie & TV details, posters, cast" },
+      { key: "aniskip", label: "ANISKIP", sub: "Intro/outro skip markers" },
+      { key: "poster_cache", label: "METADATA CACHE", sub: "Local image & JSON cache" },
+    ];
+
+    function serviceColor(status) {
+      return { ok: "#10b981", error: "#ef4444", unconfigured: "#f59e0b", disabled: "var(--text-muted)" }[status] || "var(--text-muted)";
+    }
+
+    function serviceText(svc, h) {
+      if (!h || !h.status) return "Checking…";
+      if (h.status === "ok") return h.latency_ms != null ? `${h.latency_ms} ms` : "Operational";
+      if (h.status === "error") return "Unreachable";
+      if (h.status === "unconfigured") return "Not configured";
+      if (h.status === "disabled") return "Disabled";
+      return h.status;
+    }
+
     async function fetchSystemInfo() {
       try {
         const data = await API.get("/api/system/info");
@@ -7780,7 +7992,7 @@ const AboutPage = {
       if (pollTimer) clearInterval(pollTimer);
     });
 
-    return { sysInfo, loadingSysInfo, store };
+    return { sysInfo, loadingSysInfo, store, serviceList, serviceColor, serviceText };
   }
 };
 
