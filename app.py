@@ -8,6 +8,7 @@ Or double-click start.bat
 import os
 import re
 import json
+import shutil
 import hashlib
 import threading
 import subprocess
@@ -41,7 +42,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = "capsstream_secret_key_fixed_v1"
-app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10MB max upload
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024  # 2GB max upload (backup restore)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 
@@ -972,7 +973,16 @@ def api_genres():
 
 @app.route("/api/skip-times/<int:media_id>")
 def api_skip_times(media_id):
-    from backend.skip_times import fetch_skip_times
+    from backend.skip_times import fetch_skip_times, SKIP_CACHE_DIR
+    # refresh=1 drops the resolved cache so AniSkip is re-queried and audio
+    # detection re-runs (used by the Edit Skip Timestamps "Check Online" button)
+    if request.args.get("refresh") in ("1", "true"):
+        cache_path = os.path.join(SKIP_CACHE_DIR, f"{media_id}.json")
+        try:
+            if os.path.isfile(cache_path):
+                os.remove(cache_path)
+        except Exception:
+            pass
     skip_data = fetch_skip_times(media_id)
     return jsonify(skip_data)
 
@@ -1350,6 +1360,50 @@ def api_get_progress(media_id):
     return jsonify(dict(progress) if progress else {})
 
 
+# ─── Seekbar Preview Thumbnails ───────────────────────────────────────────────
+
+@app.route("/api/media/<int:media_id>/thumbnails", methods=["GET"])
+def api_media_thumbnails(media_id):
+    """
+    Returns seekbar preview-sheet info. On first request the sheet is
+    generated in a background thread (returns ready:false immediately);
+    the player keeps its plain tooltip until the sheet is available.
+    """
+    media = get_best_media_source(media_id)
+    if not media or not media.get("file_path"):
+        return jsonify({"error": "Not found"}), 404
+
+    from backend import thumbs
+
+    if thumbs.is_ready(media_id):
+        return jsonify({**thumbs.get_info(media_id), "ready": True})
+
+    duration = media.get("duration") or 0
+    file_path = media["file_path"]
+    if not duration:
+        duration = _media_duration_seconds(file_path)
+    if not duration or not os.path.isfile(file_path):
+        return jsonify({"ready": False})
+
+    def _gen():
+        try:
+            thumbs.generate_sheet(media_id, file_path, duration)
+            print(f"[Thumbs] Sheet generated for media {media_id}")
+        except Exception as e:
+            print(f"[Thumbs] Generation failed for media {media_id}: {e}")
+
+    threading.Thread(target=_gen, daemon=True).start()
+    return jsonify({"ready": False})
+
+
+@app.route("/api/media/<int:media_id>/thumbnails/sheet", methods=["GET"])
+def api_media_thumbnail_sheet(media_id):
+    from backend import thumbs
+    if not thumbs.is_ready(media_id):
+        abort(404)
+    return send_file(thumbs._sheet(media_id), mimetype="image/jpeg")
+
+
 @app.route("/api/progress/<int:media_id>", methods=["DELETE"])
 def api_delete_progress(media_id):
     pid = _require_profile()
@@ -1383,7 +1437,26 @@ def api_toggle_favorite(media_id=None):
 @app.route("/api/collections", methods=["GET"])
 def api_get_collections():
     pid = _require_profile()
-    return jsonify(get_collections(pid))
+    result = get_collections(pid)
+
+    # ─── Smart collections (computed live, read-only) ───
+    def _smart(cid, name, desc, items):
+        return {
+            "id": cid, "name": name, "description": desc,
+            "smart": True, "items": items,
+        }
+
+    unwatched = [
+        m for m in get_unique_shows(None)
+        if not get_progress(pid, m.get("id"))
+    ]
+    result.insert(0, _smart("smart-unwatched", "Unwatched",
+                            "Library titles you haven't started yet", unwatched[:20]))
+    result.insert(1, _smart("smart-recent", "Recently Added",
+                            "The newest additions to your library", get_recently_added(limit=20)))
+    result.insert(2, _smart("smart-top", "Top Rated",
+                            "Highest rated titles in your library", get_top_rated(limit=20)))
+    return jsonify(result)
 
 
 @app.route("/api/collections", methods=["POST"])
@@ -1463,6 +1536,123 @@ def api_system_shutdown():
 
     threading.Thread(target=_shutdown, daemon=True).start()
     return jsonify({"ok": True, "message": "Server shutting down"})
+
+
+# ─── Backup & Restore ─────────────────────────────────────────────────────────
+
+@app.route("/api/system/backup", methods=["GET"])
+def api_system_backup():
+    """
+    Download a backup zip containing config.json and the library database.
+    include_metadata=1 additionally bundles the metadata cache (posters,
+    backdrops, JSON) — can be large.
+    """
+    import zipfile
+    from backend.settings import CONFIG_PATH
+
+    include_metadata = request.args.get("include_metadata") in ("1", "true")
+    db_path = os.path.join(BASE_DIR, "data", "capsstream.db")
+    if not os.path.isfile(db_path):
+        return jsonify({"error": "Database not found"}), 404
+
+    backup_name = f"CapsStream-backup-{time.strftime('%Y%m%d-%H%M')}.zip"
+    zip_path = os.path.join(BASE_DIR, "_backup_tmp.zip")
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            if os.path.isfile(CONFIG_PATH):
+                zf.write(CONFIG_PATH, "config.json")
+            zf.write(db_path, "data/capsstream.db")
+            if include_metadata:
+                meta_dir = os.path.join(BASE_DIR, "data", "metadata")
+                for root, _dirs, files in os.walk(meta_dir):
+                    for f in files:
+                        fp = os.path.join(root, f)
+                        arc = os.path.relpath(fp, BASE_DIR)
+                        try:
+                            zf.write(fp, arc)
+                        except Exception:
+                            continue
+        return send_file(
+            zip_path,
+            as_attachment=True,
+            download_name=backup_name,
+            mimetype="application/zip",
+        )
+    finally:
+        try:
+            os.remove(zip_path)
+        except Exception:
+            pass
+
+
+@app.route("/api/system/restore", methods=["POST"])
+def api_system_restore():
+    """
+    Restore from a backup zip. config.json is applied immediately (with the
+    previous version kept in data/pre_restore/); the database is staged and
+    swapped in by start.bat on the next launch (same mechanism as updates),
+    because the live SQLite file cannot be replaced while the server runs.
+    """
+    import zipfile
+
+    file = request.files.get("file")
+    if not file or not file.filename.lower().endswith(".zip"):
+        return jsonify({"error": "Please upload a CapsStream backup .zip file"}), 400
+
+    from backend.settings import CONFIG_PATH
+    restore_cfg = False
+    restore_db = False
+    staged_db = None
+
+    try:
+        file.save(file.filename and os.path.join(BASE_DIR, "_restore_tmp.zip"))
+        tmp_zip = os.path.join(BASE_DIR, "_restore_tmp.zip")
+        with zipfile.ZipFile(tmp_zip, "r") as zf:
+            names = zf.namelist()
+            for n in names:
+                base = os.path.basename(n)
+                if base == "config.json" and not restore_cfg:
+                    pre_dir = os.path.join(BASE_DIR, "data", "pre_restore")
+                    os.makedirs(pre_dir, exist_ok=True)
+                    if os.path.isfile(CONFIG_PATH):
+                        shutil.copy2(CONFIG_PATH, os.path.join(
+                            pre_dir, f"config.{time.strftime('%Y%m%d-%H%M%S')}.json"))
+                    zf.extract(n, BASE_DIR)
+                    restore_cfg = True
+                elif base == "capsstream.db" and not restore_db:
+                    from backend.updater import PENDING_DIR, _write_pending_manifest
+                    rel = "data/capsstream.db"
+                    pend = os.path.join(PENDING_DIR, rel.replace("/", os.sep))
+                    os.makedirs(os.path.dirname(pend), exist_ok=True)
+                    with zf.open(n) as src, open(pend, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    staged_db = rel
+                    restore_db = True
+
+        os.remove(tmp_zip)
+    except zipfile.BadZipFile:
+        return jsonify({"error": "That file is not a valid backup zip"}), 400
+    except Exception as e:
+        return jsonify({"error": f"Restore failed: {e}"}), 500
+
+    if staged_db:
+        from backend.updater import _write_pending_manifest
+        _write_pending_manifest([staged_db])
+
+    if not restore_cfg and not restore_db:
+        return jsonify({"error": "No config.json or capsstream.db found in that backup"}), 400
+
+    return jsonify({
+        "ok": True,
+        "restored_config": restore_cfg,
+        "restored_database": restore_db,
+        "message": (
+            "Settings restored. " if restore_cfg else ""
+        ) + (
+            "Database staged — it will be applied on the next server start (close CapsStream and run start.bat)."
+            if restore_db else ""
+        ),
+    })
 
 
 # ─── Scheduled Library Scans ──────────────────────────────────────────────────

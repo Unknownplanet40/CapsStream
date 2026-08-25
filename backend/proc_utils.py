@@ -15,3 +15,7 @@ import os
 
 # 0x08000000 = CREATE_NO_WINDOW. The flag is Windows-only — pass 0 elsewhere.
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
+# 0x00004000 = BELOW_NORMAL_PRIORITY_CLASS — for background ffmpeg jobs
+# (intro detection, thumbnail sheets) so they never starve streaming I/O.
+BELOW_NORMAL_PRIORITY = 0x00004000 if os.name == "nt" else 0

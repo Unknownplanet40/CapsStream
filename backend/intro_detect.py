@@ -16,11 +16,7 @@ import os
 import re
 import subprocess
 
-from backend.proc_utils import CREATE_NO_WINDOW
-
-# Run ffmpeg at below-normal priority so intro analysis never starves
-# media streaming / library queries of disk I/O.
-BELOW_NORMAL_PRIORITY = 0x00004000 if os.name == "nt" else 0
+from backend.proc_utils import CREATE_NO_WINDOW, BELOW_NORMAL_PRIORITY
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_BIN = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffmpeg.exe")

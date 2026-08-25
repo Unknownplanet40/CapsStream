@@ -2461,7 +2461,44 @@ const SettingsPage = {
           </div>
         </div>
 
-        <!-- 5. Fresh Start (Full System Reset) -->
+        <!-- 5. Backup & Restore -->
+        <div class="settings-section">
+          <div class="settings-section-title">
+            <i class="ph ph-archive-box" style="color:var(--accent)"></i>
+            <span>Backup & Restore</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Download Backup</div>
+                <div class="settings-desc">Exports your settings and library database (watch history, skip markers, profiles, collections, achievements) as a zip file.</div>
+                <label style="display:flex;align-items:center;gap:7px;margin:6px 0 0;font-size:0.75rem;color:var(--text-muted);cursor:pointer">
+                  <input type="checkbox" v-model="backupIncludeMetadata" />
+                  Include metadata cache (posters & artwork — can be large)
+                </label>
+              </div>
+              <a class="btn btn-primary btn-sm" :href="'/api/system/backup?include_metadata=' + (backupIncludeMetadata ? 1 : 0)" id="btn-download-backup">
+                <i class="ph ph-download-simple" style="margin-right:6px"></i> Download Backup
+              </a>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Restore From Backup</div>
+                <div class="settings-desc">Upload a backup zip to restore settings and/or the library database. The current config is kept in <code>data/pre_restore/</code>. Database restores apply on the next server start.</div>
+                <div v-if="restoreResult" style="font-size:0.8rem;margin-top:4px" :style="{ color: restoreResult.ok ? '#10b981' : '#ef4444' }">
+                  {{ restoreResult.message }}
+                </div>
+              </div>
+              <label class="btn btn-secondary btn-sm" style="cursor:pointer" :id="'btn-restore-upload'">
+                <i class="ph ph-upload-simple" style="margin-right:6px"></i> Upload Backup
+                <input type="file" accept=".zip" style="display:none" @change="restoreFromBackup" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. Fresh Start (Full System Reset) -->
         <div class="settings-section" style="border:1px solid rgba(229,9,20,0.3);background:rgba(229,9,20,0.04)">
           <div class="settings-section-title">
             <i class="ph ph-warning-circle" style="color:var(--accent)"></i>
@@ -2964,6 +3001,41 @@ const SettingsPage = {
       startLibraryScan(true);
     }
 
+    // ─── Backup & Restore ──────────────────────────────────────
+    const backupIncludeMetadata = ref(false);
+    const restoreResult = ref(null);
+
+    async function restoreFromBackup(event) {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = "";
+      if (!file) return;
+      const ok = await customConfirm({
+        title: "Restore From Backup",
+        message: `Restore from "${file.name}"? Settings apply immediately; the library database is staged and applies on the next server start.`,
+        icon: "ph ph-archive-box",
+        okText: "Restore",
+      });
+      if (!ok) return;
+      restoreResult.value = { ok: true, message: "Restoring…" };
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/system/restore", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) {
+          restoreResult.value = { ok: false, message: data.error || "Restore failed" };
+          addToast(data.error || "Restore failed", "error", 6000);
+          return;
+        }
+        restoreResult.value = { ok: true, message: data.message };
+        addToast(data.message, "success", 6000);
+        await loadSettings();
+      } catch (e) {
+        restoreResult.value = { ok: false, message: e.message || "Restore failed" };
+        addToast(e.message || "Restore failed", "error", 6000);
+      }
+    }
+
     async function startAnimeDetect() {
       if (animeDetect.value.running) return;
       try {
@@ -3072,6 +3144,9 @@ const SettingsPage = {
       animeDetect,
       startAnimeDetect,
       manualScan,
+      backupIncludeMetadata,
+      restoreResult,
+      restoreFromBackup,
       cacheInfo,
       clearingCache,
       resetting,
@@ -3368,7 +3443,12 @@ const PlayerPage = {
                @mousemove="hoverSeekbar"
                @mouseleave="showHoverTooltip = false"
                id="player-seekbar">
-            <div v-if="showHoverTooltip" class="seekbar-tooltip" :style="{ left: hoverTooltipPos + 'px' }">
+            <div v-if="showHoverTooltip" class="seekbar-tooltip" :class="{ 'has-preview': thumbSheet }" :style="{ left: hoverTooltipPos + 'px' }">
+              <div
+                v-if="thumbSheet"
+                class="seekbar-thumb-preview"
+                :style="thumbCellStyle(hoverTooltipTime)"
+              ></div>
               {{ formatTime(hoverTooltipTime) }}
             </div>
             <div class="seekbar-track">
@@ -5170,6 +5250,45 @@ const PlayerPage = {
     // ─── OpenSubtitles download ─────────────────────────────────
     const downloadingSubs = ref(false);
 
+    // ─── Seekbar preview thumbnails ─────────────────────────────
+    const thumbSheet = ref(null);
+    let thumbRetryTimer = null;
+
+    async function loadThumbSheet(mediaId) {
+      thumbSheet.value = null;
+      clearTimeout(thumbRetryTimer);
+      try {
+        const r = await API.get(`/api/media/${mediaId}/thumbnails`);
+        if (r && r.ready) {
+          thumbSheet.value = r;
+        } else if (r && !r.ready) {
+          // Sheet is generating in the background — retry once after 90s
+          thumbRetryTimer = setTimeout(async () => {
+            try {
+              const r2 = await API.get(`/api/media/${mediaId}/thumbnails`);
+              if (r2 && r2.ready) thumbSheet.value = r2;
+            } catch (e) {}
+          }, 90000);
+        }
+      } catch (e) {}
+    }
+
+    function thumbCellStyle(time) {
+      const s = thumbSheet.value;
+      if (!s) return {};
+      const clamped = Math.max(0, Math.min(s.duration - 1, time));
+      const idx = Math.min(s.count - 1, Math.floor(clamped / s.interval));
+      const col = idx % s.cols;
+      const row = Math.floor(idx / s.cols);
+      const cellH = s.cell_height || Math.round(s.cell_width * 9 / 16);
+      return {
+        backgroundImage: `url(${s.url})`,
+        backgroundPosition: `-${col * s.cell_width}px -${row * cellH}px`,
+        width: s.cell_width + "px",
+        height: cellH + "px",
+      };
+    }
+
     async function downloadSubtitles() {
       const mediaId = media.value?.id || route.params.id;
       if (!mediaId || downloadingSubs.value) return;
@@ -5598,6 +5717,7 @@ const PlayerPage = {
       autoSkippedOp.value = false;
       autoSkippedEd.value = false;
       loadSkipTimes(mediaId);
+      loadThumbSheet(mediaId);
 
       try {
         playerSettings.value = await API.get("/api/settings");
@@ -5853,6 +5973,8 @@ const PlayerPage = {
       skipTimes,
       downloadingSubs,
       downloadSubtitles,
+      thumbSheet,
+      thumbCellStyle,
       activeSkipButton,
       getSegmentStyle,
       performSkip,
@@ -6245,7 +6367,10 @@ const CollectionsPage = {
             <div v-else class="collection-cover-empty">📚</div>
           </div>
           <div class="collection-info">
-            <div class="collection-name">{{ col.name }}</div>
+            <div class="collection-name">
+              {{ col.name }}
+              <span v-if="col.smart" class="skip-src-badge" style="margin-left:6px">✨ Smart</span>
+            </div>
             <div class="collection-count">{{ col.items.length }} title{{ col.items.length !== 1 ? 's' : '' }}</div>
           </div>
         </div>
@@ -6320,7 +6445,7 @@ const CollectionDetailPage = {
           <h1 class="browse-title">{{ collection.name }}</h1>
           <p v-if="collection.description" style="color:var(--text-muted);font-size:0.875rem;margin-top:4px">{{ collection.description }}</p>
         </div>
-        <button class="btn btn-ghost" @click="deleteCollection" style="color:var(--accent)">
+        <button v-if="collection && !collection.smart" class="btn btn-ghost" @click="deleteCollection" style="color:var(--accent)">
           <i class="ph ph-trash"></i> Delete
         </button>
       </div>
@@ -6349,7 +6474,7 @@ const CollectionDetailPage = {
     async function load() {
       try {
         const cols = await API.get("/api/collections");
-        collection.value = cols.find((c) => c.id === Number(route.params.id)) || null;
+        collection.value = cols.find((c) => String(c.id) === String(route.params.id)) || null;
       } catch (e) {
         addToast("Failed to load collection", "error");
       }
@@ -9317,8 +9442,18 @@ const SkipTimestampsModal = {
             </button>
           </div>
 
-          <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.25rem">
-            Configure manual skip ranges for <strong>{{ media?.title }}</strong>. Timestamps can be entered as <code>MM:SS</code> or seconds.
+          <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.25rem;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+            <span>Configure manual skip ranges for <strong>{{ media?.title }}</strong>. Timestamps can be entered as <code>MM:SS</code> or seconds.</span>
+            <button
+              class="btn btn-secondary btn-sm"
+              @click="refreshMarkers(true)"
+              :disabled="loadingMarkers"
+              id="btn-check-online-markers"
+              title="Re-query AniSkip and re-run detection for this episode"
+            >
+              <i :class="loadingMarkers ? 'ph ph-circle-notch' : 'ph ph-cloud-arrow-down'" :style="loadingMarkers ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+              {{ loadingMarkers ? 'Checking…' : 'Check Online' }}
+            </button>
           </div>
 
           <div style="display:flex;flex-direction:column;gap:1.25rem;margin-bottom:1.5rem">
@@ -9482,12 +9617,15 @@ const SkipTimestampsModal = {
     });
 
     // Sentinel state: a stored 0/0 pair means the user CONFIRMED this
-    // episode has no such segment (distinct from never filling it in).
+    // episode has no such segment. Defaults to UNCHECKED — the boxes only
+    // get checked after resolution confirms there's genuinely no marker
+    // (0/0 is also the default of untouched episodes, so checking it
+    // unconditionally made every episode claim "no recap/intro/…").
     const noneChecked = reactive({
-      recap:   Number(props.media?.recap_start) === 0 && Number(props.media?.recap_end) === 0,
-      intro:   Number(props.media?.intro_start) === 0 && Number(props.media?.intro_end) === 0,
-      outro:   Number(props.media?.outro_start) === 0 && Number(props.media?.outro_end) === 0,
-      preview: Number(props.media?.preview_start) === 0 && Number(props.media?.preview_end) === 0,
+      recap:   false,
+      intro:   false,
+      outro:   false,
+      preview: false,
     });
 
     // Outro convenience: end auto-fills to the video duration on save
@@ -9497,29 +9635,56 @@ const SkipTimestampsModal = {
     // data (manual DB → AniSkip → ffprobe chapters) is fetched so the modal
     // shows the same markers the player uses — not just the DB columns.
     const sourceInfo = reactive({ recap: "", intro: "", outro: "", preview: "" });
+    const loadingMarkers = ref(false);
     const SEG_TO_RESOLVED = { recap: "recap", intro: "op", outro: "ed", preview: "preview" };
     const SOURCE_LABELS = { manual: "Manual", aniskip: "AniSkip", chapters: "Chapters", audio: "Audio Detect" };
 
-    onMounted(async () => {
+    onMounted(() => refreshMarkers(false));
+
+    // Resolves skip data (manual DB → AniSkip → audio → chapters) and
+    // prefills the form. force=true bypasses the server-side cache to
+    // re-query AniSkip and re-run detection.
+    async function refreshMarkers(force = false) {
+      loadingMarkers.value = true;
       try {
-        const resolved = await API.get(`/api/skip-times/${props.media.id}`);
+        const resolved = await API.get(`/api/skip-times/${props.media.id}${force ? "?refresh=1" : ""}`);
         if (!resolved) return;
         for (const [seg, key] of Object.entries(SEG_TO_RESOLVED)) {
           const s = resolved[key];
-          if (!s || s.source === "manual") continue;
-          const start = Number(s.start), end = Number(s.end);
-          if (!end || end <= start) continue;
-          // Manual DB values always win — only prefill truly empty fields,
-          // and never over a user-confirmed "none" sentinel.
+          const start = Number(s?.start), end = Number(s?.end);
+          const hasMarker = s && end > start;
           const dbStart = Number(props.media?.[seg + "_start"]) || 0;
           const dbEnd = Number(props.media?.[seg + "_end"]) || 0;
-          if (dbStart > 0 || dbEnd > 0 || noneChecked[seg]) continue;
-          form.value[seg + "_start"] = formatSecToTime(start);
-          form.value[seg + "_end"] = formatSecToTime(end);
-          sourceInfo[seg] = SOURCE_LABELS[s.source] || s.source;
+
+          if (hasMarker && s.source !== "manual") {
+            // Auto-detected marker (AniSkip / audio / chapters) — prefill it
+            // and clear any "confirmed none" sentinel: the player is actively
+            // using this marker, so claiming "no intro" would be wrong.
+            if (dbStart <= 0 && dbEnd <= 0) {
+              noneChecked[seg] = false;
+              form.value[seg + "_start"] = formatSecToTime(start);
+              form.value[seg + "_end"] = formatSecToTime(end);
+              sourceInfo[seg] = SOURCE_LABELS[s.source] || s.source;
+            } else {
+              // Manual DB values win — show them without a source badge
+              noneChecked[seg] = false;
+            }
+          } else if (!hasMarker) {
+            // No marker from any source — "no recap/intro/…" is accurate.
+            // On a forced re-check also clear stale prefills.
+            if (dbStart === 0 && dbEnd === 0) {
+              noneChecked[seg] = true;
+              if (force && sourceInfo[seg]) {
+                form.value[seg + "_start"] = "";
+                form.value[seg + "_end"] = "";
+                sourceInfo[seg] = "";
+              }
+            }
+          }
         }
       } catch (e) { /* resolved data unavailable — manual-only view */ }
-    });
+      finally { loadingMarkers.value = false; }
+    }
 
     function onNoneToggle(key) {
       if (noneChecked[key]) {
@@ -9614,7 +9779,7 @@ const SkipTimestampsModal = {
       }
     }
 
-    return { form, saving, stampCurrent, save, noneChecked, toEnd, onNoneToggle, sourceInfo };
+    return { form, saving, stampCurrent, save, noneChecked, toEnd, onNoneToggle, sourceInfo, loadingMarkers, refreshMarkers };
   }
 };
 
