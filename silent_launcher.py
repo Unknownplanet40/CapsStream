@@ -334,6 +334,30 @@ def main():
 
     send_toast("CapsStream is running", f"Serving at {url}")
     log(f"App window open (PID {browser.pid}) — monitoring until it closes")
+
+    # Edge/Chrome "background mode" keeps the browser process alive after
+    # the last window closes — process-exit polling alone would never fire
+    # and orphan the server. So also track window visibility: when the
+    # tracked browser has no visible window for a few seconds, treat the
+    # app as closed (and take the background browser down with it).
+    def browser_window_visible(pid):
+        user32 = ctypes.windll.user32
+        found = [False]
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
+
+        def cb(hwnd, lParam):
+            if user32.IsWindowVisible(hwnd):
+                pid_ref = ctypes.c_ulong()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid_ref))
+                if pid_ref.value == pid:
+                    found[0] = True
+                    return False
+            return True
+
+        user32.EnumWindows(WNDENUMPROC(cb), 0)
+        return found[0]
+
+    no_window_since = None
     try:
         while True:
             # Browser closed by the user → shut the whole stack down
@@ -348,7 +372,20 @@ def main():
                 log("Server process exited on its own — launcher exiting")
                 send_toast("CapsStream server exited", "The server process stopped unexpectedly. Check logs/ for details.")
                 break
-            time.sleep(1)
+            # Background-mode guard: process alive but the app window is gone
+            if not browser_window_visible(browser.pid):
+                if no_window_since is None:
+                    no_window_since = time.time()
+                elif time.time() - no_window_since > 8:
+                    log("Browser window gone (background mode) — shutting down browser and server")
+                    kill_tree(browser.pid)
+                    if server is not None:
+                        kill_tree(server.pid)
+                    send_toast("CapsStream stopped", "Server shut down cleanly")
+                    break
+            else:
+                no_window_since = None
+            time.sleep(2)
     finally:
         log("Launcher exiting")
 

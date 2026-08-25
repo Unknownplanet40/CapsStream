@@ -434,6 +434,9 @@ def api_post_settings():
     data = request.json or {}
     ok, result = save_config(data)
     if ok:
+        # Changing the auto-scan interval restarts the countdown from now
+        if "library" in data and "scan_interval_hours" in (data.get("library") or {}):
+            _write_last_scheduled_scan(time.time())
         return jsonify({"ok": True, "config": result})
     return jsonify({"error": result}), 500
 
@@ -1199,6 +1202,47 @@ def api_embedded_subtitles(media_id, stream_index):
     return send_file(vtt_path, mimetype="text/vtt")
 
 
+@app.route("/api/media/<int:media_id>/download-subtitles", methods=["POST"])
+def api_download_subtitles(media_id):
+    """
+    Search OpenSubtitles by file hash and download subtitles for this media
+    file in the user's preferred language(s). Requires a free OpenSubtitles
+    API key in Settings → Player & Subtitle Defaults.
+    """
+    media = get_best_media_source(media_id)
+    if not media or not media.get("file_path"):
+        return jsonify({"added": 0, "message": "Media not found"}), 404
+
+    from backend.settings import load_config
+    cfg = load_config()
+    sub_cfg = cfg.get("subtitles") or {}
+    api_key = (sub_cfg.get("opensubtitles_api_key") or "").strip()
+    if not api_key:
+        return jsonify({
+            "added": 0,
+            "message": "No OpenSubtitles API key configured — add one in Settings → Player & Subtitle Defaults.",
+        }), 400
+
+    pref = (sub_cfg.get("preferred_language") or "en").lower()
+    lang_map = {"auto": "en", "english": "en", "spanish": "es", "french": "fr", "japanese": "ja", "german": "de"}
+    languages = lang_map.get(pref, pref if len(pref) <= 3 else "en")
+
+    from backend.opensubs import download_subtitles_for_file
+    try:
+        saved = download_subtitles_for_file(media["file_path"], api_key, languages)
+    except Exception as e:
+        return jsonify({"added": 0, "message": f"OpenSubtitles request failed: {e}"}), 502
+
+    if not saved:
+        return jsonify({"added": 0, "message": "No subtitles found for this file (or already downloaded)."})
+
+    return jsonify({
+        "added": len(saved),
+        "message": f"Downloaded {len(saved)} subtitle file(s)",
+        "files": [os.path.basename(p) for p in saved],
+    })
+
+
 @app.route("/api/subtitles/<int:media_id>/<path:filename>")
 def api_subtitles(media_id, filename):
     media = get_best_media_source(media_id)
@@ -1402,6 +1446,77 @@ def api_scan():
 @app.route("/api/scan/status", methods=["GET"])
 def api_scan_status():
     return jsonify(get_scan_status())
+
+
+@app.route("/api/system/shutdown", methods=["POST"])
+def api_system_shutdown():
+    """Gracefully stop the Flask server (used by the Live Logs page's Stop Server button)."""
+    def _shutdown():
+        try:
+            func = request.environ.get("werkzeug.server.shutdown")
+            if func:
+                func()
+        except Exception:
+            pass
+        # Hard fallback — the dev server occasionally ignores the graceful path
+        threading.Timer(1.5, os._exit, args=(0,)).start()
+
+    threading.Thread(target=_shutdown, daemon=True).start()
+    return jsonify({"ok": True, "message": "Server shutting down"})
+
+
+# ─── Scheduled Library Scans ──────────────────────────────────────────────────
+# Optional auto-scan cadence (config: library.scan_interval_hours, 0 = off).
+# A daemon thread checks every 10 minutes whether the interval has elapsed
+# and triggers a scan through the same pipeline as POST /api/scan.
+
+_SCAN_SCHEDULE_FILE = os.path.join(BASE_DIR, "data", "scan_schedule.json")
+
+
+def _read_last_scheduled_scan():
+    try:
+        with open(_SCAN_SCHEDULE_FILE, encoding="utf-8") as f:
+            return float(json.load(f).get("last_run", 0))
+    except Exception:
+        return 0.0
+
+
+def _write_last_scheduled_scan(ts):
+    try:
+        os.makedirs(os.path.dirname(_SCAN_SCHEDULE_FILE), exist_ok=True)
+        with open(_SCAN_SCHEDULE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"last_run": ts}, f)
+    except Exception:
+        pass
+
+
+def _scan_scheduler_loop():
+    from backend.settings import load_config
+    from backend.scanner import get_scan_status
+    # First-run baseline: never fire immediately on server start or when the
+    # schedule file is missing/zero — the countdown starts from now.
+    if _read_last_scheduled_scan() <= 0:
+        _write_last_scheduled_scan(time.time())
+    while True:
+        try:
+            interval = float((load_config().get("library") or {}).get("scan_interval_hours") or 0)
+            if interval > 0 and not get_scan_status()["running"]:
+                last = _read_last_scheduled_scan()
+                if last <= 0:
+                    _write_last_scheduled_scan(time.time())
+                elif time.time() - last >= interval * 3600:
+                    status = get_scan_status()
+                    if not status["running"]:
+                        print(f"[Scheduler] Interval {interval}h elapsed — starting scheduled scan")
+                        _write_last_scheduled_scan(time.time())
+                        scan_library()
+        except Exception as e:
+            print(f"[Scheduler] Scan scheduler error: {e}")
+        time.sleep(600)  # check every 10 minutes
+
+
+def start_scan_scheduler():
+    threading.Thread(target=_scan_scheduler_loop, daemon=True).start()
 
 
 @app.route("/api/unmatched", methods=["GET"])
@@ -1854,6 +1969,35 @@ def api_system_info():
     config = load_config()
     api_health = _get_api_health(config)
 
+    # Drive health — auto-detect ALL system drives (fixed + removable)
+    import shutil
+    drive_roots = set()
+    try:
+        if hasattr(os, "listdrives"):  # Python 3.12+ on Windows
+            drive_roots = {d + "\\" for d in os.listdrives()}
+        else:
+            bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+            for i in range(26):
+                if bitmask & (1 << i):
+                    drive_roots.add(chr(ord("A") + i) + ":\\")
+    except Exception:
+        drive_roots = {os.path.splitdrive(BASE_DIR)[0] + "\\"}
+
+    disk_info = []
+    for drive in sorted(drive_roots):
+        try:
+            usage = shutil.disk_usage(drive)
+            if usage.total <= 0:
+                continue
+            disk_info.append({
+                "drive": drive,
+                "free_gb": round(usage.free / 1024**3, 1),
+                "total_gb": round(usage.total / 1024**3, 1),
+                "used_pct": round(100 * usage.used / usage.total) if usage.total else 0,
+            })
+        except Exception:
+            continue  # empty card reader / disconnected drive
+
     return jsonify({
         "version": get_app_version(),
         "app_name": "CapsStream",
@@ -1872,6 +2016,7 @@ def api_system_info():
         "last_checked": _updater_state().get("last_checked"),
         "latest_version": _updater_state().get("latest"),
         "storage_info": storage_info,
+        "disk_info": disk_info,
         "media_counts": {
             "total": total_count,
             "movies": movies_count,
@@ -1890,6 +2035,14 @@ if __name__ == "__main__":
 
     # Initialize database
     init_db()
+
+    # Start the scheduled-scan daemon (respects library.scan_interval_hours)
+    start_scan_scheduler()
+
+    # Background pass: audio-based intro detection for shows without markers.
+    # Delayed 2 minutes so it never competes with app launch or initial playback.
+    from backend.scanner import start_intro_detection_pass
+    threading.Timer(120, start_intro_detection_pass).start()
 
     # Load config and apply system file hiding
     cfg = load_config()

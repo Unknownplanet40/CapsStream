@@ -2936,7 +2936,6 @@ main::-webkit-scrollbar {
   display: flex;
   gap: var(--space-sm);
   flex-wrap: wrap;
-  display: none;
 }
 
 .filter-btn {
@@ -6333,6 +6332,107 @@ body.kids-mode-theme .suggestion-tag:hover {
   white-space: nowrap;
 }
 
+/* ─── Online Subtitles Search Modal ─────────────────────────── */
+.online-sub-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-outer, 16px);
+  padding: 1.5rem;
+  width: 92%;
+  max-width: 560px;
+  min-width: 380px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9);
+  animation: modalPopIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.online-sub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.1rem;
+}
+
+.online-sub-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.online-sub-list {
+  max-height: 46vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.online-sub-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.online-sub-item:hover {
+  border-color: var(--accent);
+  background: var(--bg-card-hover);
+}
+
+.online-sub-icon {
+  font-size: 1.2rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.online-sub-meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.online-sub-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.online-sub-info {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.online-sub-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.online-sub-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 2.5rem 0;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.online-sub-empty i {
+  font-size: 2rem;
+  opacity: 0.5;
+}
+
 /* ─── Per-Episode Skip Marker Button ────────────────────────── */
 .episode-skip-btn {
   position: absolute;
@@ -8009,6 +8109,23 @@ kbd.about-kbd {
   font-size: 0.72rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* Drive health (About diagnostics) */
+.drive-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px 24px;
+}
+
+.drive-health-item {
+  min-width: 0;
+}
+
+.drive-health-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 /* ─── 3-Section Glass Cards Layout ───────────────────────────── */

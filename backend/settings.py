@@ -38,6 +38,7 @@ DEFAULT_CONFIG = {
     },
     "library": {
         "scan_on_startup": True,
+        "scan_interval_hours": 0,
         "skip_patterns": "sample,trailer"
     },
     "updates": {
@@ -47,6 +48,8 @@ DEFAULT_CONFIG = {
         "auto_load": True,
         "preferred_language": "Auto",
         "font_size": "normal",
+        "opensubtitles_api_key": "",
+        "auto_download": False,
         "appearance": {
             "fontSize": "1.1rem",
             "textColor": "#ffffff",

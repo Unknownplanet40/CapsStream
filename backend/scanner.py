@@ -15,6 +15,7 @@ import os
 import re
 import json
 import time
+import threading
 from backend.db import upsert_media, get_all_media
 from backend.matcher import match_movie, match_show, fetch_season_episodes
 
@@ -515,5 +516,133 @@ def scan_library(callback=None):
             progress=f"Scan complete. Processed {count} new files.",
         )
         print(f"[Scanner] Scan complete. {count} new files added.")
+        try:
+            new_episodes = _diff_new_episodes()
+            if new_episodes:
+                _set_status(new_episodes=new_episodes)
+        except Exception as e:
+            print(f"[Scanner] New-episode diff failed: {e}")
+        try:
+            start_intro_detection_pass()
+        except Exception as e:
+            print(f"[Scanner] Intro detection pass failed to start: {e}")
 
     return {"new_files": count, "matched": matched_count, "errors": _scan_status["errors"]}
+
+
+# ─── Background intro detection pass ─────────────────────────────────────────
+# Audio-based intro detection takes ~30s per file (I/O bound), so it runs in
+# a background daemon thread after scans and at server startup — never
+# synchronously when a user opens an episode. Results land in the skip-time
+# cache (source "audio") so the player picks them up automatically.
+
+INTRO_DETECT_BATCH = 12   # max files per pass — keep disk I/O polite
+INTRO_DETECT_SLEEP = 4    # seconds between files — never saturate the drive
+
+
+def _intro_detect_pass():
+    from backend.db import get_conn
+    from backend.skip_times import SKIP_CACHE_DIR, LABELS
+    from backend.intro_detect import detect_intro
+
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT m.id, m.file_path, m.title FROM media m
+        WHERE m.type IN ('series', 'anime') AND m.file_path IS NOT NULL
+          AND m.intro_start = 0
+          AND NOT EXISTS (SELECT 1 FROM media m2 WHERE m2.tmdb_id = m.tmdb_id AND m2.intro_start > 0)
+        ORDER BY m.added_at DESC
+    """).fetchall()
+    conn.close()
+
+    processed = 0
+    for media_id, file_path, title in rows:
+        if processed >= INTRO_DETECT_BATCH:
+            break
+        cache_path = os.path.join(SKIP_CACHE_DIR, f"{media_id}.json")
+        if os.path.isfile(cache_path):
+            continue  # already has resolved skip data
+        if not os.path.isfile(file_path):
+            continue
+
+        detected = detect_intro(file_path)
+        if detected:
+            data = {
+                "op": {
+                    "start": detected["start"],
+                    "end": detected["end"],
+                    "type": "op",
+                    "label": LABELS.get("op", "Skip Intro"),
+                    "source": "audio",
+                }
+            }
+            try:
+                os.makedirs(SKIP_CACHE_DIR, exist_ok=True)
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                print(f"[IntroDetect] '{title}' intro {detected['start']}s → {detected['end']}s")
+            except Exception as e:
+                print(f"[IntroDetect] Cache write failed for {title}: {e}")
+        processed += 1
+        time.sleep(INTRO_DETECT_SLEEP)  # breathe — never saturate media drives
+
+    print(f"[IntroDetect] Pass complete — {processed} file(s) analyzed")
+
+
+def start_intro_detection_pass():
+    threading.Thread(target=_intro_detect_pass, daemon=True).start()
+
+
+# ─── New-episode notifications ────────────────────────────────────────────────
+# After each scan, diff per-show episode counts against the previous scan's
+# snapshot (data/library_state.json). Shows with new episodes are surfaced in
+# the scan status so the frontend can toast them.
+
+_LIBRARY_STATE_FILE = os.path.join(BASE_DIR, "data", "library_state.json")
+
+
+def _diff_new_episodes():
+    from backend.db import get_conn
+    conn = get_conn()
+    counts = {
+        row[0]: {"title": row[1], "type": row[2], "count": row[3]}
+        for row in conn.execute("""
+            SELECT tmdb_id, MIN(title), MIN(type), COUNT(*)
+            FROM media WHERE type IN ('series', 'anime') AND tmdb_id IS NOT NULL
+            GROUP BY tmdb_id
+        """).fetchall()
+    }
+    conn.close()
+
+    snapshot = {}
+    if os.path.isfile(_LIBRARY_STATE_FILE):
+        try:
+            with open(_LIBRARY_STATE_FILE, encoding="utf-8") as f:
+                snapshot = json.load(f) or {}
+        except Exception:
+            snapshot = {}
+
+    prev = snapshot.get("shows") or {}
+    new_episodes = []
+    for tmdb_id, info in counts.items():
+        key = str(tmdb_id)
+        before = prev.get(key, {}).get("count", 0)
+        added = info["count"] - before
+        if added > 0 and before > 0:  # brand-new shows get no spam on first scan
+            new_episodes.append({
+                "title": info["title"],
+                "type": info["type"],
+                "added": added,
+            })
+    new_episodes.sort(key=lambda x: -x["added"])
+
+    snapshot["shows"] = {k: {"count": v["count"]} for k, v in counts.items()}
+    snapshot["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        os.makedirs(os.path.dirname(_LIBRARY_STATE_FILE), exist_ok=True)
+        with open(_LIBRARY_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, indent=2)
+    except Exception as e:
+        print(f"[Scanner] Could not save library state: {e}")
+
+    return new_episodes[:10]

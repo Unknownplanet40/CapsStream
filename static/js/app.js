@@ -346,7 +346,15 @@ async function pollScanStatus() {
       applyScanStatus(status);
       if (!status.running) {
         clearInterval(scanPollTimer);
-        // Completion is surfaced by the scan widget — no toast
+        // New-episode notifications — surface shows that gained episodes
+        const ne = status.new_episodes || [];
+        for (let i = 0; i < Math.min(ne.length, 3); i++) {
+          const n = ne[i];
+          addToast(`📺 ${n.added} new episode${n.added > 1 ? "s" : ""} of ${n.title} added`, "info", 6000);
+        }
+        if (ne.length > 3) {
+          addToast(`📺 …and ${ne.reduce((s, n) => s + n.added, 0) - ne.slice(0, 3).reduce((s, n) => s + n.added, 0)} more new episodes across other shows`, "info", 6000);
+        }
       }
     } catch (e) {
       clearInterval(scanPollTimer);
@@ -2152,6 +2160,20 @@ const SettingsPage = {
 
             <div class="settings-row">
               <div class="settings-label-container">
+                <div class="settings-label">Auto-Scan Interval</div>
+                <div class="settings-desc">Automatically scan the library on a schedule while the server is running. New episodes are announced with a toast.</div>
+              </div>
+              <select v-model.number="form.library.scan_interval_hours" class="form-input" style="width:160px">
+                <option :value="0">Off</option>
+                <option :value="1">Every hour</option>
+                <option :value="6">Every 6 hours</option>
+                <option :value="12">Every 12 hours</option>
+                <option :value="24">Every 24 hours</option>
+              </select>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
                 <div class="settings-label">Manual Library Scan</div>
                 <div class="settings-desc">Run a full disk scan now to pick up new files, refresh metadata, and apply any library changes.</div>
                 <div v-if="store.scanRunning" style="font-size:0.8rem;color:var(--accent);font-weight:700;margin-top:4px">
@@ -2309,6 +2331,25 @@ const SettingsPage = {
                 <option value="large">Large (125%)</option>
                 <option value="extra-large">Extra Large (150%)</option>
               </select>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">OpenSubtitles API Key</div>
+                <div class="settings-desc">Enables automatic subtitle downloads matched to your exact files. Free key at opensubtitles.com/api — free accounts allow 5 downloads per day.</div>
+              </div>
+              <input type="password" v-model="form.subtitles.opensubtitles_api_key" class="form-input" placeholder="Paste your OpenSubtitles API key..." style="width:280px" />
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Subtitles — Auto-Download</div>
+                <div class="settings-desc">When opening a title with no subtitles available, automatically search OpenSubtitles and download one in your preferred language.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.subtitles.auto_download" />
+                <span class="toggle-slider"></span>
+              </label>
             </div>
 
             <div class="settings-row" style="flex-direction:column;align-items:flex-start">
@@ -2533,6 +2574,7 @@ const SettingsPage = {
       },
       library: {
         scan_on_startup: true,
+        scan_interval_hours: 0,
         skip_patterns: "sample,trailer",
       },
       updates: {
@@ -2542,6 +2584,8 @@ const SettingsPage = {
         auto_load: true,
         preferred_language: "Auto",
         font_size: "normal",
+        opensubtitles_api_key: "",
+        auto_download: false,
         appearance: { fontSize: "1.1rem", textColor: "#ffffff", bgOpacity: 0.5 },
       },
       playback: {
@@ -3451,6 +3495,10 @@ const PlayerPage = {
                   <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="openOnlineSubModal">
                     <i class="ph ph-magnifying-glass" style="margin-right:4px"></i> Search Online Subtitles
                   </div>
+                  <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="downloadSubtitles" :id="'ctrl-download-subs'">
+                    <i :class="downloadingSubs ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="downloadingSubs ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                    {{ downloadingSubs ? 'Searching OpenSubtitles…' : 'Auto-Download Subtitles' }}
+                  </div>
                   <label class="player-menu-item" style="cursor:pointer;color:var(--accent);font-weight:600">
                     <i class="ph ph-plus" style="margin-right:4px"></i> Load .srt / .vtt
                     <input type="file" accept=".vtt,.srt" @change="handleCustomSubFile" style="display:none" />
@@ -3653,41 +3701,47 @@ const PlayerPage = {
 
       <!-- Online Subtitles Search Modal -->
       <div v-if="showOnlineSubModal" class="modal-backdrop" @click.self="showOnlineSubModal = false">
-        <div class="modal-card" style="max-width:540px" @click.stop>
-          <div class="modal-title" style="display:flex;align-items:center;gap:8px">
-            <i class="ph ph-closed-captioning" style="color:var(--accent)"></i>
-            <span>Search Online Subtitles</span>
-          </div>
-
-          <div style="margin-bottom:1rem;color:var(--text-secondary);font-size:0.85rem">
-            Search and download subtitles for <strong>{{ media?.title }}</strong>:
+        <div class="online-sub-modal" @click.stop>
+          <div class="online-sub-header">
+            <div class="online-sub-title">
+              <i class="ph ph-closed-captioning" style="color:var(--accent);font-size:1.3rem"></i>
+              <div>
+                <div style="font-weight:800;font-size:1rem">Search Online Subtitles</div>
+                <div style="font-size:0.78rem;color:var(--text-muted);font-weight:500">{{ media?.title }}</div>
+              </div>
+            </div>
+            <button class="shortcuts-close-btn" @click="showOnlineSubModal = false">
+              <i class="ph ph-x"></i>
+            </button>
           </div>
 
           <div v-if="loadingOnlineSubs" class="loading-spinner" style="margin:2.5rem auto"></div>
 
-          <div v-else-if="onlineSubResults && onlineSubResults.length" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+          <div v-else-if="onlineSubResults && onlineSubResults.length" class="online-sub-list">
             <div
               v-for="sub in onlineSubResults"
               :key="sub.id"
-              class="player-menu-item"
-              style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg-secondary);border-radius:8px;cursor:pointer"
+              class="online-sub-item"
               @click="downloadAndApplyOnlineSub(sub)"
             >
-              <div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-right:12px">
-                <div style="font-weight:600;font-size:0.9rem">{{ sub.title }}</div>
-                <div style="font-size:0.75rem;color:var(--text-muted)">Language: {{ sub.lang }}</div>
+              <i class="ph ph-chat-center-dots online-sub-icon"></i>
+              <div class="online-sub-meta">
+                <div class="online-sub-name">{{ sub.title }}</div>
+                <div class="online-sub-info">{{ sub.lang }}</div>
               </div>
-              <button class="btn btn-primary btn-sm" :disabled="downloadingSubId === sub.id">
-                {{ downloadingSubId === sub.id ? 'Downloading...' : 'Download & Apply' }}
+              <button class="btn btn-secondary btn-sm online-sub-btn" :disabled="downloadingSubId === sub.id" @click.stop>
+                <i :class="downloadingSubId === sub.id ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="downloadingSubId === sub.id ? 'animation:spin 1s linear infinite' : ''"></i>
+                {{ downloadingSubId === sub.id ? '' : 'Apply' }}
               </button>
             </div>
           </div>
 
-          <div v-else style="text-align:center;padding:2rem 0;color:var(--text-muted)">
-            No online subtitles found for this title.
+          <div v-else class="online-sub-empty">
+            <i class="ph ph-file-x"></i>
+            <div>No online subtitles found for this title.</div>
           </div>
 
-          <button class="btn btn-ghost btn-full" style="margin-top:1.25rem" @click="showOnlineSubModal = false">
+          <button class="btn btn-ghost btn-full" style="margin-top:1rem" @click="showOnlineSubModal = false">
             Close
           </button>
         </div>
@@ -5113,6 +5167,51 @@ const PlayerPage = {
       }
     }
 
+    // ─── OpenSubtitles download ─────────────────────────────────
+    const downloadingSubs = ref(false);
+
+    async function downloadSubtitles() {
+      const mediaId = media.value?.id || route.params.id;
+      if (!mediaId || downloadingSubs.value) return;
+      downloadingSubs.value = true;
+      try {
+        const r = await API.post(`/api/media/${mediaId}/download-subtitles`, {});
+        if (r.added > 0) {
+          addToast(r.message, "success");
+          // Reload the subtitle list — new external subs appear after saving
+          const fresh = await API.get(`/api/media/${mediaId}`);
+          subtitles.value = fresh?.subtitles || [];
+          if (selectedSub.value === -1 && subtitles.value.length) {
+            selectSub(0);
+          }
+        } else {
+          addToast(r.message || "No subtitles found", "info", 5000);
+        }
+      } catch (e) {
+        addToast(e.message || "Subtitle download failed", "error", 5000);
+      } finally {
+        downloadingSubs.value = false;
+      }
+    }
+
+    async function maybeAutoDownloadSubs() {
+      // Auto-download when the title has zero subtitles and the user opted in
+      if (subtitles.value.length > 0) return;
+      const cfg = playerSettings.value;
+      if (!cfg?.subtitles?.auto_download || !cfg?.subtitles?.opensubtitles_api_key) return;
+      const mediaId = media.value?.id || route.params.id;
+      if (!mediaId) return;
+      try {
+        const r = await API.post(`/api/media/${mediaId}/download-subtitles`, {});
+        if (r.added > 0) {
+          addToast(`📺 ${r.message} — reloading subtitles`, "success", 5000);
+          const fresh = await API.get(`/api/media/${mediaId}`);
+          subtitles.value = fresh?.subtitles || [];
+          if (subtitles.value.length) selectSub(0);
+        }
+      } catch (e) {}
+    }
+
     const activeSkipButton = computed(() => {
       if (!skipTimes.value) return null;
       const time = currentTime.value;
@@ -5539,6 +5638,11 @@ const PlayerPage = {
         media.value = await API.get(`/api/media/${mediaId}`);
         subtitles.value = media.value.subtitles || [];
 
+        // Auto-download subtitles via OpenSubtitles when none exist and enabled
+        if (!subtitles.value.length) {
+          maybeAutoDownloadSubs();
+        }
+
         applyResumedProgress();
 
         // Auto-select preferred subtitle language if auto_load enabled
@@ -5747,6 +5851,8 @@ const PlayerPage = {
       showQualityMenu,
       selectQuality,
       skipTimes,
+      downloadingSubs,
+      downloadSubtitles,
       activeSkipButton,
       getSegmentStyle,
       performSkip,
@@ -5825,6 +5931,17 @@ const BrowsePage = {
             @click="setType(t.value)"
             :id="'filter-' + t.value"
           >{{ t.label }}</button>
+
+          <select
+            v-model="selectedGenre"
+            @change="onGenreChange"
+            class="form-input"
+            style="width:160px;margin-left:8px;font-size:0.85rem;padding:6px 10px"
+            id="filter-genre"
+          >
+            <option value="">All Genres</option>
+            <option v-for="g in genres" :key="g" :value="g">{{ g }}</option>
+          </select>
 
           <button
             class="filter-btn"
@@ -5965,6 +6082,15 @@ const BrowsePage = {
       }
     }
 
+    // ─── Genre filter (client-side over the loaded library) ─────
+    const genres = ref([]);
+    const selectedGenre = ref("");
+
+    function onGenreChange() {
+      currentPage.value = 1;
+      if (selectedGenre.value) unlockAchievement("filter_pro");
+    }
+
     function handleClick(item) {
       if (item.type === "movie") {
         router.push(`/title/movie/${item.id}`);
@@ -5973,7 +6099,10 @@ const BrowsePage = {
       }
     }
 
-    onMounted(load);
+    onMounted(() => {
+      load();
+      API.get("/api/genres").then((g) => { genres.value = g || []; }).catch(() => {});
+    });
     watch(
       () => route.query.type,
       (newType) => {
@@ -6006,6 +6135,12 @@ const BrowsePage = {
       let list = items.value || [];
       if (hideUnmounted.value) {
         list = list.filter((item) => item.is_mounted !== false);
+      }
+      if (selectedGenre.value) {
+        const g = selectedGenre.value.toLowerCase();
+        list = list.filter(
+          (item) => (item.genres || "").toLowerCase().split(",").map((x) => x.trim()).includes(g)
+        );
       }
       return list;
     });
@@ -6045,6 +6180,9 @@ const BrowsePage = {
       paginatedItems,
       loading,
       activeType,
+      genres,
+      selectedGenre,
+      onGenreChange,
       types,
       pageTitle,
       hideUnmounted,
@@ -7995,6 +8133,26 @@ const AboutPage = {
               </div>
             </div>
           </div>
+
+          <!-- Drive health (free space per library drive) -->
+          <div v-if="sysInfo.disk_info && sysInfo.disk_info.length" class="drive-health" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-subtle)">
+            <div class="storage-panel-title" style="margin-bottom:10px">
+              <i class="ph ph-hard-drive"></i>
+              <span>Drive Health</span>
+            </div>
+            <div class="drive-health-grid">
+              <div class="drive-health-item" v-for="d in sysInfo.disk_info" :key="d.drive">
+                <div class="drive-health-name">{{ d.drive }}</div>
+                <div class="storage-tile-bar" style="margin:4px 0 5px">
+                  <div
+                    class="storage-tile-fill"
+                    :style="{ width: d.used_pct + '%', background: d.used_pct >= 90 ? '#ef4444' : d.used_pct >= 75 ? '#f59e0b' : '#4cc2ff' }"
+                  ></div>
+                </div>
+                <div class="storage-tile-cap">{{ d.free_gb }} GB free of {{ d.total_gb }} GB</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -8204,6 +8362,10 @@ const LogViewerPage = {
           <a class="btn btn-secondary btn-sm" :href="'/api/system/logs/download?file=' + encodeURIComponent(selectedFile)" v-if="selectedFile">
             <i class="ph ph-download-simple" style="margin-right:4px"></i> Download
           </a>
+          <button class="btn btn-sm" style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.4);color:#fca5a5" @click="stopServer" :disabled="stopping" id="logs-stop-server" title="Stop the CapsStream server">
+            <i :class="stopping ? 'ph ph-circle-notch' : 'ph ph-stop'" :style="stopping ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+            {{ stopping ? 'Stopping…' : 'Stop Server' }}
+          </button>
         </div>
       </div>
 
@@ -8288,6 +8450,26 @@ const LogViewerPage = {
       if (autoRefresh.value) pollOnce();
     }
 
+    const stopping = ref(false);
+    async function stopServer() {
+      if (stopping.value) return;
+      const ok = await customConfirm({
+        title: "Stop CapsStream Server",
+        message: "Shut down the CapsStream server? The interface will go offline until you launch it again.",
+        icon: "ph ph-stop-circle",
+        danger: true,
+        okText: "Stop Server",
+      });
+      if (!ok) return;
+      stopping.value = true;
+      try {
+        await API.post("/api/system/shutdown", {});
+        addToast("Server shutting down…", "info");
+      } catch (e) {
+        addToast("Server is stopping…", "info");
+      }
+    }
+
     async function pollOnce() {
       if (!selectedFile.value) return;
       try {
@@ -8358,6 +8540,7 @@ const LogViewerPage = {
     return {
       files, selectedFile, lines, autoRefresh, atBottom, lastError, logBody,
       formatSize, lineClass, onScroll, scrollToBottom, clearView, onFileChange, toggleRefresh,
+      stopping, stopServer,
     };
   }
 };
@@ -9315,7 +9498,7 @@ const SkipTimestampsModal = {
     // shows the same markers the player uses — not just the DB columns.
     const sourceInfo = reactive({ recap: "", intro: "", outro: "", preview: "" });
     const SEG_TO_RESOLVED = { recap: "recap", intro: "op", outro: "ed", preview: "preview" };
-    const SOURCE_LABELS = { manual: "Manual", aniskip: "AniSkip", chapters: "Chapters" };
+    const SOURCE_LABELS = { manual: "Manual", aniskip: "AniSkip", chapters: "Chapters", audio: "Audio Detect" };
 
     onMounted(async () => {
       try {
@@ -9438,6 +9621,9 @@ const SkipTimestampsModal = {
 // ─── Mount App ────────────────────────────────────────────────
 
 const app = createApp(App);
+// Expose to ALL component templates — module-level helpers aren't visible
+// in template scope otherwise (this is why IMDb-link clicks did nothing).
+app.config.globalProperties.unlockAchievement = unlockAchievement;
 app.component("skip-timestamps-modal", SkipTimestampsModal);
 app.use(router);
 app.mount("#app");
