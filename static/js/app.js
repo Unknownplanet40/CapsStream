@@ -1818,6 +1818,17 @@ const SettingsPage = {
               </div>
             </div>
 
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Automatic Update Checks</div>
+                <div class="settings-desc">Check GitHub for new releases after login and show the update banner. Turn this OFF on machines where you develop unreleased changes — installing an update overwrites local code files with the released versions.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.updates.auto_check" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
             <div
               class="update-status-line"
               :style="{ color: updateState.status === 'available' ? 'var(--accent)' : updateState.status === 'error' ? '#ef4444' : 'var(--text-secondary)' }"
@@ -2426,6 +2437,9 @@ const SettingsPage = {
         scan_on_startup: true,
         skip_patterns: "sample,trailer",
       },
+      updates: {
+        auto_check: true,
+      },
       subtitles: {
         auto_load: true,
         preferred_language: "Auto",
@@ -2503,6 +2517,7 @@ const SettingsPage = {
               anime:  [...(data.disabled_paths?.anime  || [])],
             },
             library: { ...form.value.library, ...(data.library || {}) },
+            updates: { ...form.value.updates, ...(data.updates || {}) },
             subtitles: {
               ...form.value.subtitles,
               ...(data.subtitles || {}),
@@ -8423,6 +8438,12 @@ const App = {
     async function checkUpdateQuiet() {
       if (updateQuietChecked) return;
       updateQuietChecked = true;
+      try {
+        // Respect the user's "Automatic Update Checks" setting — dev machines
+        // with unreleased local changes should turn this off.
+        const cfg = await API.get("/api/settings");
+        if (cfg && cfg.updates && cfg.updates.auto_check === false) return;
+      } catch (e) {}
       try {
         const r = await API.get("/api/system/check-update");
         if (r && r.status === "available") store.updateInfo = r;

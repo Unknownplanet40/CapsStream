@@ -38,6 +38,9 @@ DEFAULT_CONFIG = {
         "scan_on_startup": True,
         "skip_patterns": "sample,trailer"
     },
+    "updates": {
+        "auto_check": True
+    },
     "subtitles": {
         "auto_load": True,
         "preferred_language": "Auto",
@@ -77,7 +80,7 @@ def load_config():
         merged.update(data)
 
         # Deep merge nested dicts
-        for key in ["metadata_sources", "media_paths", "disabled_paths", "library", "subtitles", "playback"]:
+        for key in ["metadata_sources", "media_paths", "disabled_paths", "library", "updates", "subtitles", "playback"]:
             if key in data and isinstance(data[key], dict):
                 default_sub = dict(DEFAULT_CONFIG.get(key, {}))
                 for sub_k, sub_v in data[key].items():
