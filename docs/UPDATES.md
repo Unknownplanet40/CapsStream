@@ -26,6 +26,27 @@ touched.
 
 3. Manual fallback: double-click **`update.bat`**.
 
+### How restart detection works
+
+The updater compares each file in the update package **byte-for-byte**
+against what's installed:
+
+- Only `static/`, `templates/`, or `VERSION` changed → the page
+  hard-refreshes automatically and the server keeps running (no restart —
+  the version is read live on every request).
+- Any actual change to `app.py`, `backend/`, `requirements.txt`,
+  `start.bat`, or `update.bat` → you'll be prompted to restart manually.
+- Nothing changed → "Already up to date — no changes to apply."
+
+**Manual override**: append `[restart]` (or `+restart`) anywhere in a
+commit message to force the restart prompt even for a UI-only release —
+useful when a change affects runtime behavior in ways file comparison
+can't see (e.g. new env vars or config schema expectations).
+
+```bash
+git commit -m "feat: new metadata cache layout [restart]"
+```
+
 ### What is never overwritten
 
 `config.json`, `.env`, everything in `data/`, your media folders,

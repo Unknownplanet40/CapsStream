@@ -124,7 +124,17 @@ jobs:
           fi
           {
             echo "list<<CHANGELOG_EOF"
-            git log ${RANGE:+"$RANGE"} --pretty=format:"- %s (%h)" || echo "- Initial release"
+            git log ${RANGE:+"$RANGE"} --pretty=format:"%h%x09%s%x09%b" | awk -F'\t' '
+            {
+              hash = $1
+              if ($2 != "") print "- " $2 " (" hash ")"
+              if ($3 != "") {
+                n = split($3, lines, "\n")
+                for (i = 1; i <= n; i++)
+                  if (lines[i] != "") print "  " lines[i]
+              }
+              print ""
+            }' || echo "- Initial release"
             echo ""
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"

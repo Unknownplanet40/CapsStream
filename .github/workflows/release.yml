@@ -60,12 +60,23 @@ jobs:
         run: |
           PREV=$(git tag --sort=-creatordate | sed -n '2p')
           if [ -n "$PREV" ]; then
-            LOG=$(git log --no-decorate --oneline "$PREV..${GITHUB_REF_NAME}")
+            RANGE="$PREV..${GITHUB_REF_NAME}"
           else
-            LOG=$(git log --no-decorate --oneline "${GITHUB_REF_NAME}")
+            RANGE="${GITHUB_REF_NAME}"
           fi
+          # Subject + indented body for every commit since the previous tag
+          git log --pretty=format:"%h%x09%s%x09%b" "$RANGE" | awk -F'\t' '
+          {
+            hash = $1
+            if ($2 != "") print "- " $2 " (" hash ")"
+            if ($3 != "") {
+              n = split($3, lines, "\n")
+              for (i = 1; i <= n; i++)
+                if (lines[i] != "") print "  " lines[i]
+            }
+            print ""
+          }' > changelog.txt
           # Write to a temp file so multi-line output survives
-          echo "$LOG" > changelog.txt
           {
             echo "CHANGLEOG<<EOF"
             echo "## Changes in ${GITHUB_REF_NAME}"

@@ -20,9 +20,11 @@ Restart semantics:
 """
 
 import os
+import re
 import json
 import shutil
 import zipfile
+import filecmp
 import urllib.request
 import urllib.error
 
@@ -30,6 +32,12 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VERSION_FILE = os.path.join(BASE_DIR, "VERSION")
 STATE_FILE = os.path.join(BASE_DIR, "data", "updater_state.json")
 TMP_DIR = os.path.join(BASE_DIR, "_update_tmp")
+
+# Update files that couldn't be replaced while the server was running
+# (the entry script app.py stays open) are parked here and swapped in by
+# start.bat BEFORE the next launch.
+PENDING_DIR = os.path.join(BASE_DIR, "data", "pending_update")
+PENDING_MANIFEST = os.path.join(PENDING_DIR, "manifest.json")
 
 # ─── CHANGE THIS to your public repository ───────────────────
 GITHUB_REPO = "Unknownplanet40/CapsStream"
@@ -46,8 +54,14 @@ ALLOWED_DIRS = ("backend", "static", "templates")
 # above already excludes them, this is a second guard)
 DENY = ("config.json", ".env", "data", "media", "winpython", "ffmpeg", ".git")
 
-# Files whose change requires an application restart
-RESTART_INDICATORS = ("app.py", "backend/", "requirements.txt", "start.bat", "update.bat", "version")
+# Files whose change requires an application restart.
+# NOTE: VERSION is intentionally excluded — get_app_version() reads it live
+# on every request, so version bumps alone never need a restart.
+RESTART_INDICATORS = ("app.py", "backend/", "requirements.txt", "start.bat", "update.bat")
+
+# Commit-message override: appending [restart] (or +restart) to a commit
+# forces the restart prompt even when file comparison finds no backend change.
+RESTART_HINT_RE = re.compile(r"\[restart\]|\+restart", re.IGNORECASE)
 
 
 # ─── Small helpers ────────────────────────────────────────────
@@ -151,6 +165,7 @@ def check_for_update():
     result["latest"] = latest
     result["download_url"] = download_url
     result["changelog"] = changelog
+    result["restart_hint"] = bool(RESTART_HINT_RE.search(changelog or ""))
 
     if latest:
         result["status"] = "available" if latest != current else "up_to_date"
@@ -158,7 +173,12 @@ def check_for_update():
         result["status"] = "error"
 
     result["last_checked"] = _touch_last_checked()
-    _write_state({**_read_state(), "latest": latest, "status": result["status"]})
+    _write_state({
+        **_read_state(),
+        "latest": latest,
+        "status": result["status"],
+        "restart_hint": result["restart_hint"],
+    })
     return result
 
 
@@ -182,6 +202,60 @@ def _entry_allowed(name):
 def _is_restart_file(name):
     name = name.replace("\\", "/")
     return any(name == ind or name.startswith(ind) for ind in RESTART_INDICATORS)
+
+
+def _write_pending_manifest(rel_paths):
+    os.makedirs(PENDING_DIR, exist_ok=True)
+    with open(PENDING_MANIFEST, "w", encoding="utf-8") as f:
+        json.dump(sorted(set(rel_paths)), f, indent=2)
+
+
+def apply_pending_swaps():
+    """
+    Apply update files that were deferred because the running server had
+    them locked. Called by start.bat BEFORE the server launches, when no
+    file handles are held and the swap always succeeds.
+    Returns the number of files applied.
+    """
+    if not os.path.isfile(PENDING_MANIFEST):
+        return 0
+    try:
+        with open(PENDING_MANIFEST, encoding="utf-8") as f:
+            rels = json.load(f) or []
+    except Exception as e:
+        print(f"[Updater] Could not read pending-update manifest: {e}")
+        return 0
+
+    applied = 0
+    for rel in rels:
+        pend = os.path.join(PENDING_DIR, rel.replace("/", os.sep))
+        dst = os.path.join(BASE_DIR, rel.replace("/", os.sep))
+        try:
+            if not os.path.isfile(pend):
+                continue
+            try:
+                if os.path.isfile(dst):
+                    os.chmod(dst, 0o666)  # clear read-only if set
+            except Exception:
+                pass
+            os.replace(pend, dst)
+            applied += 1
+        except Exception as e:
+            print(f"[Updater] Pending swap failed for {rel}: {e}")
+
+    if applied:
+        try:
+            os.remove(PENDING_MANIFEST)
+        except Exception:
+            pass
+        # Remove now-empty pending folders (manifest removal leaves the root)
+        for root, _dirs, _files in os.walk(PENDING_DIR, topdown=False):
+            try:
+                os.rmdir(root)
+            except Exception:
+                pass
+        print(f"[Updater] Applied {applied} pending update file(s)")
+    return applied
 
 
 def apply_update(download_url=None):
@@ -228,7 +302,7 @@ def apply_update(download_url=None):
     os.makedirs(staging, exist_ok=True)
 
     restart_required = False
-    frontend_only = True
+    anything_changed = False
     applied = 0
 
     try:
@@ -252,17 +326,12 @@ def apply_update(download_url=None):
                 zf.extract(name, staging)
                 applied += 1
 
-                rel = name.replace("\\", "/")
-                if _is_restart_file(rel) or not rel.startswith(("static/", "templates/")):
-                    restart_required = True
-                    frontend_only = False
-                else:
-                    # static/ or templates/ asset — UI-only change
-                    pass
+        # Move staged files into the application tree, tracking what
+        # actually changed (byte-wise) so UI-only releases don't force
+        # a server restart when backend files are identical.
+        deferred = []    # locked by the running server → applied on next start
+        move_errors = []
 
-        ui_only = frontend_only and not restart_required
-
-        # 3) Move staged files into the application tree
         for root, _dirs, files in os.walk(staging):
             rel_root = os.path.relpath(root, staging)
             dest_root = BASE_DIR if rel_root == "." else os.path.join(BASE_DIR, rel_root)
@@ -271,8 +340,49 @@ def apply_update(download_url=None):
                 src = os.path.join(root, f)
                 dst = os.path.join(dest_root, f)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.move(src, dst)
-                applied = applied  # informational only
+
+                if os.path.isfile(dst) and filecmp.cmp(src, dst, shallow=False):
+                    # Identical to what's installed — not a change
+                    continue
+
+                anything_changed = True
+                rel = os.path.relpath(dst, BASE_DIR).replace("\\", "/")
+
+                # Clear read-only attribute if set (blocks overwrite on Windows)
+                try:
+                    if os.path.isfile(dst):
+                        os.chmod(dst, 0o666)
+                except Exception:
+                    pass
+
+                try:
+                    os.replace(src, dst)
+                except PermissionError:
+                    # The running server keeps its entry script (app.py) open,
+                    # so Windows refuses to overwrite it. Park the new file and
+                    # let start.bat swap it in before the next launch.
+                    pend = os.path.join(PENDING_DIR, rel.replace("/", os.sep))
+                    os.makedirs(os.path.dirname(pend), exist_ok=True)
+                    shutil.copy2(src, pend)
+                    deferred.append(rel)
+                    continue
+                except Exception as e:
+                    move_errors.append(f"{rel}: {e}")
+                    continue
+
+                if _is_restart_file(rel):
+                    restart_required = True
+                elif rel.startswith(("static/", "templates/")):
+                    # static/ or templates/ asset — UI-only change
+                    pass
+                else:
+                    restart_required = True
+
+        if deferred:
+            _write_pending_manifest(deferred)
+            restart_required = True  # pending swaps finalize on next start
+
+        ui_only = not restart_required
 
     except zipfile.BadZipFile:
         return {
@@ -295,6 +405,12 @@ def apply_update(download_url=None):
 
     new_version = get_local_version()
 
+    # Commit-message override: [restart] / +restart in the release notes
+    # forces the restart prompt even when file comparison found no change.
+    if not restart_required and info.get("restart_hint"):
+        restart_required = True
+        ui_only = False
+
     # Persist outcome so /api/system/info can report it after a restart
     state = _read_state()
     state.update({
@@ -306,8 +422,14 @@ def apply_update(download_url=None):
     })
     _write_state(state)
 
-    if restart_required:
-        message = "Update installed. Please close CapsStream and run start.bat again."
+    if not anything_changed and not restart_required and not move_errors:
+        message = "Already up to date — no changes to apply."
+    elif restart_required:
+        message = "Update installed. Backend changed — please close CapsStream and run start.bat again."
+        if deferred:
+            message += f" ({len(deferred)} locked file(s) will be finalized on next start.)"
+    elif move_errors:
+        message = "Update partially applied — some files failed: " + "; ".join(move_errors[:3])
     else:
         message = "Update installed — reloading the interface."
 
