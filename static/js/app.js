@@ -1130,7 +1130,7 @@ const HeroBanner = {
               <i class="ph-fill ph-play" style="font-size:0.9rem"></i>
             </div>
           </button>
-          <button class="btn btn-secondary btn-lg" @click="$emit('trailer', current)" id="hero-trailer-btn" title="Trailer">
+          <button v-if="!store.profile?.is_kids" class="btn btn-secondary btn-lg" @click="$emit('trailer', current)" id="hero-trailer-btn" title="Trailer">
             <i class="ph ph-film-strip" style="font-size:1.15rem"></i>
           </button>
           <button class="btn btn-secondary btn-lg" @click="$emit('detail', current)" id="hero-info-btn" title="More Info">
@@ -1164,7 +1164,7 @@ const HeroBanner = {
 
     onUnmounted(() => clearInterval(timer));
 
-    return { currentIdx, current, imgUrl, formatRating };
+    return { currentIdx, current, imgUrl, formatRating, store };
   },
 };
 
@@ -1480,6 +1480,10 @@ const HomePage = {
 
     async function handleTrailer(item) {
       if (!item) return;
+      if (store.profile?.is_kids) {
+        addToast("Trailers are disabled in Kids Mode", "info");
+        return;
+      }
       try {
         const id = item.id || item.tmdb_id;
         const res = await API.get(`/api/media/${id}/trailer`);
@@ -1619,7 +1623,7 @@ const DetailPage = {
                 <i class="ph-fill ph-play" style="font-size:0.9rem"></i>
               </div>
             </button>
-            <button class="btn btn-secondary btn-lg" @click="watchTrailer" id="detail-trailer-btn" title="Trailer">
+            <button v-if="!store.profile?.is_kids" class="btn btn-secondary btn-lg" @click="watchTrailer" id="detail-trailer-btn" title="Trailer">
               <i class="ph ph-film-strip" style="font-size:1.15rem"></i>
             </button>
             <button class="btn btn-secondary btn-lg" @click="toggleFav" id="detail-fav-btn" :title="media.is_favorite ? 'Remove from Watchlist' : 'Add to Watchlist'">
@@ -10861,6 +10865,16 @@ const App = {
           <span>Fix Match</span>
         </div>
 
+        <div v-if="!store.profile?.is_kids && contextMenuState.item.tmdb_id" class="context-menu-item" @click="handleContextKidsOverride('allow')">
+          <i class="ph ph-shield-check" style="color:#2ecc71"></i>
+          <span>Kids Mode: Always Allow</span>
+        </div>
+
+        <div v-if="!store.profile?.is_kids && contextMenuState.item.tmdb_id" class="context-menu-item danger" @click="handleContextKidsOverride('block')">
+          <i class="ph ph-shield-warning"></i>
+          <span>Kids Mode: Block Title</span>
+        </div>
+
         <template v-if="contextMenuState.item.position > 0">
           <div class="context-menu-divider"></div>
           <div class="context-menu-item danger" @click="handleContextMenuResetProgress">
@@ -11493,6 +11507,23 @@ const App = {
       });
     }
 
+    async function handleContextKidsOverride(action) {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item || !item.tmdb_id) return;
+      try {
+        await API.post("/api/kids-overrides", { tmdb_id: item.tmdb_id, action });
+        addToast(
+          action === "allow"
+            ? `Kids Mode: "${item.title}" will always be shown`
+            : `Kids Mode: "${item.title}" is now blocked`,
+          "success"
+        );
+      } catch (e) {
+        addToast("Failed to save Kids Mode override", "error");
+      }
+    }
+
     async function handleContextMenuResetProgress() {
       const item = contextMenuState.item;
       closeGlobalContextMenu();
@@ -11620,6 +11651,7 @@ const App = {
       handleContextMenuFav,
       handleContextMenuCollection,
       handleContextMenuFixMatch,
+      handleContextKidsOverride,
       handleContextMenuResetProgress,
       collectionPickerState,
       globalTrailerState,

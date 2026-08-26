@@ -117,15 +117,26 @@ def _rating_verdict(certification):
     return None
 
 
-def is_kid_safe(item, deep=False, debug=True):
+def is_kid_safe(item, deep=False, debug=True, overrides=None):
     """
     Central verdict for whether a media item may appear in Kids Mode.
+
+    overrides: optional {'allow': {tmdb_id,...}, 'block': {tmdb_id,...}}
+    parental decisions — 'allow' wins before every rule, 'block' rejects
+    before every rule.
 
     Returns (safe: bool, reason: str). reason is '' when safe, otherwise a
     short human-readable explanation suitable for debug logging.
     """
     if not item:
         return False, "missing item"
+
+    tmdb_id = item.get("tmdb_id")
+    if overrides:
+        if tmdb_id in overrides.get("allow", ()):
+            return True, ""
+        if tmdb_id in overrides.get("block", ()):
+            return False, "parental override: blocked"
 
     genres = _genres_of(item)
     if item.get("type") == "anime":
@@ -181,11 +192,11 @@ def is_kid_safe(item, deep=False, debug=True):
     return True, ""
 
 
-def filter_kids(items, deep=False):
+def filter_kids(items, deep=False, overrides=None):
     """Filter a list of media dicts down to kid-safe entries. Logs blocks."""
     result = []
     for item in items or []:
-        safe, reason = is_kid_safe(item, deep=deep)
+        safe, reason = is_kid_safe(item, deep=deep, overrides=overrides)
         if safe:
             result.append(item)
         elif debug_enabled():
@@ -263,3 +274,80 @@ def _fetch_tmdb_certification(tmdb_id, media_type):
     except Exception as e:
         print(f"[KidsFilter] Certification lookup failed for tmdb {tmdb_id}: {e}")
     return ""
+
+
+# ─── Background enrichment ────────────────────────────────────────────────────
+
+_enrich_state = {"running": False, "done": False, "total": 0, "processed": 0, "filled": 0}
+
+
+def get_enrichment_status():
+    return dict(_enrich_state)
+
+
+def _store_certification(tmdb_id, cert):
+    try:
+        from backend.db import get_conn
+        conn = get_conn()
+        conn.execute(
+            "UPDATE media SET certification=? WHERE tmdb_id=? AND (certification IS NULL OR certification='')",
+            (cert, tmdb_id),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"[KidsFilter] Could not persist certification for tmdb {tmdb_id}: {e}")
+        return False
+
+
+def start_background_enrichment():
+    """
+    Start a daemon thread that fills missing TMDb certifications for every
+    distinct title in the library so bulk-list filtering can use real rating
+    data instead of the strict no-rating fallback. Politeness-throttled.
+    Safe to call once per server start; skips if already running/done this run.
+    """
+    if _enrich_state["running"]:
+        return
+    threading.Thread(target=_enrich_job, daemon=True).start()
+
+
+def _enrich_job():
+    from backend.db import get_conn
+
+    _enrich_state.update({"running": True, "done": False, "total": 0, "processed": 0, "filled": 0})
+    print("[KidsFilter] Certification enrichment started")
+    try:
+        conn = get_conn()
+        rows = conn.execute(
+            "SELECT tmdb_id, MIN(type) AS type FROM media "
+            "WHERE tmdb_id IS NOT NULL AND (certification IS NULL OR certification='') "
+            "GROUP BY tmdb_id"
+        ).fetchall()
+        conn.close()
+
+        # Skip entries whose lookups failed earlier this process
+        pending = [(r["tmdb_id"], r["type"]) for r in rows if r["tmdb_id"] not in _cert_failed]
+        _enrich_state["total"] = len(pending)
+
+        for idx, (tmdb_id, media_type) in enumerate(pending):
+            media_type = "movie" if media_type == "movie" else "tv"
+            cert = _fetch_tmdb_certification(tmdb_id, media_type)
+            if cert:
+                if _store_certification(tmdb_id, cert):
+                    _enrich_state["filled"] += 1
+            else:
+                with _cert_lock:
+                    _cert_failed.add(tmdb_id)
+            _enrich_state["processed"] = idx + 1
+            time.sleep(0.4)  # politeness throttle — ~150 lookups/minute max
+    except Exception as e:
+        print(f"[KidsFilter] Enrichment job failed: {e}")
+    finally:
+        _enrich_state["running"] = False
+        _enrich_state["done"] = True
+        print(
+            f"[KidsFilter] Certification enrichment done — "
+            f"{_enrich_state['filled']}/{_enrich_state['total']} titles rated"
+        )

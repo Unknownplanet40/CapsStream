@@ -121,6 +121,15 @@ def init_db():
             FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS kids_overrides (
+            profile_id INTEGER NOT NULL DEFAULT 0,
+            tmdb_id    INTEGER NOT NULL,
+            action     TEXT NOT NULL CHECK(action IN ('allow','block')),
+            title      TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (profile_id, tmdb_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_media_type ON media(type);
         CREATE INDEX IF NOT EXISTS idx_media_tmdb ON media(tmdb_id);
         CREATE INDEX IF NOT EXISTS idx_media_title ON media(title);
@@ -915,6 +924,49 @@ def verify_pin(profile_id, pin_hash):
     if not stored:
         return True  # No PIN set (NULL or legacy empty string)
     return stored == pin_hash
+
+
+# ─── Kids Mode Parental Overrides ─────────────────────────────────────────────
+# profile_id = 0 applies to ALL kids profiles (parent-managed global rule).
+# action 'allow' whitelists a title the rules engine would block;
+# action 'block' blacklists a title the rules engine would allow.
+
+def get_kids_override_map():
+    """Return {'allow': {tmdb_id, ...}, 'block': {tmdb_id, ...}}."""
+    conn = get_conn()
+    rows = conn.execute("SELECT tmdb_id, action FROM kids_overrides").fetchall()
+    conn.close()
+    result = {"allow": set(), "block": set()}
+    for r in rows:
+        bucket = "allow" if r["action"] == "allow" else "block"
+        result[bucket].add(r["tmdb_id"])
+    return result
+
+
+def list_kids_overrides():
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT tmdb_id, action, title, created_at FROM kids_overrides ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def set_kids_override(tmdb_id, action, title=None):
+    conn = get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO kids_overrides (profile_id, tmdb_id, action, title) VALUES (0, ?, ?, ?)",
+        (int(tmdb_id), action, title),
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_kids_override(tmdb_id):
+    conn = get_conn()
+    conn.execute("DELETE FROM kids_overrides WHERE tmdb_id=?", (int(tmdb_id),))
+    conn.commit()
+    conn.close()
 
 
 # ─── Watch Progress Queries ───────────────────────────────────────────────────

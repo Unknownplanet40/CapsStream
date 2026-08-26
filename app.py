@@ -37,7 +37,7 @@ from backend.franchises import get_universe_collections
 from backend.network_inspector import (
     init_network_inspector, get_recorded_requests, clear_recorded_requests
 )
-from backend.kids_filter import is_kid_safe, filter_kids
+from backend.kids_filter import is_kid_safe, filter_kids, start_background_enrichment, get_enrichment_status
 
 # Initialize outgoing HTTP interceptor
 init_network_inspector()
@@ -112,6 +112,22 @@ def _active_is_kids():
         return False
 
 
+def _kids_overrides():
+    """Parental allow/block decisions (global, profile_id=0)."""
+    try:
+        from backend.db import get_kids_override_map
+        return get_kids_override_map()
+    except Exception:
+        return {"allow": set(), "block": set()}
+
+
+def _filter_for_profile(items):
+    """Server-side Kids Mode list filtering incl. parental overrides."""
+    if not _active_is_kids():
+        return items
+    return filter_kids(items, overrides=_kids_overrides())
+
+
 def _kids_guard_media(media, deep=True):
     """
     Hard gate for single-item endpoints (detail page / playback).
@@ -120,7 +136,7 @@ def _kids_guard_media(media, deep=True):
     """
     if not _active_is_kids() or not media:
         return None
-    safe, reason = is_kid_safe(media, deep=deep)
+    safe, reason = is_kid_safe(media, deep=deep, overrides=_kids_overrides())
     if not safe:
         print(f"[KidsFilter] denied '{media.get('title')}' (tmdb {media.get('tmdb_id')}) — {reason}")
         return jsonify({"error": "Not available in Kids Mode", "reason": "kid_unsafe"}), 404
@@ -606,7 +622,7 @@ def api_home():
     if kids:
         filtered_rows = []
         for row in rows:
-            items = filter_kids(row.get("items"))
+            items = _filter_for_profile(row.get("items"))
             if items:
                 filtered_rows.append({**row, "items": items})
         rows = filtered_rows
@@ -619,7 +635,7 @@ def api_library():
     media_type = request.args.get("type")
     rows = get_unique_shows(media_type if media_type else None)
     if _active_is_kids():
-        rows = filter_kids(rows)
+        rows = _filter_for_profile(rows)
     return _jsonify_rows(rows)
 
 
@@ -868,12 +884,64 @@ def api_media_trailer(media_id):
     if not media:
         return jsonify({"error": "Media not found"}), 404
 
+    # Kids Mode: YouTube content is unfiltered — no trailers at all
+    if _active_is_kids():
+        return jsonify({"error": "Trailers are disabled in Kids Mode"}), 403
+
     from backend.matcher import get_media_trailer
     trailer = get_media_trailer(media.get("tmdb_id"), media.get("type", "movie"))
     if not trailer:
         return jsonify({"error": "Trailer not available for this title"}), 404
 
     return jsonify(trailer)
+
+
+# ─── Kids Mode Parental Overrides API ────────────────────────────────────────
+
+@app.route("/api/kids-overrides", methods=["GET"])
+def api_get_kids_overrides():
+    """List all parental override rules (adult profiles only)."""
+    if _active_is_kids():
+        return jsonify({"error": "Not available in Kids Mode"}), 403
+    from backend.db import list_kids_overrides
+    return jsonify(list_kids_overrides())
+
+
+@app.route("/api/kids-overrides", methods=["POST"])
+def api_set_kids_override():
+    """
+    Add a parental override for a title. Body:
+      { media_id } or { tmdb_id }, and action: 'allow' | 'block'
+    Applies to ALL kids profiles (parent-managed global rule).
+    """
+    data = request.json or {}
+    action = data.get("action")
+    if action not in ("allow", "block"):
+        return jsonify({"error": "action must be 'allow' or 'block'"}), 400
+
+    tmdb_id = data.get("tmdb_id")
+    title = None
+    if not tmdb_id and data.get("media_id"):
+        media = get_media_by_id(int(data["media_id"]))
+        if not media:
+            return jsonify({"error": "Media not found"}), 404
+        tmdb_id = media.get("tmdb_id")
+        title = media.get("title")
+    if not tmdb_id:
+        return jsonify({"error": "tmdb_id or media_id required"}), 400
+
+    from backend.db import set_kids_override
+    set_kids_override(tmdb_id, action, title or None)
+    return jsonify({"ok": True, "tmdb_id": tmdb_id, "action": action})
+
+
+@app.route("/api/kids-overrides/<int:tmdb_id>", methods=["DELETE"])
+def api_remove_kids_override(tmdb_id):
+    if _active_is_kids():
+        return jsonify({"error": "Not available in Kids Mode"}), 403
+    from backend.db import remove_kids_override
+    remove_kids_override(tmdb_id)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/show/<int:tmdb_id>", methods=["GET"])
@@ -1057,7 +1125,7 @@ def api_search():
     from backend.db import search_media
     results = search_media(query=q, media_type=media_type, genre=genre, sort_by=sort_by)
     if _active_is_kids():
-        results = filter_kids(results)
+        results = _filter_for_profile(results)
     return jsonify(results)
 
 
@@ -1525,7 +1593,7 @@ def api_get_favorites():
     pid = _require_profile()
     favs = get_favorites(pid)
     if _active_is_kids():
-        favs = filter_kids(favs)
+        favs = _filter_for_profile(favs)
     return _jsonify_rows(favs)
 
 
@@ -1551,7 +1619,7 @@ def api_get_collections():
     all_media = get_unique_shows(None)
     kids = _active_is_kids()
     if kids:
-        all_media = filter_kids(all_media)
+        all_media = _filter_for_profile(all_media)
 
     # ─── Smart collections (computed live, read-only) ───
     def _smart(cid, name, desc, items):
@@ -1578,7 +1646,7 @@ def api_get_collections():
     if kids:
         filtered = []
         for col in result:
-            items = filter_kids(col.get("items"))
+            items = _filter_for_profile(col.get("items"))
             if items:
                 filtered.append({**col, "items": items})
         result = filtered
@@ -1637,6 +1705,8 @@ def api_scan():
 
     def run_scan():
         scan_library()
+        # New titles need ratings before Kids Mode can judge them accurately
+        start_background_enrichment()
 
     _scan_thread = threading.Thread(target=run_scan, daemon=True)
     _scan_thread.start()
@@ -2464,6 +2534,10 @@ if __name__ == "__main__":
     # Delayed 2 minutes so it never competes with app launch or initial playback.
     from backend.scanner import start_intro_detection_pass
     threading.Timer(120, start_intro_detection_pass).start()
+
+    # Background pass: fill missing TMDb certifications so Kids Mode bulk-list
+    # filtering uses real ratings. Delayed 90s to avoid competing with launch.
+    threading.Timer(90, start_background_enrichment).start()
 
     # Load config and apply system file hiding
     cfg = load_config()
