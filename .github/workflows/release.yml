@@ -33,26 +33,20 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           ZIP="CapsStream-update-${TAG}.zip"
+          # Package ENTIRE trees (not a hardcoded file list) so newly added
+          # files are always included in updates.
           zip -r "$ZIP" \
             app.py \
-            backend \
-            -x "backend/__pycache__/*" "backend/**/__pycache__/*" \
-          || true
-          zip -r "$ZIP" \
-            backend \
-            -x "backend/__pycache__/*" "backend/**/__pycache__/*"
-          zip "$ZIP" \
-            static/js/app.js \
-            static/css/main.css \
-            static/img/favicon.png \
-            static/sfx/bell.wav \
-            templates/index.html \
             requirements.txt \
             start.bat \
             update.bat \
-            "Start CapsStream Silent.vbs" \
             silent_launcher.py \
-            VERSION
+            "Start CapsStream Silent.vbs" \
+            VERSION \
+            backend \
+            static \
+            templates \
+            -x "*__pycache__*" "*.pyc" "*.pyo"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
           unzip -l "$ZIP"
 

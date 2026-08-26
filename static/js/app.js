@@ -3699,6 +3699,10 @@ const SettingsPage = {
       try {
         await loadSystemInfo();
         const r = await API.get("/api/system/check-update");
+        const pend = r.pending_swaps || 0;
+        const pendNote = pend
+          ? ` ${pend} updated file(s) will be finalized next time you run start.bat.`
+          : "";
         updateState.value = {
           status: r.status || "error",
           current: r.current || (sysInfo.value?.version || ""),
@@ -3707,7 +3711,7 @@ const SettingsPage = {
           last_checked: r.last_checked || "",
           message:
             r.status === "available" ? `Update available — v${r.latest}` :
-            r.status === "up_to_date" ? "You're up to date." :
+            r.status === "up_to_date" ? ("You're up to date." + pendNote) :
             "Could not check for updates. Is GITHUB_REPO configured in backend/updater.py?",
         };
       } catch (e) {

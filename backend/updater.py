@@ -22,6 +22,7 @@ Restart semantics:
 import os
 import re
 import json
+import time
 import shutil
 import zipfile
 import filecmp
@@ -76,6 +77,46 @@ def _http_get(url, timeout=20):
     })
     with urllib.request.urlopen(req, timeout=timeout) as res:
         return res.read()
+
+
+class ReleaseNotPublished(Exception):
+    """The release exists but its zip asset is not downloadable (404)."""
+
+
+def _download(url, dest_path, attempts=3):
+    """
+    Stream url to dest_path with retries. Streaming avoids loading the whole
+    zip into memory; the transfer is verified against Content-Length when the
+    server provides it. 404s raise ReleaseNotPublished immediately (retrying
+    cannot help — the asset is not there).
+    """
+    last_err = None
+    for attempt in range(attempts):
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "CapsStream-Updater/1.0",
+                "Cache-Control": "no-cache",
+            })
+            with urllib.request.urlopen(req, timeout=120) as res, open(dest_path, "wb") as f:
+                expected = res.headers.get("Content-Length")
+                total = 0
+                while True:
+                    chunk = res.read(65536)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    f.write(chunk)
+                if expected and int(expected) != total:
+                    raise IOError(f"incomplete download ({total}/{expected} bytes)")
+            return
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise ReleaseNotPublished(url) from e
+            last_err = e
+        except Exception as e:
+            last_err = e
+        time.sleep(2 * (attempt + 1))
+    raise last_err
 
 
 def _read_state():
@@ -176,6 +217,7 @@ def check_for_update():
         result["status"] = "error"
 
     result["last_checked"] = _touch_last_checked()
+    result["pending_swaps"] = _pending_count()
     _write_state({
         **_read_state(),
         "latest": latest,
@@ -205,6 +247,31 @@ def _entry_allowed(name):
 def _is_restart_file(name):
     name = name.replace("\\", "/")
     return any(name == ind or name.startswith(ind) for ind in RESTART_INDICATORS)
+
+
+def _replace_with_retry(src, dst, attempts=4, delay=0.5):
+    """
+    os.replace with retries: on Windows, antivirus and sync clients (e.g.
+    OneDrive) can hold a brief lock on a file that is about to be replaced.
+    Retrying resolves those; only genuinely held handles (running server)
+    end up raising PermissionError to the caller.
+    """
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
+def _pending_count():
+    try:
+        with open(PENDING_MANIFEST, encoding="utf-8") as f:
+            return len(json.load(f) or [])
+    except Exception:
+        return 0
 
 
 def _write_pending_manifest(rel_paths):
@@ -284,11 +351,17 @@ def apply_update(download_url=None):
     os.makedirs(TMP_DIR, exist_ok=True)
     zip_path = os.path.join(TMP_DIR, "update.zip")
 
-    # 1) Download
+    # 1) Download (streamed to disk, with retries)
     try:
-        data = _http_get(url, timeout=120)
-        with open(zip_path, "wb") as f:
-            f.write(data)
+        _download(url, zip_path)
+    except ReleaseNotPublished:
+        return {
+            "success": False,
+            "message": f"Release v{latest} is still publishing — its package is not downloadable yet. Try again in a couple of minutes.",
+            "new_version": latest,
+            "restart_required": False,
+            "ui_only": False,
+        }
     except Exception as e:
         return {
             "success": False,
@@ -359,7 +432,7 @@ def apply_update(download_url=None):
                     pass
 
                 try:
-                    os.replace(src, dst)
+                    _replace_with_retry(src, dst)
                 except PermissionError:
                     # The running server keeps its entry script (app.py) open,
                     # so Windows refuses to overwrite it. Park the new file and
