@@ -15,7 +15,7 @@ import threading
 import subprocess
 from flask import (
     Flask, jsonify, request, send_file,
-    send_from_directory, render_template, session, abort, Response
+    send_from_directory, render_template, session, abort, Response, make_response
 )
 
 from backend.db import (
@@ -80,7 +80,10 @@ def _load_or_create_secret_key():
 
 app.secret_key = _load_or_create_secret_key()
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024  # 2GB max upload (backup restore)
-app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+# Static assets are cache-busted with ?v=<version> on every template reference,
+# so they can be cached hard. The HTML shell itself is NOT under /static and
+# stays uncached, so new releases are always picked up.
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 12 * 3600
 
 
 # ─── Per-request DB connection teardown ───────────────────────────────────────
@@ -372,9 +375,18 @@ def _get_github_profile():
 
 # ─── Main Page ────────────────────────────────────────────────────────────────
 
+# Stable per-boot timestamp for static asset URLs (?t=). Combined with
+# ?v=<version> it lets browsers cache assets hard while still busting the
+# cache on every new release / server restart.
+_BOOT_TS = int(time.time())
+
+
 @app.route("/")
 def index():
-    return render_template("index.html", version=get_app_version(), t=int(time.time()))
+    resp = make_response(render_template("index.html", version=get_app_version(), t=_BOOT_TS))
+    # The HTML shell must always be revalidated so new releases load instantly
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 @app.route("/.well-known/appspecific/com.chrome.devtools.json")
@@ -718,6 +730,15 @@ def api_home():
     else:
         rows = []
 
+        # Single pass over unique shows — reused for Movies/Series/Anime rows
+        # instead of four separate full-table scans.
+        all_shows = get_unique_shows(None)
+        by_type = {"movie": [], "series": [], "anime": []}
+        for show in all_shows:
+            t = show.get("type")
+            if t in by_type:
+                by_type[t].append(show)
+
         # Recently Added
         recent = get_recently_added(limit=20)
         if recent:
@@ -728,20 +749,16 @@ def api_home():
         if top:
             rows.append({"title": "Top Rated", "type": "row", "items": top})
 
-        # Movies
-        movies = get_top_rated(limit=20, media_type="movie")
-        if not movies:
-            movies = get_unique_shows("movie")[:20]
+        # Movies / Series / Anime
+        movies = sorted(by_type["movie"], key=lambda m: m.get("rating") or 0, reverse=True)[:20]
         if movies:
             rows.append({"title": "Movies", "type": "row", "items": movies})
 
-        # Series
-        series = get_unique_shows("series")
+        series = by_type["series"]
         if series:
             rows.append({"title": "Series", "type": "row", "items": series[:20]})
 
-        # Anime
-        anime = get_unique_shows("anime")
+        anime = by_type["anime"]
         if anime:
             rows.append({"title": "Anime", "type": "row", "items": anime[:20]})
 
@@ -2919,6 +2936,80 @@ def api_clear_network_requests():
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
+def _port_owner_pid(port):
+    """Return the PID listening on the port, or None."""
+    try:
+        from backend.proc_utils import CREATE_NO_WINDOW
+        out = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10, creationflags=CREATE_NO_WINDOW,
+        ).stdout
+        for line in out.splitlines():
+            parts = line.split()
+            # proto  local              foreign  state      pid
+            if len(parts) >= 5 and parts[3] == "LISTENING" and parts[1].rsplit(":", 1)[-1] == str(port):
+                return int(parts[-1])
+    except Exception as e:
+        print(f"[Startup] Could not inspect port {port}: {e}")
+    return None
+
+
+def _process_cmdline(pid):
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile",
+             f"(Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\").CommandLine"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        ).stdout.strip()
+        return out
+    except Exception:
+        return ""
+
+
+def _ensure_single_instance(host, port):
+    """
+    Guarantee exactly one CapsStream server per installation folder.
+    If the port is held by another CapsStream instance of THIS folder (a
+    leftover from an update restart), terminate it. If it's held by anything
+    else — including a different install or an unrelated program — abort with
+    a clear message instead of failing cryptically at bind time.
+    """
+    import time as _t
+    owner = _port_owner_pid(port)
+    if not owner or owner == os.getpid():
+        return
+
+    cmdline = _process_cmdline(owner).lower()
+    own_root = os.path.normcase(os.path.abspath(BASE_DIR))
+    is_ours = (
+        "app.py" in cmdline
+        and os.path.normcase(BASE_DIR) in cmdline.replace("/", "\\")
+        and ("python" in cmdline)
+    )
+
+    if is_ours:
+        print(f"[Startup] Port {port} is held by a leftover CapsStream instance "
+              f"(pid {owner}) of this installation — terminating it.")
+        subprocess.run(
+            ["taskkill", "/PID", str(owner), "/F"],
+            capture_output=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        # Give the socket a moment to release
+        for _ in range(10):
+            _t.sleep(0.5)
+            if not _port_owner_pid(port):
+                break
+    else:
+        print(f"\n  ❌ ERROR: Port {port} is already in use by another program (pid {owner}).")
+        if cmdline:
+            print(f"     Command line: {cmdline[:200]}")
+        print(f"     CapsStream cannot start. Free the port or change 'port' in config.json.\n")
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     print("=" * 50)
     print("  CapsStream — Starting up")
@@ -2951,6 +3042,15 @@ if __name__ == "__main__":
     apply_system_file_hiding()
     host = cfg.get("host", "127.0.0.1")
     port = cfg.get("port", 8000)
+
+    # Guarantee a single instance per install — kills leftover copies of
+    # itself, refuses foreign port squatters.
+    _ensure_single_instance(host, port)
+    try:
+        with open(os.path.join(BASE_DIR, "data", "server.pid"), "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass
 
     if host not in ("127.0.0.1", "localhost", "::1"):
         print(

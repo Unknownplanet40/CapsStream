@@ -3879,12 +3879,17 @@ const SettingsPage = {
       try {
         await API.post("/api/system/restart-after-update", {});
         updateState.value = { ...updateState.value, message: "Restarting — the server will come back in a few seconds…" };
+        // Flag survives the hard reload; the app shows a success toast on boot
+        sessionStorage.setItem("cs_server_restarted", "1");
         // Poll until the server comes back, then hard-reload
         const check = setInterval(async () => {
           try {
-            await fetch("/api/system/info", { cache: "no-store" });
-            clearInterval(check);
-            location.href = location.origin + location.pathname + "?v=" + Date.now();
+            const info = await fetch("/api/system/info", { cache: "no-store" });
+            if (info.ok) {
+              clearInterval(check);
+              sessionStorage.setItem("cs_server_restarted", "1");
+              location.href = location.origin + location.pathname + "?v=" + Date.now();
+            }
           } catch (e) {}
         }, 1500);
       } catch (e) {
@@ -11205,6 +11210,20 @@ const App = {
     // ─── Update banner state ─────────────────────────────────────
     const updateBannerDismissed = ref(false);
     const remoteBannerDismissed = ref(false);
+
+    onMounted(() => {
+      // One-click update restart completed — confirm it to the user
+      try {
+        if (sessionStorage.getItem("cs_server_restarted") === "1") {
+          sessionStorage.removeItem("cs_server_restarted");
+          addToast(
+            `✅ Server restarted successfully${store.sysInfo?.version ? " — v" + store.sysInfo.version : ""}`,
+            "success",
+            5000
+          );
+        }
+      } catch (e) {}
+    });
     let updateQuietChecked = false;
     async function checkUpdateQuiet() {
       if (updateQuietChecked) return;
