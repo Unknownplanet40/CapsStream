@@ -1603,9 +1603,9 @@ def api_system_shutdown():
                 conn.close()
         except Exception as e:
             print(f"[Shutdown] SQLite checkpoint failed: {e}")
-        # sys.exit runs atexit handlers and Python finalizers (flushes open files);
-        # remaining threads are daemons, so the interpreter will not hang.
-        sys.exit(0)
+        # Hard-exit. sys.exit() cannot be used here: raised inside a daemon
+        # thread it only terminates that thread, leaving the server alive.
+        os._exit(0)
 
     threading.Thread(target=_shutdown, daemon=True).start()
     return jsonify({"ok": True, "message": "Server shutting down cleanly"})

@@ -4145,7 +4145,7 @@ const SettingsPage = {
       if (isShuttingDown.value) return;
       showShutdownModal.value = false;
       isShuttingDown.value = true;
-      shutdownCountdown.value = 2;
+      shutdownCountdown.value = 10;
       shutdownCompleted.value = false;
       _windowCloseCalled = false;
 
