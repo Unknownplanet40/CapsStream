@@ -1399,33 +1399,30 @@ def api_restart_after_update():
     One-click finish for restart-required updates: spawns a detached helper
     that waits for this process to exit, applies any pending locked-file
     swaps, then relaunches the server — and shuts the current server down.
+    Every step (including the new server's startup output) is logged to
+    data/update_restart.log.
     """
-    pid = os.getpid()
-    helper = os.path.join(BASE_DIR, "_finish_update.bat")
-    python_dir = os.path.join(BASE_DIR, "winpython", "python")
-    python_exe = os.path.join(python_dir, "python.exe")
+    import sys as _sys
+    from backend.updater import spawn_restart_helper
 
-    script = f"""@echo off
-rem CapsStream one-click update finisher — waits for PID {pid} to exit,
-rem applies pending file swaps, then relaunches the server.
-setlocal
-set "ROOT={BASE_DIR}"
-:waitloop
-tasklist /FI \"PID eq {pid}\" 2>nul | find /I \"{pid}\" >nul
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
-    goto waitloop
-)
-cd /d \"%ROOT%\"
-if exist \"{python_exe}\" (
-    \"{python_exe}\" -c \"from backend.updater import apply_pending_swaps; apply_pending_swaps()\" >nul 2>&1
-)
-start \"\" /D \"%ROOT%\" \"{python_exe}\" \"%ROOT%app.py\"
-endlocal
-"""
     try:
+        spawn_restart_helper()
+        # Belt-and-braces: also drop a batch fallback that relaunches via
+        # start.bat if the helper itself somehow fails within 3 minutes.
+        pid = os.getpid()
+        helper = os.path.join(BASE_DIR, "_finish_update_fallback.bat")
         with open(helper, "w", encoding="utf-8") as f:
-            f.write(script)
+            f.write(
+                "@echo off\r\n"
+                "rem Fallback: if the python helper failed, run start.bat manually.\r\n"
+                "rem (ping-delay works even in a detached, console-less context)\r\n"
+                "ping -n 181 127.0.0.1 >nul\r\n"
+                f"tasklist /FI \"PID eq {pid}\" 2>nul | find /I \"{pid}\" >nul\r\n"
+                "if not errorlevel 1 (\r\n"
+                f"  cd /d \"{BASE_DIR}\"\r\n"
+                "  call start.bat\r\n"
+                ")\r\n"
+            )
         flags = 0
         if hasattr(subprocess, "DETACHED_PROCESS"):
             flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
@@ -1434,8 +1431,9 @@ endlocal
             cwd=BASE_DIR,
             creationflags=flags,
             close_fds=True,
+            stdin=subprocess.DEVNULL,
         )
-        print(f"[Updater] Restart helper spawned ({helper})")
+        print(f"[Updater] Restart helper spawned; fallback armed ({helper})")
     except Exception as e:
         return jsonify({"ok": False, "error": f"Could not spawn restart helper: {e}"}), 500
 

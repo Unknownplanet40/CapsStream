@@ -30,6 +30,8 @@ import urllib.request
 import urllib.error
 import threading
 import hashlib
+import subprocess
+import sys
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VERSION_FILE = os.path.join(BASE_DIR, "VERSION")
@@ -331,6 +333,119 @@ def _pending_count():
             return len(json.load(f) or [])
     except Exception:
         return 0
+
+
+# ─── One-click restart helper ─────────────────────────────────────────────────
+
+RESTART_HELPER_FILE = "_finish_update_helper.py"
+RESTART_LOG = os.path.join(BASE_DIR, "data", "update_restart.log")
+
+_RESTART_HELPER_SRC = '''\
+"""CapsStream update finisher - waits for the old server process to exit,
+applies pending locked-file swaps, then relaunches the server."""
+import ctypes
+import os
+import subprocess
+import sys
+import time
+
+pid = int(sys.argv[1])
+root = sys.argv[2]
+log_path = os.path.join(root, "data", "update_restart.log")
+
+
+def log(msg):
+    try:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(time.strftime("[%Y-%m-%d %H:%M:%S] ") + msg + "\\n")
+    except Exception:
+        pass
+
+
+def pid_alive(target):
+    SYNCHRONIZE = 0x00100000
+    WAIT_TIMEOUT = 0x00000102
+    k32 = ctypes.windll.kernel32
+    handle = k32.OpenProcess(SYNCHRONIZE, False, target)
+    if not handle:
+        return False  # process gone (or cannot be opened)
+    try:
+        return k32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT
+    finally:
+        k32.CloseHandle(handle)
+
+
+log(f"helper started - waiting for server pid {pid} to exit")
+waited = 0
+while pid_alive(pid):
+    time.sleep(0.5)
+    waited += 0.5
+    if waited > 120:
+        log("old server still running after 120s - giving up (will not double-start)")
+        sys.exit(1)
+log(f"server exited after {waited:.0f}s")
+
+sys.path.insert(0, root)
+os.chdir(root)
+
+try:
+    from backend.updater import apply_pending_swaps
+    swapped = apply_pending_swaps()
+    log(f"pending swaps applied: {swapped}")
+except Exception as e:
+    log(f"pending-swap error: {e}")
+
+python_exe = os.path.join(root, "winpython", "python", "python.exe")
+if not os.path.isfile(python_exe):
+    python_exe = sys.executable
+
+try:
+    out = open(log_path, "a", encoding="utf-8")
+    subprocess.Popen(
+        [python_exe, os.path.join(root, "app.py")],
+        cwd=root,
+        stdout=out,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+    )
+    log("server relaunched (startup output captured in this log)")
+except Exception as e:
+    log(f"RELUNCH FAILED: {e}")
+    sys.exit(2)
+'''
+
+
+def spawn_restart_helper():
+    """
+    Detached helper that survives this server's exit: waits for the current
+    process to die, applies pending swaps, relaunches app.py and captures its
+    startup output into data/update_restart.log for debugging.
+    Returns (helper_path, log_path).
+    """
+    helper_path = os.path.join(BASE_DIR, RESTART_HELPER_FILE)
+    with open(helper_path, "w", encoding="utf-8") as f:
+        f.write(_RESTART_HELPER_SRC)
+
+    flags = 0
+    if hasattr(subprocess, "DETACHED_PROCESS"):
+        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    subprocess.Popen(
+        [sys.executable, helper_path, str(os.getpid()), BASE_DIR],
+        cwd=BASE_DIR,
+        creationflags=flags,
+        close_fds=True,
+        stdin=subprocess.DEVNULL,
+    )
+    # Remove the legacy batch helper if an older version left one behind
+    legacy = os.path.join(BASE_DIR, "_finish_update.bat")
+    if os.path.isfile(legacy):
+        try:
+            os.remove(legacy)
+        except OSError:
+            pass
+    print(f"[Updater] Restart helper spawned ({helper_path})")
+    return helper_path, RESTART_LOG
 
 
 def _validate_staging(staging, expected_version=None):
