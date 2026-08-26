@@ -56,6 +56,19 @@ def get_app_version():
         return "2.0.0.0"
 
 
+def is_dev_mode():
+    """Check if local DEV file exists with valid development flag."""
+    try:
+        dev_file = os.path.join(BASE_DIR, "DEV")
+        if os.path.isfile(dev_file):
+            with open(dev_file, "r", encoding="utf-8") as f:
+                val = f.read().strip().lower()
+                return val in ("development", "dev", "true", "1", "yes", "on")
+    except Exception:
+        pass
+    return False
+
+
 def load_config():
     # Delegate so .env / environment secrets are included
     from backend.settings import load_config as _load
@@ -287,6 +300,7 @@ def api_create_profile():
     pin = str(raw_pin).strip() if raw_pin is not None else ""
     avatar = data.get("avatar", "🎬")
     color  = data.get("color", "#e50914")
+    theme  = str(data.get("theme", "crimson") or "crimson").strip()
 
     if not name:
         return jsonify({"error": "Name is required"}), 400
@@ -297,14 +311,14 @@ def api_create_profile():
     daily_limit_minutes = int(data.get("daily_limit_minutes", 0) or 0)
     bedtime_curfew = str(data.get("bedtime_curfew", "") or "").strip()
     pin_hash = _hash_pin(pin) if pin else None
-    pid = create_profile(name, pin_hash, avatar, color, is_kids=is_kids, daily_limit_minutes=daily_limit_minutes, bedtime_curfew=bedtime_curfew)
+    pid = create_profile(name, pin_hash, avatar, color, is_kids=is_kids, daily_limit_minutes=daily_limit_minutes, bedtime_curfew=bedtime_curfew, theme=theme)
     if is_kids:
         active_pid = _current_profile()
         if active_pid:
             from backend.db import unlock_achievement
             unlock_achievement(active_pid, "kids_creator")
     return jsonify({
-        "id": pid, "name": name, "avatar": avatar, "color": color, "is_kids": is_kids,
+        "id": pid, "name": name, "avatar": avatar, "color": color, "theme": theme, "is_kids": is_kids,
         "daily_limit_minutes": daily_limit_minutes, "bedtime_curfew": bedtime_curfew
     }), 201
 
@@ -317,6 +331,7 @@ def api_update_profile(profile_id):
     is_kids = bool(data.get("is_kids", False))
     avatar = data.get("avatar", "🎬")
     color  = data.get("color", "#e50914")
+    theme  = str(data.get("theme", "crimson") or "crimson").strip()
     update_pin = bool(data.get("update_pin", False))
 
     if not name:
@@ -336,13 +351,14 @@ def api_update_profile(profile_id):
 
     daily_limit_minutes = int(data.get("daily_limit_minutes", 0) or 0)
     bedtime_curfew = str(data.get("bedtime_curfew", "") or "").strip()
-    update_profile(profile_id, name, pin_hash, avatar, color, is_kids, update_pin=update_pin, daily_limit_minutes=daily_limit_minutes, bedtime_curfew=bedtime_curfew)
+    update_profile(profile_id, name, pin_hash, avatar, color, is_kids, update_pin=update_pin, daily_limit_minutes=daily_limit_minutes, bedtime_curfew=bedtime_curfew, theme=theme)
 
     return jsonify({
         "id": profile_id,
         "name": name,
         "avatar": avatar,
         "color": color,
+        "theme": theme,
         "is_kids": is_kids,
         "has_pin": bool(pin_hash),
         "daily_limit_minutes": daily_limit_minutes,
@@ -1939,14 +1955,6 @@ def api_recache_media():
     })
 
 
-@app.route("/api/tmdb/search", methods=["GET"])
-def api_tmdb_search():
-    query = request.args.get("query", "")
-    mtype = request.args.get("type", "movie")
-    from backend.matcher import search_tmdb
-    results = search_tmdb(query, mtype)
-    return jsonify(results)
-
 
 def _media_duration_seconds(file_path):
     """Best-effort stream duration via ffprobe (0 if unavailable)."""
@@ -2292,6 +2300,7 @@ def api_system_info():
 
     return jsonify({
         "version": get_app_version(),
+        "is_dev": is_dev_mode(),
         "app_name": "CapsStream",
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "platform": platform.platform(),

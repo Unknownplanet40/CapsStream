@@ -178,6 +178,9 @@ def init_db():
         if "bedtime_curfew" not in pcols:
             conn.execute("ALTER TABLE profiles ADD COLUMN bedtime_curfew TEXT DEFAULT ''")
             print("[DB] Migrated: added bedtime_curfew column to profiles")
+        if "theme" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN theme TEXT DEFAULT 'crimson'")
+            print("[DB] Migrated: added theme column to profiles")
     except Exception as e:
         print("[DB] Migration notice:", e)
 
@@ -842,7 +845,7 @@ def get_unmatched():
 
 def get_all_profiles():
     conn = get_conn()
-    rows = conn.execute("SELECT id, name, avatar, color, is_kids, (CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at FROM profiles").fetchall()
+    rows = conn.execute("SELECT id, name, avatar, color, theme, is_kids, (CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at FROM profiles").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -854,11 +857,11 @@ def get_profile(profile_id):
     return dict(row) if row else None
 
 
-def create_profile(name, pin_hash, avatar="🎦", color="#e50914", is_kids=False, daily_limit_minutes=0, bedtime_curfew=""):
+def create_profile(name, pin_hash, avatar="🎦", color="#e50914", is_kids=False, daily_limit_minutes=0, bedtime_curfew="", theme="crimson"):
     conn = get_conn()
     cur = conn.execute(
-        "INSERT INTO profiles (name, pin_hash, avatar, color, is_kids, daily_limit_minutes, bedtime_curfew) VALUES (?,?,?,?,?,?,?)",
-        (name, pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0), str(bedtime_curfew or ''))
+        "INSERT INTO profiles (name, pin_hash, avatar, color, is_kids, daily_limit_minutes, bedtime_curfew, theme) VALUES (?,?,?,?,?,?,?,?)",
+        (name, pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0), str(bedtime_curfew or ''), str(theme or 'crimson'))
     )
     conn.commit()
     pid = cur.lastrowid
@@ -866,7 +869,7 @@ def create_profile(name, pin_hash, avatar="🎦", color="#e50914", is_kids=False
     return pid
 
 
-def update_profile(profile_id, name, pin_hash=None, avatar="🎦", color="#e50914", is_kids=False, update_pin=False, daily_limit_minutes=0, bedtime_curfew=""):
+def update_profile(profile_id, name, pin_hash=None, avatar="🎦", color="#e50914", is_kids=False, update_pin=False, daily_limit_minutes=0, bedtime_curfew="", theme="crimson"):
     conn = get_conn()
     if is_kids:
         pin_hash = None
@@ -874,13 +877,13 @@ def update_profile(profile_id, name, pin_hash=None, avatar="🎦", color="#e5091
 
     if update_pin:
         conn.execute(
-            "UPDATE profiles SET name=?, pin_hash=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, bedtime_curfew=? WHERE id=?",
-            (name, pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0), str(bedtime_curfew or ''), profile_id)
+            "UPDATE profiles SET name=?, pin_hash=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, bedtime_curfew=?, theme=? WHERE id=?",
+            (name, pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0), str(bedtime_curfew or ''), str(theme or 'crimson'), profile_id)
         )
     else:
         conn.execute(
-            "UPDATE profiles SET name=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, bedtime_curfew=? WHERE id=?",
-            (name, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0), str(bedtime_curfew or ''), profile_id)
+            "UPDATE profiles SET name=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, bedtime_curfew=?, theme=? WHERE id=?",
+            (name, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0), str(bedtime_curfew or ''), str(theme or 'crimson'), profile_id)
         )
     conn.commit()
     conn.close()

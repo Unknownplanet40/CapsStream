@@ -364,6 +364,93 @@ function openGlobalFixMatch(target, onMatched) {
   fixMatchState.show = true;
 }
 
+// ─── Multi-Theme Preset System ─────────────────────────────────
+
+const THEME_PRESETS = [
+  {
+    id: "crimson",
+    name: "Crimson Cinema",
+    desc: "Obsidian dark mode with bold Netflix-crimson red accents and warm golden highlights.",
+    accent: "#e50914",
+    secondary: "#f5c518",
+    bg: "#050508",
+    border: "rgba(229, 9, 20, 0.35)",
+    icon: "ph-film-slate",
+  },
+  {
+    id: "oled",
+    name: "OLED Pure Black",
+    desc: "100% true pitch black canvas with sharp silver luminescence for maximum contrast and OLED displays.",
+    accent: "#ffffff",
+    secondary: "#94a3b8",
+    bg: "#000000",
+    border: "rgba(255, 255, 255, 0.25)",
+    icon: "ph-moon",
+  },
+  {
+    id: "sapphire",
+    name: "Royal Sapphire",
+    desc: "Deep Disney+ cosmic space navy paired with rich royal sapphire blue and icy cyan highlights.",
+    accent: "#2563eb",
+    secondary: "#38bdf8",
+    bg: "#060a17",
+    border: "rgba(37, 99, 235, 0.35)",
+    icon: "ph-planet",
+  },
+  {
+    id: "amethyst",
+    name: "Velvet Amethyst",
+    desc: "Deep HBO royal obsidian violet with luminous amethyst purple accents and radiant lavender glow.",
+    accent: "#8b5cf6",
+    secondary: "#c084fc",
+    bg: "#090514",
+    border: "rgba(139, 92, 246, 0.35)",
+    icon: "ph-sparkle",
+  },
+  {
+    id: "azure",
+    name: "Azure Prime",
+    desc: "Midnight cerulean canvas with crisp electric streaming cyan-blue accents and icy highlights.",
+    accent: "#0284c7",
+    secondary: "#38bdf8",
+    bg: "#050d14",
+    border: "rgba(2, 132, 199, 0.35)",
+    icon: "ph-television-simple",
+  },
+  {
+    id: "coral",
+    name: "Sunset Coral",
+    desc: "Smoky cinematic dusk obsidian with warm radiant coral rose accents and golden peach highlights.",
+    accent: "#f43f5e",
+    secondary: "#fda4af",
+    bg: "#0e080b",
+    border: "rgba(244, 63, 94, 0.35)",
+    icon: "ph-sun-horizon",
+  },
+];
+
+function applyTheme(themeKey, persist = false) {
+  const validTheme = THEME_PRESETS.some((t) => t.id === themeKey) ? themeKey : "crimson";
+  document.documentElement.setAttribute("data-theme", validTheme);
+  document.body.setAttribute("data-theme", validTheme);
+  try {
+    localStorage.setItem("capsstream_theme", validTheme);
+  } catch (e) {}
+
+  if (persist && store.profile?.id) {
+    store.profile.theme = validTheme;
+    API.put(`/api/profiles/${store.profile.id}`, {
+      name: store.profile.name,
+      avatar: store.profile.avatar,
+      color: store.profile.color,
+      is_kids: store.profile.is_kids,
+      theme: validTheme,
+      daily_limit_minutes: store.profile.daily_limit_minutes,
+      bedtime_curfew: store.profile.bedtime_curfew,
+    }).catch((err) => console.warn("[Theme] Failed to persist profile theme:", err));
+  }
+}
+
 // ─── Custom Global Context Menu System ────────────────────────
 
 const contextMenuState = reactive({
@@ -379,13 +466,28 @@ function openGlobalContextMenu(e, item) {
   if (e && typeof e.preventDefault === "function") e.preventDefault();
   if (e && typeof e.stopPropagation === "function") e.stopPropagation();
 
-  const menuWidth = 240;
-  const menuHeight = 300;
+  const menuWidth = 270;
+  const menuHeight = 360;
   let clickX = (e && e.clientX) || 100;
   let clickY = (e && e.clientY) || 100;
 
-  if (e && e.currentTarget && typeof e.currentTarget.getBoundingClientRect === "function") {
-    const rect = e.currentTarget.getBoundingClientRect();
+  // Anchor to the 3-dot button if triggered from a card or the button itself
+  let anchorEl = null;
+  if (e && e.currentTarget && typeof e.currentTarget.querySelector === "function") {
+    if (e.currentTarget.classList?.contains("card-menu-btn")) {
+      anchorEl = e.currentTarget;
+    } else {
+      anchorEl = e.currentTarget.querySelector(".card-menu-btn") || e.currentTarget;
+    }
+  } else if (e && e.target && typeof e.target.closest === "function") {
+    const card = e.target.closest(".media-card");
+    if (card) {
+      anchorEl = card.querySelector(".card-menu-btn") || card;
+    }
+  }
+
+  if (anchorEl && typeof anchorEl.getBoundingClientRect === "function") {
+    const rect = anchorEl.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
       clickX = rect.left;
       clickY = rect.bottom + 4;
@@ -627,6 +729,12 @@ function formatDuration(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function formatGenres(genresStr, max = 3) {
+  if (!genresStr) return "";
+  const list = genresStr.split(",").map(s => s.trim()).filter(Boolean);
+  return list.slice(0, max).join(" • ");
 }
 
 function getCodecInfo(path) {
@@ -2206,6 +2314,45 @@ const SettingsPage = {
       </div>
 
       <template v-else>
+        <!-- Appearance & Themes -->
+        <div class="settings-section" id="settings-theme-section">
+          <div class="settings-section-title">
+            <i class="ph ph-palette" style="color:var(--accent)"></i>
+            <span>Appearance & Theme Presets</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-label-container" style="margin-bottom:12px">
+              <div class="settings-label">Active Theme Preset</div>
+              <div class="settings-desc">Choose a curated visual theme for your profile. Changes apply instantly across the entire interface.</div>
+            </div>
+
+            <div class="theme-preset-grid">
+              <div
+                v-for="t in THEME_PRESETS"
+                :key="t.id"
+                class="theme-preset-card"
+                :class="{ active: currentTheme === t.id }"
+                @click="selectTheme(t.id)"
+              >
+                <div class="theme-card-preview" :style="{ background: t.bg, borderColor: t.border }">
+                  <div class="theme-card-accent-bar" :style="{ background: t.accent }"></div>
+                  <div class="theme-card-dots">
+                    <span class="theme-card-dot" :style="{ background: t.accent }"></span>
+                    <span class="theme-card-dot" :style="{ background: t.secondary || t.accent }"></span>
+                  </div>
+                </div>
+                <div class="theme-card-body">
+                  <div class="theme-card-name">
+                    <span>{{ t.name }}</span>
+                    <span v-if="currentTheme === t.id" class="theme-active-tag">Active</span>
+                  </div>
+                  <div class="theme-card-desc">{{ t.desc }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 0. Updates -->
         <div class="settings-section" id="settings-updates-section">
           <div class="settings-section-title">
@@ -3629,7 +3776,16 @@ const SettingsPage = {
       loadUnmatched();
     });
 
+    const currentTheme = computed(() => store.profile?.theme || localStorage.getItem("capsstream_theme") || "crimson");
+
+    function selectTheme(themeId) {
+      applyTheme(themeId, true);
+    }
+
     return {
+      THEME_PRESETS,
+      currentTheme,
+      selectTheme,
       kidsProfiles,
       saveKidsProfileLimits,
       store,
@@ -7824,6 +7980,7 @@ const ProfilesPage = {
       name: "",
       avatar: "🎬",
       color: "#e50914",
+      theme: "crimson",
       is_kids: false,
       pin: "",
       update_pin: false,
@@ -7838,6 +7995,7 @@ const ProfilesPage = {
       name: "",
       avatar: "🎬",
       color: "#e50914",
+      theme: "crimson",
       pin: "",
       is_kids: false,
       daily_limit_minutes: 0,
@@ -7927,6 +8085,7 @@ const ProfilesPage = {
       editProfile.name = profile.name;
       editProfile.avatar = profile.avatar || "🎬";
       editProfile.color = profile.color || "#e50914";
+      editProfile.theme = profile.theme || "crimson";
       editProfile.is_kids = !!profile.is_kids;
       editProfile.pin = "";
       editProfile.update_pin = false;
@@ -7939,6 +8098,7 @@ const ProfilesPage = {
       newProfile.name = "";
       newProfile.avatar = "🎬";
       newProfile.color = "#e50914";
+      newProfile.theme = "crimson";
       newProfile.pin = "";
       newProfile.is_kids = false;
       viewMode.value = "create";
@@ -7954,6 +8114,7 @@ const ProfilesPage = {
           name: editProfile.name.trim(),
           avatar: editProfile.avatar,
           color: editProfile.color,
+          theme: editProfile.theme || editTarget.value?.theme || "crimson",
           is_kids: editProfile.is_kids,
           pin: editProfile.pin || "",
           update_pin: editProfile.update_pin,
@@ -8102,6 +8263,7 @@ const ProfilesPage = {
           pin: newProfile.pin || "",
           avatar: newProfile.avatar,
           color: newProfile.color,
+          theme: newProfile.theme || "crimson",
           is_kids: newProfile.is_kids,
           daily_limit_minutes: newProfile.daily_limit_minutes,
           bedtime_curfew: newProfile.bedtime_curfew,
@@ -8971,7 +9133,8 @@ const AboutPage = {
       <div class="about-hero">
         <div class="about-hero-badge">
           <img src="/static/img/favicon.png" alt="CapsStream" class="about-hero-logo">
-            <span>CapsStream v{{ sysInfo?.version || '2.0.0.0' }}</span>
+          <span>CapsStream v{{ sysInfo?.version || '2.0.0.0' }}</span>
+          <span v-if="sysInfo?.is_dev" class="about-dev-badge" title="Local DEV flag active">🛠️ DEV BUILD</span>
         </div>
         <h1 class="about-hero-title">Stream Everything You Own.</h1>
         <p class="about-hero-subtitle">
@@ -9097,6 +9260,13 @@ const AboutPage = {
                 <div class="diag-label">HOST OS</div>
                 <div class="diag-val">{{ sysInfo.os_name === 'nt' ? 'Windows' : sysInfo.os_name }}</div>
                 <div class="diag-sub" :title="sysInfo.platform">{{ sysInfo.platform }}</div>
+              </div>
+              <div class="diag-item">
+                <div class="diag-label">ENVIRONMENT</div>
+                <div class="diag-val" :style="{ color: sysInfo.is_dev ? '#fbbf24' : '#10b981' }">
+                  {{ sysInfo.is_dev ? '🛠️ Development' : '🚀 Production' }}
+                </div>
+                <div class="diag-sub">{{ sysInfo.is_dev ? 'Local DEV flag active' : 'Standard release build' }}</div>
               </div>
               <div class="diag-item">
                 <div class="diag-label">FFMPEG / FFPROBE</div>
@@ -9902,9 +10072,26 @@ const App = {
                 <div class="profile-dropdown-item" @click.stop="goStats" id="dd-stats">📊 Watch Stats</div>
                 <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="dd-settings">⚙️ Settings</div>
                 <div class="profile-dropdown-item" @click.stop="goAbout" id="dd-about">ℹ️ About CapsStream</div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-divider"></div>
                 <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="editCurrentProfile" id="dd-edit-profile">✏️ Edit Profile</div>
                 <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="switchProfile" id="dd-switch">👤 Switch Profile</div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-divider"></div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-section-title">🎨 Theme Presets</div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-themes">
+                  <button
+                    v-for="t in THEME_PRESETS"
+                    :key="t.id"
+                    class="theme-mini-chip"
+                    :class="{ active: currentTheme === t.id }"
+                    :style="{ '--chip-color': t.accent }"
+                    @click.stop="selectTheme(t.id)"
+                    :title="t.name"
+                  >
+                    <span class="theme-mini-dot" :style="{ background: t.accent }"></span>
+                    <span class="theme-mini-name">{{ t.name }}</span>
+                    <i v-if="currentTheme === t.id" class="ph-bold ph-check theme-mini-check"></i>
+                  </button>
+                </div>
+                <div class="profile-dropdown-divider"></div>
                 <div class="profile-dropdown-item danger" @click.stop="logout" v-if="store.profile" id="dd-logout">🚪 Sign Out</div>
               </div>
             </div>
@@ -10089,13 +10276,43 @@ const App = {
         @click.stop
       >
         <div class="context-menu-header">
-          <div class="context-menu-title" :title="contextMenuState.item.title">
-            {{ contextMenuState.item.title }}
+          <div class="context-menu-thumb" v-if="contextMenuPoster">
+            <img :src="contextMenuPoster" :alt="contextMenuState.item.title" loading="lazy" />
           </div>
-          <div class="context-menu-meta">
-            <span v-if="contextMenuState.item.year">{{ contextMenuState.item.year }}</span>
-            <span v-if="contextMenuState.item.type" class="badge" style="text-transform:capitalize;font-size:0.65rem">{{ contextMenuState.item.type }}</span>
-            <span v-if="contextMenuState.item.rating" style="color:var(--gold);font-weight:700">★ {{ formatRating(contextMenuState.item.rating) }}</span>
+          <div v-else class="context-menu-thumb placeholder">
+            <i class="ph-fill ph-film-strip"></i>
+          </div>
+          <div class="context-menu-header-info">
+            <div class="context-menu-title" :title="contextMenuState.item.title">
+              {{ contextMenuState.item.title }}
+            </div>
+            <div v-if="contextMenuState.item.season || contextMenuState.item.episode || contextMenuState.item.ep_title" class="context-menu-ep-info">
+              <span v-if="contextMenuState.item.season || contextMenuState.item.episode" class="context-menu-ep-code">
+                S{{ String(contextMenuState.item.season || 1).padStart(2, '0') }}E{{ String(contextMenuState.item.episode || 1).padStart(2, '0') }}
+              </span>
+              <span v-if="contextMenuState.item.ep_title" class="context-menu-ep-title" :title="contextMenuState.item.ep_title">
+                {{ contextMenuState.item.ep_title }}
+              </span>
+            </div>
+            <div class="context-menu-meta">
+              <span v-if="contextMenuState.item.year" class="context-menu-meta-tag">{{ contextMenuState.item.year }}</span>
+              <span v-if="contextMenuState.item.type" class="badge" style="text-transform:capitalize;font-size:0.65rem">{{ contextMenuState.item.type }}</span>
+              <span v-if="contextMenuState.item.duration" class="context-menu-meta-tag">{{ formatDuration(contextMenuState.item.duration) }}</span>
+              <span v-if="contextMenuState.item.rating" class="context-menu-rating" style="color:var(--gold);font-weight:700">★ {{ formatRating(contextMenuState.item.rating) }}</span>
+            </div>
+            <div v-if="contextMenuState.item.genres" class="context-menu-genres" :title="contextMenuState.item.genres">
+              {{ formatGenres(contextMenuState.item.genres, 3) }}
+            </div>
+          </div>
+        </div>
+
+        <div v-if="calcProgressPercent(contextMenuState.item) > 0" class="context-menu-progress-wrap">
+          <div class="context-menu-progress-bar">
+            <div class="context-menu-progress-fill" :style="{ width: calcProgressPercent(contextMenuState.item) + '%' }"></div>
+          </div>
+          <div class="context-menu-progress-labels">
+            <span>{{ calcProgressPercent(contextMenuState.item) }}% watched</span>
+            <span v-if="calcTimeLeft(contextMenuState.item)">{{ calcTimeLeft(contextMenuState.item) }}</span>
           </div>
         </div>
 
@@ -10238,9 +10455,17 @@ const App = {
       () => store.profile,
       (prof) => {
         document.body.classList.toggle("kids-mode-theme", !!prof?.is_kids);
+        const theme = prof?.theme || localStorage.getItem("capsstream_theme") || "crimson";
+        applyTheme(theme, false);
       },
       { immediate: true, deep: true }
     );
+
+    const currentTheme = computed(() => store.profile?.theme || localStorage.getItem("capsstream_theme") || "crimson");
+
+    function selectTheme(themeId) {
+      applyTheme(themeId, true);
+    }
 
     // ─── Update banner state ─────────────────────────────────────
     const updateBannerDismissed = ref(false);
@@ -10829,6 +11054,15 @@ const App = {
       }
     }
 
+    const contextMenuPoster = computed(() => {
+      const item = contextMenuState.item;
+      if (!item) return null;
+      if (item.poster_path) return imgUrl(item.poster_path);
+      if (item.backdrop_path) return imgUrl(item.backdrop_path);
+      if (item.still_path) return imgUrl(item.still_path);
+      return null;
+    });
+
     return {
       store,
       route,
@@ -10866,6 +11100,7 @@ const App = {
       handleGlobalFixMatchClose,
       handleGlobalFixMatchDone,
       contextMenuState,
+      contextMenuPoster,
       handleContextMenuPlay,
       handleContextMenuDetails,
       handleContextMenuTrailer,
@@ -10880,6 +11115,11 @@ const App = {
       toggleItemInCollection,
       createAndAddToCollection,
       formatRating,
+      formatDuration,
+      formatGenres,
+      calcProgressPercent,
+      calcTimeLeft,
+      imgUrl,
       dismissToast,
       getToastIcon,
       navItems,
@@ -10888,6 +11128,9 @@ const App = {
       hoveredLinkIndex,
       pillStyle,
       isNavActive,
+      THEME_PRESETS,
+      currentTheme,
+      selectTheme,
     };
   },
 };

@@ -2,6 +2,9 @@
 .env
 config.json
 skills-lock.json
+DEV
+DEV*
+.dev*
 
 # ─── User data (database, metadata, artwork, subtitles) ─────
 # Keep only the fresh template database
@@ -31,3 +34,5 @@ logs/
 Thumbs.db
 _backup_tmp.zip
 _restore_tmp.zip
+
+AGENTS.md
