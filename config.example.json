@@ -18,7 +18,6 @@
   "subtitles": {
     "auto_load": true,
     "preferred_language": "en",
-    "font_size": "normal",
     "appearance": {
       "fontSize": "1.1rem",
       "textColor": "#ffffff",

@@ -48,7 +48,6 @@ DEFAULT_CONFIG = {
     "subtitles": {
         "auto_load": True,
         "preferred_language": "Auto",
-        "font_size": "normal",
         "opensubtitles_api_key": "",
         "auto_download": False,
         "appearance": {
@@ -136,6 +135,10 @@ def load_config():
             merged.pop("omdb_api_key", None)
         if isinstance(merged.get("metadata_sources"), dict):
             merged["metadata_sources"].pop("enable_omdb", None)
+
+        # Migration: remove legacy subtitles.font_size key in favor of subtitles.appearance.fontSize
+        if isinstance(merged.get("subtitles"), dict) and "font_size" in merged["subtitles"]:
+            merged["subtitles"].pop("font_size", None)
 
         # Secrets are provided via environment / .env — env values win over
         # anything stale in config.json, and empty config values get filled.

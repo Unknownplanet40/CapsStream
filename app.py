@@ -29,6 +29,8 @@ from backend.db import (
     get_favorites, toggle_favorite, is_favorite,
     get_collections, create_collection, delete_collection,
     add_to_collection, remove_from_collection,
+    get_playlists, get_playlist, create_playlist, update_playlist,
+    delete_playlist, add_to_playlist, remove_from_playlist, reorder_playlist,
     get_unmatched, upsert_media
 )
 from backend.streamer import stream_file
@@ -2066,6 +2068,87 @@ def api_add_to_collection(collection_id):
 def api_remove_from_collection(collection_id, media_id):
     pid = _require_profile()
     remove_from_collection(collection_id, media_id)
+    return jsonify({"ok": True})
+
+
+# ─── Playlists ───────────────────────────────────────────────────────────────
+
+@app.route("/api/playlists", methods=["GET"])
+def api_get_playlists():
+    pid = _require_profile()
+    playlists = get_playlists(pid)
+    return jsonify(playlists)
+
+
+@app.route("/api/playlists", methods=["POST"])
+def api_create_playlist():
+    pid = _require_profile()
+    data = request.json or {}
+    name = (data.get("name") or "").strip()
+    desc = (data.get("description") or "").strip()
+    if not name:
+        return jsonify({"error": "Playlist name is required"}), 400
+    pl_id = create_playlist(pid, name, desc)
+    pl = get_playlist(pl_id, pid)
+    return jsonify(pl), 201
+
+
+@app.route("/api/playlists/<int:playlist_id>", methods=["GET"])
+def api_get_playlist_route(playlist_id):
+    pid = _require_profile()
+    pl = get_playlist(playlist_id, pid)
+    if not pl:
+        return jsonify({"error": "Playlist not found"}), 404
+    if _active_is_kids():
+        pl["items"] = _filter_for_profile(pl.get("items", []))
+        pl["item_count"] = len(pl["items"])
+    return jsonify(pl)
+
+
+@app.route("/api/playlists/<int:playlist_id>", methods=["PUT"])
+def api_update_playlist_route(playlist_id):
+    pid = _require_profile()
+    data = request.json or {}
+    name = data.get("name")
+    desc = data.get("description")
+    update_playlist(playlist_id, pid, name=name, description=desc)
+    pl = get_playlist(playlist_id, pid)
+    return jsonify(pl)
+
+
+@app.route("/api/playlists/<int:playlist_id>", methods=["DELETE"])
+def api_delete_playlist_route(playlist_id):
+    pid = _require_profile()
+    delete_playlist(playlist_id, pid)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/playlists/<int:playlist_id>/items", methods=["POST"])
+def api_add_to_playlist_route(playlist_id):
+    pid = _require_profile()
+    data = request.json or {}
+    media_id = data.get("media_id")
+    if not media_id:
+        return jsonify({"error": "media_id is required"}), 400
+    item_id = add_to_playlist(playlist_id, int(media_id))
+    return jsonify({"ok": True, "item_id": item_id})
+
+
+@app.route("/api/playlists/<int:playlist_id>/items/<int:item_id>", methods=["DELETE"])
+def api_remove_from_playlist_route(playlist_id, item_id):
+    pid = _require_profile()
+    remove_from_playlist(playlist_id, item_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/playlists/<int:playlist_id>/reorder", methods=["POST"])
+def api_reorder_playlist_route(playlist_id):
+    pid = _require_profile()
+    data = request.json or {}
+    item_ids = data.get("item_ids", [])
+    if not isinstance(item_ids, list):
+        return jsonify({"error": "item_ids array is required"}), 400
+    reorder_playlist(playlist_id, [int(i) for i in item_ids])
     return jsonify({"ok": True})
 
 

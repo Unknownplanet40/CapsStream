@@ -129,7 +129,91 @@ const store = reactive({
   dailyLimitWarned: false,
   bedtimeDismissedForToday: false,
   dailyLimitExtended: false,
+  queue: [],               // active playback queue items
+  queueIndex: -1,          // current item index in queue
+  queueShuffle: false,     // shuffle state
+  queueRepeat: 'off',      // 'off' | 'all' | 'one'
+  queuePlaylistId: null,   // id of playlist if playing from a saved playlist
+  queuePlaylistName: "",   // name of active playlist
 });
+
+const playlistPickerState = reactive({
+  show: false,
+  item: null,
+  playlists: [],
+  loading: false,
+  inlineName: "",
+});
+
+async function openAddToPlaylist(media) {
+  if (!store.profile) {
+    addToast("Select a profile first", "info");
+    return;
+  }
+  if (!media) return;
+  playlistPickerState.item = media;
+  playlistPickerState.inlineName = "";
+  playlistPickerState.show = true;
+  playlistPickerState.loading = true;
+  try {
+    const lists = await API.get("/api/playlists");
+    playlistPickerState.playlists = Array.isArray(lists) ? lists : [];
+  } catch (e) {
+    playlistPickerState.playlists = [];
+  } finally {
+    playlistPickerState.loading = false;
+  }
+}
+
+function isItemInPlaylist(playlist) {
+  if (!playlistPickerState.item || !playlist) return false;
+  const targetId = playlistPickerState.item.id;
+  return (playlist.item_ids || []).includes(targetId);
+}
+
+async function toggleItemInPlaylist(playlist) {
+  if (!playlistPickerState.item || !playlist) return;
+  const mediaId = playlistPickerState.item.id;
+  try {
+    await API.post(`/api/playlists/${playlist.id}/items`, { media_id: mediaId });
+    addToast(`Added "${playlistPickerState.item.title}" to ${playlist.name} 📋`, "success");
+    const lists = await API.get("/api/playlists");
+    playlistPickerState.playlists = Array.isArray(lists) ? lists : [];
+  } catch (e) {
+    addToast("Failed to add to playlist", "error");
+  }
+}
+
+async function createAndAddToPlaylist() {
+  const name = playlistPickerState.inlineName.trim();
+  if (!name || !playlistPickerState.item) return;
+  try {
+    const pl = await API.post("/api/playlists", { name });
+    if (pl && pl.id) {
+      await API.post(`/api/playlists/${pl.id}/items`, { media_id: playlistPickerState.item.id });
+      addToast(`Created "${name}" and added title! 📋`, "success");
+      playlistPickerState.inlineName = "";
+      const lists = await API.get("/api/playlists");
+      playlistPickerState.playlists = Array.isArray(lists) ? lists : [];
+    }
+  } catch (e) {
+    addToast("Failed to create playlist", "error");
+  }
+}
+
+function addPickerItemToQueue(playNext = false) {
+  if (!playlistPickerState.item) return;
+  const media = playlistPickerState.item;
+  if (!store.queue) store.queue = [];
+  if (playNext && store.queue.length > 0 && store.queueIndex >= 0) {
+    store.queue.splice(store.queueIndex + 1, 0, media);
+    addToast(`Added "${media.title}" to play next ⏭️`, "success");
+  } else {
+    store.queue.push(media);
+    addToast(`Added "${media.title}" to queue 📋`, "success");
+  }
+  playlistPickerState.show = false;
+}
 
 let sleepTimerInterval = null;
 
@@ -1656,6 +1740,9 @@ const DetailPage = {
             <button class="btn btn-secondary btn-lg" @click="toggleFav" id="detail-fav-btn" :title="media.is_favorite ? 'Remove from Watchlist' : 'Add to Watchlist'">
               <i :class="media.is_favorite ? 'ph-fill ph-heart' : 'ph ph-heart'" style="font-size:1.15rem" :style="{ color: media.is_favorite ? 'var(--accent)' : 'inherit' }"></i>
             </button>
+            <button class="btn btn-secondary btn-lg" @click="openAddToPlaylist(media)" id="detail-playlist-btn" title="Add to Playlist or Queue">
+              <i class="ph ph-queue" style="font-size:1.15rem"></i>
+            </button>
             <button v-if="!store.profile?.is_kids" class="btn btn-ghost btn-lg" @click="showCollectionModal = true" id="detail-collection-btn" title="Add to List">
               <i class="ph ph-plus-circle" style="font-size:1.15rem"></i>
             </button>
@@ -2401,6 +2488,7 @@ const DetailPage = {
       trailerModalTitle,
       showSkipModal,
       handleSkipSaved,
+      openAddToPlaylist,
     };
   },
 };
@@ -3144,19 +3232,6 @@ const SettingsPage = {
 
             <div class="settings-row">
               <div class="settings-label-container">
-                <div class="settings-label">Subtitles — Font Size</div>
-                <div class="settings-desc">Default font size scaling for subtitle text in the player.</div>
-              </div>
-              <select v-model="form.subtitles.font_size" class="form-input" style="width:160px">
-                <option value="small">Small (75%)</option>
-                <option value="normal">Normal (100%)</option>
-                <option value="large">Large (125%)</option>
-                <option value="extra-large">Extra Large (150%)</option>
-              </select>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
                 <div class="settings-label">OpenSubtitles API Key</div>
                 <div class="settings-desc">Enables automatic subtitle downloads matched to your exact files. Free key at opensubtitles.com/api — free accounts allow 5 downloads per day.</div>
               </div>
@@ -3609,7 +3684,6 @@ const SettingsPage = {
       subtitles: {
         auto_load: true,
         preferred_language: "Auto",
-        font_size: "normal",
         opensubtitles_api_key: "",
         auto_download: false,
         appearance: { fontSize: "1.1rem", textColor: "#ffffff", bgOpacity: 0.5 },
@@ -4587,6 +4661,10 @@ const ShortcutsModal = {
                 <span class="shortcut-desc">Subtitle Sync (±250ms / ±1s)</span>
                 <div class="kbd-group"><kbd class="shortcut-kbd">[</kbd> <kbd class="shortcut-kbd">]</kbd></div>
               </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Queue & Playlist Drawer</span>
+                <kbd class="shortcut-kbd">Q</kbd>
+              </div>
             </div>
 
             <!-- Navigation & Global -->
@@ -4816,8 +4894,9 @@ const PlayerPage = {
           <div class="seekbar-wrapper"
                ref="seekbarRef"
                @click="seekToClick"
+               @mouseenter="onSeekbarMouseEnter"
                @mousemove="hoverSeekbar"
-               @mouseleave="showHoverTooltip = false"
+               @mouseleave="onSeekbarMouseLeave"
                id="player-seekbar">
             <div v-if="showHoverTooltip" class="seekbar-tooltip" :class="{ 'has-preview': thumbSheet }" :style="{ left: hoverTooltipPos + 'px' }">
               <div
@@ -5055,6 +5134,22 @@ const PlayerPage = {
                 </div>
               </div>
 
+              <!-- Queue & Playlist Drawer Button -->
+              <div style="position:relative">
+                <button
+                  class="ctrl-btn"
+                  :class="{ active: showQueueDrawer }"
+                  @click="toggleQueueDrawer"
+                  title="Queue & Playlist (Q)"
+                  id="ctrl-queue"
+                >
+                  <i class="ph ph-queue" style="font-size:1.35rem"></i>
+                  <span v-if="store.queue && store.queue.length" class="player-queue-badge">
+                    {{ store.queue.length }}
+                  </span>
+                </button>
+              </div>
+
               <!-- Picture-in-Picture (PiP) -->
               <button
                 v-if="isPipSupported"
@@ -5217,6 +5312,93 @@ const PlayerPage = {
           </button>
         </div>
       </div>
+
+      <!-- In-Player Slide-Out Queue Drawer -->
+      <transition name="slide-left">
+        <div v-if="showQueueDrawer" class="player-queue-drawer" @click.stop>
+          <div class="queue-drawer-header">
+            <div class="queue-drawer-title">
+              <i class="ph ph-queue" style="color:var(--accent);font-size:1.3rem"></i>
+              <span>{{ store.queuePlaylistName || 'Playback Queue' }}</span>
+              <span v-if="store.queue && store.queue.length" class="queue-count-pill">{{ store.queue.length }}</span>
+            </div>
+            <button class="queue-close-btn" @click="showQueueDrawer = false" title="Close Queue">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+
+          <!-- Queue Controls Toolbar -->
+          <div class="queue-toolbar">
+            <button
+              class="queue-tool-btn"
+              :class="{ active: store.queueShuffle }"
+              @click="toggleQueueShuffle"
+              title="Shuffle Queue"
+            >
+              <i class="ph ph-shuffle"></i> Shuffle
+            </button>
+            <button
+              class="queue-tool-btn"
+              :class="{ active: store.queueRepeat !== 'off' }"
+              @click="cycleQueueRepeat"
+              :title="'Repeat: ' + store.queueRepeat"
+            >
+              <i :class="store.queueRepeat === 'one' ? 'ph ph-repeat-once' : 'ph ph-repeat'"></i>
+              {{ store.queueRepeat === 'all' ? 'Repeat All' : store.queueRepeat === 'one' ? 'Repeat One' : 'Repeat Off' }}
+            </button>
+            <button class="queue-tool-btn danger" @click="clearActiveQueue" title="Clear Queue">
+              <i class="ph ph-trash"></i> Clear
+            </button>
+          </div>
+
+          <!-- Queue Items List -->
+          <div v-if="!store.queue || !store.queue.length" class="queue-empty-state">
+            <i class="ph ph-queue"></i>
+            <div style="font-weight:700;font-size:0.95rem;margin-bottom:4px">Queue is empty</div>
+            <p style="font-size:0.8rem;color:var(--text-muted)">Add titles from your library or playlists to play them back-to-back.</p>
+          </div>
+
+          <div v-else class="queue-items-list">
+            <div
+              v-for="(item, qIdx) in store.queue"
+              :key="item.item_id || item.id + '-' + qIdx"
+              class="queue-item-card"
+              :class="{ 'is-playing': qIdx === store.queueIndex }"
+              @click="playQueueItem(qIdx)"
+            >
+              <div class="queue-item-drag-handle">
+                <span v-if="qIdx === store.queueIndex" class="queue-now-playing-icon">▶</span>
+                <span v-else class="queue-item-num">{{ qIdx + 1 }}</span>
+              </div>
+              <div class="queue-item-thumb">
+                <img :src="imgUrl(item.still_path || item.poster_path || item.backdrop_path)" :alt="item.title" loading="lazy" />
+              </div>
+              <div class="queue-item-meta">
+                <div class="queue-item-title" :title="item.title">
+                  {{ item.title }}
+                </div>
+                <div class="queue-item-sub">
+                  <span v-if="item.season_number && item.episode_number">
+                    S{{ item.season_number }} E{{ item.episode_number }} · 
+                  </span>
+                  <span>{{ formatTime(item.duration || 0) }}</span>
+                </div>
+              </div>
+              <div class="queue-item-actions" @click.stop>
+                <button class="queue-action-btn" @click.stop="moveQueueItem(qIdx, -1)" :disabled="qIdx === 0" title="Move Up">
+                  <i class="ph ph-caret-up"></i>
+                </button>
+                <button class="queue-action-btn" @click.stop="moveQueueItem(qIdx, 1)" :disabled="qIdx === store.queue.length - 1" title="Move Down">
+                  <i class="ph ph-caret-down"></i>
+                </button>
+                <button class="queue-action-btn danger" @click.stop="removeQueueItem(qIdx)" title="Remove">
+                  <i class="ph ph-x"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
 
       <!-- Playback Error Overlay -->
       <div v-if="playerError" class="empty-state" style="position:fixed;inset:0;background:rgba(10,10,15,0.95);z-index:300;padding:2rem">
@@ -6243,9 +6425,28 @@ const PlayerPage = {
         .catch(() => {});
     }
 
+    let cachedSeekbarRect = null;
+    let hoverRafId = null;
+
+    function onSeekbarMouseEnter() {
+      if (seekbarRef.value) {
+        cachedSeekbarRect = seekbarRef.value.getBoundingClientRect();
+      }
+    }
+
+    function onSeekbarMouseLeave() {
+      showHoverTooltip.value = false;
+      cachedSeekbarRect = null;
+      if (hoverRafId) {
+        cancelAnimationFrame(hoverRafId);
+        hoverRafId = null;
+      }
+    }
+
     function seekToClick(e) {
       if (!seekbarRef.value || !duration.value) return;
-      const rect = seekbarRef.value.getBoundingClientRect();
+      const rect = cachedSeekbarRect || seekbarRef.value.getBoundingClientRect();
+      if (!rect || rect.width <= 0) return;
       const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       // Seekbar is player-relative — seekTo expects CONTENT time
       const targetTime = playerToContent(pos * displayDuration.value);
@@ -6254,12 +6455,20 @@ const PlayerPage = {
     }
 
     function hoverSeekbar(e) {
-      if (!seekbarRef.value || !displayDuration.value) return;
-      const rect = seekbarRef.value.getBoundingClientRect();
-      const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      hoverTooltipPos.value = e.clientX - rect.left;
-      hoverTooltipTime.value = pos * displayDuration.value;
-      showHoverTooltip.value = true;
+      if (!displayDuration.value) return;
+      const clientX = e.clientX;
+      if (hoverRafId) cancelAnimationFrame(hoverRafId);
+      hoverRafId = requestAnimationFrame(() => {
+        if (!cachedSeekbarRect && seekbarRef.value) {
+          cachedSeekbarRect = seekbarRef.value.getBoundingClientRect();
+        }
+        const rect = cachedSeekbarRect;
+        if (!rect || rect.width <= 0) return;
+        const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        hoverTooltipPos.value = clientX - rect.left;
+        hoverTooltipTime.value = pos * displayDuration.value;
+        showHoverTooltip.value = true;
+      });
     }
 
     const nextEpHover = ref(false);
@@ -6516,33 +6725,113 @@ const PlayerPage = {
       updateActiveCueText();
     }
 
+    let lastCueIdx = 0;
+    let lastCueTrack = null;
+
+    function findActiveCues(cues, now) {
+      if (!cues || cues.length === 0) return [];
+      const len = cues.length;
+
+      // 1. Fast sequential check: during normal playback, current/next cue is at or near lastCueIdx
+      if (lastCueIdx >= 0 && lastCueIdx < len) {
+        const c = cues[lastCueIdx];
+        if (c && now >= c.startTime && now <= c.endTime) {
+          const active = [sanitizeCueText(c.text)];
+          let i = lastCueIdx + 1;
+          while (i < len && cues[i].startTime <= now) {
+            if (now <= cues[i].endTime) {
+              const s = sanitizeCueText(cues[i].text);
+              if (s) active.push(s);
+            }
+            i++;
+          }
+          let j = lastCueIdx - 1;
+          while (j >= 0 && cues[j].endTime >= now) {
+            if (now >= cues[j].startTime) {
+              const s = sanitizeCueText(cues[j].text);
+              if (s) active.unshift(s);
+            }
+            j--;
+          }
+          return active.filter(Boolean);
+        } else if (lastCueIdx + 1 < len) {
+          const next = cues[lastCueIdx + 1];
+          if (next && now >= next.startTime && now <= next.endTime) {
+            lastCueIdx++;
+            return [sanitizeCueText(next.text)].filter(Boolean);
+          }
+        }
+      }
+
+      // 2. Binary search for O(log N) jump when seeking or scene jump
+      let low = 0;
+      let high = len - 1;
+      let bestIdx = -1;
+
+      while (low <= high) {
+        const mid = (low + high) >> 1;
+        const midCue = cues[mid];
+        if (!midCue) break;
+        if (midCue.startTime <= now) {
+          bestIdx = mid;
+          low = mid + 1;
+        } else {
+          high = mid - 1;
+        }
+      }
+
+      if (bestIdx >= 0) {
+        lastCueIdx = bestIdx;
+        const active = [];
+        let i = bestIdx;
+        while (i < len && cues[i].startTime <= now) {
+          if (now <= cues[i].endTime) {
+            const s = sanitizeCueText(cues[i].text);
+            if (s) active.push(s);
+          }
+          i++;
+        }
+        let j = bestIdx - 1;
+        while (j >= 0 && cues[j].endTime >= now) {
+          if (now >= cues[j].startTime) {
+            const s = sanitizeCueText(cues[j].text);
+            if (s) active.unshift(s);
+          }
+          j--;
+        }
+        return active.filter(Boolean);
+      }
+
+      return [];
+    }
+
     function updateActiveCueText() {
       try {
         if (!videoRef.value) return;
         const tracks = videoRef.value.textTracks;
         if (!tracks || selectedSub.value < 0 || !tracks[selectedSub.value]) {
-          activeCueText.value = "";
+          if (activeCueText.value !== "") activeCueText.value = "";
           return;
         }
         const track = tracks[selectedSub.value];
+        if (lastCueTrack !== track) {
+          lastCueTrack = track;
+          lastCueIdx = 0;
+        }
         const offsetSec = (subOffsetMs.value || 0) / 1000;
         const now = currentTime.value - offsetSec;
 
-        // Primary: manual cue scan using currentTime.value (total media time).
+        // Primary: fast binary search + sequential pointer scan
         if (track.cues && track.cues.length > 0) {
-          const active = [];
-          for (let i = 0; i < track.cues.length; i++) {
-            const c = track.cues[i];
-            if (c && now >= c.startTime && now <= c.endTime) {
-              const s = sanitizeCueText(c.text);
-              if (s) active.push(s);
-            }
+          const active = findActiveCues(track.cues, now);
+          const newText = active.length > 0 ? active.join("\n") : "";
+          if (activeCueText.value !== newText) {
+            activeCueText.value = newText;
           }
-          activeCueText.value = active.length > 0 ? active.join("\n") : "";
           return;
         }
 
-        // Secondary fallback: browser-managed activeCues.
+        // Secondary fallback: browser-managed activeCues
         if (track.activeCues && track.activeCues.length > 0) {
           const active = [];
           for (let i = 0; i < track.activeCues.length; i++) {
@@ -6551,11 +6840,16 @@ const PlayerPage = {
               if (s) active.push(s);
             }
           }
-          activeCueText.value = active.length > 0 ? active.join("\n") : "";
+          const newText = active.length > 0 ? active.join("\n") : "";
+          if (activeCueText.value !== newText) {
+            activeCueText.value = newText;
+          }
           return;
         }
 
-        activeCueText.value = "";
+        if (activeCueText.value !== "") {
+          activeCueText.value = "";
+        }
       } catch (err) {
         console.warn("Subtitle update error:", err);
         activeCueText.value = "";
@@ -6619,6 +6913,8 @@ const PlayerPage = {
 
     onMounted(loadSubStyleFromConfig);
 
+    const customBlobUrls = [];
+
     function handleCustomSubFile(e) {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -6630,6 +6926,7 @@ const PlayerPage = {
         }
         const blob = new Blob([content], { type: "text/vtt" });
         const url = URL.createObjectURL(blob);
+        customBlobUrls.push(url);
         const newSub = { label: file.name.replace(/\.(vtt|srt)$/i, ""), url };
         if (!subtitles.value) subtitles.value = [];
         subtitles.value.push(newSub);
@@ -6973,8 +7270,93 @@ const PlayerPage = {
     }
 
 
+    // ─── Queue & Playlist Drawer ─────────────────────────────────
+    const showQueueDrawer = ref(false);
+
+    function toggleQueueDrawer() {
+      showQueueDrawer.value = !showQueueDrawer.value;
+      if (showQueueDrawer.value) showControls();
+    }
+
+    function toggleQueueShuffle() {
+      store.queueShuffle = !store.queueShuffle;
+      if (store.queueShuffle && store.queue && store.queue.length > 1) {
+        const curr = store.queue[store.queueIndex] || store.queue[0];
+        const rest = store.queue.filter((_, idx) => idx !== store.queueIndex);
+        for (let i = rest.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [rest[i], rest[j]] = [rest[j], rest[i]];
+        }
+        store.queue = [curr, ...rest];
+        store.queueIndex = 0;
+        addToast("Queue shuffled 🔀", "info");
+      }
+    }
+
+    function cycleQueueRepeat() {
+      if (store.queueRepeat === "off") store.queueRepeat = "all";
+      else if (store.queueRepeat === "all") store.queueRepeat = "one";
+      else store.queueRepeat = "off";
+    }
+
+    function clearActiveQueue() {
+      store.queue = [];
+      store.queueIndex = -1;
+      store.queuePlaylistId = null;
+      store.queuePlaylistName = "";
+      showQueueDrawer.value = false;
+      addToast("Queue cleared", "info");
+    }
+
+    function playQueueItem(index) {
+      if (!store.queue || !store.queue[index]) return;
+      store.queueIndex = index;
+      const target = store.queue[index];
+      router.push(`/watch/${target.id}`);
+    }
+
+    function moveQueueItem(index, direction) {
+      const targetIdx = index + direction;
+      if (!store.queue || targetIdx < 0 || targetIdx >= store.queue.length) return;
+      const moved = [...store.queue];
+      [moved[index], moved[targetIdx]] = [moved[targetIdx], moved[index]];
+      store.queue = moved;
+      if (store.queueIndex === index) store.queueIndex = targetIdx;
+      else if (store.queueIndex === targetIdx) store.queueIndex = index;
+    }
+
+    function removeQueueItem(index) {
+      if (!store.queue || index < 0 || index >= store.queue.length) return;
+      const removed = store.queue[index];
+      store.queue.splice(index, 1);
+      if (store.queueIndex > index) store.queueIndex--;
+      else if (store.queueIndex >= store.queue.length) {
+        store.queueIndex = Math.max(0, store.queue.length - 1);
+      }
+      addToast(`Removed "${removed.title}" from queue`, "info");
+    }
+
     function onEnded() {
       isPlaying.value = false;
+      // 1. If repeat 'one' is active
+      if (store.queueRepeat === "one" && videoRef.value) {
+        seekTo(0);
+        videoRef.value.play().catch(() => {});
+        return;
+      }
+
+      // 2. If active queue has next item
+      if (store.queue && store.queue.length > 0) {
+        if (store.queueIndex + 1 < store.queue.length) {
+          playQueueItem(store.queueIndex + 1);
+          return;
+        } else if (store.queueRepeat === "all" && store.queue.length > 0) {
+          playQueueItem(0);
+          return;
+        }
+      }
+
+      // 3. Fallback to normal auto-play next episode
       const autoNext = playerSettings.value?.playback?.auto_play_next !== false;
       if (showNextEp.value && autoNext) {
         startAutoAdvanceCountdown();
@@ -7180,6 +7562,11 @@ const PlayerPage = {
           e.preventDefault();
           toggleMute();
           break;
+        case "q":
+        case "Q":
+          e.preventDefault();
+          toggleQueueDrawer();
+          break;
         case "n":
         case "N":
           e.preventDefault();
@@ -7273,12 +7660,6 @@ const PlayerPage = {
           playbackRate.value = rate;
           if (videoRef.value) videoRef.value.playbackRate = rate;
           if (isRemoteAudioActive() && remoteAudioEl) remoteAudioEl.playbackRate = rate;
-        }
-
-        if (sub.font_size) {
-          const fontMap = { small: "0.85rem", normal: "1rem", large: "1.2rem", "extra-large": "1.4rem" };
-          const fontVal = fontMap[sub.font_size] || sub.font_size;
-          document.documentElement.style.setProperty("--sub-font-size", fontVal);
         }
       }
 
@@ -7419,10 +7800,44 @@ const PlayerPage = {
       clearInterval(progressTimer);
       clearInterval(stallTimer);
       clearTimeout(hideTimer);
+      clearTimeout(thumbRetryTimer);
+      clearTimeout(volumeOSDTimer);
+      clearTimeout(seekOSDTimer);
+      clearTimeout(nextEpHideTimer);
       if (playerAchTimer) clearTimeout(playerAchTimer);
+      if (hoverRafId) cancelAnimationFrame(hoverRafId);
+
       window.removeEventListener("pagehide", flushProgressOnHide);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("keydown", handleKeyboard);
+
+      // Clean up Web Audio graph
+      if (audioCtx) {
+        try {
+          if (gainNode) gainNode.disconnect();
+          if (audioSource) audioSource.disconnect();
+          audioCtx.close().catch(() => {});
+        } catch (e) {}
+        audioCtx = null;
+        gainNode = null;
+        audioSource = null;
+      }
+
+      // Revoke any custom uploaded subtitle blob URLs
+      for (const u of customBlobUrls) {
+        try { URL.revokeObjectURL(u); } catch (e) {}
+      }
+      customBlobUrls.length = 0;
+
+      // Release hardware video decoder context
+      const v = videoRef.value;
+      if (v) {
+        try {
+          v.pause();
+          v.removeAttribute("src");
+          v.load();
+        } catch (e) {}
+      }
     });
 
     watch(
@@ -7531,6 +7946,8 @@ const PlayerPage = {
       onVolumeInput,
       seekToClick,
       hoverSeekbar,
+      onSeekbarMouseEnter,
+      onSeekbarMouseLeave,
       selectSpeed,
       selectSub,
       onSubtitleTrackError,
@@ -7567,6 +7984,14 @@ const PlayerPage = {
       nextEpProgressPercent,
       handleNextEpClick,
       cancelAutoAdvance,
+      showQueueDrawer,
+      toggleQueueDrawer,
+      toggleQueueShuffle,
+      cycleQueueRepeat,
+      clearActiveQueue,
+      playQueueItem,
+      moveQueueItem,
+      removeQueueItem,
     };
   },
 };
@@ -8236,6 +8661,478 @@ const CollectionDetailPage = {
       deleteCollection
     };
   },
+};
+
+// ─── Playlists Page ───────────────────────────────────────────
+
+const PlaylistsPage = {
+  template: `
+    <div class="collections-page">
+      <div class="collections-header-bar">
+        <div>
+          <h1 class="page-title">Playlists & Queues</h1>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+          <button v-if="store.queue && store.queue.length" class="btn btn-secondary" @click="resumeActiveQueue" id="btn-resume-queue">
+            <i class="ph ph-queue"></i> Active Queue ({{ store.queue.length }})
+          </button>
+          <button class="btn btn-primary" @click="showCreate = true" id="create-playlist-btn">
+            <i class="ph ph-plus"></i> New Playlist
+          </button>
+        </div>
+      </div>
+
+      <div v-if="!store.profile" class="empty-state">
+        <div class="empty-icon">👤</div>
+        <div class="empty-title">Select a profile first</div>
+      </div>
+
+      <div v-else-if="loading" style="display:flex;justify-content:center;padding:4rem">
+        <div class="loading-spinner"></div>
+      </div>
+
+      <div v-else-if="playlists.length === 0" class="empty-state">
+        <div class="empty-icon">📋</div>
+        <div class="empty-title">No playlists created yet</div>
+        <div class="empty-subtitle">Create custom playlists to marathon movies, anime arcs, or cartoon episodes in seamless sequence.</div>
+        <button class="btn btn-primary" style="margin-top:1rem" @click="showCreate = true" id="create-first-playlist-btn">
+          <i class="ph ph-plus"></i> Create First Playlist
+        </button>
+      </div>
+
+      <div v-else class="collections-grid">
+        <div
+          v-for="pl in playlists"
+          :key="pl.id"
+          class="collection-card playlist-card"
+          @click="router.push('/playlists/' + pl.id)"
+          :id="'playlist-' + pl.id"
+        >
+          <div class="collection-cover" :class="'cover-count-' + Math.min(pl.sample_posters ? pl.sample_posters.length : 0, 4)">
+            <template v-if="pl.sample_posters && pl.sample_posters.length">
+              <img
+                v-for="(poster, idx) in pl.sample_posters"
+                :key="idx"
+                :src="imgUrl(poster)"
+                class="collection-cover-img"
+                loading="lazy"
+              />
+            </template>
+            <div v-else class="collection-cover-empty">
+              <i class="ph ph-queue"></i>
+              <span>Empty Playlist</span>
+            </div>
+          </div>
+          <div class="collection-info">
+            <div class="collection-name">{{ pl.name }}</div>
+            <div class="collection-count">{{ pl.item_count || 0 }} item{{ pl.item_count !== 1 ? 's' : '' }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Create Playlist Modal -->
+      <div class="modal-backdrop" v-if="showCreate" @click.self="showCreate = false">
+        <div class="modal">
+          <h3>New Playlist</h3>
+          <div class="form-group">
+            <label class="form-label">Playlist Name</label>
+            <input id="new-playlist-name" class="form-input" v-model="newName" placeholder="e.g. Studio Ghibli Marathon" @keyup.enter="handleCreate">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description (optional)</label>
+            <input id="new-playlist-desc" class="form-input" v-model="newDesc" placeholder="A brief description of this playlist" @keyup.enter="handleCreate">
+          </div>
+          <div style="display:flex;gap:0.75rem;margin-top:1rem">
+            <button class="btn btn-primary btn-full" @click="handleCreate" :disabled="creating" id="save-playlist-btn">
+              {{ creating ? 'Creating...' : 'Create' }}
+            </button>
+            <button class="btn btn-ghost btn-full" @click="showCreate = false">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `,
+  setup() {
+    const router = VueRouter.useRouter();
+    const playlists = ref([]);
+    const loading = ref(true);
+    const showCreate = ref(false);
+    const creating = ref(false);
+    const newName = ref("");
+    const newDesc = ref("");
+
+    async function load() {
+      if (!store.profile) return;
+      loading.value = true;
+      try {
+        playlists.value = await API.get("/api/playlists");
+      } catch (e) {
+        playlists.value = [];
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    async function handleCreate() {
+      if (!newName.value.trim() || creating.value) return;
+      creating.value = true;
+      try {
+        const pl = await API.post("/api/playlists", {
+          name: newName.value.trim(),
+          description: newDesc.value.trim()
+        });
+        showCreate.value = false;
+        newName.value = "";
+        newDesc.value = "";
+        addToast("Playlist created! 📋", "success");
+        if (pl && pl.id) {
+          router.push(`/playlists/${pl.id}`);
+        } else {
+          load();
+        }
+      } catch (e) {
+        addToast("Failed to create playlist", "error");
+      } finally {
+        creating.value = false;
+      }
+    }
+
+    function resumeActiveQueue() {
+      if (store.queue && store.queue.length && store.queueIndex >= 0) {
+        const item = store.queue[store.queueIndex] || store.queue[0];
+        router.push(`/watch/${item.id}`);
+      }
+    }
+
+    onMounted(load);
+
+    return {
+      store,
+      playlists,
+      loading,
+      showCreate,
+      creating,
+      newName,
+      newDesc,
+      handleCreate,
+      resumeActiveQueue,
+      imgUrl,
+      router
+    };
+  }
+};
+
+// ─── Playlist Detail Page ───────────────────────────────────────
+
+const PlaylistDetailPage = {
+  template: `
+    <div class="browse-page playlist-detail-page">
+      <div v-if="loading" style="display:flex;justify-content:center;padding:4rem">
+        <div class="loading-spinner"></div>
+      </div>
+
+      <template v-else-if="playlist">
+        <!-- Playlist Hero Header -->
+        <div class="collection-hero">
+          <img
+            v-if="heroBackdrop"
+            :src="imgUrl(heroBackdrop)"
+            class="collection-hero-backdrop"
+            :alt="playlist.name"
+          />
+          <div class="collection-hero-overlay"></div>
+          <div class="collection-hero-content">
+            <div class="collection-hero-main">
+              <div class="collection-hero-badges">
+                <span class="collection-hero-badge">
+                  <i class="ph ph-queue"></i> Custom Playlist
+                </span>
+                <span class="collection-hero-badge">
+                  {{ (playlist.items || []).length }} item{{ (playlist.items || []).length !== 1 ? 's' : '' }}
+                </span>
+                <span v-if="totalDurationFormatted" class="collection-hero-badge">
+                  ⏱️ {{ totalDurationFormatted }}
+                </span>
+              </div>
+              <h1 class="collection-hero-title">{{ playlist.name }}</h1>
+              <p v-if="playlist.description" class="collection-hero-desc">{{ playlist.description }}</p>
+            </div>
+
+            <div class="collection-hero-actions">
+              <button
+                v-if="playlist.items && playlist.items.length > 0"
+                class="btn btn-primary"
+                @click="playAll(false)"
+                id="playlist-play-all-btn"
+              >
+                <i class="ph-fill ph-play"></i> Play All
+              </button>
+              <button
+                v-if="playlist.items && playlist.items.length > 1"
+                class="btn btn-secondary"
+                @click="playAll(true)"
+                id="playlist-shuffle-btn"
+                title="Shuffle Play"
+              >
+                <i class="ph ph-shuffle"></i> Shuffle
+              </button>
+              <button
+                class="btn btn-ghost"
+                @click="showEdit = true"
+                title="Edit Playlist Info"
+              >
+                <i class="ph ph-pencil-simple"></i> Edit
+              </button>
+              <button
+                class="btn btn-ghost danger"
+                @click="deletePlaylist"
+                title="Delete Playlist"
+              >
+                <i class="ph ph-trash"></i> Delete
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Playlist Items List -->
+        <div class="playlist-items-container">
+          <div v-if="!playlist.items || playlist.items.length === 0" class="empty-state" style="padding:3rem 1rem">
+            <div class="empty-icon">📋</div>
+            <div class="empty-title">This playlist is empty</div>
+            <div class="empty-subtitle">Add movies, anime, or episodes by clicking "+ Add to Playlist" on any media card or detail page.</div>
+          </div>
+
+          <div v-else class="playlist-table-wrap">
+            <table class="playlist-items-table">
+              <thead>
+                <tr>
+                  <th style="width:50px">#</th>
+                  <th style="width:90px">Cover</th>
+                  <th>Title / Episode</th>
+                  <th style="width:120px">Type</th>
+                  <th style="width:90px">Duration</th>
+                  <th style="width:160px;text-align:right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="(item, idx) in playlist.items"
+                  :key="item.item_id || item.id"
+                  class="playlist-row"
+                  @click="playSingle(idx)"
+                >
+                  <td class="playlist-pos-cell">
+                    <span class="playlist-pos-num">{{ idx + 1 }}</span>
+                    <button class="playlist-row-play-btn" title="Play">
+                      <i class="ph-fill ph-play"></i>
+                    </button>
+                  </td>
+                  <td>
+                    <div class="playlist-row-thumb">
+                      <img :src="imgUrl(item.still_path || item.poster_path || item.backdrop_path)" :alt="item.title" loading="lazy" />
+                    </div>
+                  </td>
+                  <td>
+                    <div class="playlist-row-title">{{ item.title }}</div>
+                    <div v-if="item.season_number && item.episode_number" class="playlist-row-subtitle">
+                      S{{ (item.season_number||1).toString().padStart(2,'0') }} E{{ (item.episode_number||1).toString().padStart(2,'0') }}
+                      <template v-if="item.episode_title"> · {{ item.episode_title }}</template>
+                    </div>
+                  </td>
+                  <td>
+                    <span class="badge" style="text-transform:capitalize;font-size:0.75rem">{{ item.type }}</span>
+                  </td>
+                  <td style="color:var(--text-muted);font-size:0.85rem">
+                    {{ formatDuration(item.duration) }}
+                  </td>
+                  <td style="text-align:right" @click.stop>
+                    <div class="playlist-row-actions">
+                      <button class="path-act-btn" @click.stop="moveItem(idx, -1)" :disabled="idx === 0" title="Move Up">
+                        <i class="ph ph-caret-up"></i>
+                      </button>
+                      <button class="path-act-btn" @click.stop="moveItem(idx, 1)" :disabled="idx === playlist.items.length - 1" title="Move Down">
+                        <i class="ph ph-caret-down"></i>
+                      </button>
+                      <button class="path-act-btn danger" @click.stop="removeItem(item)" title="Remove from Playlist">
+                        <i class="ph ph-trash"></i>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Edit Modal -->
+        <div class="modal-backdrop" v-if="showEdit" @click.self="showEdit = false">
+          <div class="modal">
+            <h3>Edit Playlist</h3>
+            <div class="form-group">
+              <label class="form-label">Playlist Name</label>
+              <input class="form-input" v-model="editName" placeholder="Playlist Name">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Description</label>
+              <input class="form-input" v-model="editDesc" placeholder="Description">
+            </div>
+            <div style="display:flex;gap:0.75rem;margin-top:1rem">
+              <button class="btn btn-primary btn-full" @click="handleUpdate">Save Changes</button>
+              <button class="btn btn-ghost btn-full" @click="showEdit = false">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  `,
+  setup() {
+    const route = VueRouter.useRoute();
+    const router = VueRouter.useRouter();
+    const playlist = ref(null);
+    const loading = ref(true);
+    const showEdit = ref(false);
+    const editName = ref("");
+    const editDesc = ref("");
+
+    const heroBackdrop = computed(() => {
+      const items = playlist.value?.items || [];
+      if (!items.length) return null;
+      const firstWithBackdrop = items.find((i) => i.backdrop_path);
+      return firstWithBackdrop ? firstWithBackdrop.backdrop_path : (items[0]?.poster_path || null);
+    });
+
+    const totalDurationFormatted = computed(() => {
+      const items = playlist.value?.items || [];
+      const totalSec = items.reduce((acc, i) => acc + (Number(i.duration) || 0), 0);
+      if (!totalSec) return "";
+      const hrs = Math.floor(totalSec / 3600);
+      const mins = Math.floor((totalSec % 3600) / 60);
+      if (hrs > 0) return `${hrs}h ${mins}m`;
+      return `${mins} min`;
+    });
+
+    async function load() {
+      loading.value = true;
+      try {
+        playlist.value = await API.get(`/api/playlists/${route.params.id}`);
+        if (playlist.value) {
+          editName.value = playlist.value.name || "";
+          editDesc.value = playlist.value.description || "";
+        }
+      } catch (e) {
+        addToast("Failed to load playlist", "error");
+        playlist.value = null;
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    function playAll(shuffle = false) {
+      if (!playlist.value?.items?.length) return;
+      let items = [...playlist.value.items];
+      if (shuffle) {
+        for (let i = items.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [items[i], items[j]] = [items[j], items[i]];
+        }
+      }
+      store.queue = items;
+      store.queueIndex = 0;
+      store.queueShuffle = shuffle;
+      store.queuePlaylistId = playlist.value.id;
+      store.queuePlaylistName = playlist.value.name;
+      router.push(`/watch/${items[0].id}`);
+    }
+
+    function playSingle(index) {
+      if (!playlist.value?.items?.[index]) return;
+      store.queue = [...playlist.value.items];
+      store.queueIndex = index;
+      store.queuePlaylistId = playlist.value.id;
+      store.queuePlaylistName = playlist.value.name;
+      router.push(`/watch/${playlist.value.items[index].id}`);
+    }
+
+    async function moveItem(index, direction) {
+      const targetIdx = index + direction;
+      const items = playlist.value?.items || [];
+      if (targetIdx < 0 || targetIdx >= items.length) return;
+      const moved = [...items];
+      [moved[index], moved[targetIdx]] = [moved[targetIdx], moved[index]];
+      playlist.value.items = moved;
+      try {
+        const itemIds = moved.map((i) => i.item_id);
+        await API.post(`/api/playlists/${playlist.value.id}/reorder`, { item_ids: itemIds });
+      } catch (e) {
+        load();
+      }
+    }
+
+    async function removeItem(item) {
+      try {
+        await API.del(`/api/playlists/${playlist.value.id}/items/${item.item_id}`);
+        playlist.value.items = (playlist.value.items || []).filter((i) => i.item_id !== item.item_id);
+        addToast(`Removed "${item.title}" from playlist`, "info");
+      } catch (e) {
+        addToast("Failed to remove item", "error");
+      }
+    }
+
+    async function handleUpdate() {
+      if (!editName.value.trim()) return;
+      try {
+        const updated = await API.put(`/api/playlists/${playlist.value.id}`, {
+          name: editName.value.trim(),
+          description: editDesc.value.trim()
+        });
+        playlist.value.name = updated.name;
+        playlist.value.description = updated.description;
+        showEdit.value = false;
+        addToast("Playlist updated", "success");
+      } catch (e) {
+        addToast("Failed to update playlist", "error");
+      }
+    }
+
+    async function deletePlaylist() {
+      const ok = await customConfirm({
+        title: "Delete Playlist",
+        message: `Are you sure you want to delete "${playlist.value?.name}"?`,
+        icon: "ph ph-trash",
+        danger: true,
+        okText: "Delete Playlist"
+      });
+      if (!ok) return;
+      try {
+        await API.del(`/api/playlists/${playlist.value.id}`);
+        addToast("Playlist deleted", "success");
+        router.push("/playlists");
+      } catch (e) {
+        addToast("Failed to delete playlist", "error");
+      }
+    }
+
+    onMounted(load);
+
+    return {
+      store,
+      playlist,
+      loading,
+      showEdit,
+      editName,
+      editDesc,
+      heroBackdrop,
+      totalDurationFormatted,
+      playAll,
+      playSingle,
+      moveItem,
+      removeItem,
+      handleUpdate,
+      deletePlaylist,
+      formatDuration,
+      imgUrl
+    };
+  }
 };
 
 // ─── Favorites Page ───────────────────────────────────────────
@@ -10734,6 +11631,8 @@ const router = createRouter({
     { path: "/search", component: SearchPage },
     { path: "/title/:type/:id", component: DetailPage },
     { path: "/watch/:id", component: PlayerPage },
+    { path: "/playlists", component: PlaylistsPage },
+    { path: "/playlists/:id", component: PlaylistDetailPage },
     { path: "/collections", component: CollectionsPage },
     { path: "/collection/:id", component: CollectionDetailPage },
     { path: "/favorites", component: FavoritesPage },
@@ -11002,6 +11901,7 @@ const App = {
                 </div>
                 <div class="profile-dropdown-divider" v-if="store?.profile"></div>
                 <div class="profile-dropdown-item" @click.stop="goFavorites" id="dd-watchlist">❤️ Watchlist</div>
+                <div class="profile-dropdown-item" @click.stop="goPlaylists" id="dd-playlists">📋 Playlists</div>
                 <div class="profile-dropdown-item" @click.stop="goCollections" id="dd-collections">📚 Collections</div>
                 <div class="profile-dropdown-item" @click.stop="goStats" id="dd-stats">📊 Watch Stats</div>
                 <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="dd-settings">⚙️ Settings</div>
@@ -11272,8 +12172,23 @@ const App = {
           <span>{{ contextMenuState.isFavorite ? 'Remove from Watchlist' : 'Add to Watchlist' }}</span>
         </div>
 
-        <div v-if="!store.profile?.is_kids" class="context-menu-item" @click="handleContextMenuCollection">
+        <div class="context-menu-item" @click="handleContextMenuPlaylist">
+          <i class="ph ph-queue"></i>
+          <span>Add to Playlist</span>
+        </div>
+
+        <div class="context-menu-item" @click="handleContextMenuQueueNext">
+          <i class="ph ph-skip-forward"></i>
+          <span>Play Next</span>
+        </div>
+
+        <div class="context-menu-item" @click="handleContextMenuQueueEnd">
           <i class="ph ph-plus-circle"></i>
+          <span>Add to Queue</span>
+        </div>
+
+        <div v-if="!store.profile?.is_kids" class="context-menu-item" @click="handleContextMenuCollection">
+          <i class="ph ph-stack"></i>
           <span>Add to Collection</span>
         </div>
 
@@ -11371,6 +12286,84 @@ const App = {
             </div>
 
             <button class="btn btn-ghost btn-full" style="margin-top:1.25rem" @click="collectionPickerState.show = false">
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Global Playlist Picker Modal -->
+      <div
+        class="modal-backdrop"
+        v-if="playlistPickerState.show"
+        style="z-index:999995;background:rgba(0,0,0,0.85);backdrop-filter:blur(20px);"
+        @click.self="playlistPickerState.show = false"
+      >
+        <div class="shortcuts-modal-card" style="max-width:440px" @click.stop>
+          <div class="shortcuts-modal-inner" style="text-align:left">
+            <div class="shortcuts-modal-header" style="margin-bottom:1rem">
+              <div class="shortcuts-header-title" style="color:var(--text-primary);display:flex;align-items:center;gap:10px">
+                <i class="ph ph-queue" style="color:var(--accent);font-size:1.4rem"></i>
+                <span>Add to Playlist or Queue</span>
+              </div>
+              <button class="shortcuts-close-btn" @click="playlistPickerState.show = false">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+
+            <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1rem">
+              Add <strong>{{ playlistPickerState.item?.title }}</strong>:
+            </div>
+
+            <!-- Quick Queue Actions -->
+            <div style="display:flex;gap:8px;margin-bottom:1.25rem">
+              <button class="btn btn-secondary btn-sm" style="flex:1" @click="addPickerItemToQueue(true)">
+                <i class="ph ph-skip-forward"></i> Play Next
+              </button>
+              <button class="btn btn-secondary btn-sm" style="flex:1" @click="addPickerItemToQueue(false)">
+                <i class="ph ph-plus"></i> Add to Queue
+              </button>
+            </div>
+
+            <!-- Create new playlist inline -->
+            <div style="display:flex;gap:8px;margin-bottom:1.25rem">
+              <input
+                type="text"
+                v-model="playlistPickerState.inlineName"
+                class="form-input"
+                placeholder="New playlist name..."
+                @keyup.enter="createAndAddToPlaylist"
+              />
+              <button class="btn btn-primary btn-sm" @click="createAndAddToPlaylist">
+                Create
+              </button>
+            </div>
+
+            <div v-if="playlistPickerState.loading" style="text-align:center;padding:1.5rem">
+              <div class="loading-spinner"></div>
+            </div>
+
+            <div v-else-if="playlistPickerState.playlists.length === 0" style="text-align:center;padding:1.5rem;color:var(--text-muted);font-size:0.85rem">
+              No playlists yet. Type a name above to create your first playlist!
+            </div>
+
+            <div v-else style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+              <div
+                v-for="pl in playlistPickerState.playlists"
+                :key="pl.id"
+                class="collection-select-item"
+                style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:rgba(255,255,255,0.04);border-radius:10px;cursor:pointer;transition:background 0.2s"
+                @click="toggleItemInPlaylist(pl)"
+              >
+                <div>
+                  <div style="font-weight:700;font-size:0.9rem">{{ pl.name }}</div>
+                  <div style="font-size:0.75rem;color:var(--text-muted)">{{ pl.item_count || 0 }} items</div>
+                </div>
+                <i :class="isItemInPlaylist(pl) ? 'ph-fill ph-check-circle' : 'ph ph-plus-circle'" :style="{ color: isItemInPlaylist(pl) ? 'var(--accent)' : 'var(--text-muted)', fontSize: '1.3rem' }"></i>
+              </div>
+            </div>
+
+            <button class="btn btn-ghost btn-full" style="margin-top:1.25rem" @click="playlistPickerState.show = false">
               Done
             </button>
           </div>
@@ -11513,6 +12506,7 @@ const App = {
           { name: "Shows & Cartoons", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
           { name: "Movies", path: "/browse?type=movie", id: "nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
           { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
+          { name: "Playlists", path: "/playlists", id: "nav-playlists", isMatch: (r) => r.path.startsWith("/playlists") },
           { name: "Stats", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
           { name: "About", path: "/about", id: "nav-about", isMatch: (r) => r.path === "/about" },
         ];
@@ -11522,6 +12516,7 @@ const App = {
         { name: "Movies", path: "/browse?type=movie", id: "nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
         { name: "Series", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
         { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
+        { name: "Playlists", path: "/playlists", id: "nav-playlists", isMatch: (r) => r.path.startsWith("/playlists") },
         { name: "Stats", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
         { name: "About", path: "/about", id: "nav-about", isMatch: (r) => r.path === "/about" },
       ];
@@ -11567,6 +12562,11 @@ const App = {
     function goFavorites() {
       showProfileMenu.value = false;
       router.push("/favorites");
+    }
+
+    function goPlaylists() {
+      showProfileMenu.value = false;
+      router.push("/playlists");
     }
 
     function goCollections() {
@@ -12031,6 +13031,38 @@ const App = {
       }
     }
 
+    function handleContextMenuPlaylist() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item) return;
+      openAddToPlaylist(item);
+    }
+
+    function handleContextMenuQueueNext() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item) return;
+      if (!store.queue) store.queue = [];
+      if (store.queue.length > 0 && store.queueIndex >= 0) {
+        store.queue.splice(store.queueIndex + 1, 0, item);
+        addToast(`Added "${item.title}" to play next ⏭️`, "success");
+      } else {
+        store.queue.push(item);
+        store.queueIndex = 0;
+        addToast(`Added "${item.title}" to queue 📋`, "success");
+      }
+    }
+
+    function handleContextMenuQueueEnd() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item) return;
+      if (!store.queue) store.queue = [];
+      store.queue.push(item);
+      if (store.queueIndex < 0) store.queueIndex = 0;
+      addToast(`Added "${item.title}" to queue 📋`, "success");
+    }
+
     // ─── Global Collection Picker Helpers ──────────────────────
     const userCustomCollections = computed(() => {
       return (collectionPickerState.collections || []).filter((c) => !c.smart && !c.universe);
@@ -12140,6 +13172,9 @@ const App = {
       handleContextMenuDetails,
       handleContextMenuTrailer,
       handleContextMenuFav,
+      handleContextMenuPlaylist,
+      handleContextMenuQueueNext,
+      handleContextMenuQueueEnd,
       handleContextMenuCollection,
       handleContextMenuFixMatch,
       handleContextKidsOverride,
@@ -12147,6 +13182,13 @@ const App = {
       handleContextMenuDelete,
       handleContextMenuResetProgress,
       collectionPickerState,
+      playlistPickerState,
+      openAddToPlaylist,
+      isItemInPlaylist,
+      toggleItemInPlaylist,
+      createAndAddToPlaylist,
+      addPickerItemToQueue,
+      goPlaylists,
       globalTrailerState,
       userCustomCollections,
       isItemInCol,
