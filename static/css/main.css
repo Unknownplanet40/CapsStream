@@ -6984,7 +6984,9 @@ body.kids-mode-theme .suggestion-tag:hover {
 .player-achv-pill {
   position: absolute;
   left: 18px;
-  z-index: 30;
+  /* Above the paused-info block / bottom bar (later DOM siblings, no z-index)
+     and the compat banner (z:40) so unlock notices are never hidden. */
+  z-index: 50;
   display: flex;
   align-items: center;
   gap: 8px;
