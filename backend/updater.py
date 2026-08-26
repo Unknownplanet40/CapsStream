@@ -396,7 +396,11 @@ try:
 except Exception as e:
     log(f"pending-swap error: {e}")
 
-python_exe = os.path.join(root, "winpython", "python", "python.exe")
+# Prefer the windowless interpreter so the relaunched server doesn't open a
+# black console window (matches the silent-launch experience).
+python_exe = os.path.join(root, "winpython", "python", "pythonw.exe")
+if not os.path.isfile(python_exe):
+    python_exe = os.path.join(root, "winpython", "python", "python.exe")
 if not os.path.isfile(python_exe):
     python_exe = sys.executable
 
@@ -428,8 +432,10 @@ def spawn_restart_helper():
         f.write(_RESTART_HELPER_SRC)
 
     flags = 0
-    if hasattr(subprocess, "DETACHED_PROCESS"):
-        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        # Fully invisible — DETACHED_PROCESS alone still lets console-host
+        # helpers (python.exe) flash a window.
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
     subprocess.Popen(
         [sys.executable, helper_path, str(os.getpid()), BASE_DIR],
         cwd=BASE_DIR,

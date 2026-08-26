@@ -1456,15 +1456,18 @@ def api_restart_after_update():
                 "  call start.bat\r\n"
                 ")\r\n"
             )
-        flags = 0
-        if hasattr(subprocess, "DETACHED_PROCESS"):
-            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        # CREATE_NO_WINDOW keeps the fallback cmd (and its ping delay) fully
+        # invisible; DETACHED_PROCESS alone still lets console children show.
+        hide = 0
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            hide = subprocess.CREATE_NO_WINDOW
         subprocess.Popen(
             ["cmd", "/c", helper],
             cwd=BASE_DIR,
-            creationflags=flags,
-            close_fds=True,
+            creationflags=hide | subprocess.CREATE_NEW_PROCESS_GROUP,
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         print(f"[Updater] Restart helper spawned; fallback armed ({helper})")
     except Exception as e:
