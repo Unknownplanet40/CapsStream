@@ -121,13 +121,43 @@ def _hash_pin(pin):
 
 # ─── PIN Brute-Force Protection ──────────────────────────────────────────────
 
-_PIN_FAILS = {}          # profile_id -> [monotonic timestamps of failures]
+_PIN_FAILS = {}          # profile_id -> [epoch timestamps of failures]
+_PIN_FAILS_FILE = os.path.join(BASE_DIR, "data", "pin_fails.json")
 _PIN_MAX_ATTEMPTS = 5
 _PIN_LOCKOUT_SEC = 600   # 10 minutes
 
 
+def _load_pin_fails():
+    """Load persisted failure counts so restarts don't reset lockouts."""
+    global _PIN_FAILS
+    if _PIN_FAILS:
+        return
+    try:
+        with open(_PIN_FAILS_FILE, encoding="utf-8") as f:
+            raw = json.load(f) or {}
+        now = time.time()
+        _PIN_FAILS = {
+            int(pid): [t for t in stamps if now - t < _PIN_LOCKOUT_SEC]
+            for pid, stamps in raw.items()
+        }
+    except Exception:
+        _PIN_FAILS = {}
+
+
+def _save_pin_fails():
+    try:
+        os.makedirs(os.path.dirname(_PIN_FAILS_FILE), exist_ok=True)
+        tmp = _PIN_FAILS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({str(k): v for k, v in _PIN_FAILS.items()}, f)
+        os.replace(tmp, _PIN_FAILS_FILE)
+    except Exception:
+        pass
+
+
 def _pin_lockout_remaining(profile_id):
-    now = time.monotonic()
+    _load_pin_fails()
+    now = time.time()
     fails = [t for t in _PIN_FAILS.get(profile_id, []) if now - t < _PIN_LOCKOUT_SEC]
     _PIN_FAILS[profile_id] = fails
     if len(fails) >= _PIN_MAX_ATTEMPTS:
@@ -136,14 +166,17 @@ def _pin_lockout_remaining(profile_id):
 
 
 def _record_pin_failure(profile_id):
-    now = time.monotonic()
-    fails = [t for t in _PIN_FAILS.get(profile_id, []) if now - t < _PIN_LOCKOUT_SEC]
-    fails.append(now)
+    _load_pin_fails()
+    fails = [t for t in _PIN_FAILS.get(profile_id, []) if time.time() - t < _PIN_LOCKOUT_SEC]
+    fails.append(time.time())
     _PIN_FAILS[profile_id] = fails
+    _save_pin_fails()
 
 
 def _clear_pin_failures(profile_id):
-    _PIN_FAILS.pop(profile_id, None)
+    _load_pin_fails()
+    if _PIN_FAILS.pop(profile_id, None) is not None:
+        _save_pin_fails()
 
 
 def _current_profile():
@@ -1445,6 +1478,44 @@ def api_restart_after_update():
 
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 LOG_NAME_RE = re.compile(r"^capsstream_\d{8}\.log$")
+LOG_RETENTION_DAYS = 14
+
+
+def _prune_old_logs():
+    """Delete daily server logs older than LOG_RETENTION_DAYS."""
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        cutoff = time.time() - LOG_RETENTION_DAYS * 86400
+        removed = 0
+        for name in os.listdir(LOG_DIR):
+            fp = os.path.join(LOG_DIR, name)
+            if LOG_NAME_RE.match(name) and os.path.isfile(fp) and os.path.getmtime(fp) < cutoff:
+                os.remove(fp)
+                removed += 1
+        if removed:
+            print(f"[Maintenance] Pruned {removed} old log file(s)")
+    except Exception as e:
+        print(f"[Maintenance] Log prune failed: {e}")
+
+
+def _db_maintenance_daemon():
+    """
+    Weekly SQLite upkeep: PRAGMA optimize refreshes planner statistics and
+    quick_check detects corruption early. First pass runs ~5 min after boot.
+    """
+    from backend.db import get_conn
+    time.sleep(300)
+    while True:
+        try:
+            conn = get_conn()
+            conn.execute("PRAGMA optimize")
+            row = conn.execute("PRAGMA quick_check").fetchone()
+            status = row[0] if row else "unknown"
+            conn.close()
+            print(f"[DB] Weekly maintenance done (quick_check: {status})")
+        except Exception as e:
+            print(f"[DB] Maintenance failed: {e}")
+        time.sleep(7 * 86400)
 
 
 def _safe_log_path(name):
@@ -1921,7 +1992,9 @@ def api_scan():
     global _scan_thread
     status = get_scan_status()
     if status["running"]:
-        return jsonify({"error": "Scan already in progress", "status": status}), 409
+        # Not an error — tell the caller a scan is already running so the UI
+        # can attach to it silently (no console 409 noise).
+        return jsonify({"ok": True, "already_running": True, "status": status})
 
     def run_scan():
         scan_library()
@@ -2724,6 +2797,7 @@ def api_system_info():
         "version": get_app_version(),
         "is_dev": is_dev_mode(),
         "app_name": "CapsStream",
+        "remote_exposed": (config.get("host", "127.0.0.1") not in ("127.0.0.1", "localhost", "::1")),
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "platform": platform.platform(),
         "os_name": os.name,
@@ -2797,11 +2871,23 @@ if __name__ == "__main__":
     # Weekly automatic config + database backups (data/backups, keep 4)
     start_auto_backups()
 
+    # Startup maintenance: prune old logs, then weekly DB upkeep
+    _prune_old_logs()
+    threading.Thread(target=_db_maintenance_daemon, daemon=True, name="db-maintenance").start()
+
     # Load config and apply system file hiding
     cfg = load_config()
     apply_system_file_hiding()
     host = cfg.get("host", "127.0.0.1")
     port = cfg.get("port", 8000)
+
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "\n  ⚠️  WARNING: The server is bound to a non-localhost address — "
+            "anyone on your network can access CapsStream without authenticating.\n"
+            "  Set host back to '127.0.0.1' in config.json unless you intentionally "
+            "want to share your library."
+        )
 
     # Library scanning is intentionally NOT started here.
     # The scan waits until the user logs into a profile (frontend triggers POST /api/scan after login).

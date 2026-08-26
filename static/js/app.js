@@ -689,17 +689,14 @@ async function startLibraryScan(force = false) {
   }
   sessionScanStarted = true;
   try {
-    await API.post("/api/scan", {});
+    const res = await API.post("/api/scan", {});
+    if (res && res.already_running) {
+      // Scan already running — silently attach to its status
+    }
     store.scanRunning = true;
     pollScanStatus();
     return true;
   } catch (e) {
-    if (e.message && e.message.includes("409")) {
-      // Scan already running elsewhere — just follow its status
-      store.scanRunning = true;
-      pollScanStatus();
-      return true;
-    }
     sessionScanStarted = false;
     return false;
   }
@@ -999,9 +996,9 @@ const ContentRow = {
       </div>
 
       <div class="row-scroller-wrapper">
-        <div class="cards-scroller" ref="scrollerRef" @scroll="checkScroll">
+        <div class="cards-scroller" ref="scrollerRef" @scroll="onRowScroll">
           <media-card
-            v-for="item in (row?.items || [])"
+            v-for="item in visibleItems"
             :key="item.id || item.tmdb_id"
             :item="item"
             :is-continue="row?.type === 'continue'"
@@ -1012,16 +1009,36 @@ const ContentRow = {
       </div>
     </div>
   `,
-  setup() {
+  setup(props) {
     const scrollerRef = ref(null);
     const canScrollLeft = ref(false);
     const canScrollRight = ref(true);
+
+    // Progressive rendering: very long rows (big libraries) mount cards in
+    // chunks as the user scrolls instead of building the whole DOM at once.
+    const renderCount = ref(24);
+    const totalItems = computed(() => (props.row?.items || []).length);
+    const visibleItems = computed(() => (props.row?.items || []).slice(0, renderCount.value));
+
+    function maybeRenderMore() {
+      if (renderCount.value < totalItems.value && scrollerRef.value) {
+        const el = scrollerRef.value;
+        if (el.scrollLeft + el.clientWidth >= el.scrollWidth - 40) {
+          renderCount.value = Math.min(renderCount.value + 24, totalItems.value);
+        }
+      }
+    }
+
+    function onRowScroll() {
+      checkScroll();
+      maybeRenderMore();
+    }
 
     function checkScroll() {
       if (!scrollerRef.value) return;
       const el = scrollerRef.value;
       canScrollLeft.value = el.scrollLeft > 10;
-      canScrollRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 10;
+      canScrollRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 10 || renderCount.value < totalItems.value;
     }
 
     function scrollLeft() {
@@ -1042,7 +1059,7 @@ const ContentRow = {
       });
     });
 
-    return { scrollerRef, canScrollLeft, canScrollRight, checkScroll, scrollLeft, scrollRight };
+    return { scrollerRef, canScrollLeft, canScrollRight, visibleItems, onRowScroll, scrollLeft, scrollRight };
   },
 };
 
@@ -1467,11 +1484,7 @@ const HomePage = {
         await API.post("/api/scan", {});
         store.scanRunning = true;
       } catch (e) {
-        if (e.message && e.message.includes("409")) {
-          addToast("Scan already in progress", "info");
-        } else {
-          addToast("Failed to start scan", "error");
-        }
+        addToast("Failed to start scan", "error");
       }
     }
 
@@ -3350,6 +3363,25 @@ const SettingsPage = {
                   </div>
                 </div>
               </div>
+
+              <!-- Parental override rules (allow/block titles) -->
+              <div v-if="kidsOverrides.length" style="border-top:1px solid var(--border);margin-top:18px;padding-top:16px">
+                <div class="settings-label" style="margin-bottom:4px">Title Overrides for Kids Mode</div>
+                <div class="settings-desc" style="margin-bottom:10px">Rules set via right-click → "Kids Mode: Always Allow / Block Title". These win over automatic filtering.</div>
+                <div v-for="ov in kidsOverrides" :key="ov.tmdb_id"
+                     style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;font-size:0.87rem">
+                  <i :class="ov.action === 'allow' ? 'ph ph-shield-check' : 'ph ph-shield-warning'"
+                     :style="{ color: ov.action === 'allow' ? '#2ecc71' : '#e50914', fontSize: '1.1rem' }"></i>
+                  <span style="flex:1;font-weight:600">{{ ov.title || ('TMDb #' + ov.tmdb_id) }}</span>
+                  <span :style="{ color: ov.action === 'allow' ? '#2ecc71' : '#e50914', fontWeight: 700, fontSize: '0.78rem' }">
+                    {{ ov.action === 'allow' ? 'ALWAYS ALLOWED' : 'BLOCKED' }}
+                  </span>
+                  <button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 10px;height:auto"
+                          @click="removeKidsOverride(ov)" :id="'btn-del-override-' + ov.tmdb_id">
+                    <i class="ph ph-x"></i> Remove
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -3885,6 +3917,7 @@ const SettingsPage = {
       loadSettings();
       loadCacheInfo();
       loadSystemInfo();
+      if (!store.profile?.is_kids) loadKidsOverrides();
       window.addEventListener("beforeunload", handleBeforeUnload);
       // Auto-run the update check when arriving from the update banner
       if (store.pendingUpdateCheck) {
@@ -4142,6 +4175,28 @@ const SettingsPage = {
       }
     }
 
+    // ─── Kids Mode parental overrides management ────────────────
+    const kidsOverrides = ref([]);
+
+    async function loadKidsOverrides() {
+      try {
+        const res = await API.get("/api/kids-overrides");
+        kidsOverrides.value = res || [];
+      } catch (e) {
+        kidsOverrides.value = [];
+      }
+    }
+
+    async function removeKidsOverride(ov) {
+      try {
+        await API.del(`/api/kids-overrides/${ov.tmdb_id}`);
+        kidsOverrides.value = kidsOverrides.value.filter((o) => o.tmdb_id !== ov.tmdb_id);
+        addToast(`Override removed — "${ov.title || "title"}" follows automatic Kids Mode rules again`, "success");
+      } catch (e) {
+        addToast("Failed to remove override", "error");
+      }
+    }
+
     // ─── Unmatched Media & Fix Match ────────────────────────────
     const unmatchedList = ref([]);
     const loadingUnmatched = ref(false);
@@ -4380,6 +4435,9 @@ const SettingsPage = {
       currentTheme,
       selectTheme,
       kidsProfiles,
+      kidsOverrides,
+      loadKidsOverrides,
+      removeKidsOverride,
       saveKidsProfileLimits,
       store,
       sysInfo,
@@ -10727,6 +10785,23 @@ const App = {
         </div>
       </transition>
 
+      <transition name="fade">
+        <div
+          class="update-banner"
+          style="background:linear-gradient(90deg,#7a1f1f,#a12b2b)"
+          v-if="store.sysInfo?.remote_exposed && !remoteBannerDismissed && showNav && !store.profile?.is_kids"
+        >
+          <i class="ph ph-warning"></i>
+          <span>
+            The server is reachable from your network without authentication —
+            set host to 127.0.0.1 in config.json if this is unintentional.
+          </span>
+          <button class="update-banner-dismiss" @click="remoteBannerDismissed = true" title="Dismiss">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+      </transition>
+
       <!-- Main content -->
       <main :style="{ paddingTop: showNav && isPlayerRoute && isDetailRoute ? 'var(--nav-height)' : '0' }">
         <router-view />
@@ -11102,6 +11177,7 @@ const App = {
 
     // ─── Update banner state ─────────────────────────────────────
     const updateBannerDismissed = ref(false);
+    const remoteBannerDismissed = ref(false);
     let updateQuietChecked = false;
     async function checkUpdateQuiet() {
       if (updateQuietChecked) return;
@@ -11113,6 +11189,11 @@ const App = {
       try {
         const r = await API.get("/api/system/check-update");
         if (r && r.status === "available") store.updateInfo = r;
+      } catch (e) {}
+      try {
+        // Used by the remote-exposure warning banner
+        const info = await API.get("/api/system/info");
+        if (info) store.sysInfo = info;
       } catch (e) {}
     }
 
@@ -11399,13 +11480,12 @@ const App = {
     async function triggerScan() {
       try {
         unlockAchievement("scan_master");
-        await API.post("/api/scan", {});
+        const res = await API.post("/api/scan", {});
         store.scanRunning = true;
-        pollScanStatus();
+        if (res && res.already_running) addToast("Scan already in progress", "info");
+        else pollScanStatus();
       } catch (e) {
-        if (e.message.includes("409")) {
-          addToast("Scan already in progress", "info");
-        }
+        addToast("Failed to start scan", "error");
       }
     }
 
@@ -11763,6 +11843,7 @@ const App = {
       appLoading,
       showNav,
       updateBannerDismissed,
+      remoteBannerDismissed,
       isPlayerRoute,
       isDetailRoute,
       isRoute,
