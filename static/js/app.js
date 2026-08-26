@@ -8,16 +8,51 @@ const { createRouter, createWebHashHistory } = VueRouter;
 
 // ─── API Helper ──────────────────────────────────────────────
 
+const _API_CACHE = new Map();
+
 const API = {
-  async get(url) {
+  clearCache(pattern) {
+    if (!pattern) {
+      _API_CACHE.clear();
+      return;
+    }
+    for (const key of _API_CACHE.keys()) {
+      if (key.includes(pattern)) _API_CACHE.delete(key);
+    }
+  },
+  async get(url, options = {}) {
+    const isCacheable = url.startsWith("/api/media") || url.startsWith("/api/genres") || url.startsWith("/api/favorites") || url.startsWith("/api/collections");
+    const useCache = options.cache !== false && (isCacheable || options.cache === true);
+    const maxAge = options.maxAge || 60000;
+    const now = Date.now();
+    const entry = _API_CACHE.get(url);
+
+    if (useCache && entry) {
+      // SWR: return cached entry immediately and revalidate in background if older than maxAge / 2
+      if (now - entry.timestamp > maxAge / 2) {
+        fetch(url)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((fresh) => {
+            if (fresh) _API_CACHE.set(url, { data: fresh, timestamp: Date.now() });
+          })
+          .catch(() => {});
+      }
+      return entry.data;
+    }
+
     const r = await fetch(url);
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       throw new Error(err.error || `API error: ${r.status}`);
     }
-    return r.json();
+    const data = await r.json();
+    if (useCache) {
+      _API_CACHE.set(url, { data, timestamp: now });
+    }
+    return data;
   },
   async post(url, data) {
+    API.clearCache();
     const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -30,6 +65,7 @@ const API = {
     return r.json();
   },
   async put(url, data) {
+    API.clearCache();
     const r = await fetch(url, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -42,6 +78,7 @@ const API = {
     return r.json();
   },
   async patch(url, data) {
+    API.clearCache();
     const r = await fetch(url, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -54,6 +91,7 @@ const API = {
     return r.json();
   },
   async del(url) {
+    API.clearCache();
     const r = await fetch(url, { method: "DELETE" });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
@@ -82,7 +120,52 @@ const store = reactive({
   updateInfo: null,      // set when an update is available
   pendingScanAfterCacheCleared: false, // triggers auto-scan when returning home after cache clear
   pendingUpdateCheck: false,           // triggers auto-check for updates when Settings opens from the banner
+  sleepTimerMinutes: 0,
+  sleepTimerEndsAt: null,
+  bedtimeActive: false,
+  bedtimeReason: 'curfew',
+  todayWatchSeconds: 0,
+  bedtimeWarned: false,
+  dailyLimitWarned: false,
+  bedtimeDismissedForToday: false,
+  dailyLimitExtended: false,
 });
+
+let sleepTimerInterval = null;
+
+function setSleepTimer(minutes) {
+  if (sleepTimerInterval) {
+    clearInterval(sleepTimerInterval);
+    sleepTimerInterval = null;
+  }
+  if (!minutes || minutes <= 0) {
+    store.sleepTimerMinutes = 0;
+    store.sleepTimerEndsAt = null;
+    addToast("Bedtime timer turned off", "info");
+    return;
+  }
+  store.sleepTimerMinutes = minutes;
+  store.sleepTimerEndsAt = Date.now() + minutes * 60 * 1000;
+  addToast(`Bedtime timer set for ${minutes} minutes 🌙`, "success");
+
+  sleepTimerInterval = setInterval(() => {
+    if (!store.sleepTimerEndsAt) {
+      clearInterval(sleepTimerInterval);
+      return;
+    }
+    const remaining = Math.max(0, Math.ceil((store.sleepTimerEndsAt - Date.now()) / 60000));
+    store.sleepTimerMinutes = remaining;
+    if (Date.now() >= store.sleepTimerEndsAt) {
+      clearInterval(sleepTimerInterval);
+      sleepTimerInterval = null;
+      store.sleepTimerMinutes = 0;
+      store.sleepTimerEndsAt = null;
+      store.bedtimeActive = true;
+      const v = document.querySelector("video");
+      if (v) v.pause();
+    }
+  }, 1000);
+}
 
 let isServerOfflineToastActive = false;
 
@@ -276,18 +359,40 @@ function triggerAchievementUnlock(ach) {
 
 // ─── Kids Mode Content Filter ─────────────────────────────────
 
-const KIDS_BLOCKED_GENRES = ["horror", "thriller", "crime", "action"];
+const KIDS_SAFE_GENRES = [
+  "animation", "family", "adventure", "comedy", "fantasy", 
+  "science fiction", "sci-fi", "music", "documentary", "kids"
+];
+
+const KIDS_BLOCKED_GENRES = [
+  "horror", "thriller", "crime", "war", "romance", "mystery", "action"
+];
+
+function isKidSafeItem(item) {
+  if (!item) return false;
+  const genres = (item.genres || "").toLowerCase();
+  const isAnimatedOrFamily = genres.includes("animation") || genres.includes("family") || item.type === "anime";
+  
+  // Block strictly mature genres (Action allowed ONLY if animated or family)
+  const hasBlockedGenre = KIDS_BLOCKED_GENRES.some(g => {
+    if (g === "action") {
+      return genres.includes("action") && !isAnimatedOrFamily;
+    }
+    return genres.includes(g);
+  });
+  if (hasBlockedGenre) return false;
+
+  // Must match at least one safe genre keyword or be anime/animation
+  const hasSafeGenre = KIDS_SAFE_GENRES.some(g => genres.includes(g)) || isAnimatedOrFamily;
+  if (genres && !hasSafeGenre) return false;
+
+  return true;
+}
 
 function kidsFilter(items) {
+  if (!items || !Array.isArray(items)) return [];
   if (!store.profile?.is_kids) return items;
-  return (items || []).filter(item => {
-    const genres = (item.genres || "").toLowerCase();
-    if (KIDS_BLOCKED_GENRES.some(g => genres.includes(g))) return false;
-    if (item.vote_average !== undefined && item.vote_average !== null && Number(item.vote_average) > 0) {
-      if (Number(item.vote_average) < 6.0) return false;
-    }
-    return true;
-  });
+  return items.filter(item => isKidSafeItem(item));
 }
 
 let scanPollTimer = null;
@@ -369,7 +474,11 @@ function unlockAchievement(achievementId) {
   API.post("/api/achievements/unlock", { achievement_id: achievementId })
     .then((res) => {
       if (res && res.unlocked) {
-        addToast(`🏆 Achievement Unlocked: ${res.unlocked.icon} ${res.unlocked.title}!`, "success");
+        if (store.profile?.is_kids) {
+          addToast(`🌟 Kids Badge Unlocked: ${res.unlocked.icon} ${res.unlocked.title}! 🎉`, "success");
+        } else {
+          addToast(`🏆 Achievement Unlocked: ${res.unlocked.icon} ${res.unlocked.title}!`, "success");
+        }
       }
     })
     .catch(() => {});
@@ -486,6 +595,7 @@ const MediaCard = {
           :alt="cardItem.title"
           class="card-poster"
           loading="lazy"
+          decoding="async"
           @error="handleImgError"
         >
         <div v-else class="card-poster-placeholder">
@@ -585,10 +695,10 @@ const ContentRow = {
       <div class="row-scroller-wrapper">
         <div class="cards-scroller" ref="scrollerRef" @scroll="checkScroll">
           <media-card
-            v-for="item in row.items"
+            v-for="item in (row?.items || [])"
             :key="item.id || item.tmdb_id"
             :item="item"
-            :is-continue="row.type === 'continue'"
+            :is-continue="row?.type === 'continue'"
             @click="$emit('card-click', item, row)"
             @remove-continue="$emit('remove-continue', item)"
           />
@@ -684,6 +794,7 @@ const HeroBanner = {
               :src="imgUrl(current.backdrop_path)"
               class="hero-backdrop-img"
               :alt="current.title"
+              decoding="async"
               @error="e => e.target.style.display='none'"
             >
           </div>
@@ -721,9 +832,9 @@ const HeroBanner = {
           </button>
         </div>
       </div>
-      <div class="hero-indicators">
+      <div class="hero-indicators" v-if="items && items.length > 1">
         <div
-          v-for="(item, i) in items.slice(0, 6)"
+          v-for="(item, i) in (items || []).slice(0, 6)"
           :key="i"
           class="hero-indicator"
           :class="{ active: i === currentIdx }"
@@ -734,12 +845,12 @@ const HeroBanner = {
   `,
   setup(props) {
     const currentIdx = ref(0);
-    const current = computed(() => props.items?.[currentIdx.value] || null);
+    const current = computed(() => (props.items && props.items.length) ? props.items[currentIdx.value] : null);
     let timer = null;
 
     onMounted(() => {
       timer = setInterval(() => {
-        if (props.items?.length > 1) {
+        if (props.items && props.items.length > 1) {
           currentIdx.value = (currentIdx.value + 1) % Math.min(props.items.length, 6);
         }
       }, 7000);
@@ -765,12 +876,40 @@ const HomePage = {
       />
 
       <hero-banner
-        v-if="heroItems.length"
+        v-if="heroItems && heroItems.length"
         :items="heroItems"
         @play="handlePlay"
         @detail="handleDetail"
         @trailer="handleTrailer"
       />
+
+      <!-- Kids Category Bubbles Tray -->
+      <div v-if="store.profile?.is_kids && !loading && kidsItemCount > 0" class="kids-category-bubbles">
+        <div class="kids-bubble-item" :class="{ active: selectedCategory === 'all' }" @click="selectCategory('all')">
+          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #ff7675, #d63031)">🌟</div>
+          <span class="kids-bubble-label">All Fun</span>
+        </div>
+        <div class="kids-bubble-item" :class="{ active: selectedCategory === 'cartoons' }" @click="selectCategory('cartoons')">
+          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #74b9ff, #0984e3)">🎨</div>
+          <span class="kids-bubble-label">Cartoons & Anime</span>
+        </div>
+        <div class="kids-bubble-item" :class="{ active: selectedCategory === 'adventures' }" @click="selectCategory('adventures')">
+          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #55efc4, #00b894)">🚀</div>
+          <span class="kids-bubble-label">Adventures</span>
+        </div>
+        <div class="kids-bubble-item" :class="{ active: selectedCategory === 'magic' }" @click="selectCategory('magic')">
+          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #a29bfe, #6c5ce7)">🪄</div>
+          <span class="kids-bubble-label">Magic & Fantasy</span>
+        </div>
+        <div class="kids-bubble-item" :class="{ active: selectedCategory === 'comedy' }" @click="selectCategory('comedy')">
+          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #ffeaa7, #fdcb6e)">😄</div>
+          <span class="kids-bubble-label">Funny Laughs</span>
+        </div>
+        <div class="kids-bubble-item" :class="{ active: selectedCategory === 'family' }" @click="selectCategory('family')">
+          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #fd79a8, #e84393)">🦁</div>
+          <span class="kids-bubble-label">Animals & Family</span>
+        </div>
+      </div>
 
       <div class="home-content">
         <!-- Structured loading skeleton — mirrors the real page layout -->
@@ -808,7 +947,7 @@ const HomePage = {
           </div>
         </div>
 
-        <div v-else-if="!loading && rows.length === 0" class="empty-state" style="padding-top: calc(var(--nav-height) + 2rem); text-align: center; max-width: 600px; margin: 0 auto;">
+        <div v-else-if="!loading && (!rows || rows.length === 0)" class="empty-state" style="padding-top: calc(var(--nav-height) + 2rem); text-align: center; max-width: 600px; margin: 0 auto;">
           <div class="empty-icon" style="font-size: 3.5rem; margin-bottom: 1rem;">🎬</div>
           <div class="empty-title" style="font-size: 1.5rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem;">
             No Media Found in Library
@@ -829,8 +968,8 @@ const HomePage = {
 
         <template v-else>
           <content-row
-            v-for="row in rows"
-            :key="row.title"
+            v-for="row in (rows || [])"
+            :key="row.title || row.id"
             :row="row"
             @card-click="handleCardClick"
             @remove-continue="handleRemoveContinue"
@@ -843,13 +982,45 @@ const HomePage = {
     const router = VueRouter.useRouter();
     const rows = ref([]);
     const loading = ref(true);
+    const selectedCategory = ref("all");
+    const kidsAllRows = ref([]);
+    const kidsItemCount = ref(0);
 
     const heroItems = computed(() => {
-      const topRatedRow = rows.value.find((r) => r.title === "Top Rated");
-      const recentRow = rows.value.find((r) => r.title === "Recently Added");
-      const source = topRatedRow || recentRow || rows.value[1];
-      return source?.items?.filter((i) => i.backdrop_path)?.slice(0, 6) || [];
+      if (!rows.value || !Array.isArray(rows.value)) return [];
+      const topRatedRow = rows.value.find((r) => r && r.title === "Top Rated");
+      const recentRow = rows.value.find((r) => r && r.title === "Recently Added");
+      const source = topRatedRow || recentRow || rows.value[1] || rows.value[0];
+      return (source?.items || []).filter((i) => i && i.backdrop_path).slice(0, 6);
     });
+
+    function selectCategory(cat) {
+      selectedCategory.value = cat;
+      if (store.profile?.is_kids) {
+        unlockAchievement("kids_bubble_explorer");
+      }
+      applyKidsCategoryFilter();
+    }
+
+    function applyKidsCategoryFilter() {
+      if (!store.profile?.is_kids || !kidsAllRows.value.length) return;
+      if (selectedCategory.value === "all") {
+        rows.value = kidsAllRows.value;
+      } else if (selectedCategory.value === "cartoons") {
+        rows.value = kidsAllRows.value.filter(r => r.categoryKey === "cartoons");
+      } else if (selectedCategory.value === "adventures") {
+        rows.value = kidsAllRows.value.filter(r => r.categoryKey === "adventures");
+      } else if (selectedCategory.value === "magic") {
+        rows.value = kidsAllRows.value.filter(r => r.categoryKey === "magic");
+      } else if (selectedCategory.value === "comedy") {
+        rows.value = kidsAllRows.value.filter(r => r.categoryKey === "comedy");
+      } else if (selectedCategory.value === "family") {
+        rows.value = kidsAllRows.value.filter(r => r.categoryKey === "family");
+      }
+      if (rows.value.length === 0) {
+        rows.value = kidsAllRows.value;
+      }
+    }
 
     async function loadHome() {
       try {
@@ -860,18 +1031,24 @@ const HomePage = {
           (data || []).forEach(r => (r.items || []).forEach(item => allRaw.push(item)));
           const uniqueItems = Array.from(new Map(allRaw.map(i => [i.id || i.tmdb_id, i])).values());
           const filtered = kidsFilter(uniqueItems);
+          kidsItemCount.value = filtered.length;
 
           const animationItems = filtered.filter(i => (i.genres || '').toLowerCase().includes('animation') || i.type === 'anime');
-          const familyItems = filtered.filter(i => (i.genres || '').toLowerCase().includes('family') || (i.genres || '').toLowerCase().includes('fantasy'));
+          const adventureItems = filtered.filter(i => (i.genres || '').toLowerCase().includes('adventure') || (i.genres || '').toLowerCase().includes('action') || (i.genres || '').toLowerCase().includes('sci-fi'));
+          const magicItems = filtered.filter(i => (i.genres || '').toLowerCase().includes('fantasy') || (i.genres || '').toLowerCase().includes('magic'));
+          const familyItems = filtered.filter(i => (i.genres || '').toLowerCase().includes('family') || (i.genres || '').toLowerCase().includes('documentary'));
           const comedyItems = filtered.filter(i => (i.genres || '').toLowerCase().includes('comedy'));
 
           const kidsRows = [];
-          if (animationItems.length) kidsRows.push({ title: "🎨 Animation & Cartoons", items: animationItems });
-          if (familyItems.length) kidsRows.push({ title: "🪄 Family & Fantasy", items: familyItems });
-          if (comedyItems.length) kidsRows.push({ title: "😄 Fun Comedies", items: comedyItems });
-          if (filtered.length && kidsRows.length === 0) kidsRows.push({ title: "✨ Kids Movies & Shows", items: filtered });
+          if (animationItems.length) kidsRows.push({ title: "🎨 Animation & Cartoons", items: animationItems, categoryKey: "cartoons" });
+          if (adventureItems.length) kidsRows.push({ title: "🚀 Fun Adventures", items: adventureItems, categoryKey: "adventures" });
+          if (magicItems.length) kidsRows.push({ title: "🪄 Magic & Fantasy", items: magicItems, categoryKey: "magic" });
+          if (familyItems.length) kidsRows.push({ title: "🦁 Animals & Family", items: familyItems, categoryKey: "family" });
+          if (comedyItems.length) kidsRows.push({ title: "😄 Funny Laughs", items: comedyItems, categoryKey: "comedy" });
+          if (filtered.length && kidsRows.length === 0) kidsRows.push({ title: "✨ Kids Movies & Shows", items: filtered, categoryKey: "all" });
 
-          rows.value = kidsRows;
+          kidsAllRows.value = kidsRows;
+          applyKidsCategoryFilter();
         } else {
           rows.value = (data || []).map(row => ({
             ...row,
@@ -1029,7 +1206,7 @@ const HomePage = {
 const DetailPage = {
   components: { MediaCard, TrailerModal },
   template: `
-    <div class="detail-page" v-if="media">
+    <div class="detail-page" v-if="media" @mousemove="onMouseMove">
       <trailer-modal
         v-if="trailerModalUrl"
         :url="trailerModalUrl"
@@ -1039,18 +1216,36 @@ const DetailPage = {
 
       <!-- Backdrop -->
       <div class="detail-backdrop">
-        <img
-          v-if="media.backdrop_path && !backdropFailed"
-          :src="imgUrl(media.backdrop_path)"
-          class="detail-backdrop-img"
-          :alt="media.title"
-          @error="backdropFailed = true"
-        >
+        <div class="detail-backdrop-parallax" :style="backdropStyle">
+          <transition name="kenburns-fade">
+            <img
+              v-if="activeBackdrop && !backdropFailed"
+              :key="activeBackdrop"
+              :src="imgUrl(activeBackdrop)"
+              class="detail-backdrop-img"
+              :alt="media.title"
+              decoding="async"
+              @error="backdropFailed = true"
+            >
+          </transition>
+        </div>
         <!-- Fallback when the backdrop can't load (server down / file missing) -->
-        <div v-else class="detail-backdrop-fallback">
+        <div v-if="!activeBackdrop || backdropFailed" class="detail-backdrop-fallback">
           <i class="ph ph-film-strip"></i>
         </div>
         <div class="detail-backdrop-overlay"></div>
+
+        <!-- Backdrop Indicators (Manual Switcher) -->
+        <div v-if="backdrops.length > 1" class="detail-backdrop-indicators">
+          <div
+            v-for="(b, idx) in backdrops"
+            :key="idx"
+            class="backdrop-dot"
+            :class="{ active: idx === activeBackdropIdx }"
+            @click.stop="activeBackdropIdx = idx"
+            :title="'Backdrop ' + (idx + 1)"
+          ></div>
+        </div>
       </div>
 
       <!-- Body -->
@@ -1118,19 +1313,19 @@ const DetailPage = {
             <button class="btn btn-secondary btn-lg" @click="toggleFav" id="detail-fav-btn" :title="media.is_favorite ? 'Remove from Watchlist' : 'Add to Watchlist'">
               <i :class="media.is_favorite ? 'ph-fill ph-heart' : 'ph ph-heart'" style="font-size:1.15rem" :style="{ color: media.is_favorite ? 'var(--accent)' : 'inherit' }"></i>
             </button>
-            <button class="btn btn-ghost btn-lg" @click="showCollectionModal = true" id="detail-collection-btn" title="Add to List">
+            <button v-if="!store.profile?.is_kids" class="btn btn-ghost btn-lg" @click="showCollectionModal = true" id="detail-collection-btn" title="Add to List">
               <i class="ph ph-plus-circle" style="font-size:1.15rem"></i>
             </button>
-            <button class="btn btn-ghost btn-lg" @click="openFixMatchModal" id="detail-fix-match-btn" title="Fix Match">
+            <button v-if="!store.profile?.is_kids" class="btn btn-ghost btn-lg" @click="openFixMatchModal" id="detail-fix-match-btn" title="Fix Match">
               <i class="ph ph-wrench" style="font-size:1.15rem"></i>
             </button>
-            <button class="btn btn-ghost btn-lg" @click="recacheInfo" :disabled="recaching" id="detail-recache-btn" :title="recaching ? 'Re-caching...' : 'Re-cache'">
+            <button v-if="!store.profile?.is_kids" class="btn btn-ghost btn-lg" @click="recacheInfo" :disabled="recaching" id="detail-recache-btn" :title="recaching ? 'Re-caching...' : 'Re-cache'">
               <i :class="recaching ? 'ph ph-circle-notch' : 'ph ph-database'" :style="{ animation: recaching ? 'spin 1s linear infinite' : 'none', fontSize: '1.15rem' }"></i>
             </button>
           </div>
 
           <!-- Codec Compatibility Warning Card -->
-          <div class="codec-warning-card" v-if="codecInfo.hasWarning">
+          <div class="codec-warning-card" v-if="codecInfo.hasWarning && !store.profile?.is_kids">
             <div class="codec-warning-icon">⚠️</div>
             <div class="codec-warning-content">
               <div class="codec-warning-title">
@@ -1315,7 +1510,7 @@ const DetailPage = {
                   </div>
                   <!-- Per-episode skip marker editor -->
                   <button
-                    v-if="ep.id"
+                    v-if="ep.id && !store.profile?.is_kids"
                     class="episode-skip-btn"
                     :class="{ 'has-markers': episodeHasMarkers(ep) }"
                     @click.stop="openEpisodeSkipModal(ep)"
@@ -1471,6 +1666,51 @@ const DetailPage = {
     });
 
     const backdropFailed = ref(false);
+    const activeBackdropIdx = ref(0);
+    const parallaxX = ref(0);
+    const parallaxY = ref(0);
+    const scrollOffsetY = ref(0);
+    let backdropCycleTimer = null;
+
+    const backdrops = computed(() => {
+      const list = [];
+      if (media.value?.backdrops && Array.isArray(media.value.backdrops)) {
+        for (const b of media.value.backdrops) {
+          if (b && !list.includes(b)) list.push(b);
+        }
+      }
+      if (media.value?.backdrop_path && !list.includes(media.value.backdrop_path)) {
+        list.unshift(media.value.backdrop_path);
+      }
+      return list;
+    });
+
+    const activeBackdrop = computed(() => backdrops.value[activeBackdropIdx.value] || media.value?.backdrop_path || null);
+
+    const backdropStyle = computed(() => ({
+      transform: `translate3d(${parallaxX.value}px, ${parallaxY.value + scrollOffsetY.value}px, 0) scale(1.06)`,
+      transition: "transform 0.15s cubic-bezier(0.2, 0, 0.2, 1)"
+    }));
+
+    function onMouseMove(e) {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      parallaxX.value = ((e.clientX / w) - 0.5) * -22;
+      parallaxY.value = ((e.clientY / h) - 0.5) * -16;
+    }
+
+    function onScroll() {
+      scrollOffsetY.value = window.scrollY * -0.28;
+    }
+
+    function startBackdropCycle() {
+      if (backdropCycleTimer) clearInterval(backdropCycleTimer);
+      backdropCycleTimer = setInterval(() => {
+        if (backdrops.value.length > 1) {
+          activeBackdropIdx.value = (activeBackdropIdx.value + 1) % backdrops.value.length;
+        }
+      }, 8000);
+    }
 
     async function load() {
       loading.value = true;
@@ -1483,7 +1723,16 @@ const DetailPage = {
         } else {
           url = `/api/show/${id}?type=${type}`;
         }
-        media.value = await API.get(url);
+        const loadedMedia = await API.get(url);
+        if (store.profile?.is_kids && loadedMedia && !isKidSafeItem(loadedMedia)) {
+          addToast("🧒 Kids Safe Mode: This title is restricted.", "warning");
+          media.value = null;
+          router.replace("/");
+          return;
+        }
+        media.value = loadedMedia;
+        activeBackdropIdx.value = 0;
+        startBackdropCycle();
         if (sortedSeasons.value.length) {
           activeSeason.value = sortedSeasons.value[0];
         }
@@ -1497,8 +1746,18 @@ const DetailPage = {
       }
     }
 
-    onMounted(load);
-    watch(() => route.params.id, load);
+    onMounted(() => {
+      load();
+      window.addEventListener("scroll", onScroll, { passive: true });
+    });
+    onUnmounted(() => {
+      if (backdropCycleTimer) clearInterval(backdropCycleTimer);
+      window.removeEventListener("scroll", onScroll);
+    });
+    watch(() => route.params.id, () => {
+      activeBackdropIdx.value = 0;
+      load();
+    });
 
     function copyFilePath() {
       if (!media.value?.file_path) return;
@@ -1801,6 +2060,11 @@ const DetailPage = {
       scrollCast,
       searchCast,
       backdropFailed,
+      activeBackdropIdx,
+      backdrops,
+      activeBackdrop,
+      backdropStyle,
+      onMouseMove,
       skipEditTarget,
       openEpisodeSkipModal,
       episodeHasMarkers,
@@ -2498,7 +2762,58 @@ const SettingsPage = {
           </div>
         </div>
 
-        <!-- 6. Fresh Start (Full System Reset) -->
+        <!-- 6. Parental Controls & Kids Screen Time -->
+        <div class="settings-section">
+          <div class="settings-section-title">
+            <i class="ph ph-shield-check" style="color:#fdcb6e"></i>
+            <span>Parental Controls & Kids Screen Time</span>
+          </div>
+          <div class="settings-group">
+            <div v-if="!kidsProfiles.length" style="padding:1.25rem;color:var(--text-muted);font-size:0.9rem">
+              No Kids profiles created yet. Create or edit a profile in <router-link to="/profiles?manage=true" style="color:var(--accent);font-weight:700">Manage Profiles</router-link> to set daily cartoon time limits and bedtime curfews.
+            </div>
+            <div v-else>
+              <div v-for="kp in kidsProfiles" :key="kp.id" class="settings-row" style="align-items:flex-start">
+                <div class="settings-label-container">
+                  <div class="settings-label" style="display:flex;align-items:center;gap:8px">
+                    <span>{{ kp.avatar }} {{ kp.name }}</span>
+                    <span style="font-size:0.75rem;background:rgba(253,203,110,0.15);color:#fdcb6e;padding:2px 8px;border-radius:12px;font-weight:700">🧒 Kids Profile</span>
+                  </div>
+                  <div class="settings-desc">Set daily watch limits and evening bedtime curfew for {{ kp.name }}.</div>
+                </div>
+                <div style="display:flex;gap:12px;flex-wrap:wrap">
+                  <div>
+                    <label style="display:block;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;font-weight:600">Daily Limit</label>
+                    <select v-model.number="kp.daily_limit_minutes" @change="saveKidsProfileLimits(kp)" class="form-input" style="min-width:140px;font-size:0.85rem">
+                      <option :value="0">No Limit</option>
+                      <option :value="30">30 Mins / day</option>
+                      <option :value="45">45 Mins / day</option>
+                      <option :value="60">1 Hour / day</option>
+                      <option :value="90">1.5 Hours / day</option>
+                      <option :value="120">2 Hours / day</option>
+                      <option :value="180">3 Hours / day</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;font-weight:600">Bedtime Curfew</label>
+                    <select v-model="kp.bedtime_curfew" @change="saveKidsProfileLimits(kp)" class="form-input" style="min-width:140px;font-size:0.85rem">
+                      <option value="">Off (None)</option>
+                      <option value="19:00">7:00 PM</option>
+                      <option value="19:30">7:30 PM</option>
+                      <option value="20:00">8:00 PM</option>
+                      <option value="20:30">8:30 PM</option>
+                      <option value="21:00">9:00 PM</option>
+                      <option value="21:30">9:30 PM</option>
+                      <option value="22:00">10:00 PM</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 7. Fresh Start (Full System Reset) -->
         <div class="settings-section" style="border:1px solid rgba(229,9,20,0.3);background:rgba(229,9,20,0.04)">
           <div class="settings-section-title">
             <i class="ph ph-warning-circle" style="color:var(--accent)"></i>
@@ -3111,6 +3426,24 @@ const SettingsPage = {
       }
     }
 
+    const allProfiles = ref([]);
+    const kidsProfiles = computed(() => (allProfiles.value || []).filter((p) => p.is_kids));
+
+    async function loadAllProfiles() {
+      try {
+        allProfiles.value = await API.get("/api/profiles") || [];
+      } catch (e) {}
+    }
+
+    async function saveKidsProfileLimits(kp) {
+      try {
+        await API.put(`/api/profiles/${kp.id}`, kp);
+        addToast(`Screen time settings saved for ${kp.name} ✓`, "success");
+      } catch (e) {
+        addToast("Failed to save screen time settings", "error");
+      }
+    }
+
     onMounted(() => {
       if (store.profile?.is_kids) {
         addToast("Settings is locked in Kids Mode 🔒", "warning");
@@ -3119,9 +3452,12 @@ const SettingsPage = {
       }
       loadSettings();
       loadCacheInfo();
+      loadAllProfiles();
     });
 
     return {
+      kidsProfiles,
+      saveKidsProfileLimits,
       store,
       sysInfo,
       loading,
@@ -3223,6 +3559,10 @@ const ShortcutsModal = {
                 <span class="shortcut-desc">Volume Up / Down</span>
                 <div class="kbd-group"><kbd class="shortcut-kbd">↑</kbd> <kbd class="shortcut-kbd">↓</kbd></div>
               </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Subtitle Sync (±250ms / ±1s)</span>
+                <div class="kbd-group"><kbd class="shortcut-kbd">[</kbd> <kbd class="shortcut-kbd">]</kbd></div>
+              </div>
             </div>
 
             <!-- Navigation & Global -->
@@ -3293,8 +3633,9 @@ const PlayerPage = {
 
       <!-- Minimal Achievement Pill (left side, never covers controls) -->
       <transition name="fade">
-        <div v-if="playerAch" class="player-achv-pill" :style="{ bottom: controlsHidden ? '40px' : '120px' }">
-          <i class="ph-fill ph-trophy"></i>
+        <div v-if="playerAch" class="player-achv-pill" :class="{ 'kids-achv-pill': playerAch.isKids }" :style="{ bottom: controlsHidden ? '40px' : '120px' }">
+          <span v-if="playerAch.icon" style="font-size:1.15rem;margin-right:2px">{{ playerAch.icon }}</span>
+          <i v-else class="ph-fill ph-trophy"></i>
           <span>{{ playerAch.title }}</span>
         </div>
       </transition>
@@ -3328,6 +3669,16 @@ const PlayerPage = {
           </button>
         </div>
       </transition>
+
+      <!-- Child Screen Lock Overlay -->
+      <div v-if="isChildLocked" class="player-child-lock-overlay" @click.stop="promptUnlockHint">
+        <transition name="fade">
+          <div v-if="showUnlockHint" class="child-lock-hint-pill" @click.stop="toggleChildLock">
+            <i class="ph-fill ph-lock-key"></i>
+            <span>Screen Locked • Click to Unlock 🔓</span>
+          </div>
+        </transition>
+      </div>
 
       <!-- Volume OSD (minimal vertical bar, right side) -->
       <transition name="fade">
@@ -3586,7 +3937,22 @@ const PlayerPage = {
 
                   <!-- Subtitle Appearance Customizer Panel -->
                   <div class="sub-style-panel" @click.stop>
-                    <div class="sub-style-title">Subtitle Appearance</div>
+                    <div class="sub-style-title">Subtitle Appearance & Sync</div>
+                    <div class="sub-style-row" style="flex-direction:column;align-items:stretch;gap:6px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.1)">
+                      <div style="display:flex;justify-content:space-between;align-items:center">
+                        <span class="sub-style-label">Sync / Delay</span>
+                        <span style="font-size:0.75rem;font-weight:700;color:var(--accent)">
+                          {{ subOffsetMs === 0 ? '0 ms (In Sync)' : (subOffsetMs > 0 ? '+' + subOffsetMs + ' ms' : subOffsetMs + ' ms') }}
+                        </span>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:4px;justify-content:space-between">
+                        <button class="sub-size-btn" @click="adjustSubOffset(-1000)" title="Earlier 1.0s">−1.0s</button>
+                        <button class="sub-size-btn" @click="adjustSubOffset(-250)" title="Earlier 0.25s">−0.25s</button>
+                        <button class="sub-size-btn" @click="resetSubOffset" title="Reset delay to 0 ms" :class="{ active: subOffsetMs === 0 }">Reset</button>
+                        <button class="sub-size-btn" @click="adjustSubOffset(250)" title="Later 0.25s">+0.25s</button>
+                        <button class="sub-size-btn" @click="adjustSubOffset(1000)" title="Later 1.0s">+1.0s</button>
+                      </div>
+                    </div>
                     <div class="sub-style-row">
                       <span class="sub-style-label">Color</span>
                       <div class="sub-color-dots">
@@ -3626,7 +3992,7 @@ const PlayerPage = {
                   <div style="font-size:0.75rem;color:var(--text-muted);padding:6px 12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">
                     Player Options
                   </div>
-                  <div class="player-menu-item" @click="showSkipModal = true; showQualityMenu = false" id="player-menu-skip-markers">
+                  <div v-if="!store.profile?.is_kids" class="player-menu-item" @click="showSkipModal = true; showQualityMenu = false" id="player-menu-skip-markers">
                     <span>⏱️ Edit Skip Markers</span>
                   </div>
                   <!-- Video Quality: always visible; clickable only when an
@@ -3830,11 +4196,14 @@ const PlayerPage = {
       <!-- Playback Error Overlay -->
       <div v-if="playerError" class="empty-state" style="position:fixed;inset:0;background:rgba(10,10,15,0.95);z-index:300;padding:2rem">
         <div class="empty-icon">⚠️</div>
-        <div class="empty-title">Playback Error</div>
+        <div class="empty-title">Playback Issue</div>
         <div class="empty-subtitle" style="max-width:480px;margin-bottom:1.5rem">
           {{ playerError }}
         </div>
-        <button class="btn btn-primary" @click="goBack">Go Back</button>
+        <div style="display:flex;gap:12px;justify-content:center">
+          <button class="btn btn-primary" @click="playerError = null; if (videoRef) videoRef.play().catch(()=>{})">Resume Playback</button>
+          <button class="btn btn-secondary" @click="goBack">Go Back</button>
+        </div>
       </div>
     </div>
   `,
@@ -4654,6 +5023,9 @@ const PlayerPage = {
         videoRef.value.pause();
         isPlaying.value = false;
         saveProgressNow();
+        if (store.profile?.is_kids) {
+          unlockAchievementSilently("kids_play_pause");
+        }
       }
     }
 
@@ -4816,12 +5188,13 @@ const PlayerPage = {
       playAchievementSound();
       playerAch.value = {
         icon: ach.icon || "🏆",
-        title: ach.title || "Achievement Unlocked!",
+        title: store.profile?.is_kids ? `⭐ Badge Unlocked: ${ach.title}` : (ach.title || "Achievement Unlocked!"),
+        isKids: !!store.profile?.is_kids
       };
       if (playerAchTimer) clearTimeout(playerAchTimer);
       playerAchTimer = setTimeout(() => {
         playerAch.value = null;
-      }, 2600);
+      }, 2800);
     }
     function unlockAchievementSilently(achievementId) {
       API.post("/api/achievements/unlock", { achievement_id: achievementId })
@@ -5075,6 +5448,21 @@ const PlayerPage = {
       return lines.slice(0, 3).join("\n");
     }
 
+    const subOffsetMs = ref(0);
+
+    function adjustSubOffset(deltaMs) {
+      subOffsetMs.value += deltaMs;
+      const displayStr = subOffsetMs.value === 0 ? "0 ms (In Sync)" : (subOffsetMs.value > 0 ? `+${subOffsetMs.value} ms` : `${subOffsetMs.value} ms`);
+      addToast(`Subtitle Delay: ${displayStr}`, "info", 1500);
+      updateActiveCueText();
+    }
+
+    function resetSubOffset() {
+      subOffsetMs.value = 0;
+      addToast("Subtitle Delay Reset: 0 ms (In Sync)", "info", 1500);
+      updateActiveCueText();
+    }
+
     function updateActiveCueText() {
       try {
         if (!videoRef.value) return;
@@ -5084,7 +5472,8 @@ const PlayerPage = {
           return;
         }
         const track = tracks[selectedSub.value];
-        const now = currentTime.value;
+        const offsetSec = (subOffsetMs.value || 0) / 1000;
+        const now = currentTime.value - offsetSec;
 
         // Primary: manual cue scan using currentTime.value (total media time).
         if (track.cues && track.cues.length > 0) {
@@ -5394,8 +5783,11 @@ const PlayerPage = {
       // playerToContent()/currentContentTime() only.
       currentTime.value = videoRef.value.currentTime || 0;
       isPlaying.value = !videoRef.value.paused;
+      // Auto-clear false-positive stall errors if the stream is actively progressing
+      if (playerError.value && (playerError.value.includes("stuck") || playerError.value.includes("Stuck"))) {
+        playerError.value = null;
+      }
       updateActiveCueText();
-      checkPlaybackStall();
       checkAutoSkip();
     }
 
@@ -5553,34 +5945,47 @@ const PlayerPage = {
 
     // Decoder-stall watchdog: 4K HEVC software decode can wedge the renderer
     // without firing an error event. If the video claims to be playing but
-    // time stops advancing for ~6s, surface a recovery notice.
-    let stallCheckCount = 0;
-    let lastStallPos = -1;
+    // time stops advancing for >= 16s while not paused/seeking, surface a recovery notice.
+    let lastStallCheckTime = Date.now();
+    let lastStallVideoTime = -1;
+    let stallDurationSec = 0;
+
     function checkPlaybackStall() {
       const v = videoRef.value;
-      if (!v || v.paused || !media.value) {
-        stallCheckCount = 0;
-        lastStallPos = -1;
+      if (!v || v.paused || v.ended || v.seeking || !media.value) {
+        stallDurationSec = 0;
+        lastStallVideoTime = v ? v.currentTime : -1;
+        lastStallCheckTime = Date.now();
         return;
       }
-      const pos = Math.floor(v.currentTime * 2) / 2; // half-second granularity
-      if (pos === lastStallPos && v.readyState < 3) {
-        stallCheckCount++;
-        if (stallCheckCount === 20) {   // ~30s of zero progress
-          const p = (media.value.file_path || "").toLowerCase();
-          const heavy = p.includes("2160") || p.includes("4k") || p.includes("uhd") ||
-                        codecInfo.value.tags.some((t) => t.includes("HEVC"));
-          playerError.value = heavy
-            ? "Decoder appears stuck — this 4K/HEVC stream exceeds what this device can handle. Enable hardware acceleration, use Edge, or pick a lower-quality source."
-            : "Playback appears stuck. Press Play again or reload the stream.";
+
+      const now = Date.now();
+      const deltaReal = (now - lastStallCheckTime) / 1000;
+      lastStallCheckTime = now;
+
+      const curr = v.currentTime;
+      // If playback position has advanced by at least 0.25s, video is actively progressing
+      if (lastStallVideoTime >= 0 && Math.abs(curr - lastStallVideoTime) >= 0.25) {
+        stallDurationSec = 0;
+        lastStallVideoTime = curr;
+        if (playerError.value && (playerError.value.includes("stuck") || playerError.value.includes("Stuck"))) {
+          playerError.value = null; // recovered on its own
         }
-      } else {
-        stallCheckCount = 0;
-        if (playerError.value && playerError.value.startsWith("Decoder appears stuck")) {
-          playerError.value = null;   // recovered on its own
-        }
+        return;
       }
-      lastStallPos = pos;
+
+      lastStallVideoTime = curr;
+      stallDurationSec += deltaReal;
+
+      // Only flag as stalled if frozen for at least 16 continuous seconds
+      if (stallDurationSec >= 16) {
+        const p = (media.value?.file_path || "").toLowerCase();
+        const heavy = p.includes("2160") || p.includes("4k") || p.includes("uhd") ||
+                      (codecInfo.value?.tags || []).some((t) => t.includes("HEVC"));
+        playerError.value = heavy
+          ? "Decoder appears stuck — this 4K/HEVC stream exceeds what this device can handle. Enable hardware acceleration, use Edge, or pick a lower-quality source."
+          : "Playback appears stuck. Press Play again or reload the stream.";
+      }
     }
 
     function formatTime(seconds) {
@@ -5666,6 +6071,16 @@ const PlayerPage = {
         case "N":
           e.preventDefault();
           if (hasNextEp.value) handleNextEpClick();
+          break;
+        case "[":
+        case "BracketLeft":
+          e.preventDefault();
+          adjustSubOffset(e.shiftKey ? -1000 : -250);
+          break;
+        case "]":
+        case "BracketRight":
+          e.preventDefault();
+          adjustSubOffset(e.shiftKey ? 1000 : 250);
           break;
       }
     }
@@ -5835,7 +6250,7 @@ const PlayerPage = {
 
       // Decoder-stall watchdog runs independently of media events —
       // a wedged 4K HEVC decoder stops firing timeupdate entirely.
-      stallTimer = setInterval(() => checkPlaybackStall(), 1500);
+      stallTimer = setInterval(() => checkPlaybackStall(), 2000);
 
       // Kick off initial playback through the controller (it owns the src)
       swapStream(0);
@@ -6014,6 +6429,9 @@ const PlayerPage = {
       onVideoError,
       subStyle,
       updateSubStyle,
+      subOffsetMs,
+      adjustSubOffset,
+      resetSubOffset,
       activeCueText,
       updateActiveCueText,
       customCueStyle,
@@ -6062,10 +6480,11 @@ const BrowsePage = {
             id="filter-genre"
           >
             <option value="">All Genres</option>
-            <option v-for="g in genres" :key="g" :value="g">{{ g }}</option>
+            <option v-for="g in displayGenres" :key="g" :value="g">{{ g }}</option>
           </select>
 
           <button
+            v-if="!store.profile?.is_kids"
             class="filter-btn"
             :class="{ active: hideUnmounted }"
             @click="toggleHideUnmounted"
@@ -6221,6 +6640,15 @@ const BrowsePage = {
       }
     }
 
+    const displayGenres = computed(() => {
+      const all = genres.value || [];
+      if (!store.profile?.is_kids) return all;
+      return all.filter(g => {
+        const gl = g.toLowerCase();
+        return KIDS_SAFE_GENRES.some(k => gl.includes(k)) && !KIDS_BLOCKED_GENRES.some(b => gl === b && b !== "adventure");
+      });
+    });
+
     onMounted(() => {
       load();
       API.get("/api/genres").then((g) => { genres.value = g || []; }).catch(() => {});
@@ -6303,6 +6731,7 @@ const BrowsePage = {
       loading,
       activeType,
       genres,
+      displayGenres,
       selectedGenre,
       onGenreChange,
       types,
@@ -6327,7 +6756,7 @@ const CollectionsPage = {
     <div class="collections-page">
       <div class="page-header">
         <h1 class="page-title">My Collections</h1>
-        <button class="btn btn-primary" @click="showCreate = true" id="create-collection-btn">
+        <button v-if="!store.profile?.is_kids" class="btn btn-primary" @click="showCreate = true" id="create-collection-btn">
           <i class="ph ph-plus"></i> New Collection
         </button>
       </div>
@@ -6341,7 +6770,7 @@ const CollectionsPage = {
         <div class="empty-icon">📚</div>
         <div class="empty-title">No collections yet</div>
         <div class="empty-subtitle">Create a collection to group your favourite titles.</div>
-        <button class="btn btn-primary" style="margin-top:1rem" @click="showCreate = true" id="create-first-col-btn">
+        <button v-if="!store.profile?.is_kids" class="btn btn-primary" style="margin-top:1rem" @click="showCreate = true" id="create-first-col-btn">
           <i class="ph ph-plus"></i> Create First Collection
         </button>
       </div>
@@ -6445,7 +6874,7 @@ const CollectionDetailPage = {
           <h1 class="browse-title">{{ collection.name }}</h1>
           <p v-if="collection.description" style="color:var(--text-muted);font-size:0.875rem;margin-top:4px">{{ collection.description }}</p>
         </div>
-        <button v-if="collection && !collection.smart" class="btn btn-ghost" @click="deleteCollection" style="color:var(--accent)">
+        <button v-if="collection && !collection.smart && !store.profile?.is_kids" class="btn btn-ghost" @click="deleteCollection" style="color:var(--accent)">
           <i class="ph ph-trash"></i> Delete
         </button>
       </div>
@@ -6547,7 +6976,7 @@ const FavoritesPage = {
     async function load() {
       if (!store.profile) return;
       try {
-        items.value = await API.get("/api/favorites");
+        items.value = kidsFilter(await API.get("/api/favorites"));
       } catch (e) {
         addToast("Failed to load watchlist", "error");
       }
@@ -6727,10 +7156,40 @@ const ProfilesPage = {
               </label>
             </div>
 
+            <!-- Kids Screen Time Controls -->
+            <div v-if="editProfile.is_kids" style="border-top:1px solid #282828;padding-top:18px">
+              <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">⏰ Daily Watch Limit</div>
+              <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Automatically lock Kids Mode after watching this amount today.</div>
+              <select v-model.number="editProfile.daily_limit_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                <option :value="0">No Limit (Unlimited)</option>
+                <option :value="30">30 Minutes / day</option>
+                <option :value="45">45 Minutes / day</option>
+                <option :value="60">1 Hour / day</option>
+                <option :value="90">1.5 Hours / day</option>
+                <option :value="120">2 Hours / day</option>
+                <option :value="180">3 Hours / day</option>
+              </select>
+            </div>
+
+            <div v-if="editProfile.is_kids" style="border-top:1px solid #282828;padding-top:18px">
+              <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🌙 Bedtime Curfew</div>
+              <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Locks Kids Mode at this time in the evening.</div>
+              <select v-model="editProfile.bedtime_curfew" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                <option value="">Off (No Bedtime Curfew)</option>
+                <option value="19:00">7:00 PM</option>
+                <option value="19:30">7:30 PM</option>
+                <option value="20:00">8:00 PM</option>
+                <option value="20:30">8:30 PM</option>
+                <option value="21:00">9:00 PM</option>
+                <option value="21:30">9:30 PM</option>
+                <option value="22:00">10:00 PM</option>
+              </select>
+            </div>
+
             <!-- PIN Protection -->
-            <div style="border-top:1px solid #282828;padding-top:18px">
+            <div v-if="!editProfile.is_kids" style="border-top:1px solid #282828;padding-top:18px">
               <label class="netflix-checkbox-label" style="margin-bottom:8px">
-                <input type="checkbox" v-model="editProfile.update_pin" :disabled="editProfile.is_kids">
+                <input type="checkbox" v-model="editProfile.update_pin">
                 <div>
                   <div class="netflix-checkbox-title">Lock Profile with PIN</div>
                   <div class="netflix-checkbox-desc">Require a 4-digit PIN to access this profile.</div>
@@ -6850,16 +7309,45 @@ const ProfilesPage = {
               </label>
             </div>
 
+            <!-- Kids Screen Time Controls -->
+            <div v-if="newProfile.is_kids" style="border-top:1px solid #282828;padding-top:18px">
+              <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">⏰ Daily Watch Limit</div>
+              <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Automatically lock Kids Mode after watching this amount today.</div>
+              <select v-model.number="newProfile.daily_limit_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                <option :value="0">No Limit (Unlimited)</option>
+                <option :value="30">30 Minutes / day</option>
+                <option :value="45">45 Minutes / day</option>
+                <option :value="60">1 Hour / day</option>
+                <option :value="90">1.5 Hours / day</option>
+                <option :value="120">2 Hours / day</option>
+                <option :value="180">3 Hours / day</option>
+              </select>
+            </div>
+
+            <div v-if="newProfile.is_kids" style="border-top:1px solid #282828;padding-top:18px">
+              <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🌙 Bedtime Curfew</div>
+              <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Locks Kids Mode at this time in the evening.</div>
+              <select v-model="newProfile.bedtime_curfew" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                <option value="">Off (No Bedtime Curfew)</option>
+                <option value="19:00">7:00 PM</option>
+                <option value="19:30">7:30 PM</option>
+                <option value="20:00">8:00 PM</option>
+                <option value="20:30">8:30 PM</option>
+                <option value="21:00">9:00 PM</option>
+                <option value="21:30">9:30 PM</option>
+                <option value="22:00">10:00 PM</option>
+              </select>
+            </div>
+
             <!-- PIN Protection -->
-            <div style="border-top:1px solid #282828;padding-top:18px">
+            <div v-if="!newProfile.is_kids" style="border-top:1px solid #282828;padding-top:18px">
               <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">PIN Protection (Optional)</div>
               <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Leave empty for instant access without a PIN.</div>
               <input
                 id="new-profile-pin"
                 class="netflix-input"
                 v-model="newProfile.pin"
-                :placeholder="newProfile.is_kids ? 'PIN disabled in Kids Mode' : '4-digit PIN'"
-                :disabled="newProfile.is_kids"
+                placeholder="4-digit PIN"
                 maxlength="4"
                 inputmode="numeric"
                 style="max-width:240px"
@@ -6926,6 +7414,34 @@ const ProfilesPage = {
           <button class="btn btn-ghost btn-full" style="margin-top:1.25rem" @click="deletePinTarget = null">Cancel</button>
         </div>
       </div>
+
+      <!-- Parental Math Challenge Gate Modal -->
+      <div class="modal-backdrop" v-if="mathGateTarget" @click.self="mathGateTarget = null" style="background:rgba(0,0,0,0.88)">
+        <div class="modal parental-gate-modal" style="text-align:center;max-width:380px;border-radius:22px;padding:2rem 1.5rem">
+          <div class="parental-gate-icon">🛡️</div>
+          <h3 style="font-size:1.35rem;font-weight:700;margin:0.5rem 0">Parental Exit Gate</h3>
+          <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.2rem">
+            Please solve the math puzzle to switch to <strong>{{ mathGateTarget?.name }}</strong>:
+          </p>
+          <div class="math-question-badge">
+            {{ mathProblem.num1 }} + {{ mathProblem.num2 }} = ?
+          </div>
+          <div class="pin-display" style="justify-content:center;margin:1rem 0">
+            <div class="math-answer-display">{{ mathAnswer || '?' }}</div>
+          </div>
+          <div class="pin-pad">
+            <button v-for="n in [1,2,3,4,5,6,7,8,9,'',0,'⌫']" :key="n"
+              class="pin-key"
+              :class="{ backspace: n === '⌫' }"
+              @click="handleMathKey(n)"
+              :id="'math-key-' + n"
+              :disabled="n === ''"
+            >{{ n }}</button>
+          </div>
+          <div class="modal-error" v-if="mathGateError" style="margin-top:10px">{{ mathGateError }}</div>
+          <button class="btn btn-ghost btn-full" style="margin-top:1.25rem;border-radius:12px" @click="mathGateTarget = null">Cancel</button>
+        </div>
+      </div>
     </div>
   `,
   setup() {
@@ -6936,6 +7452,10 @@ const ProfilesPage = {
     const pinTarget = ref(null);
     const pin = ref("");
     const pinError = ref("");
+    const mathGateTarget = ref(null);
+    const mathAnswer = ref("");
+    const mathGateError = ref("");
+    const mathProblem = reactive({ num1: 7, num2: 8, answer: 15 });
 
     const editTarget = ref(null);
     const editProfile = reactive({
@@ -6945,6 +7465,8 @@ const ProfilesPage = {
       is_kids: false,
       pin: "",
       update_pin: false,
+      daily_limit_minutes: 0,
+      bedtime_curfew: "",
     });
 
     const avatars = ["🎬", "🎭", "🍿", "🎮", "🚀", "🐱", "🐶", "🦊", "🎵", "🌟", "🔥", "💫"];
@@ -6956,7 +7478,41 @@ const ProfilesPage = {
       color: "#e50914",
       pin: "",
       is_kids: false,
+      daily_limit_minutes: 0,
+      bedtime_curfew: "",
     });
+
+    function generateMathProblem() {
+      const n1 = Math.floor(Math.random() * 8) + 4;
+      const n2 = Math.floor(Math.random() * 8) + 3;
+      mathProblem.num1 = n1;
+      mathProblem.num2 = n2;
+      mathProblem.answer = n1 + n2;
+      mathAnswer.value = "";
+      mathGateError.value = "";
+    }
+
+    function handleMathKey(key) {
+      mathGateError.value = "";
+      if (key === "⌫") {
+        mathAnswer.value = mathAnswer.value.slice(0, -1);
+        return;
+      }
+      if (key === "") return;
+      if (mathAnswer.value.length >= 3) return;
+      mathAnswer.value += key.toString();
+
+      if (Number(mathAnswer.value) === mathProblem.answer) {
+        const target = mathGateTarget.value;
+        mathGateTarget.value = null;
+        authProfile(target, "");
+      } else if (mathAnswer.value.length >= String(mathProblem.answer).length) {
+        mathGateError.value = "Incorrect. Try again!";
+        setTimeout(() => {
+          generateMathProblem();
+        }, 900);
+      }
+    }
 
     watch(
       () => newProfile.is_kids,
@@ -7012,6 +7568,8 @@ const ProfilesPage = {
       editProfile.is_kids = !!profile.is_kids;
       editProfile.pin = "";
       editProfile.update_pin = false;
+      editProfile.daily_limit_minutes = profile.daily_limit_minutes || 0;
+      editProfile.bedtime_curfew = profile.bedtime_curfew || "";
       viewMode.value = "edit";
     }
 
@@ -7037,6 +7595,8 @@ const ProfilesPage = {
           is_kids: editProfile.is_kids,
           pin: editProfile.pin || "",
           update_pin: editProfile.update_pin,
+          daily_limit_minutes: editProfile.daily_limit_minutes,
+          bedtime_curfew: editProfile.bedtime_curfew,
         });
 
         const idx = profiles.value.findIndex((p) => p.id === editTarget.value.id);
@@ -7087,7 +7647,6 @@ const ProfilesPage = {
     }
 
     function handleDeletePinKey(key) {
-      // Any new input clears a previous wrong-PIN error state immediately
       deletePinError.value = "";
       if (key === "⌫") {
         deletePin.value = deletePin.value.slice(0, -1);
@@ -7182,12 +7741,15 @@ const ProfilesPage = {
           avatar: newProfile.avatar,
           color: newProfile.color,
           is_kids: newProfile.is_kids,
+          daily_limit_minutes: newProfile.daily_limit_minutes,
+          bedtime_curfew: newProfile.bedtime_curfew,
         });
         profiles.value.push(p);
         viewMode.value = "select";
         newProfile.name = "";
         newProfile.pin = "";
         newProfile.is_kids = false;
+        if (newProfile.is_kids) unlockAchievement("kids_creator");
         addToast(newProfile.is_kids ? "Kids profile created 🧒" : "Profile created", "success");
       } catch (e) {
         addToast(e.message || "Failed to create profile", "error");
@@ -7531,10 +8093,14 @@ const SearchPage = {
     const results = ref([]);
     const loading = ref(false);
     const searched = ref(false);
-    const genresList = ref([
+    const allGenresList = [
       'Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 
       'Drama', 'Family', 'Fantasy', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller'
-    ]);
+    ];
+    const kidsGenresList = [
+      'Animation', 'Family', 'Adventure', 'Comedy', 'Fantasy', 'Sci-Fi', 'Documentary'
+    ];
+    const genresList = computed(() => store.profile?.is_kids ? kidsGenresList : allGenresList);
 
     let debounceTimer = null;
 
@@ -7673,10 +8239,10 @@ const StatsPage = {
       <div style="margin-bottom:2rem;display:flex;align-items:center;justify-content:space-between">
         <div>
           <h1 style="font-size:2rem;font-weight:800;display:flex;align-items:center;gap:10px">
-            <i class="ph ph-chart-bar" style="color:var(--accent)"></i>
-            <span>Watch Stats & Insights</span>
+            <i :class="store.profile?.is_kids ? 'ph ph-star' : 'ph ph-chart-bar'" :style="{ color: store.profile?.is_kids ? '#fdcb6e' : 'var(--accent)' }"></i>
+            <span>{{ store.profile?.is_kids ? '🌟 Kids Stats & Trophy Case' : 'Watch Stats & Insights' }}</span>
           </h1>
-          <p style="color:var(--text-secondary);margin-top:4px">Viewing analytics and watch activity for <strong>{{ store.profile?.name }}</strong></p>
+          <p style="color:var(--text-secondary);margin-top:4px">{{ store.profile?.is_kids ? 'Viewing badges and cartoon adventures for ' : 'Viewing analytics and watch activity for ' }}<strong>{{ store.profile?.name }}</strong></p>
         </div>
       </div>
 
@@ -7690,7 +8256,7 @@ const StatsPage = {
               <i class="ph ph-clock"></i>
             </div>
             <div>
-              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">Total Watch Time</div>
+              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">{{ store.profile?.is_kids ? 'Total Cartoon Time' : 'Total Watch Time' }}</div>
               <div style="font-size:1.4rem;font-weight:800;color:#fff">{{ formatTimeSpent(stats.total_seconds) }}</div>
             </div>
           </div>
@@ -7700,7 +8266,7 @@ const StatsPage = {
               <i class="ph ph-check-circle"></i>
             </div>
             <div>
-              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">Completion Rate</div>
+              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">{{ store.profile?.is_kids ? 'Cartoons Finished' : 'Completion Rate' }}</div>
               <div style="font-size:1.4rem;font-weight:800;color:#fff">{{ stats.completion_rate }}% <span style="font-size:0.75rem;color:var(--text-muted);font-weight:500">({{ stats.completed_items }}/{{ stats.total_items }})</span></div>
             </div>
           </div>
@@ -7710,12 +8276,12 @@ const StatsPage = {
               <i class="ph ph-sun-dim"></i>
             </div>
             <div>
-              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">Peak Watch Hour</div>
+              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">{{ store.profile?.is_kids ? 'Favorite Watch Time' : 'Peak Watch Hour' }}</div>
               <div style="font-size:1.2rem;font-weight:800;color:#fff">{{ stats.peak_hour }}</div>
             </div>
           </div>
 
-          <div class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;display:flex;align-items:center;gap:1rem">
+          <div v-if="!store.profile?.is_kids" class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;display:flex;align-items:center;gap:1rem">
             <div style="width:52px;height:52px;border-radius:12px;background:rgba(168,85,247,0.15);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#a855f7">
               <i class="ph ph-hard-drives"></i>
             </div>
@@ -7731,7 +8297,8 @@ const StatsPage = {
           <!-- 7-Day Watch Activity Chart -->
           <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem">
             <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px">
-              <i class="ph ph-chart-line-up" style="color:var(--accent)"></i> 7-Day Watch Activity (Minutes)
+              <i :class="store.profile?.is_kids ? 'ph ph-calendar' : 'ph ph-chart-line-up'" :style="{ color: store.profile?.is_kids ? '#fdcb6e' : 'var(--accent)' }"></i>
+              <span>{{ store.profile?.is_kids ? '📅 7-Day Cartoon Time' : '7-Day Watch Activity (Minutes)' }}</span>
             </h3>
             <div class="stats-activity-chart">
               <div
@@ -7753,7 +8320,7 @@ const StatsPage = {
           </div>
 
           <!-- Technical Library & Resolution Breakdown -->
-          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem">
+          <div v-if="!store.profile?.is_kids" style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem">
             <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px">
               <i class="ph ph-film-strip" style="color:#38bdf8"></i> Library Resolution & Quality
             </h3>
@@ -7781,7 +8348,8 @@ const StatsPage = {
         <!-- Genre Distribution Progress Section -->
         <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem;margin-bottom:2.5rem">
           <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px">
-            <i class="ph ph-tag" style="color:var(--accent)"></i> Favorite Genres Distribution
+            <i :class="store.profile?.is_kids ? 'ph ph-balloon' : 'ph ph-tag'" :style="{ color: store.profile?.is_kids ? '#fdcb6e' : 'var(--accent)' }"></i>
+            <span>{{ store.profile?.is_kids ? '🎈 Favorite Cartoon Categories' : 'Favorite Genres Distribution' }}</span>
           </h3>
           <div v-if="stats.top_genres && stats.top_genres.length" style="display:flex;flex-direction:column;gap:1rem">
             <div v-for="g in stats.top_genres" :key="g.genre">
@@ -7803,7 +8371,8 @@ const StatsPage = {
         <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem;margin-bottom:2.5rem" class="trophy-case-header">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;flex-wrap:wrap;gap:10px">
             <h3 style="font-size:1.15rem;font-weight:800;display:flex;align-items:center;gap:10px">
-              <i class="ph ph-trophy" style="color:#f59e0b;font-size:1.35rem"></i> Achievements & Badges Trophy Case
+              <i class="ph ph-trophy" style="color:#f59e0b;font-size:1.35rem"></i>
+              <span>{{ store.profile?.is_kids ? '🌟 Kids Badges & Trophy Case' : 'Achievements & Badges Trophy Case' }}</span>
             </h3>
             <span style="font-size:0.9rem;font-weight:700;color:var(--accent)" v-if="stats.achievements">
               {{ unlockedCount }} / {{ totalCount }} Unlocked ({{ completionPercent }}%)
@@ -7866,7 +8435,8 @@ const StatsPage = {
         <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem">
           <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <span style="display:flex;align-items:center;gap:8px">
-              <i class="ph ph-history" style="color:var(--accent)"></i> Recent Watch History
+              <i class="ph ph-history" style="color:var(--accent)"></i>
+              <span>{{ store.profile?.is_kids ? '🎬 Recent Cartoons & Movies' : 'Recent Watch History' }}</span>
             </span>
             <span style="font-size:0.75rem;font-weight:600;color:var(--text-muted)">Consolidated Titles</span>
           </h3>
@@ -7927,7 +8497,13 @@ const StatsPage = {
     const stats = ref(null);
     const loading = ref(true);
     const activeCategory = ref("All");
-    const categories = ["All", "Milestones", "Viewing Habits", "Player Master", "Discovery", "Collector"];
+    const categories = computed(() => {
+      if (!stats.value?.achievements?.length) {
+        return ["All", "Milestones", "Viewing Habits", "Player Master", "Discovery", "Collector"];
+      }
+      const uniqueCats = Array.from(new Set(stats.value.achievements.map(a => a.category).filter(Boolean)));
+      return ["All", ...uniqueCats];
+    });
 
     const unlockedCount = computed(() => {
       if (!stats.value?.achievements) return 0;
@@ -8107,7 +8683,7 @@ const AboutPage = {
       </div>
 
       <!-- Live Server & Diagnostics Status (3-Section Glass Cards) -->
-      <div class="about-section" style="margin-top:2.5rem">
+      <div v-if="!store.profile?.is_kids" class="about-section" style="margin-top:2.5rem">
         <div class="about-section-header" style="justify-content:space-between;flex-wrap:wrap;gap:12px">
           <div style="display:flex;align-items:center;gap:8px">
             <i class="ph ph-cpu" style="color:var(--accent);font-size:1.5rem"></i>
@@ -8330,6 +8906,14 @@ const AboutPage = {
           </div>
 
           <div class="hotkey-item">
+            <kbd class="about-kbd">[ / ]</kbd>
+            <div class="hotkey-label-wrap">
+              <div class="hotkey-title">Subtitle Sync</div>
+              <div class="hotkey-desc">Adjust delay (±250ms / ±1s)</div>
+            </div>
+          </div>
+
+          <div class="hotkey-item">
             <kbd class="about-kbd">?</kbd>
             <div class="hotkey-label-wrap">
               <div class="hotkey-title">Shortcuts Modal</div>
@@ -8450,7 +9034,9 @@ const AboutPage = {
 
     onMounted(() => {
       fetchSystemInfo();
-      pollTimer = setInterval(fetchSystemInfo, 3000);
+      if (!store.profile?.is_kids) {
+        pollTimer = setInterval(fetchSystemInfo, 3000);
+      }
     });
 
     onUnmounted(() => {
@@ -8923,8 +9509,8 @@ const App = {
               <i class="ph ph-keyboard" style="font-size:1.1rem"></i>
             </div>
 
-            <!-- Scan button -->
-            <div class="nav-search-btn" @click="triggerScan" id="nav-scan" data-tooltip="Refresh Library" style="position:relative">
+            <!-- Scan button (hidden for Kids profiles) -->
+            <div v-if="!store.profile?.is_kids" class="nav-search-btn" @click="triggerScan" id="nav-scan" data-tooltip="Refresh Library" style="position:relative">
               <i class="ph ph-arrows-clockwise" style="font-size:1.1rem" :style="{ animation: store.scanRunning ? 'spin 1s linear infinite' : 'none' }"></i>
               <div class="scan-badge" v-if="store.scanRunning"></div>
             </div>
@@ -8954,9 +9540,9 @@ const App = {
                 <div class="profile-dropdown-item" @click.stop="goStats" id="dd-stats">📊 Watch Stats</div>
                 <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="dd-settings">⚙️ Settings</div>
                 <div class="profile-dropdown-item" @click.stop="goAbout" id="dd-about">ℹ️ About CapsStream</div>
-                <div class="profile-dropdown-divider"></div>
-                <div class="profile-dropdown-item" @click.stop="editCurrentProfile" id="dd-edit-profile">✏️ Edit Profile</div>
-                <div class="profile-dropdown-item" @click.stop="switchProfile" id="dd-switch">👤 Switch Profile</div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-divider"></div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="editCurrentProfile" id="dd-edit-profile">✏️ Edit Profile</div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="switchProfile" id="dd-switch">👤 Switch Profile</div>
                 <div class="profile-dropdown-item danger" @click.stop="logout" v-if="store.profile" id="dd-logout">🚪 Sign Out</div>
               </div>
             </div>
@@ -8968,7 +9554,7 @@ const App = {
       <transition name="fade">
         <div
           class="update-banner"
-          v-if="store.updateInfo?.status === 'available' && !updateBannerDismissed && showNav"
+          v-if="store.updateInfo?.status === 'available' && !updateBannerDismissed && showNav && !store.profile?.is_kids"
         >
           <i class="ph ph-arrow-circle-up"></i>
           <span>
@@ -9046,6 +9632,55 @@ const App = {
       <!-- Bottom-Left Floating Scan Progress Widget -->
       <scan-progress-widget />
 
+      <!-- Bedtime Celebration Overlay -->
+      <div v-if="store.bedtimeActive" class="bedtime-overlay" @click.stop>
+        <div class="bedtime-card" @click.stop>
+          <div class="bedtime-moon">🌙 ✨ 💤</div>
+          <h2 style="font-size:1.8rem;font-weight:900;color:#fed330;margin-bottom:0.75rem">
+            {{ store.bedtimeReason === 'daily_limit' ? 'Daily Cartoon Time Limit Reached!' : 'Bedtime for Tonight!' }}
+          </h2>
+          <p style="color:var(--text-secondary);font-size:1rem;line-height:1.6;margin-bottom:1.5rem">
+            Great job watching today, <strong>{{ store.profile?.name }}</strong>! It's time to rest and recharge for tomorrow's fun adventures.
+          </p>
+          <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+            <button class="btn btn-primary" style="border-radius:16px;padding:12px 28px;font-size:0.95rem;font-weight:800;background:linear-gradient(135deg,#ff4757,#ff6b81)" @click="handleBedtimeGoodnight">
+              Goodnight! 🌟
+            </button>
+            <button class="btn btn-secondary" style="border-radius:16px;padding:12px 24px;font-size:0.95rem;font-weight:700" @click="handleBedtimeUnlock">
+              🛡️ Parent Unlock (+30m)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Parental Math Challenge Exit Gate Modal (Global from Kids Mode) -->
+      <div class="modal-backdrop" v-if="appMathGateShow" @click.self="appMathGateShow = false" style="z-index:9999999;background:rgba(0,0,0,0.88)">
+        <div class="modal parental-gate-modal" style="text-align:center;max-width:380px;border-radius:22px;padding:2rem 1.5rem">
+          <div class="parental-gate-icon">🛡️</div>
+          <h3 style="font-size:1.35rem;font-weight:700;margin:0.5rem 0">Parental Exit Gate</h3>
+          <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.2rem">
+            Please solve the math puzzle to exit Kids Mode:
+          </p>
+          <div class="math-question-badge">
+            {{ appMathProblem.num1 }} + {{ appMathProblem.num2 }} = ?
+          </div>
+          <div class="pin-display" style="justify-content:center;margin:1rem 0">
+            <div class="math-answer-display">{{ appMathAnswer || '?' }}</div>
+          </div>
+          <div class="pin-pad">
+            <button v-for="n in [1,2,3,4,5,6,7,8,9,'',0,'⌫']" :key="n"
+              class="pin-key"
+              :class="{ backspace: n === '⌫' }"
+              @click="handleAppMathKey(n)"
+              :id="'app-math-key-' + n"
+              :disabled="n === ''"
+            >{{ n }}</button>
+          </div>
+          <div class="modal-error" v-if="appMathError" style="margin-top:10px">{{ appMathError }}</div>
+          <button class="btn btn-ghost btn-full" style="margin-top:1.25rem;border-radius:12px" @click="appMathGateShow = false">Cancel</button>
+        </div>
+      </div>
+
       <!-- Global Custom Confirm Modal -->
       <div v-if="confirmState.show" class="modal-backdrop" style="z-index:999999;background:rgba(0,0,0,0.85);backdrop-filter:blur(20px);" @click.self="handleConfirmCancel">
         <div class="shortcuts-modal-card" style="max-width:460px;border-radius:var(--radius-outer);border:1px solid rgba(255,255,255,0.16);box-shadow:0 24px 60px rgba(0,0,0,0.95)" @click.stop>
@@ -9079,6 +9714,7 @@ const App = {
   `,
   setup() {
     const route = VueRouter.useRoute();
+    const router = VueRouter.useRouter();
     const navScrolled = ref(false);
     const showProfileMenu = ref(false);
     const showShortcuts = ref(false);
@@ -9099,8 +9735,6 @@ const App = {
       if (updateQuietChecked) return;
       updateQuietChecked = true;
       try {
-        // Respect the user's "Automatic Update Checks" setting — dev machines
-        // with unreleased local changes should turn this off.
         const cfg = await API.get("/api/settings");
         if (cfg && cfg.updates && cfg.updates.auto_check === false) return;
       } catch (e) {}
@@ -9110,7 +9744,6 @@ const App = {
       } catch (e) {}
     }
 
-    // Quietly check once after the user logs in
     watch(
       () => store.profile,
       (p) => {
@@ -9122,13 +9755,25 @@ const App = {
       const tag = (e.target && e.target.tagName) || "";
       if (["INPUT", "TEXTAREA", "SELECT"].includes(tag)) return;
 
+      if (appMathGateShow.value) {
+        if (/^[0-9]$/.test(e.key)) {
+          e.preventDefault();
+          handleAppMathKey(Number(e.key));
+        } else if (e.key === "Backspace") {
+          e.preventDefault();
+          handleAppMathKey("⌫");
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          appMathGateShow.value = false;
+        }
+        return;
+      }
+
       if (e.key === "?") {
         e.preventDefault();
         showShortcuts.value = !showShortcuts.value;
       }
 
-      // "/" opens Quick Search from anywhere; on /search the page's own
-      // handler focuses the input instead.
       if (e.key === "/" && !route.path.startsWith("/search")) {
         e.preventDefault();
         router.push("/search");
@@ -9136,24 +9781,36 @@ const App = {
     }
 
     const showNav = computed(() => {
-      return !["profiles", "setup"].some((name) => route.path === "/" + name) && !route.path.startsWith("/watch/");
+      return !["profiles", "setup"].some((name) => route.path === "/" + name) && !route.path.startsWith("/watch");
     });
 
-    const isPlayerRoute = computed(() => route.path.startsWith("/watch/"));
-    const isDetailRoute = computed(() => route.path.startsWith("/detail/"));
+    const isPlayerRoute = computed(() => route.path.startsWith("/watch"));
+    const isDetailRoute = computed(() => !route.path.startsWith("/title"));
 
     function isRoute(path) {
       return route.path === path || route.fullPath === path;
     }
 
-    const navItems = [
-      { name: "Home", path: "/", id: "nav-home", isMatch: (r) => r.path === "/" },
-      { name: "Movies", path: "/browse?type=movie", id: "nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
-      { name: "Series", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
-      { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
-      { name: "Stats", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
-      { name: "About", path: "/about", id: "nav-about", isMatch: (r) => r.path === "/about" },
-    ];
+    const navItems = computed(() => {
+      if (store.profile?.is_kids) {
+        return [
+          { name: "Home", path: "/", id: "nav-home", isMatch: (r) => r.path === "/" },
+          { name: "Shows & Cartoons", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
+          { name: "Movies", path: "/browse?type=movie", id: "nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
+          { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
+          { name: "Stats", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
+          { name: "About", path: "/about", id: "nav-about", isMatch: (r) => r.path === "/about" },
+        ];
+      }
+      return [
+        { name: "Home", path: "/", id: "nav-home", isMatch: (r) => r.path === "/" },
+        { name: "Movies", path: "/browse?type=movie", id: "nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
+        { name: "Series", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
+        { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
+        { name: "Stats", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
+        { name: "About", path: "/about", id: "nav-about", isMatch: (r) => r.path === "/about" },
+      ];
+    });
 
     const navLinksRef = ref(null);
     const linkRefs = ref([]);
@@ -9168,7 +9825,7 @@ const App = {
       nextTick(() => {
         let targetIdx = hoveredLinkIndex.value;
         if (targetIdx === null || targetIdx === undefined) {
-          targetIdx = navItems.findIndex((item) => isNavActive(item));
+          targetIdx = navItems.value.findIndex((item) => isNavActive(item));
         }
 
         if (targetIdx >= 0 && linkRefs.value[targetIdx]) {
@@ -9184,18 +9841,8 @@ const App = {
       });
     }
 
-    watch([() => route.fullPath, hoveredLinkIndex], () => {
+    watch([() => route.fullPath, hoveredLinkIndex, navItems], () => {
       updatePillPosition();
-    });
-
-    onMounted(() => {
-      window.addEventListener("resize", updatePillPosition);
-      setTimeout(updatePillPosition, 80);
-      setTimeout(updatePillPosition, 250);
-    });
-
-    onUnmounted(() => {
-      window.removeEventListener("resize", updatePillPosition);
     });
 
     function toggleProfileMenu() {
@@ -9222,8 +9869,71 @@ const App = {
       router.push("/about");
     }
 
+    function promptSleepTimer() {
+      showProfileMenu.value = false;
+      const options = [0, 15, 30, 45, 60, 90];
+      const curr = store.sleepTimerMinutes || 0;
+      const nextIdx = (options.findIndex((o) => o >= curr && curr > 0) + 1) % options.length;
+      const nextVal = options[nextIdx];
+      setSleepTimer(nextVal);
+    }
+
+    const appMathGateShow = ref(false);
+    const appMathAnswer = ref("");
+    const appMathError = ref("");
+    const appMathProblem = reactive({ num1: 7, num2: 8, answer: 15 });
+    let appMathCallback = null;
+
+    function generateAppMathProblem(cb) {
+      const n1 = Math.floor(Math.random() * 8) + 4;
+      const n2 = Math.floor(Math.random() * 8) + 3;
+      appMathProblem.num1 = n1;
+      appMathProblem.num2 = n2;
+      appMathProblem.answer = n1 + n2;
+      appMathAnswer.value = "";
+      appMathError.value = "";
+      appMathCallback = cb;
+      appMathGateShow.value = true;
+    }
+
+    function handleAppMathKey(key) {
+      appMathError.value = "";
+      if (key === "⌫") {
+        appMathAnswer.value = appMathAnswer.value.slice(0, -1);
+        return;
+      }
+      if (key === "") return;
+      if (appMathAnswer.value.length >= 3) return;
+      appMathAnswer.value += key.toString();
+
+      if (Number(appMathAnswer.value) === appMathProblem.answer) {
+        appMathGateShow.value = false;
+        if (typeof appMathCallback === "function") {
+          appMathCallback();
+        }
+      } else if (appMathAnswer.value.length >= String(appMathProblem.answer).length) {
+        appMathError.value = "Incorrect. Try again!";
+        setTimeout(() => {
+          const n1 = Math.floor(Math.random() * 8) + 4;
+          const n2 = Math.floor(Math.random() * 8) + 3;
+          appMathProblem.num1 = n1;
+          appMathProblem.num2 = n2;
+          appMathProblem.answer = n1 + n2;
+          appMathAnswer.value = "";
+        }, 900);
+      }
+    }
+
     function switchProfile() {
       showProfileMenu.value = false;
+      if (store.profile?.is_kids) {
+        generateAppMathProblem(() => {
+          store.profile = null;
+          router.push("/profiles");
+          API.post("/api/profiles/logout", {}).catch(() => {});
+        });
+        return;
+      }
       store.profile = null;
       router.push("/profiles");
       API.post("/api/profiles/logout", {}).catch(() => {});
@@ -9231,9 +9941,87 @@ const App = {
 
     function logout() {
       showProfileMenu.value = false;
+      if (store.profile?.is_kids) {
+        generateAppMathProblem(() => {
+          store.profile = null;
+          router.push("/profiles");
+          API.post("/api/profiles/logout", {}).catch(() => {});
+        });
+        return;
+      }
       store.profile = null;
       router.push("/profiles");
       API.post("/api/profiles/logout", {}).catch(() => {});
+    }
+
+    function handleBedtimeGoodnight() {
+      store.bedtimeActive = false;
+      store.profile = null;
+      router.push("/profiles");
+      API.post("/api/profiles/logout", {}).catch(() => {});
+    }
+
+    function handleBedtimeUnlock() {
+      generateAppMathProblem(() => {
+        store.bedtimeActive = false;
+        store.dailyLimitExtended = true;
+        store.bedtimeDismissedForToday = true;
+        addToast("Parent Unlock Verified! +30 minutes of cartoon time granted 🛡️", "success", 5000);
+      });
+    }
+
+    let screenTimeWatchdog = null;
+    function startScreenTimeWatchdog() {
+      if (screenTimeWatchdog) clearInterval(screenTimeWatchdog);
+      screenTimeWatchdog = setInterval(() => {
+        if (!store.profile || !store.profile.is_kids) return;
+        const now = new Date();
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+        // 1. Bedtime Curfew Check
+        if (store.profile.bedtime_curfew) {
+          const [curfH, curfM] = store.profile.bedtime_curfew.split(":").map(Number);
+          const curfewMinutes = curfH * 60 + curfM;
+          const diff = curfewMinutes - currentMinutes;
+
+          if (diff === 5 && !store.bedtimeWarned) {
+            store.bedtimeWarned = true;
+            addToast("⏰ 5 minutes of cartoon time left before bedtime! 🌙", "warning", 7000);
+          }
+
+          if (currentMinutes >= curfewMinutes && currentMinutes < curfewMinutes + 360) {
+            if (!store.bedtimeActive && !store.bedtimeDismissedForToday) {
+              store.bedtimeActive = true;
+              store.bedtimeReason = "curfew";
+              const v = document.querySelector("video");
+              if (v) v.pause();
+            }
+          }
+        }
+
+        // 2. Daily Watch Limit Check
+        if (store.profile.daily_limit_minutes > 0) {
+          const v = document.querySelector("video");
+          if (v && !v.paused) {
+            store.todayWatchSeconds = (store.todayWatchSeconds || 0) + 10;
+          }
+          const todayMins = Math.floor((store.todayWatchSeconds || 0) / 60);
+          const remainingMins = store.profile.daily_limit_minutes - todayMins;
+
+          if (remainingMins === 5 && !store.dailyLimitWarned) {
+            store.dailyLimitWarned = true;
+            addToast("⏰ 5 minutes of cartoon time remaining for today! 🌟", "warning", 7000);
+          }
+
+          if (todayMins >= store.profile.daily_limit_minutes) {
+            if (!store.bedtimeActive && !store.dailyLimitExtended) {
+              store.bedtimeActive = true;
+              store.bedtimeReason = "daily_limit";
+              if (v) v.pause();
+            }
+          }
+        }
+      }, 10000);
     }
 
     async function triggerScan() {
@@ -9248,10 +10036,6 @@ const App = {
         }
       }
     }
-
-    // NOTE: library scan intentionally does NOT auto-start on app load or
-    // session restore — it is triggered by startLibraryScan() only when the
-    // user actively logs into a profile (ProfilesPage / SetupPage).
 
     // Close profile menu on outside click
     function handleOutsideClick(e) {
@@ -9316,6 +10100,8 @@ const App = {
       });
 
       window.addEventListener("click", handleOutsideClick);
+
+      startScreenTimeWatchdog();
 
       // Poll if scan is running
       try {
@@ -9384,7 +10170,14 @@ const App = {
       editCurrentProfile,
       switchProfile,
       logout,
+      handleBedtimeGoodnight,
+      handleBedtimeUnlock,
       triggerScan,
+      appMathGateShow,
+      appMathProblem,
+      appMathAnswer,
+      appMathError,
+      handleAppMathKey,
       confirmState,
       handleConfirmOk,
       handleConfirmCancel,

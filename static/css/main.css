@@ -2187,18 +2187,91 @@ main::-webkit-scrollbar {
   top: 0;
   left: 0;
   right: 0;
-  height: 600px;
+  height: 650px;
   overflow: hidden;
   z-index: 0;
   pointer-events: none;
 }
 
+.detail-backdrop-parallax {
+  position: absolute;
+  inset: -25px;
+  will-change: transform;
+}
+
 .detail-backdrop-img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center 20%;
-  filter: brightness(0.9);
+  object-position: center 22%;
+  filter: brightness(0.88) contrast(1.05);
+  animation: kenBurnsPan 20s ease-in-out infinite alternate;
+}
+
+@keyframes kenBurnsPan {
+  0% {
+    transform: scale(1.02) translate(0, 0);
+  }
+  50% {
+    transform: scale(1.07) translate(-1.5%, -1%);
+  }
+  100% {
+    transform: scale(1.04) translate(1.5%, 1%);
+  }
+}
+
+.kenburns-fade-enter-active,
+.kenburns-fade-leave-active {
+  transition: opacity 1.4s cubic-bezier(0.4, 0, 0.2, 1), transform 1.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.kenburns-fade-enter-from {
+  opacity: 0;
+  transform: scale(1.12) translate(2%, 0);
+}
+
+.kenburns-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.96) translate(-2%, 0);
+}
+
+.detail-backdrop-indicators {
+  position: absolute;
+  top: calc(var(--nav-height) + 20px);
+  right: var(--space-xl, 2rem);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+  background: rgba(10, 10, 15, 0.75);
+  padding: 6px 14px;
+  border-radius: 20px;
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.backdrop-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.backdrop-dot:hover {
+  background: rgba(255, 255, 255, 0.8);
+  transform: scale(1.2);
+}
+
+.backdrop-dot.active {
+  width: 24px;
+  background: var(--accent);
+  box-shadow: 0 0 10px rgba(229, 9, 20, 0.5);
 }
 
 /* Fallback when the backdrop image fails to load (server down, missing
@@ -5467,31 +5540,178 @@ input:checked + .toggle-slider:before {
   gap: 4px;
 }
 
-/* ─── Kids Mode UI ───────────────────────────────────────────── */
+/* ─── Kids Mode UI & Playful Midnight Candy Theme ───────────── */
 
-.kids-profile-badge {
-  font-size: 0.7rem;
+body.kids-mode-theme {
+  --bg-primary: #0a0d1e;
+  --bg-secondary: #111633;
+  --bg-card: #161c42;
+  --bg-card-hover: #1f2759;
+  --bg-overlay: rgba(10, 13, 30, 0.94);
+  --bg-glass: rgba(17, 22, 51, 0.88);
+
+  --accent: #ff4757;
+  --accent-hover: #ff6b81;
+  --accent-dim: rgba(255, 71, 87, 0.25);
+  --accent-glow: 0 0 35px rgba(255, 71, 87, 0.6);
+
+  --gold: #fed330;
+  --gold-dim: rgba(254, 211, 48, 0.25);
+
+  --candy-pink: #ff6b81;
+  --candy-yellow: #fed330;
+  --candy-cyan: #00d2d3;
+  --candy-green: #2ed573;
+  --candy-purple: #a55eea;
+  --candy-orange: #ff9f43;
+
+  --radius-outer: 24px;
+  --radius-inner: 16px;
+  --radius-sm: 10px;
+
+  background-color: var(--bg-primary);
+  background-image: 
+    radial-gradient(circle at 15% 20%, rgba(255, 107, 129, 0.08) 0%, transparent 40%),
+    radial-gradient(circle at 85% 60%, rgba(0, 210, 211, 0.08) 0%, transparent 45%),
+    radial-gradient(circle at 50% 90%, rgba(165, 94, 234, 0.07) 0%, transparent 50%);
+  background-attachment: fixed;
+}
+
+body.kids-mode-theme .navbar {
+  background: rgba(10, 13, 30, 0.85);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+body.kids-mode-theme .media-card {
+  border-radius: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.06);
+  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.28s ease, border-color 0.28s ease;
+}
+
+body.kids-mode-theme .media-card:hover {
+  transform: translateY(-6px) scale(1.04);
+  border-color: rgba(0, 210, 211, 0.6);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(0, 210, 211, 0.3);
+}
+
+body.kids-mode-theme .card-play-btn {
+  background: linear-gradient(135deg, #ff4757, #ff6b81);
+  box-shadow: 0 4px 16px rgba(255, 71, 87, 0.5);
+  width: 52px;
+  height: 52px;
+}
+
+body.kids-mode-theme .card-badge {
+  border-radius: 12px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  padding: 4px 10px;
+  background: rgba(17, 22, 51, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* Category Bubbles Container */
+.kids-category-bubbles {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 1.25rem 2rem 0.5rem 2rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  margin-top: calc(var(--nav-height) - 10px);
+}
+
+.kids-category-bubbles::-webkit-scrollbar {
+  display: none;
+}
+
+.kids-bubble-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 8px 14px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.kids-bubble-item:hover {
+  transform: translateY(-4px) scale(1.05);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(254, 211, 48, 0.5);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3), 0 0 15px rgba(254, 211, 48, 0.2);
+}
+
+.kids-bubble-item.active {
+  background: rgba(254, 211, 48, 0.15);
+  border-color: #fed330;
+  box-shadow: 0 8px 25px rgba(254, 211, 48, 0.35);
+  transform: translateY(-2px) scale(1.03);
+}
+
+.kids-bubble-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: transform 0.25s ease;
+}
+
+.kids-bubble-item:hover .kids-bubble-icon {
+  transform: scale(1.1) rotate(5deg);
+}
+
+.kids-bubble-label {
+  font-size: 0.85rem;
   font-weight: 700;
-  color: #fdcb6e;
-  background: rgba(253, 203, 110, 0.15);
-  border: 1px solid rgba(253, 203, 110, 0.3);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.kids-bubble-item.active .kids-bubble-label {
+  color: #fed330;
+}
+
+/* Kids Profile Badge */
+.kids-profile-badge {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #00d2d3;
+  background: rgba(0, 210, 211, 0.15);
+  border: 1px solid rgba(0, 210, 211, 0.4);
   border-radius: var(--radius-pill);
-  padding: 2px 8px;
-  margin-top: 4px;
-  display: inline-block;
+  padding: 3px 10px;
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 8px rgba(0, 210, 211, 0.2);
 }
 
 .kids-mode-nav-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: #fdcb6e;
-  background: rgba(253, 203, 110, 0.15);
-  border: 1px solid rgba(253, 203, 110, 0.35);
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #00d2d3;
+  background: rgba(0, 210, 211, 0.15);
+  border: 1.5px solid rgba(0, 210, 211, 0.45);
   border-radius: var(--radius-pill);
-  padding: 4px 10px;
+  padding: 4px 12px;
+  box-shadow: 0 0 12px rgba(0, 210, 211, 0.25);
+  letter-spacing: 0.3px;
 }
 
 .kids-mode-toggle-row {
@@ -5551,6 +5771,168 @@ input:checked + .toggle-slider:before {
 
 .kids-mode-toggle input:checked + .kids-mode-slider:before {
   transform: translateX(20px);
+}
+
+/* ─── Child-Friendly Video Player & Screen Lock ─────────────── */
+
+.player-kids-lock-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  border-radius: var(--radius-pill);
+  padding: 6px 14px;
+  color: #ffffff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(10px);
+  user-select: none;
+}
+
+.player-kids-lock-btn:hover {
+  background: rgba(255, 71, 87, 0.25);
+  border-color: #ff4757;
+  transform: scale(1.05);
+}
+
+.player-kids-lock-btn.locked {
+  background: #ff4757;
+  border-color: #ff6b81;
+  box-shadow: 0 0 15px rgba(255, 71, 87, 0.6);
+}
+
+.player-child-lock-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.child-lock-hint-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(16, 22, 51, 0.92);
+  border: 2px solid #ff4757;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 25px rgba(255, 71, 87, 0.5);
+  border-radius: var(--radius-pill);
+  padding: 12px 24px;
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+  animation: lockPulse 1.8s infinite;
+  backdrop-filter: blur(12px);
+}
+
+@keyframes lockPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+body.kids-mode-theme .custom-player .ctrl-btn {
+  font-size: 1.4rem;
+  padding: 10px;
+}
+
+body.kids-mode-theme .custom-player .seekbar-fill {
+  background: linear-gradient(90deg, #ff4757, #00d2d3);
+  box-shadow: 0 0 10px rgba(0, 210, 211, 0.5);
+}
+
+/* ─── Parental Exit Gate & Math Challenge Modal ──────────────── */
+
+.parental-gate-modal {
+  position: relative;
+  background: #141936 !important;
+  border: 2px solid #283168 !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(0, 210, 211, 0.2);
+}
+
+.parental-gate-icon {
+  font-size: 2.8rem;
+  margin-bottom: 0.5rem;
+  animation: floatShield 2.5s ease-in-out infinite;
+}
+
+@keyframes floatShield {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.math-question-badge {
+  display: inline-block;
+  background: rgba(254, 211, 48, 0.15);
+  border: 2px dashed #fed330;
+  border-radius: 16px;
+  padding: 10px 24px;
+  font-size: 1.6rem;
+  font-weight: 900;
+  color: #fed330;
+  letter-spacing: 2px;
+  margin-bottom: 0.5rem;
+}
+
+.math-answer-display {
+  font-size: 1.8rem;
+  font-weight: 800;
+  min-width: 60px;
+  padding: 4px 16px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  border-bottom: 3px solid #00d2d3;
+  color: #ffffff;
+}
+
+/* ─── Bedtime / Sleep Timer Overlay ──────────────────────────── */
+
+.bedtime-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(5, 7, 18, 0.95);
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(25px);
+  animation: fadeIn 0.4s ease;
+  padding: 2rem;
+  text-align: center;
+}
+
+.bedtime-card {
+  background: linear-gradient(145deg, #12183a, #1a224f);
+  border: 2px solid rgba(254, 211, 48, 0.4);
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.9), 0 0 40px rgba(254, 211, 48, 0.25);
+  border-radius: 28px;
+  padding: 2.5rem 2rem;
+  max-width: 440px;
+  width: 100%;
+}
+
+.bedtime-moon {
+  font-size: 3.5rem;
+  margin-bottom: 1rem;
+  animation: floatMoon 3s ease-in-out infinite;
+}
+
+@keyframes floatMoon {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(5deg); }
 }
 
 /* ─── Range Slider / Progressbar Style ───────────────────────── */
@@ -6126,6 +6508,15 @@ body.kids-mode-theme .suggestion-tag:hover {
 .player-achv-pill i {
   font-size: 1rem;
   color: #f5d67b;
+}
+
+.player-achv-pill.kids-achv-pill {
+  background: linear-gradient(135deg, rgba(253, 203, 110, 0.95), rgba(225, 112, 85, 0.95));
+  border: 2px solid #ffeaa7;
+  color: #2d3436;
+  font-weight: 700;
+  font-size: 0.82rem;
+  box-shadow: 0 6px 20px rgba(253, 203, 110, 0.45);
 }
 
 /* ─── 4K HEVC Playback Advisory (left side, dismissible) ────── */

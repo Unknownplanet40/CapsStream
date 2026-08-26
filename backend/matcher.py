@@ -605,3 +605,41 @@ def fetch_imdb_id(tmdb_id, media_type="movie"):
     except Exception as e:
         print(f"[Matcher] Error fetching IMDb ID for {tmdb_id}: {e}")
     return None
+
+
+def fetch_media_backdrops(tmdb_id, media_type="movie"):
+    """
+    Fetches alternative backdrop images from TMDb API for a movie/show.
+    Returns list of backdrop image paths.
+    """
+    key = _api_key()
+    if not key or not tmdb_id:
+        return []
+
+    cache_file = os.path.join(METADATA_DIR, f"backdrops_{media_type}_{tmdb_id}.json")
+    if os.path.isfile(cache_file):
+        try:
+            with open(cache_file, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+
+    endpoint = "tv" if media_type in ("series", "anime") else "movie"
+    url = f"{TMDB_BASE}/{endpoint}/{tmdb_id}/images"
+    try:
+        r = requests.get(url, params={"api_key": key, "include_image_language": "en,null"}, timeout=8)
+        if r.status_code == 200:
+            data = r.json()
+            raw_backdrops = data.get("backdrops") or []
+            paths = []
+            for b in raw_backdrops[:8]:
+                fp = b.get("file_path")
+                if fp and fp not in paths:
+                    local_img = _download_image(fp, f"backdrop_{tmdb_id}_{len(paths)}")
+                    paths.append(local_img or fp)
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(paths, f)
+            return paths
+    except Exception as e:
+        print(f"[Matcher] Error fetching backdrops for {tmdb_id}: {e}")
+    return []

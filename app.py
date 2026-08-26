@@ -293,9 +293,19 @@ def api_create_profile():
         return jsonify({"error": "PIN must be exactly 4 digits"}), 400
 
     is_kids = bool(data.get("is_kids", False))
+    daily_limit_minutes = int(data.get("daily_limit_minutes", 0) or 0)
+    bedtime_curfew = str(data.get("bedtime_curfew", "") or "").strip()
     pin_hash = _hash_pin(pin) if pin else None
-    pid = create_profile(name, pin_hash, avatar, color, is_kids=is_kids)
-    return jsonify({"id": pid, "name": name, "avatar": avatar, "color": color, "is_kids": is_kids}), 201
+    pid = create_profile(name, pin_hash, avatar, color, is_kids=is_kids, daily_limit_minutes=daily_limit_minutes, bedtime_curfew=bedtime_curfew)
+    if is_kids:
+        active_pid = _current_profile()
+        if active_pid:
+            from backend.db import unlock_achievement
+            unlock_achievement(active_pid, "kids_creator")
+    return jsonify({
+        "id": pid, "name": name, "avatar": avatar, "color": color, "is_kids": is_kids,
+        "daily_limit_minutes": daily_limit_minutes, "bedtime_curfew": bedtime_curfew
+    }), 201
 
 
 @app.route("/api/profiles/<int:profile_id>", methods=["PUT"])
@@ -323,7 +333,9 @@ def api_update_profile(profile_id):
         else:
             pin_hash = None
 
-    update_profile(profile_id, name, pin_hash, avatar, color, is_kids, update_pin=update_pin)
+    daily_limit_minutes = int(data.get("daily_limit_minutes", 0) or 0)
+    bedtime_curfew = str(data.get("bedtime_curfew", "") or "").strip()
+    update_profile(profile_id, name, pin_hash, avatar, color, is_kids, update_pin=update_pin, daily_limit_minutes=daily_limit_minutes, bedtime_curfew=bedtime_curfew)
 
     return jsonify({
         "id": profile_id,
@@ -331,7 +343,9 @@ def api_update_profile(profile_id):
         "avatar": avatar,
         "color": color,
         "is_kids": is_kids,
-        "has_pin": bool(pin_hash)
+        "has_pin": bool(pin_hash),
+        "daily_limit_minutes": daily_limit_minutes,
+        "bedtime_curfew": bedtime_curfew
     })
 
 
@@ -394,6 +408,8 @@ def api_auth_profile():
         "avatar":  profile["avatar"],
         "color":   profile["color"],
         "is_kids": bool(profile.get("is_kids", 0)),
+        "daily_limit_minutes": int(profile.get("daily_limit_minutes", 0) or 0),
+        "bedtime_curfew": str(profile.get("bedtime_curfew", "") or ""),
     }})
 
 
@@ -412,6 +428,8 @@ def api_me():
         "avatar":  profile["avatar"],
         "color":   profile["color"],
         "is_kids": bool(profile.get("is_kids", 0)),
+        "daily_limit_minutes": int(profile.get("daily_limit_minutes", 0) or 0),
+        "bedtime_curfew": str(profile.get("bedtime_curfew", "") or ""),
     })
 
 
@@ -648,6 +666,15 @@ def api_media_detail(media_id):
                 conn.close()
             except Exception:
                 pass
+
+    if media.get("tmdb_id"):
+        from backend.matcher import fetch_media_backdrops
+        backdrops = fetch_media_backdrops(media["tmdb_id"], media.get("type", "movie"))
+        if media.get("backdrop_path") and media["backdrop_path"] not in backdrops:
+            backdrops = [media["backdrop_path"]] + backdrops
+        media["backdrops"] = backdrops or ([media["backdrop_path"]] if media.get("backdrop_path") else [])
+    else:
+        media["backdrops"] = [media["backdrop_path"]] if media.get("backdrop_path") else []
 
     pid = _current_profile()
     if pid:
@@ -1347,9 +1374,10 @@ def api_save_progress():
         return jsonify({"error": "media_id required"}), 400
 
     save_progress(pid, media_id, position, duration, completed)
-    from backend.db import check_and_unlock_achievements, ACHIEVEMENTS
+    from backend.db import check_and_unlock_achievements, get_profile_catalog
     newly_unlocked_ids = check_and_unlock_achievements(pid)
-    unlocked_items = [a for a in ACHIEVEMENTS if a["id"] in newly_unlocked_ids]
+    catalog = get_profile_catalog(pid)
+    unlocked_items = [a for a in catalog if a["id"] in newly_unlocked_ids]
     return jsonify({"ok": True, "unlocked_achievements": unlocked_items})
 
 

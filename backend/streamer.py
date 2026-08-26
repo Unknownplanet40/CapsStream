@@ -166,7 +166,7 @@ def stream_file(file_path):
         abort(416, description="Range Not Satisfiable")
 
     length = end - start + 1
-    chunk_size = 1024 * 1024  # 1 MB
+    chunk_size = 2 * 1024 * 1024  # 2 MB buffer for high throughput zero-stutter streaming
 
     def generate_range():
         with open(file_path, "rb") as f:

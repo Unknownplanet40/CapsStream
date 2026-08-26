@@ -85,39 +85,96 @@
 
       var bell = new Audio("/static/sfx/bell.wav");
       bell.volume = 1;
+      bell.preload = "auto";
       var bellPlayed = false;
+      var words = splash.querySelectorAll(".part");
+      var capsShown = false;
+      var streamShown = false;
+      var animStarted = false;
+      var startTime = null;
+
+      function startAnimation() {
+        if (animStarted) return;
+        animStarted = true;
+        startTime = performance.now();
+
+        function syncFrame(now) {
+          if (!splash || !splash.parentNode) return;
+          var elapsed = now - startTime;
+
+          // If audio has started and reporting currentTime, lock onto exact audio time
+          if (bellPlayed && bell.currentTime > 0) {
+            elapsed = bell.currentTime * 1000;
+          }
+
+          // First ding primary onset ≈ 417.7 ms -> "caps"
+          if (!capsShown && elapsed >= 417.7) {
+            words[0].style.opacity = "1";
+            capsShown = true;
+          }
+          // Second stronger ding peak ≈ 1616 ms -> "Stream"
+          if (!streamShown && elapsed >= 1616) {
+            words[1].style.opacity = "1";
+            streamShown = true;
+          }
+
+          if (elapsed < 3500) {
+            requestAnimationFrame(syncFrame);
+          }
+        }
+        requestAnimationFrame(syncFrame);
+
+        setTimeout(function () {
+          splash.style.transition = "opacity 0.55s ease";
+          splash.style.opacity = "0";
+        }, 2900);
+
+        setTimeout(function () {
+          try { sessionStorage.setItem("cs_splash_done", "1"); } catch (e) {}
+          if (splash.parentNode) splash.parentNode.removeChild(splash);
+        }, 3500);
+      }
+
       function tryBell() {
         if (bellPlayed) return;
         var p = bell.play();
-        if (p && p.then) p.then(function () { bellPlayed = true; })
-                        .catch(function () { /* still blocked — retry on next gesture */ });
-        else bellPlayed = true;
+        if (p && p.then) {
+          p.then(function () {
+            bellPlayed = true;
+            if (!animStarted) {
+              startAnimation();
+            } else {
+              // Resync if audio started slightly after visual frame start
+              startTime = performance.now() - (bell.currentTime * 1000);
+            }
+          }).catch(function () {
+            // Autoplay blocked — start visual timer anyway so UI doesn't hang
+            startAnimation();
+          });
+        } else {
+          bellPlayed = true;
+          startAnimation();
+        }
       }
-      tryBell();
-      // Autoplay policy fallback: some profiles (e.g. fresh app-mode
-      // profiles) block audible autoplay until the user interacts.
-      ["pointerdown", "keydown"].forEach(function (evt) {
-        window.addEventListener(evt, tryBell);
+
+      bell.addEventListener("play", function () {
+        bellPlayed = true;
+        if (!animStarted) {
+          startAnimation();
+        }
       });
 
-      // Brackets are visible immediately; only the two words pop in
-      var words = splash.querySelectorAll(".part");
-      function reveal(el) {
-        el.style.opacity = "1";
-      }
+      tryBell();
 
-      setTimeout(function () { reveal(words[0]); }, 500);    // caps
-      setTimeout(function () { reveal(words[1]); }, 1600);   // Stream
+      // Autoplay policy fallback: user interaction unlocks audio
+      ["pointerdown", "keydown"].forEach(function (evt) {
+        window.addEventListener(evt, tryBell, { once: true });
+      });
 
+      // Fallback safety timer: ensure animation starts even if audio takes time to load
       setTimeout(function () {
-        splash.style.transition = "opacity 0.55s ease";
-        splash.style.opacity = "0";
-      }, 2900);
-
-      setTimeout(function () {
-        try { sessionStorage.setItem("cs_splash_done", "1"); } catch (e) {}
-        if (splash.parentNode) splash.parentNode.removeChild(splash);
-      }, 3500);
+        if (!animStarted) startAnimation();
+      }, 50);
     })();
   </script>
 

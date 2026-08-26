@@ -126,6 +126,12 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_media_title ON media(title);
         CREATE INDEX IF NOT EXISTS idx_progress_profile ON watch_progress(profile_id);
         CREATE INDEX IF NOT EXISTS idx_favorites_profile ON favorites(profile_id);
+        CREATE INDEX IF NOT EXISTS idx_watch_progress_prof_upd ON watch_progress(profile_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_watch_progress_prof_med ON watch_progress(profile_id, media_id);
+        CREATE INDEX IF NOT EXISTS idx_favorites_prof_add ON favorites(profile_id, added_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_media_type_rating ON media(type, rating DESC);
+        CREATE INDEX IF NOT EXISTS idx_media_type_added ON media(type, added_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_media_added ON media(added_at DESC);
     """)
 
     # Migration guards for media table columns
@@ -166,6 +172,12 @@ def init_db():
         if "is_kids" not in pcols:
             conn.execute("ALTER TABLE profiles ADD COLUMN is_kids INTEGER DEFAULT 0")
             print("[DB] Migrated: added is_kids column to profiles")
+        if "daily_limit_minutes" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN daily_limit_minutes INTEGER DEFAULT 0")
+            print("[DB] Migrated: added daily_limit_minutes column to profiles")
+        if "bedtime_curfew" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN bedtime_curfew TEXT DEFAULT ''")
+            print("[DB] Migrated: added bedtime_curfew column to profiles")
     except Exception as e:
         print("[DB] Migration notice:", e)
 
@@ -842,11 +854,11 @@ def get_profile(profile_id):
     return dict(row) if row else None
 
 
-def create_profile(name, pin_hash, avatar="🎦", color="#e50914", is_kids=False):
+def create_profile(name, pin_hash, avatar="🎦", color="#e50914", is_kids=False, daily_limit_minutes=0, bedtime_curfew=""):
     conn = get_conn()
     cur = conn.execute(
-        "INSERT INTO profiles (name, pin_hash, avatar, color, is_kids) VALUES (?,?,?,?,?)",
-        (name, pin_hash, avatar, color, 1 if is_kids else 0)
+        "INSERT INTO profiles (name, pin_hash, avatar, color, is_kids, daily_limit_minutes, bedtime_curfew) VALUES (?,?,?,?,?,?,?)",
+        (name, pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0), str(bedtime_curfew or ''))
     )
     conn.commit()
     pid = cur.lastrowid
@@ -854,7 +866,7 @@ def create_profile(name, pin_hash, avatar="🎦", color="#e50914", is_kids=False
     return pid
 
 
-def update_profile(profile_id, name, pin_hash=None, avatar="🎦", color="#e50914", is_kids=False, update_pin=False):
+def update_profile(profile_id, name, pin_hash=None, avatar="🎦", color="#e50914", is_kids=False, update_pin=False, daily_limit_minutes=0, bedtime_curfew=""):
     conn = get_conn()
     if is_kids:
         pin_hash = None
@@ -862,13 +874,13 @@ def update_profile(profile_id, name, pin_hash=None, avatar="🎦", color="#e5091
 
     if update_pin:
         conn.execute(
-            "UPDATE profiles SET name=?, pin_hash=?, avatar=?, color=?, is_kids=? WHERE id=?",
-            (name, pin_hash, avatar, color, 1 if is_kids else 0, profile_id)
+            "UPDATE profiles SET name=?, pin_hash=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, bedtime_curfew=? WHERE id=?",
+            (name, pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0), str(bedtime_curfew or ''), profile_id)
         )
     else:
         conn.execute(
-            "UPDATE profiles SET name=?, avatar=?, color=?, is_kids=? WHERE id=?",
-            (name, avatar, color, 1 if is_kids else 0, profile_id)
+            "UPDATE profiles SET name=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, bedtime_curfew=? WHERE id=?",
+            (name, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0), str(bedtime_curfew or ''), profile_id)
         )
     conn.commit()
     conn.close()
@@ -1749,22 +1761,419 @@ ACHIEVEMENTS = [
 ]
 
 
+KIDS_ACHIEVEMENTS = [
+    # ─── 1. Little Milestones ───
+    {
+        "id": "kids_first_watch",
+        "title": "Little Streamer",
+        "icon": "🎬",
+        "description": "Watch your very first cartoon or movie",
+        "category": "Little Milestones",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_first_finish",
+        "title": "Storybook Finisher",
+        "icon": "🏁",
+        "description": "Watch a show or movie all the way to the end",
+        "category": "Little Milestones",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_time_1h",
+        "title": "Cartoon Explorer",
+        "icon": "⏱️",
+        "description": "Enjoy 1 hour of fun streaming",
+        "category": "Little Milestones",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_time_3h",
+        "title": "Adventure Fan",
+        "icon": "🍿",
+        "description": "Enjoy 3 hours of streaming fun",
+        "category": "Little Milestones",
+        "rarity": "Silver"
+    },
+    {
+        "id": "kids_time_10h",
+        "title": "Super Streamer",
+        "icon": "🌟",
+        "description": "Reach 10 hours of total streaming",
+        "category": "Little Milestones",
+        "rarity": "Gold"
+    },
+    {
+        "id": "kids_time_25h",
+        "title": "Mega Movie Star",
+        "icon": "🚀",
+        "description": "Reach 25 hours of playtime",
+        "category": "Little Milestones",
+        "rarity": "Platinum"
+    },
+    {
+        "id": "kids_titles_5",
+        "title": "Five Star Fun",
+        "icon": "⭐",
+        "description": "Watch 5 different cartoons or movies",
+        "category": "Little Milestones",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_titles_15",
+        "title": "Show Collector",
+        "icon": "📚",
+        "description": "Watch 15 different cartoons or movies",
+        "category": "Little Milestones",
+        "rarity": "Silver"
+    },
+    {
+        "id": "kids_titles_30",
+        "title": "Library Champion",
+        "icon": "👑",
+        "description": "Watch 30 different cartoons or movies",
+        "category": "Little Milestones",
+        "rarity": "Gold"
+    },
+    {
+        "id": "kids_streak_2",
+        "title": "Weekend Fan",
+        "icon": "🎉",
+        "description": "Watch shows 2 days in a row",
+        "category": "Little Milestones",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_streak_3",
+        "title": "Cartoon Streak",
+        "icon": "🔥",
+        "description": "Watch shows 3 days in a row",
+        "category": "Little Milestones",
+        "rarity": "Silver"
+    },
+    {
+        "id": "kids_streak_5",
+        "title": "High Five Streak",
+        "icon": "✋",
+        "description": "Stream every day for 5 days",
+        "category": "Little Milestones",
+        "rarity": "Gold"
+    },
+    {
+        "id": "kids_streak_7",
+        "title": "Weekly Champion",
+        "icon": "📅",
+        "description": "Stream every day for a full week",
+        "category": "Little Milestones",
+        "rarity": "Platinum"
+    },
+    {
+        "id": "kids_quick_show",
+        "title": "Quick Chuckles",
+        "icon": "⚡",
+        "description": "Finish a short cartoon under 15 minutes",
+        "category": "Little Milestones",
+        "rarity": "Bronze"
+    },
+
+    # ─── 2. Cartoon Explorer ───
+    {
+        "id": "kids_animation_fan",
+        "title": "Toon Lover",
+        "icon": "🎨",
+        "description": "Watch 3 or more Animated cartoons or shows",
+        "category": "Cartoon Explorer",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_family_time",
+        "title": "Family Fun",
+        "icon": "🎈",
+        "description": "Watch 3 Family or Adventure movies",
+        "category": "Cartoon Explorer",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_comedy_kid",
+        "title": "Giggle Box",
+        "icon": "😂",
+        "description": "Watch 3 funny Comedy shows",
+        "category": "Cartoon Explorer",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_fantasy_magic",
+        "title": "Magic Kingdom",
+        "icon": "🧙‍♂️",
+        "description": "Watch 3 Fantasy or magical adventures",
+        "category": "Cartoon Explorer",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_sci_fi_space",
+        "title": "Space Explorer",
+        "icon": "🚀",
+        "description": "Watch 3 Sci-Fi or space adventures",
+        "category": "Cartoon Explorer",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_genre_adventurer",
+        "title": "Curious Explorer",
+        "icon": "🔍",
+        "description": "Watch shows from 3 different categories",
+        "category": "Cartoon Explorer",
+        "rarity": "Silver"
+    },
+    {
+        "id": "kids_trailer_scout",
+        "title": "Sneak Peek",
+        "icon": "🍿",
+        "description": "Watch an official video preview or trailer",
+        "category": "Cartoon Explorer",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_search_helper",
+        "title": "Treasure Hunter",
+        "icon": "🔎",
+        "description": "Search for your favorite cartoon or character",
+        "category": "Cartoon Explorer",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_bubble_explorer",
+        "title": "Bubble Popper",
+        "icon": "🫧",
+        "description": "Click a category bubble on the Kids Home page",
+        "category": "Cartoon Explorer",
+        "rarity": "Bronze"
+    },
+
+    # ─── 3. Fun Player ───
+    {
+        "id": "kids_fullscreen_fun",
+        "title": "Big Screen Magic",
+        "icon": "🖥️",
+        "description": "Play your video in full screen mode",
+        "category": "Fun Player",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_play_pause",
+        "title": "Freeze Dance",
+        "icon": "⏸️",
+        "description": "Pause and resume your show",
+        "category": "Fun Player",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_volume_whisper",
+        "title": "Whisper Quiet",
+        "icon": "🤫",
+        "description": "Adjust the volume to a quiet level or mute",
+        "category": "Fun Player",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_volume_party",
+        "title": "Party Volume",
+        "icon": "🔊",
+        "description": "Turn up the volume for your favorite song or scene",
+        "category": "Fun Player",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_pip_hero",
+        "title": "Mini Magic Screen",
+        "icon": "🖼️",
+        "description": "Open the video in a mini pop-out window",
+        "category": "Fun Player",
+        "rarity": "Silver"
+    },
+    {
+        "id": "kids_next_episode",
+        "title": "Next Adventure",
+        "icon": "⏭️",
+        "description": "Jump straight to the next episode",
+        "category": "Fun Player",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_sub_reading",
+        "title": "Reading Helper",
+        "icon": "💬",
+        "description": "Turn on subtitles to read along with the characters",
+        "category": "Fun Player",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_speed_turbo",
+        "title": "Turbo Speed",
+        "icon": "⚡",
+        "description": "Watch a scene in fast speed",
+        "category": "Fun Player",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_speed_slowmo",
+        "title": "Super Slow-Mo",
+        "icon": "🐌",
+        "description": "Watch a scene in slow motion",
+        "category": "Fun Player",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_rewind_seeker",
+        "title": "Time Rewind",
+        "icon": "⏪",
+        "description": "Rewind to replay a favorite part",
+        "category": "Fun Player",
+        "rarity": "Bronze"
+    },
+
+    # ─── 4. Sticker Collector ───
+    {
+        "id": "kids_fav_1",
+        "title": "First Favorite",
+        "icon": "💖",
+        "description": "Add your very first favorite cartoon",
+        "category": "Sticker Collector",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_fav_5",
+        "title": "Sticker Collection",
+        "icon": "❤️",
+        "description": "Save 5 shows to your Favorites",
+        "category": "Sticker Collector",
+        "rarity": "Silver"
+    },
+    {
+        "id": "kids_fav_15",
+        "title": "Super Treasure Box",
+        "icon": "💎",
+        "description": "Save 15 shows to your Favorites",
+        "category": "Sticker Collector",
+        "rarity": "Gold"
+    },
+    {
+        "id": "kids_collection_builder",
+        "title": "Toy Box Creator",
+        "icon": "📁",
+        "description": "Create a custom cartoon playlist or collection",
+        "category": "Sticker Collector",
+        "rarity": "Silver"
+    },
+    {
+        "id": "kids_avatar_dress",
+        "title": "Dress Up Time",
+        "icon": "🎭",
+        "description": "Choose a fun avatar icon or favorite color",
+        "category": "Sticker Collector",
+        "rarity": "Bronze"
+    },
+
+    # ─── 5. Junior Champion ───
+    {
+        "id": "kids_trophy_5",
+        "title": "Little Star",
+        "icon": "🌟",
+        "description": "Unlock 5 badges in your Kids Trophy Case",
+        "category": "Junior Champion",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_trophy_10",
+        "title": "Bronze Scout",
+        "icon": "🥉",
+        "description": "Unlock 10 badges in your Kids Trophy Case",
+        "category": "Junior Champion",
+        "rarity": "Bronze"
+    },
+    {
+        "id": "kids_trophy_20",
+        "title": "Silver Champion",
+        "icon": "🥈",
+        "description": "Unlock 20 badges in your Kids Trophy Case",
+        "category": "Junior Champion",
+        "rarity": "Silver"
+    },
+    {
+        "id": "kids_trophy_30",
+        "title": "Golden Superstar",
+        "icon": "🥇",
+        "description": "Unlock 30 badges in your Kids Trophy Case",
+        "category": "Junior Champion",
+        "rarity": "Gold"
+    },
+    {
+        "id": "kids_trophy_all",
+        "title": "Ultimate Legend",
+        "icon": "👑",
+        "description": "Collect all badges in the Kids Trophy Case!",
+        "category": "Junior Champion",
+        "rarity": "Platinum"
+    }
+]
+
+
+ACTION_TO_KIDS_ACHIEVEMENTS = {
+    "seeker": "kids_rewind_seeker",
+    "fullscreen_pro": "kids_fullscreen_fun",
+    "mute_master": "kids_volume_whisper",
+    "volume_booster": "kids_volume_party",
+    "pip_master": "kids_pip_hero",
+    "next_ep_advance": "kids_next_episode",
+    "sub_master": "kids_sub_reading",
+    "sub_styler": "kids_sub_reading",
+    "speed_demon": "kids_speed_turbo",
+    "double_speed": "kids_speed_turbo",
+    "slow_motion": "kids_speed_slowmo",
+    "trailer_buff": "kids_trailer_scout",
+    "search_master": "kids_search_helper",
+    "filter_pro": "kids_genre_adventurer",
+    "curator": "kids_fav_1",
+    "fav_collector": "kids_fav_5",
+    "fav_legend": "kids_fav_15",
+    "collection_king": "kids_collection_builder",
+    "profile_customizer": "kids_avatar_dress",
+}
+
+
+def get_profile_catalog(profile_id):
+    conn = get_conn()
+    p = conn.execute("SELECT is_kids FROM profiles WHERE id=?", (profile_id,)).fetchone()
+    conn.close()
+    return KIDS_ACHIEVEMENTS if (p and p["is_kids"]) else ACHIEVEMENTS
+
+
 def unlock_achievement(profile_id, achievement_id):
     if not profile_id or not achievement_id:
         return None
     conn = get_conn()
+    p_row = conn.execute("SELECT is_kids FROM profiles WHERE id=?", (profile_id,)).fetchone()
+    is_kids = bool(p_row["is_kids"]) if p_row else False
+
+    actual_aid = achievement_id
+    if is_kids and achievement_id in ACTION_TO_KIDS_ACHIEVEMENTS:
+        actual_aid = ACTION_TO_KIDS_ACHIEVEMENTS[achievement_id]
+
+    active_catalog = KIDS_ACHIEVEMENTS if is_kids else ACHIEVEMENTS
     existing = conn.execute(
         "SELECT 1 FROM achievements WHERE profile_id=? AND achievement_id=?",
-        (profile_id, achievement_id)
+        (profile_id, actual_aid)
     ).fetchone()
     if not existing:
         conn.execute(
             "INSERT INTO achievements (profile_id, achievement_id) VALUES (?,?)",
-            (profile_id, achievement_id)
+            (profile_id, actual_aid)
         )
         conn.commit()
         conn.close()
-        ach = next((a for a in ACHIEVEMENTS if a["id"] == achievement_id), None)
+        ach = next((a for a in active_catalog if a["id"] == actual_aid), None)
+        if not ach:
+            ach = next((a for a in (ACHIEVEMENTS + KIDS_ACHIEVEMENTS) if a["id"] == actual_aid), None)
         return ach
     conn.close()
     return None
@@ -1773,6 +2182,9 @@ def unlock_achievement(profile_id, achievement_id):
 def check_and_unlock_achievements(profile_id):
     from datetime import datetime
     conn = get_conn()
+
+    p_row = conn.execute("SELECT avatar, color, is_kids, pin_hash FROM profiles WHERE id=?", (profile_id,)).fetchone()
+    is_kids = bool(p_row["is_kids"]) if p_row else False
 
     unlocked_ids = set(
         r["achievement_id"] for r in conn.execute(
@@ -1794,6 +2206,142 @@ def check_and_unlock_achievements(profile_id):
     fav_cnt = conn.execute("SELECT COUNT(*) as c FROM favorites WHERE profile_id=?", (profile_id,)).fetchone()["c"]
     col_cnt = conn.execute("SELECT COUNT(*) as c FROM collections WHERE profile_id=?", (profile_id,)).fetchone()["c"]
 
+    raw_rows = conn.execute("""
+        SELECT wp.updated_at, wp.position, wp.duration, wp.completed, wp.media_id,
+               m.type, m.tmdb_id, m.season, m.episode, m.genres
+        FROM watch_progress wp JOIN media m ON m.id = wp.media_id
+        WHERE wp.profile_id=?
+    """, (profile_id,)).fetchall()
+
+    day_hours = {}
+    day_titles = {}
+    day_seconds = {}
+    day_movie_done = {}
+    show_day_eps = {}
+    hour_dates = {}
+    genres_watched = {}
+    max_episode_cache = {}
+
+    for r in raw_rows:
+        ts = r["updated_at"] or ""
+        if len(ts) < 13:
+            continue
+        date_s, hour_s = ts[:10], ts[11:13]
+        try:
+            hour = int(hour_s)
+        except ValueError:
+            continue
+        weekday = datetime.strptime(date_s, "%Y-%m-%d").weekday()
+
+        day_hours.setdefault(date_s, set()).add(hour)
+        day_titles.setdefault(date_s, set()).add(r["media_id"])
+        hour_dates.setdefault(hour, set()).add(date_s)
+
+        pos = r["position"] or 0
+        dur = r["duration"] or 0
+        day_seconds[date_s] = day_seconds.get(date_s, 0) + min(pos, dur) if dur else day_seconds.get(date_s, 0)
+
+        if r["completed"] and r["type"] == "movie":
+            day_movie_done[date_s] = day_movie_done.get(date_s, 0) + 1
+
+        if r["completed"] and r["type"] != "movie" and r["tmdb_id"]:
+            key = (r["tmdb_id"], r["season"], date_s)
+            show_day_eps.setdefault(key, set()).add(r["episode"])
+
+        for kw in ("Action", "Comedy", "Drama", "Science Fiction", "Sci-Fi", "Horror",
+                   "Thriller", "Romance", "Documentary", "Animation",
+                   "Crime", "Mystery", "Fantasy", "Family", "Adventure"):
+            if kw in (r["genres"] or ""):
+                genres_watched.setdefault(kw, set()).add(r["media_id"])
+
+    genre_rows = conn.execute("""
+        SELECT DISTINCT m.genres FROM watch_progress wp
+        JOIN media m ON m.id = wp.media_id
+        WHERE wp.profile_id=? AND m.genres IS NOT NULL
+    """, (profile_id,)).fetchall()
+    distinct_genres = set()
+    for gr in genre_rows:
+        for g in (gr["genres"] or "").split(","):
+            if g.strip(): distinct_genres.add(g.strip())
+
+    def consecutive_days(dates, needed):
+        if len(dates) < needed:
+            return False
+        ds = sorted(datetime.strptime(d, "%Y-%m-%d").toordinal() for d in dates)
+        run, best = 1, 1
+        for i in range(1, len(ds)):
+            run = run + 1 if ds[i] - ds[i - 1] == 1 else 1
+            best = max(best, run)
+        return best >= needed
+
+    all_dates = set(day_hours.keys())
+
+    # ─── Kids Mode Logic ───
+    if is_kids:
+        # 1. Little Milestones
+        if "kids_first_watch" not in unlocked_ids and total_items > 0: new_unlocked.append("kids_first_watch")
+        if "kids_first_finish" not in unlocked_ids and completed_items >= 1: new_unlocked.append("kids_first_finish")
+        if "kids_time_1h" not in unlocked_ids and total_seconds >= 3600: new_unlocked.append("kids_time_1h")
+        if "kids_time_3h" not in unlocked_ids and total_seconds >= 10800: new_unlocked.append("kids_time_3h")
+        if "kids_time_10h" not in unlocked_ids and total_seconds >= 36000: new_unlocked.append("kids_time_10h")
+        if "kids_time_25h" not in unlocked_ids and total_seconds >= 90000: new_unlocked.append("kids_time_25h")
+        if "kids_titles_5" not in unlocked_ids and total_items >= 5: new_unlocked.append("kids_titles_5")
+        if "kids_titles_15" not in unlocked_ids and total_items >= 15: new_unlocked.append("kids_titles_15")
+        if "kids_titles_30" not in unlocked_ids and total_items >= 30: new_unlocked.append("kids_titles_30")
+        if "kids_streak_2" not in unlocked_ids and consecutive_days(all_dates, 2): new_unlocked.append("kids_streak_2")
+        if "kids_streak_3" not in unlocked_ids and consecutive_days(all_dates, 3): new_unlocked.append("kids_streak_3")
+        if "kids_streak_5" not in unlocked_ids and consecutive_days(all_dates, 5): new_unlocked.append("kids_streak_5")
+        if "kids_streak_7" not in unlocked_ids and consecutive_days(all_dates, 7): new_unlocked.append("kids_streak_7")
+        if "kids_quick_show" not in unlocked_ids and any(
+            r["completed"] and 0 < (r["duration"] or 0) <= 900 for r in raw_rows
+        ):
+            new_unlocked.append("kids_quick_show")
+
+        # 2. Cartoon Explorer
+        if "kids_animation_fan" not in unlocked_ids and len(genres_watched.get("Animation", set())) >= 3:
+            new_unlocked.append("kids_animation_fan")
+        fam_adv = genres_watched.get("Family", set()) | genres_watched.get("Adventure", set())
+        if "kids_family_time" not in unlocked_ids and len(fam_adv) >= 3:
+            new_unlocked.append("kids_family_time")
+        if "kids_comedy_kid" not in unlocked_ids and len(genres_watched.get("Comedy", set())) >= 3:
+            new_unlocked.append("kids_comedy_kid")
+        if "kids_fantasy_magic" not in unlocked_ids and len(genres_watched.get("Fantasy", set())) >= 3:
+            new_unlocked.append("kids_fantasy_magic")
+        sci_fi = genres_watched.get("Science Fiction", set()) | genres_watched.get("Sci-Fi", set())
+        if "kids_sci_fi_space" not in unlocked_ids and len(sci_fi) >= 3:
+            new_unlocked.append("kids_sci_fi_space")
+        if "kids_genre_adventurer" not in unlocked_ids and len(distinct_genres) >= 3:
+            new_unlocked.append("kids_genre_adventurer")
+
+        # 4. Sticker Collector
+        if "kids_fav_1" not in unlocked_ids and fav_cnt >= 1: new_unlocked.append("kids_fav_1")
+        if "kids_fav_5" not in unlocked_ids and fav_cnt >= 5: new_unlocked.append("kids_fav_5")
+        if "kids_fav_15" not in unlocked_ids and fav_cnt >= 15: new_unlocked.append("kids_fav_15")
+        if "kids_collection_builder" not in unlocked_ids and col_cnt >= 1: new_unlocked.append("kids_collection_builder")
+        if "kids_avatar_dress" not in unlocked_ids and p_row and (
+            (p_row["avatar"] or "").strip() or (p_row["color"] or "").strip()
+        ):
+            new_unlocked.append("kids_avatar_dress")
+
+        # 5. Junior Champion (Kids Trophy Milestones)
+        kids_ach_ids = {a["id"] for a in KIDS_ACHIEVEMENTS}
+        current_kids_unlocked = len(unlocked_ids & kids_ach_ids) + len(new_unlocked)
+        if "kids_trophy_5" not in unlocked_ids and current_kids_unlocked >= 5: new_unlocked.append("kids_trophy_5")
+        if "kids_trophy_10" not in unlocked_ids and current_kids_unlocked >= 10: new_unlocked.append("kids_trophy_10")
+        if "kids_trophy_20" not in unlocked_ids and current_kids_unlocked >= 20: new_unlocked.append("kids_trophy_20")
+        if "kids_trophy_30" not in unlocked_ids and current_kids_unlocked >= 30: new_unlocked.append("kids_trophy_30")
+        if "kids_trophy_all" not in unlocked_ids and current_kids_unlocked >= (len(KIDS_ACHIEVEMENTS) - 1):
+            new_unlocked.append("kids_trophy_all")
+
+        for aid in new_unlocked:
+            conn.execute("INSERT OR IGNORE INTO achievements (profile_id, achievement_id) VALUES (?,?)", (profile_id, aid))
+
+        if new_unlocked:
+            conn.commit()
+        conn.close()
+        return new_unlocked
+
+    # ─── Standard Mode Logic ───
     movie_cnt = conn.execute("""
         SELECT COUNT(*) as c FROM watch_progress wp
         JOIN media m ON m.id = wp.media_id
@@ -1832,15 +2380,6 @@ def check_and_unlock_achievements(profile_id):
     if "otaku" not in unlocked_ids and anime_cnt >= 3: new_unlocked.append("otaku")
     if "omni_viewer" not in unlocked_ids and (movie_cnt > 0 and series_cnt > 0 and anime_cnt > 0): new_unlocked.append("omni_viewer")
 
-    genre_rows = conn.execute("""
-        SELECT DISTINCT m.genres FROM watch_progress wp
-        JOIN media m ON m.id = wp.media_id
-        WHERE wp.profile_id=? AND m.genres IS NOT NULL
-    """, (profile_id,)).fetchall()
-    distinct_genres = set()
-    for gr in genre_rows:
-        for g in (gr["genres"] or "").split(","):
-            if g.strip(): distinct_genres.add(g.strip())
     if "explorer" not in unlocked_ids and len(distinct_genres) >= 3: new_unlocked.append("explorer")
     if "genre_virtuoso" not in unlocked_ids and len(distinct_genres) >= 8: new_unlocked.append("genre_virtuoso")
 
@@ -1860,17 +2399,17 @@ def check_and_unlock_achievements(profile_id):
             new_unlocked.append("early_bird")
 
     # 5. Profile & Storage
-    p_row = conn.execute("SELECT avatar, color, is_kids, pin_hash FROM profiles WHERE id=?", (profile_id,)).fetchone()
     if p_row:
         if "pin_defender" not in unlocked_ids and p_row["pin_hash"]: new_unlocked.append("pin_defender")
-        if "kids_creator" not in unlocked_ids and p_row["is_kids"]: new_unlocked.append("kids_creator")
+        if "kids_creator" not in unlocked_ids and not p_row["is_kids"]:
+            if conn.execute("SELECT 1 FROM profiles WHERE is_kids = 1").fetchone():
+                new_unlocked.append("kids_creator")
 
-    # 5b. Theme — the entire interface is the premium dark theme, so this
-    # unlocks for any active profile that checks their trophy case.
+    # 5b. Theme
     if "theme_master" not in unlocked_ids:
         new_unlocked.append("theme_master")
 
-    # 5c. Library storage & drive milestones (library-wide, not per-profile)
+    # 5c. Library storage & drive milestones
     lib_stats = conn.execute("""
         SELECT COALESCE(SUM(file_size), 0) AS total_bytes,
                COUNT(DISTINCT CASE WHEN file_size >= 2000000000 THEN
@@ -1898,68 +2437,6 @@ def check_and_unlock_achievements(profile_id):
     ):
         new_unlocked.append("profile_customizer")
 
-    # 6. Time-of-day, streaks & session habits — computed from raw progress
-    # rows (one query, all Python-side; timestamps are "YYYY-MM-DD HH:MM:SS")
-    raw_rows = conn.execute("""
-        SELECT wp.updated_at, wp.position, wp.duration, wp.completed, wp.media_id,
-               m.type, m.tmdb_id, m.season, m.episode, m.genres
-        FROM watch_progress wp JOIN media m ON m.id = wp.media_id
-        WHERE wp.profile_id=?
-    """, (profile_id,)).fetchall()
-
-    day_hours = {}     # date -> set(hours)
-    day_titles = {}    # date -> set(media_id)
-    day_seconds = {}   # date -> approximate watched seconds
-    day_movie_done = {}  # date -> count completed movies
-    show_day_eps = {}  # (tmdb_id, season, date) -> set(episode numbers completed)
-    hour_dates = {}    # hour -> set(dates)
-    genres_watched = {}  # genre keyword -> set(media_id)
-    max_episode_cache = {}
-
-    for r in raw_rows:
-        ts = r["updated_at"] or ""
-        if len(ts) < 13:
-            continue
-        date_s, hour_s = ts[:10], ts[11:13]
-        try:
-            hour = int(hour_s)
-        except ValueError:
-            continue
-        minute = int(ts[14:16]) if len(ts) >= 16 and ts[14:16].isdigit() else 0
-        weekday = datetime.strptime(date_s, "%Y-%m-%d").weekday()  # 0=Mon
-
-        day_hours.setdefault(date_s, set()).add(hour)
-        day_titles.setdefault(date_s, set()).add(r["media_id"])
-        hour_dates.setdefault(hour, set()).add(date_s)
-
-        pos = r["position"] or 0
-        dur = r["duration"] or 0
-        day_seconds[date_s] = day_seconds.get(date_s, 0) + min(pos, dur) if dur else day_seconds.get(date_s, 0)
-
-        if r["completed"] and r["type"] == "movie":
-            day_movie_done[date_s] = day_movie_done.get(date_s, 0) + 1
-
-        if r["completed"] and r["type"] != "movie" and r["tmdb_id"]:
-            key = (r["tmdb_id"], r["season"], date_s)
-            show_day_eps.setdefault(key, set()).add(r["episode"])
-
-        for kw in ("Action", "Comedy", "Drama", "Science Fiction", "Horror",
-                   "Thriller", "Romance", "Documentary", "Animation",
-                   "Crime", "Mystery", "Fantasy"):
-            if kw in (r["genres"] or ""):
-                genres_watched.setdefault(kw, set()).add(r["media_id"])
-
-    def consecutive_days(dates, needed):
-        if len(dates) < needed:
-            return False
-        ds = sorted(datetime.strptime(d, "%Y-%m-%d").toordinal() for d in dates)
-        run, best = 1, 1
-        for i in range(1, len(ds)):
-            run = run + 1 if ds[i] - ds[i - 1] == 1 else 1
-            best = max(best, run)
-        return best >= needed
-
-    all_dates = set(day_hours.keys())
     if "streak_3" not in unlocked_ids and consecutive_days(all_dates, 3): new_unlocked.append("streak_3")
     if "streak_7" not in unlocked_ids and consecutive_days(all_dates, 7): new_unlocked.append("streak_7")
     if "streak_30" not in unlocked_ids and consecutive_days(all_dates, 30): new_unlocked.append("streak_30")
@@ -2059,11 +2536,10 @@ def check_and_unlock_achievements(profile_id):
         for span in season_spans.values():
             if len(span["eps"]) >= 3 and len(span["dates"]) >= 1:
                 ds = sorted(datetime.strptime(d, "%Y-%m-%d").toordinal() for d in span["dates"])
-                if (ds[-1] - ds[0]) <= 2:  # within 48 hours
+                if (ds[-1] - ds[0]) <= 2:
                     new_unlocked.append("marathon_master")
                     break
 
-    # 6b. Genre exploration (distinct watched titles per genre keyword)
     genre_goals = {
         "action_junkie": (("Action",), 3),
         "comedy_lover": (("Comedy",), 3),
@@ -2107,6 +2583,10 @@ def get_profile_achievements(profile_id):
     conn = get_conn()
     check_and_unlock_achievements(profile_id)
 
+    p_row = conn.execute("SELECT is_kids FROM profiles WHERE id=?", (profile_id,)).fetchone()
+    is_kids = bool(p_row["is_kids"]) if p_row else False
+    active_catalog = KIDS_ACHIEVEMENTS if is_kids else ACHIEVEMENTS
+
     unlocked_rows = conn.execute(
         "SELECT achievement_id, unlocked_at FROM achievements WHERE profile_id=?",
         (profile_id,)
@@ -2116,13 +2596,12 @@ def get_profile_achievements(profile_id):
     unlocked_map = {r["achievement_id"]: r["unlocked_at"] for r in unlocked_rows}
 
     results = []
-    for ach in ACHIEVEMENTS:
+    for ach in active_catalog:
         aid = ach["id"]
         is_unlocked = aid in unlocked_map
         unlocked_at_str = None
         if is_unlocked and unlocked_map[aid]:
             try:
-                # Format unlocked date e.g. "Aug 19"
                 from datetime import datetime
                 dt = datetime.strptime(str(unlocked_map[aid]).split(".")[0], "%Y-%m-%d %H:%M:%S")
                 unlocked_at_str = dt.strftime("%b %d")
