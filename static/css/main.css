@@ -9960,6 +9960,10 @@ kbd.about-kbd {
   z-index: 999990;
   min-width: 250px;
   max-width: 310px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   background: rgba(18, 18, 26, 0.96);
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 14px;
@@ -9973,6 +9977,23 @@ kbd.about-kbd {
   animation: context-menu-pop 0.15s cubic-bezier(0.2, 0, 0, 1);
   transform-origin: top left;
   user-select: none;
+}
+
+.floating-context-menu::-webkit-scrollbar {
+  width: 4px;
+}
+
+.floating-context-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.floating-context-menu::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 99px;
+}
+
+.floating-context-menu::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
 }
 
 @keyframes context-menu-pop {

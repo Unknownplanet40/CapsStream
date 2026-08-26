@@ -550,8 +550,6 @@ function openGlobalContextMenu(e, item) {
   if (e && typeof e.preventDefault === "function") e.preventDefault();
   if (e && typeof e.stopPropagation === "function") e.stopPropagation();
 
-  const menuWidth = 270;
-  const menuHeight = 360;
   let clickX = (e && e.clientX) || 100;
   let clickY = (e && e.clientY) || 100;
 
@@ -570,22 +568,69 @@ function openGlobalContextMenu(e, item) {
     }
   }
 
+  let anchorRect = null;
   if (anchorEl && typeof anchorEl.getBoundingClientRect === "function") {
     const rect = anchorEl.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
+      anchorRect = rect;
       clickX = rect.left;
       clickY = rect.bottom + 4;
     }
   }
 
-  const maxX = window.innerWidth - menuWidth - 16;
-  const maxY = window.innerHeight - menuHeight - 16;
-
-  contextMenuState.x = Math.max(16, Math.min(clickX, maxX));
-  contextMenuState.y = Math.max(16, Math.min(clickY, maxY));
+  // Set initial data
   contextMenuState.item = item;
   contextMenuState.isFavorite = !!item.is_favorite;
+  contextMenuState.x = Math.max(12, Math.min(clickX, window.innerWidth - 290));
+  contextMenuState.y = Math.max(12, Math.min(clickY, window.innerHeight - 350));
   contextMenuState.show = true;
+
+  // Dynamically compute exact positioning after Vue renders the menu into DOM
+  nextTick(() => {
+    const menuEl = document.querySelector(".floating-context-menu");
+    if (!menuEl) return;
+    const menuWidth = menuEl.offsetWidth || 280;
+    const menuHeight = menuEl.offsetHeight || 420;
+    const margin = 12;
+    const winW = window.innerWidth;
+    const winH = window.innerHeight;
+
+    let posX = clickX;
+    let posY = clickY;
+
+    if (anchorRect) {
+      // If anchoring to 3-dots button, align right edges if near right screen edge
+      if (anchorRect.right + menuWidth > winW - margin) {
+        posX = anchorRect.right - menuWidth;
+      } else {
+        posX = anchorRect.left;
+      }
+
+      // If opening below would overflow viewport bottom, flip above anchor or clamp
+      if (anchorRect.bottom + 4 + menuHeight > winH - margin) {
+        if (anchorRect.top - menuHeight - 4 >= margin) {
+          posY = anchorRect.top - menuHeight - 4;
+        } else {
+          // If neither side fits fully, place within screen bounds
+          posY = Math.max(margin, winH - menuHeight - margin);
+        }
+      } else {
+        posY = anchorRect.bottom + 4;
+      }
+    } else {
+      // Direct right-click coordinates: flip if overflowing screen boundaries
+      if (posX + menuWidth > winW - margin) {
+        posX = posX - menuWidth;
+      }
+      if (posY + menuHeight > winH - margin) {
+        posY = posY - menuHeight;
+      }
+    }
+
+    // Strict boundary enforcement so nothing is ever cut off
+    contextMenuState.x = Math.max(margin, Math.min(posX, winW - menuWidth - margin));
+    contextMenuState.y = Math.max(margin, Math.min(posY, winH - menuHeight - margin));
+  });
 }
 
 function closeGlobalContextMenu() {
