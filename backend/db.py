@@ -497,25 +497,12 @@ def format_file_size_bytes(bytes_val):
 
 def get_media_quality_options(media_id):
     """
-    Finds all mounted source copies of the media file, probes their video resolution,
-    and returns a list of formatted quality options.
-    Only movies support multi-drive quality switching. Series/anime always return a single option.
+    Finds all mounted source copies of the media file (movie, series, or anime episode),
+    probes their video resolution, extracts drive letters, and returns formatted quality options.
     """
     media = get_media_by_id(media_id)
     if not media:
         return []
-
-    # Series and anime episodes are individual — never group as quality options
-    if media.get("type") in ("series", "anime"):
-        return [{
-            "media_id": media["id"],
-            "file_path": media.get("file_path", ""),
-            "resolution": "Default",
-            "display_label": "Default",
-            "size_str": format_file_size_bytes(media.get("file_size")),
-            "file_size": media.get("file_size") or 0,
-            "is_current": True,
-        }]
 
     sources = get_all_sources_for_media(media)
     mounted_sources = [s for s in sources if s.get("is_mounted")]
@@ -524,53 +511,59 @@ def get_media_quality_options(media_id):
 
     from backend.video_probe import probe_video_resolution
 
-    # Sort sources by file size descending
+    # Sort sources by file size descending (prefer higher quality / higher bitrate)
     mounted_sources.sort(key=lambda s: s.get("file_size") or 0, reverse=True)
 
-    # Probe every source once and remember its resolution label
+    # Probe every source once and extract resolution label and drive letter
     probed = []
     for s in mounted_sources:
-        probe_res = probe_video_resolution(s["file_path"])
+        fp = s.get("file_path") or ""
+        drive = os.path.splitdrive(fp)[0].upper() if fp else ""
+        probe_res = probe_video_resolution(fp)
         res_label = probe_res.get("label") or "Standard Quality"
-        probed.append((s, res_label))
+        base_label = probe_res.get("base_label") or "Standard"
+        probed.append((s, res_label, base_label, drive))
 
-    current_label = next((lbl for s, lbl in probed if s["id"] == media_id), None)
-    if current_label is None and probed:
-        current_label = probed[0][1]
-
-    # Only offer quality switching when at least one alternative file has a
-    # DIFFERENT resolution than the current one — same-resolution duplicates
-    # (or single files) should not show a Quality dropdown at all.
-    distinct_labels = {lbl for _, lbl in probed}
-    if len(distinct_labels) <= 1:
+    # If only 1 source exists, return standard single option
+    if len(probed) <= 1:
+        s, res_label, base_label, drive = probed[0] if probed else (media, "Default", "Default", "")
+        size_str = format_file_size_bytes(s.get("file_size"))
+        lbl = f"{res_label} ({size_str})" if size_str else res_label
+        if drive:
+            lbl += f" — {drive}"
         return [{
-            "media_id": media["id"],
-            "file_path": media.get("file_path", ""),
-            "resolution": current_label,
-            "display_label": current_label,
-            "size_str": format_file_size_bytes(media.get("file_size")),
-            "file_size": media.get("file_size") or 0,
+            "media_id": s["id"],
+            "file_path": s.get("file_path", ""),
+            "drive": drive,
+            "resolution": res_label,
+            "base_label": base_label,
+            "display_label": lbl,
+            "size_str": size_str,
+            "file_size": s.get("file_size") or 0,
             "is_current": True,
+            "is_mounted": bool(s.get("is_mounted", True)),
         }]
 
     options = []
-    seen_labels = set()
-
-    for idx, (s, res_label) in enumerate(probed):
+    for idx, (s, res_label, base_label, drive) in enumerate(probed):
         size_str = format_file_size_bytes(s.get("file_size"))
         display_label = res_label
-        if res_label in seen_labels and size_str:
-            display_label = f"{res_label} ({size_str})"
-        seen_labels.add(res_label)
+        if size_str:
+            display_label += f" ({size_str})"
+        if drive:
+            display_label += f" — {drive}"
 
         options.append({
             "media_id": s["id"],
-            "file_path": s["file_path"],
+            "file_path": s.get("file_path", ""),
+            "drive": drive,
             "resolution": res_label,
+            "base_label": base_label,
             "display_label": display_label,
             "size_str": size_str,
             "file_size": s.get("file_size") or 0,
-            "is_current": s["id"] == media_id
+            "is_current": (s["id"] == media_id),
+            "is_mounted": bool(s.get("is_mounted", True)),
         })
 
     return options
@@ -653,6 +646,23 @@ def delete_media_by_tmdb(tmdb_id, media_type):
     cur = conn.execute(
         "DELETE FROM media WHERE tmdb_id=? AND type=?",
         (int(tmdb_id), media_type),
+    )
+    conn.commit()
+    n = cur.rowcount
+    conn.close()
+    return n
+
+
+def delete_media_by_title_and_type(title, media_type):
+    """
+    Remove every row of a title matching title and type (for unmatched titles without tmdb_id).
+    Progress/favorites cascade via FK.
+    Returns number of rows removed.
+    """
+    conn = get_conn()
+    cur = conn.execute(
+        "DELETE FROM media WHERE title=? AND type=?",
+        (title, media_type),
     )
     conn.commit()
     n = cur.rowcount
@@ -1173,31 +1183,54 @@ def get_progress(profile_id, media_id):
         "SELECT * FROM watch_progress WHERE profile_id=? AND media_id=?",
         (profile_id, media_id)
     ).fetchone()
+    if not row:
+        media = get_media_by_id(media_id)
+        if media:
+            sources = get_all_sources_for_media(media)
+            for s in sources:
+                if s.get("id") and s["id"] != media_id:
+                    alt_row = conn.execute(
+                        "SELECT * FROM watch_progress WHERE profile_id=? AND media_id=?",
+                        (profile_id, s["id"])
+                    ).fetchone()
+                    if alt_row:
+                        row = alt_row
+                        break
     conn.close()
     return dict(row) if row else None
 
 
 def save_progress(profile_id, media_id, position, duration=0, completed=False):
     conn = get_conn()
-    conn.execute("""
-        INSERT INTO watch_progress (profile_id, media_id, position, duration, completed, updated_at)
-        VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)
-        ON CONFLICT(profile_id, media_id) DO UPDATE SET
-            position=excluded.position,
-            duration=excluded.duration,
-            completed=excluded.completed,
-            updated_at=CURRENT_TIMESTAMP
-    """, (profile_id, media_id, position, duration, 1 if completed else 0))
+    media = get_media_by_id(media_id)
+    sources = get_all_sources_for_media(media) if media else []
+    target_ids = {s["id"] for s in sources if s.get("id")} | {media_id}
+
+    for mid in target_ids:
+        conn.execute("""
+            INSERT INTO watch_progress (profile_id, media_id, position, duration, completed, updated_at)
+            VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)
+            ON CONFLICT(profile_id, media_id) DO UPDATE SET
+                position=excluded.position,
+                duration=excluded.duration,
+                completed=excluded.completed,
+                updated_at=CURRENT_TIMESTAMP
+        """, (profile_id, mid, position, duration, 1 if completed else 0))
     conn.commit()
     conn.close()
 
 
 def delete_progress(profile_id, media_id):
     conn = get_conn()
-    conn.execute(
-        "DELETE FROM watch_progress WHERE profile_id=? AND media_id=?",
-        (profile_id, media_id)
-    )
+    media = get_media_by_id(media_id)
+    sources = get_all_sources_for_media(media) if media else []
+    target_ids = {s["id"] for s in sources if s.get("id")} | {media_id}
+
+    for mid in target_ids:
+        conn.execute(
+            "DELETE FROM watch_progress WHERE profile_id=? AND media_id=?",
+            (profile_id, mid)
+        )
     conn.commit()
     conn.close()
 
@@ -1210,10 +1243,25 @@ def get_continue_watching(profile_id, limit=20):
         JOIN media m ON m.id = wp.media_id
         WHERE wp.profile_id=? AND wp.completed=0 AND wp.position > 5
         ORDER BY wp.updated_at DESC
-        LIMIT ?
-    """, (profile_id, limit)).fetchall()
+    """, (profile_id,)).fetchall()
     conn.close()
-    return enrich_mounted_list([dict(r) for r in rows])
+
+    items = enrich_mounted_list([dict(r) for r in rows])
+    deduped = {}
+    for it in items:
+        # Group by tmdb_id + type + season + episode (or title + type + season + episode)
+        key = (it.get("tmdb_id") or it.get("title"), it.get("type"), it.get("season"), it.get("episode"))
+        if key not in deduped:
+            deduped[key] = it
+        else:
+            curr = deduped[key]
+            # Prefer mounted copy, then larger file size (higher quality)
+            curr_mounted = bool(curr.get("is_mounted"))
+            it_mounted = bool(it.get("is_mounted"))
+            if (not curr_mounted and it_mounted) or (curr_mounted == it_mounted and (it.get("file_size") or 0) > (curr.get("file_size") or 0)):
+                deduped[key] = it
+
+    return list(deduped.values())[:limit]
 
 
 ACHIEVEMENTS = [

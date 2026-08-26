@@ -66,13 +66,14 @@ def _clean_name(name):
         r'720p', r'1080p', r'2160p', r'4k', r'uhd', r'hdr', r'bluray', r'brrip', r'webrip', r'web-dl', r'web',
         r'dvdrip', r'x264', r'x265', r'hevc', r'10bit', r'8bit', r'aac5\.1', r'aac', r'ac3', r'dts', r'5\.1', r'7\.1',
         r'yts\.[a-z0-9\.\-]+', r'yts', r'yify', r'wd', r'hdtv', r'proper', r'repack', r'remux', r'extended',
-        r'unrated', r'directors\.cut', r'atmos', r'truehd', r'xvid', r'amzn', r'nf', r'hulu', r'dsnp', r'hmax', r'atvp'
+        r'unrated', r'directors\.cut', r'atmos', r'truehd', r'xvid', r'amzn', r'nf', r'hulu', r'dsnp', r'hmax', r'atvp',
+        r'complete(?:\.series)?', r'full'
     ]
     # Strip bracketed metadata like [Multi-audio] or [TGx]
     clean = re.sub(r'\[.*?\]', '', clean)
 
-    # Strip S01, S02, S1, S2 season indicators from folder names
-    clean = re.sub(r'[\.\[\(\s_\-][Ss]\d{1,2}.*$', '', clean)
+    # Strip S01, S02, S1, S2, Season 1, Season.01, Complete series indicators from folder names
+    clean = re.sub(r'[\.\[\(\s_\-](?:[Ss]eason[\. _\-]?(?:\d{1,2}|[Cc]omplete)|[Ss]\d{1,2}|[Cc]omplete(?:\.?[Ss]eries)?).*$', '', clean, flags=re.IGNORECASE)
 
     # Strip year and everything after
     clean = re.sub(r'[\.\[\(\s_\-](19|20)\d{2}.*$', '', clean, flags=re.IGNORECASE)

@@ -2485,6 +2485,45 @@ main::-webkit-scrollbar {
   border-color: rgba(168, 85, 247, 0.7);
 }
 
+.quality-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(99, 102, 241, 0.15));
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.15);
+  margin-left: 6px;
+  cursor: help;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.quality-source-badge:hover {
+  transform: scale(1.05);
+  border-color: rgba(56, 189, 248, 0.7);
+}
+
+.quality-source-badge.quality-source-current {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.2));
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.5);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+}
+
+.quality-source-badge.quality-source-unmounted {
+  opacity: 0.5;
+  color: var(--text-muted);
+  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+}
+
 /* Codec Warning Card on Detail Page */
 .codec-warning-card {
   background: rgba(245, 158, 11, 0.1);

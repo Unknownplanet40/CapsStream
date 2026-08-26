@@ -24,7 +24,7 @@ from backend.db import (
     get_by_genre, get_all_genres, get_random_pick,
     get_all_profiles, get_profile, create_profile, update_profile, delete_profile,
     verify_pin_raw, hash_pin,
-    delete_media_by_id, delete_media_by_tmdb,
+    delete_media_by_id, delete_media_by_tmdb, delete_media_by_title_and_type,
     get_progress, save_progress, delete_progress, get_continue_watching,
     get_favorites, toggle_favorite, is_favorite,
     get_collections, create_collection, delete_collection,
@@ -802,7 +802,8 @@ def api_library_delete():
     Files on disk are NEVER touched — this only cleans CapsStream's records.
 
     Body: { "tmdb_id": <int>, "type": "movie"|"series"|"anime" }  → whole title
-       or { "media_id": <int> }                                   → single row
+       or { "media_id": <int> }                                   → single row or title
+       or { "title": <str>, "type": <str> }                       → unmatched title
     """
     if _active_is_kids():
         return jsonify({"error": "Not available in Kids Mode"}), 403
@@ -811,18 +812,41 @@ def api_library_delete():
     tmdb_id = data.get("tmdb_id")
     mtype = data.get("type")
     media_id = data.get("media_id")
+    title = data.get("title")
 
-    if not tmdb_id and media_id:
-        row = get_media_by_id(int(media_id))
-        if not row:
-            return jsonify({"error": "Media not found"}), 404
-        tmdb_id, mtype = row.get("tmdb_id"), row.get("type")
+    # If tmdb_id is 0 or "0" or invalid, treat as None
+    try:
+        if tmdb_id is not None and int(tmdb_id) <= 0:
+            tmdb_id = None
+    except (ValueError, TypeError):
+        tmdb_id = None
 
-    if not tmdb_id or not mtype:
-        return jsonify({"error": "tmdb_id and type (or media_id) required"}), 400
+    row = None
+    if media_id:
+        try:
+            row = get_media_by_id(int(media_id))
+        except (ValueError, TypeError):
+            row = None
 
-    removed = delete_media_by_tmdb(tmdb_id, mtype)
-    print(f"[Library] Deleted {removed} row(s) for tmdb {tmdb_id} ({mtype}) — source files untouched.")
+    if row:
+        if not tmdb_id:
+            tmdb_id = row.get("tmdb_id")
+        if not mtype:
+            mtype = row.get("type")
+        if not title:
+            title = row.get("title")
+
+    removed = 0
+    if tmdb_id and mtype:
+        removed = delete_media_by_tmdb(int(tmdb_id), mtype)
+    elif title and mtype:
+        removed = delete_media_by_title_and_type(title, mtype)
+    elif media_id:
+        removed = delete_media_by_id(int(media_id))
+    else:
+        return jsonify({"error": "media_id, or tmdb_id + type, or title + type required"}), 400
+
+    print(f"[Library] Deleted {removed} row(s) (tmdb={tmdb_id}, type={mtype}, media_id={media_id}, title={title}) — source files untouched.")
     _bust_home_cache()
     return jsonify({"ok": True, "removed": removed})
 
@@ -1058,6 +1082,10 @@ def api_media_detail(media_id):
     from backend.subtitles import get_all_subtitles
     media["subtitles"] = get_all_subtitles(media["file_path"], media_id)
 
+    # Quality options & Drive sources for media detail
+    from backend.db import get_media_quality_options
+    media["quality_options"] = get_media_quality_options(media_id)
+
     # Probe audio tracks for Multi-Audio indicator badge
     from backend.audio_probe import probe_audio_tracks
     media["audio_tracks"] = probe_audio_tracks(media["file_path"])
@@ -1176,7 +1204,15 @@ def api_show_detail(tmdb_id):
             ep_int = int(ep.get("episode") or 1)
         except Exception:
             ep_int = 1
-        local_map[(s_int, ep_int)] = ep
+        key = (s_int, ep_int)
+        if key not in local_map:
+            local_map[key] = ep
+        else:
+            curr = local_map[key]
+            curr_mounted = bool(curr.get("is_mounted"))
+            ep_mounted = bool(ep.get("is_mounted"))
+            if (not curr_mounted and ep_mounted) or (curr_mounted == ep_mounted and (ep.get("file_size") or 0) > (curr.get("file_size") or 0)):
+                local_map[key] = ep
 
     seasons = {}
     tmdb_id = show.get("tmdb_id")

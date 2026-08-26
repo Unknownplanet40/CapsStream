@@ -1613,6 +1613,20 @@ const DetailPage = {
             <span v-if="media.has_multi_audio" class="multi-audio-badge" :title="media.audio_tracks ? media.audio_tracks.map(t => t.title).join(', ') : 'Multiple audio tracks available'">
               🎙️ Multi-Audio
             </span>
+
+            <!-- Quality & Drive Badges -->
+            <template v-if="media.quality_options && media.quality_options.length > 0">
+              <span
+                v-for="opt in media.quality_options"
+                :key="opt.media_id"
+                class="quality-source-badge"
+                :class="{ 'quality-source-current': opt.is_current, 'quality-source-unmounted': !opt.is_mounted }"
+                :title="opt.file_path"
+              >
+                <i class="ph-bold ph-hard-drive" style="font-size:0.85rem"></i>
+                {{ opt.resolution }}<template v-if="opt.drive"> • {{ opt.drive }}</template><template v-if="opt.size_str"> ({{ opt.size_str }})</template>
+              </span>
+            </template>
           </div>
 
           <div v-if="media.genres" class="detail-genres">
@@ -5344,22 +5358,25 @@ const PlayerPage = {
       const v = videoRef.value;
       if (!v) return;
       const token = ++reloadToken;
-      // Converted streams are piped & non-seekable: always start at 0
-      // (server cuts at the keyframe-aligned point).
+      // Exact float position for frame-perfect continuation
       const playerPos = streamState.transcode
         ? 0
-        : Math.max(0, Math.floor(atContentTime || 0));
-      isBuffering.value = true;
+        : Math.max(0, Number(atContentTime || 0));
 
       const onMeta = () => {
         v.removeEventListener("loadedmetadata", onMeta);
         if (token !== reloadToken) return;   // a newer swap superseded us
         try {
-          if (playerPos > 0 && isFinite(playerPos)) v.currentTime = playerPos;
-          currentTime.value = v.currentTime;
+          if (playerPos > 0 && isFinite(playerPos)) {
+            if (v.fastSeek) {
+              v.fastSeek(playerPos);
+            } else {
+              v.currentTime = playerPos;
+            }
+          }
+          currentTime.value = playerPos;
         } catch (e) {}
         applySubtitleOffset();
-        [300, 700].forEach((d) => setTimeout(applySubtitleOffset, d));
         // Resume prompt takes priority — stay paused behind the modal
         if (showResumeModal.value) {
           v.pause();
@@ -5374,23 +5391,31 @@ const PlayerPage = {
           detachRemoteAudio();
         }
       };
-      v.addEventListener("loadedmetadata", onMeta);
+      v.addEventListener("loadedmetadata", onMeta, { once: true });
 
-      // Setting src runs the media load algorithm exactly once.
-      const want = buildStreamUrl(streamState.mediaId);
-      const absWant = new URL(want, location.origin).href;
-      if (v.src !== absWant) {
+      // Append media fragment #t=... so the browser requests the target byte-range directly on initial probe
+      const wantBase = buildStreamUrl(streamState.mediaId);
+      const want = wantBase + (playerPos > 0 && !streamState.transcode ? `#t=${playerPos.toFixed(3)}` : '');
+      const absWantBase = new URL(wantBase, location.origin).href;
+
+      if (!v.src.startsWith(absWantBase)) {
         currentTime.value = playerPos;
         v.src = want;
+        try {
+          if (playerPos > 0 && isFinite(playerPos)) v.currentTime = playerPos;
+        } catch (e) {}
         v.load();
+        v.play().catch(() => {});
       } else {
         // Same source already loaded — just reposition deterministically
         try {
-          if (playerPos > 0 && isFinite(playerPos)) v.currentTime = playerPos;
-          currentTime.value = v.currentTime;
+          if (playerPos > 0 && isFinite(playerPos)) {
+            if (v.fastSeek) v.fastSeek(playerPos);
+            else v.currentTime = playerPos;
+          }
+          currentTime.value = playerPos;
         } catch (e) {}
         applySubtitleOffset();
-        [300, 700].forEach((d) => setTimeout(applySubtitleOffset, d));
         v.play().catch(() => {});
         if (isRemoteAudioActive()) {
           attachRemoteAudio(streamState.audioTrack);
@@ -5628,22 +5653,22 @@ const PlayerPage = {
     const selectedQualityMediaId = ref(null);
     const showQualityMenu = ref(false);
 
-    // Only offer switching when another REAL alternative exists.
+    // Only offer switching when 2 or more quality options exist.
     const canSwitchQuality = computed(() =>
-      !!media.value &&
-      media.value.type === "movie" &&
-      qualityOptions.value.some((o) => !o.is_current && o.media_id !== selectedQualityMediaId.value)
+      !!media.value && qualityOptions.value.length > 1
     );
 
     async function loadQualityOptions(mediaId) {
       try {
         const opts = await API.get(`/api/quality-options/${mediaId}`);
         qualityOptions.value = opts || [];
-        const current = qualityOptions.value.find((o) => o.is_current);
-        if (current) {
-          selectedQualityMediaId.value = current.media_id;
-        } else if (qualityOptions.value.length > 0) {
-          selectedQualityMediaId.value = qualityOptions.value[0].media_id;
+        if (!selectedQualityMediaId.value || !qualityOptions.value.some((o) => o.media_id === selectedQualityMediaId.value)) {
+          const current = qualityOptions.value.find((o) => o.is_current);
+          if (current) {
+            selectedQualityMediaId.value = current.media_id;
+          } else if (qualityOptions.value.length > 0) {
+            selectedQualityMediaId.value = qualityOptions.value[0].media_id;
+          }
         }
       } catch (e) {
         qualityOptions.value = [];
@@ -7237,7 +7262,9 @@ const PlayerPage = {
               if (a.season !== b.season) return (a.season || 0) - (b.season || 0);
               return (a.episode || 0) - (b.episode || 0);
             });
-          const idx = allEps.findIndex((e) => e.id === Number(mediaId));
+          const idx = allEps.findIndex(
+            (e) => e.id === Number(mediaId) || (e.season === media.value.season && e.episode === media.value.episode)
+          );
           if (idx >= 0) {
             let foundNext = null;
             for (let i = idx + 1; i < allEps.length; i++) {
@@ -11724,6 +11751,7 @@ const App = {
           tmdb_id: item.tmdb_id,
           type: item.type,
           media_id: item.id,
+          title: item.title,
         });
         addToast(`🗑️ Removed "${label}" from the library (${r.removed ?? 0} entries)`, "success");
         if (route.path === "/") {
