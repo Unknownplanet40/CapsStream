@@ -340,6 +340,30 @@ function handleConfirmCancel() {
   }
 }
 
+function formatFileSize(bytes) {
+  if (!bytes || isNaN(bytes) || bytes <= 0) return '0 MB';
+  const tb = bytes / (1024 * 1024 * 1024 * 1024);
+  if (tb >= 1.0) return `${tb < 10 ? tb.toFixed(2) : tb.toFixed(1)} TB`;
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1.0) return `${gb < 10 ? gb.toFixed(2) : gb.toFixed(1)} GB`;
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(1)} MB`;
+}
+
+// ─── Custom Global Fix Match Modal System ─────────────────────
+
+const fixMatchState = reactive({
+  show: false,
+  target: null,
+  onMatched: null
+});
+
+function openGlobalFixMatch(target, onMatched) {
+  fixMatchState.target = target;
+  fixMatchState.onMatched = onMatched || null;
+  fixMatchState.show = true;
+}
+
 function triggerAchievementUnlock(ach) {
   if (!ach) return;
   playAchievementSound();
@@ -1581,36 +1605,12 @@ const DetailPage = {
       </div>
 
       <!-- Fix Match Modal -->
-      <div class="modal-backdrop" v-if="showFixMatchModal" @click.self="showFixMatchModal = false">
-        <div class="modal-card" style="max-width:550px">
-          <div class="modal-title">Fix Match / Search TMDb</div>
-          <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:1rem">
-            Search by Movie/Show title, or enter an IMDb ID (e.g. tt36304003) or TMDb ID:
-          </div>
-          <div style="display:flex;gap:8px;margin-bottom:1rem">
-            <input type="text" v-model="fixQuery" class="form-input" placeholder="e.g. Huo Zhe Yan or tt36304003" @keyup.enter="searchFixMatch" />
-            <button class="btn btn-primary" @click="searchFixMatch">Search</button>
-          </div>
-          <div v-if="searchingFix" class="loading-spinner" style="margin:2rem auto"></div>
-          <div v-else-if="fixResults.length" style="max-height:350px;overflow-y:auto">
-            <div v-for="res in fixResults" :key="res.tmdb_id"
-                 style="display:flex;gap:12px;padding:8px;border-radius:8px;background:var(--bg-secondary);margin-bottom:8px;cursor:pointer;align-items:center"
-                 @click="applyFixMatch(res)">
-              <img v-if="res.poster_path" :src="imgUrl(res.poster_path)" style="width:45px;height:65px;object-fit:cover;border-radius:4px" />
-              <div v-else style="width:45px;height:65px;background:var(--bg-tertiary);display:flex;align-items:center;justify-content:center;border-radius:4px">🎬</div>
-              <div style="flex:1;overflow:hidden">
-                <div style="font-weight:700;font-size:0.95rem">{{ res.title }} <span v-if="res.year" style="color:var(--text-muted)">({{ res.year }})</span></div>
-                <div style="font-size:0.75rem;color:var(--text-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">{{ res.overview || 'No overview available' }}</div>
-              </div>
-              <button class="btn btn-primary btn-sm">Match</button>
-            </div>
-          </div>
-          <div v-else-if="fixSearched" style="text-align:center;padding:2rem 0;color:var(--text-muted)">
-            No results found for "{{ fixQuery }}". Try an IMDb ID like tt36304003.
-          </div>
-          <button class="btn btn-ghost btn-full" style="margin-top:1rem" @click="showFixMatchModal = false">Close</button>
-        </div>
-      </div>
+      <fix-match-modal
+        v-if="showFixMatchModal"
+        :target="fixMatchTarget"
+        @close="showFixMatchModal = false"
+        @matched="handleFixMatchDone"
+      />
 
       <!-- Skip Timestamps Editor Modal (per-episode) -->
       <skip-timestamps-modal
@@ -1873,45 +1873,26 @@ const DetailPage = {
       }
     }
 
+    const fixMatchTarget = computed(() => {
+      if (!media.value) return null;
+      const mediaId = media.value.id || media.value.seasons?.[sortedSeasons.value[0]]?.[0]?.id;
+      return {
+        id: mediaId,
+        tmdb_id: media.value.tmdb_id,
+        title: media.value.title,
+        year: media.value.year,
+        type: media.value.type || route.params.type || "movie",
+        file_path: media.value.file_path
+      };
+    });
+
     function openFixMatchModal() {
-      fixQuery.value = media.value?.title || "";
-      fixResults.value = [];
-      fixSearched.value = false;
       showFixMatchModal.value = true;
-      if (fixQuery.value) {
-        searchFixMatch();
-      }
     }
 
-    async function searchFixMatch() {
-      if (!fixQuery.value.trim()) return;
-      searchingFix.value = true;
-      fixSearched.value = true;
-      try {
-        const mtype = media.value?.type || route.params.type || "movie";
-        fixResults.value = await API.get(`/api/tmdb/search?query=${encodeURIComponent(fixQuery.value.trim())}&type=${mtype}`);
-      } catch (e) {
-        addToast("Search failed", "error");
-      } finally {
-        searchingFix.value = false;
-      }
-    }
-
-    async function applyFixMatch(result) {
-      const mediaId = media.value?.id || media.value?.seasons?.[sortedSeasons.value[0]]?.[0]?.id;
-      if (!mediaId) return;
-      try {
-        await API.post("/api/override", {
-          media_id: mediaId,
-          tmdb_id: result.tmdb_id,
-          type: media.value?.type || route.params.type || "movie",
-        });
-        addToast(`Matched to ${result.title}!`, "success");
-        showFixMatchModal.value = false;
-        await load();
-      } catch (e) {
-        addToast("Failed to apply match", "error");
-      }
+    async function handleFixMatchDone(result) {
+      showFixMatchModal.value = false;
+      await load();
     }
 
     function getSeasonMeta(seasonNum) {
@@ -2079,13 +2060,9 @@ const DetailPage = {
       showInlineCreate,
       createAndAddInlineCollection,
       showFixMatchModal,
-      fixQuery,
-      fixResults,
-      searchingFix,
-      fixSearched,
+      fixMatchTarget,
       openFixMatchModal,
-      searchFixMatch,
-      applyFixMatch,
+      handleFixMatchDone,
       router,
       imgUrl,
       formatRating,
@@ -2476,6 +2453,77 @@ const SettingsPage = {
                 <i :class="animeDetect.running ? 'ph ph-circle-notch' : 'ph ph-magic-wand'" :style="animeDetect.running ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
                 {{ animeDetect.running ? 'Detecting…' : 'Detect Anime' }}
               </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2c. Unmatched Media & Fix Match Inspector -->
+        <div class="settings-section" id="settings-unmatched-section">
+          <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <i class="ph ph-warning-circle" style="color:var(--accent)"></i>
+              <span>Unmatched Media & Fix Match</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="unmatched-count-badge" v-if="unmatchedList.length > 0">
+                <i class="ph ph-warning"></i> {{ unmatchedList.length }} Unmatched
+              </span>
+              <button class="btn btn-secondary btn-sm" @click="loadUnmatched" :disabled="loadingUnmatched" id="btn-refresh-unmatched">
+                <i :class="loadingUnmatched ? 'ph ph-circle-notch' : 'ph ph-arrows-clockwise'" :style="loadingUnmatched ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                {{ loadingUnmatched ? 'Refreshing...' : 'Refresh List' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-desc" style="margin-bottom:1rem">
+              Files in your scanned media directories that could not be automatically matched to TMDb. Click <strong>Fix Match</strong> to search and link them to the correct movie or TV show.
+            </div>
+
+            <div v-if="loadingUnmatched" style="display:flex;justify-content:center;padding:2rem">
+              <div class="loading-spinner"></div>
+            </div>
+
+            <div v-else-if="unmatchedList.length === 0" style="padding:1.5rem;text-align:center;background:rgba(255,255,255,0.02);border-radius:12px;border:1px dashed rgba(255,255,255,0.1)">
+              <div style="font-size:1.5rem;margin-bottom:4px">🎉</div>
+              <div style="font-weight:700;color:var(--text-primary)">All Library Media Matched!</div>
+              <div style="font-size:0.8rem;color:var(--text-muted)">There are currently no unmatched items in your library.</div>
+            </div>
+
+            <div v-else class="unmatched-container">
+              <table class="unmatched-table">
+                <thead>
+                  <tr>
+                    <th>Title / Guess</th>
+                    <th>Type</th>
+                    <th>File Path</th>
+                    <th>Size</th>
+                    <th style="text-align:right">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in unmatchedList" :key="item.id">
+                    <td class="unmatched-title-cell" :title="item.title">
+                      {{ item.title }}
+                      <span v-if="item.year" style="color:var(--text-muted);font-weight:normal"> ({{ item.year }})</span>
+                    </td>
+                    <td>
+                      <span class="badge" style="text-transform:capitalize;font-size:0.75rem">{{ item.type }}</span>
+                    </td>
+                    <td class="unmatched-path-cell" :title="item.file_path">
+                      {{ item.file_path }}
+                    </td>
+                    <td style="color:var(--text-muted);font-size:0.8rem">
+                      {{ formatFileSize(item.file_size) }}
+                    </td>
+                    <td style="text-align:right">
+                      <button class="btn btn-primary btn-sm" @click="openFixMatchForItem(item)">
+                        <i class="ph ph-magic-wand" style="margin-right:4px"></i> Fix Match
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -3444,6 +3492,28 @@ const SettingsPage = {
       }
     }
 
+    // ─── Unmatched Media & Fix Match ────────────────────────────
+    const unmatchedList = ref([]);
+    const loadingUnmatched = ref(false);
+
+    async function loadUnmatched() {
+      loadingUnmatched.value = true;
+      try {
+        const res = await API.get("/api/unmatched");
+        unmatchedList.value = res || [];
+      } catch (e) {
+        addToast("Failed to load unmatched media list", "error");
+      } finally {
+        loadingUnmatched.value = false;
+      }
+    }
+
+    function openFixMatchForItem(item) {
+      openGlobalFixMatch(item, async () => {
+        await loadUnmatched();
+      });
+    }
+
     onMounted(() => {
       if (store.profile?.is_kids) {
         addToast("Settings is locked in Kids Mode 🔒", "warning");
@@ -3453,6 +3523,7 @@ const SettingsPage = {
       loadSettings();
       loadCacheInfo();
       loadAllProfiles();
+      loadUnmatched();
     });
 
     return {
@@ -3502,6 +3573,11 @@ const SettingsPage = {
       validatePaths,
       volumePercent,
       setVolumePercent,
+      unmatchedList,
+      loadingUnmatched,
+      loadUnmatched,
+      openFixMatchForItem,
+      formatFileSize,
     };
   },
 };
@@ -6754,11 +6830,48 @@ const BrowsePage = {
 const CollectionsPage = {
   template: `
     <div class="collections-page">
-      <div class="page-header">
-        <h1 class="page-title">My Collections</h1>
-        <button v-if="!store.profile?.is_kids" class="btn btn-primary" @click="showCreate = true" id="create-collection-btn">
-          <i class="ph ph-plus"></i> New Collection
-        </button>
+      <div class="collections-header-bar">
+        <div>
+          <h1 class="page-title">Collections & Universes</h1>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+          <div class="collections-filter-tabs" v-if="collections.length > 0">
+            <button
+              class="collections-tab-btn"
+              :class="{ active: activeTab === 'all' }"
+              @click="activeTab = 'all'"
+            >
+              All <span class="collections-tab-count">{{ collections.length }}</span>
+            </button>
+            <button
+              v-if="universesCount > 0"
+              class="collections-tab-btn"
+              :class="{ active: activeTab === 'universes' }"
+              @click="activeTab = 'universes'"
+            >
+              <i class="ph ph-sparkle"></i> Universes <span class="collections-tab-count">{{ universesCount }}</span>
+            </button>
+            <button
+              v-if="smartCount > 0"
+              class="collections-tab-btn"
+              :class="{ active: activeTab === 'smart' }"
+              @click="activeTab = 'smart'"
+            >
+              <i class="ph ph-lightning"></i> Smart Lists <span class="collections-tab-count">{{ smartCount }}</span>
+            </button>
+            <button
+              v-if="customCount > 0"
+              class="collections-tab-btn"
+              :class="{ active: activeTab === 'custom' }"
+              @click="activeTab = 'custom'"
+            >
+              <i class="ph ph-folder"></i> Custom <span class="collections-tab-count">{{ customCount }}</span>
+            </button>
+          </div>
+          <button v-if="!store.profile?.is_kids" class="btn btn-primary" @click="showCreate = true" id="create-collection-btn">
+            <i class="ph ph-plus"></i> New Collection
+          </button>
+        </div>
       </div>
 
       <div v-if="!store.profile" class="empty-state">
@@ -6769,38 +6882,51 @@ const CollectionsPage = {
       <div v-else-if="collections.length === 0" class="empty-state">
         <div class="empty-icon">📚</div>
         <div class="empty-title">No collections yet</div>
-        <div class="empty-subtitle">Create a collection to group your favourite titles.</div>
+        <div class="empty-subtitle">Create a collection to group your favourite titles or add titles to auto-generate cinematic universes.</div>
         <button v-if="!store.profile?.is_kids" class="btn btn-primary" style="margin-top:1rem" @click="showCreate = true" id="create-first-col-btn">
           <i class="ph ph-plus"></i> Create First Collection
         </button>
       </div>
 
+      <div v-else-if="filteredCollections.length === 0" class="empty-state">
+        <div class="empty-icon">🔍</div>
+        <div class="empty-title">No matching collections</div>
+        <div class="empty-subtitle">Try selecting a different filter tab.</div>
+      </div>
+
       <div v-else class="collections-grid">
         <div
-          v-for="col in collections"
+          v-for="col in filteredCollections"
           :key="col.id"
           class="collection-card"
           @click="router.push('/collection/' + col.id)"
           :id="'collection-' + col.id"
         >
-          <div class="collection-cover">
-            <template v-if="col.items.length">
+          <div class="collection-cover" :class="'cover-count-' + Math.min(col.items ? col.items.length : 0, 4)">
+            <template v-if="col.items && col.items.length">
               <img
-                v-for="item in col.items.slice(0,4)"
+                v-for="item in col.items.slice(0, 4)"
                 :key="item.id"
-                :src="imgUrl(item.poster_path)"
+                :src="imgUrl(col.items.length === 1 && item.backdrop_path ? item.backdrop_path : (item.poster_path || item.backdrop_path))"
                 class="collection-cover-img"
                 :alt="item.title"
+                loading="lazy"
               >
             </template>
-            <div v-else class="collection-cover-empty">📚</div>
+            <div v-else class="collection-cover-empty">
+              <i class="ph ph-stack"></i>
+              <span>Empty Collection</span>
+            </div>
           </div>
           <div class="collection-info">
             <div class="collection-name">
               {{ col.name }}
-              <span v-if="col.smart" class="skip-src-badge" style="margin-left:6px">✨ Smart</span>
+              <span v-if="col.universe" class="universe-card-badge" style="margin-left:6px">
+                <i class="ph ph-sparkle"></i> Universe
+              </span>
+              <span v-else-if="col.smart" class="skip-src-badge" style="margin-left:6px">✨ Smart</span>
             </div>
-            <div class="collection-count">{{ col.items.length }} title{{ col.items.length !== 1 ? 's' : '' }}</div>
+            <div class="collection-count">{{ col.items ? col.items.length : 0 }} title{{ !col.items || col.items.length !== 1 ? 's' : '' }}</div>
           </div>
         </div>
       </div>
@@ -6828,9 +6954,21 @@ const CollectionsPage = {
   setup() {
     const router = VueRouter.useRouter();
     const collections = ref([]);
+    const activeTab = ref("all");
     const showCreate = ref(false);
     const newName = ref("");
     const newDesc = ref("");
+
+    const universesCount = computed(() => collections.value.filter((c) => c.universe).length);
+    const smartCount = computed(() => collections.value.filter((c) => c.smart && !c.universe).length);
+    const customCount = computed(() => collections.value.filter((c) => !c.smart).length);
+
+    const filteredCollections = computed(() => {
+      if (activeTab.value === "universes") return collections.value.filter((c) => c.universe);
+      if (activeTab.value === "smart") return collections.value.filter((c) => c.smart && !c.universe);
+      if (activeTab.value === "custom") return collections.value.filter((c) => !c.smart);
+      return collections.value;
+    });
 
     async function load() {
       if (!store.profile) return;
@@ -6859,7 +6997,21 @@ const CollectionsPage = {
     onMounted(load);
     watch(() => store.profile, load);
 
-    return { store, collections, showCreate, newName, newDesc, router, imgUrl, createCollection };
+    return {
+      store,
+      collections,
+      activeTab,
+      universesCount,
+      smartCount,
+      customCount,
+      filteredCollections,
+      showCreate,
+      newName,
+      newDesc,
+      router,
+      imgUrl,
+      createCollection
+    };
   },
 };
 
@@ -6869,25 +7021,93 @@ const CollectionDetailPage = {
   components: { MediaCard },
   template: `
     <div class="browse-page">
-      <div class="browse-header" v-if="collection">
-        <div>
-          <h1 class="browse-title">{{ collection.name }}</h1>
-          <p v-if="collection.description" style="color:var(--text-muted);font-size:0.875rem;margin-top:4px">{{ collection.description }}</p>
+      <div v-if="collection" class="collection-hero">
+        <img
+          v-if="heroBackdrop"
+          :src="imgUrl(heroBackdrop)"
+          class="collection-hero-backdrop"
+          :alt="collection.name"
+        />
+        <div class="collection-hero-overlay"></div>
+        <div class="collection-hero-content">
+          <div class="collection-hero-main">
+            <div class="collection-hero-badges">
+              <span v-if="collection.universe" class="collection-hero-badge badge-universe">
+                <i class="ph ph-sparkle"></i> Cinematic Universe
+              </span>
+              <span v-else-if="collection.smart" class="collection-hero-badge badge-smart">
+                <i class="ph ph-lightning"></i> Smart Collection
+              </span>
+              <span v-else class="collection-hero-badge">
+                <i class="ph ph-stack"></i> Custom Collection
+              </span>
+              <span class="collection-hero-badge">
+                {{ displayItems ? displayItems.length : 0 }} title{{ !displayItems || displayItems.length !== 1 ? 's' : '' }}
+              </span>
+            </div>
+            <h1 class="collection-hero-title">{{ collection.name }}</h1>
+            <p v-if="collection.description" class="collection-hero-desc">{{ collection.description }}</p>
+          </div>
+          <div class="collection-hero-actions">
+            <!-- Timeline toggle for universes with chronological mapping -->
+            <div v-if="collection.has_timeline" class="timeline-toggle-group">
+              <button
+                class="timeline-toggle-btn"
+                :class="{ active: sortMode === 'release' }"
+                @click="sortMode = 'release'"
+                title="Sort by Release Date"
+              >
+                <i class="ph ph-calendar"></i> Release
+              </button>
+              <button
+                class="timeline-toggle-btn"
+                :class="{ active: sortMode === 'timeline' }"
+                @click="sortMode = 'timeline'"
+                title="Sort by In-Universe Chronological Timeline"
+              >
+                <i class="ph ph-hourglass-high"></i> Timeline
+              </button>
+            </div>
+
+            <button
+              v-if="displayItems && displayItems.length > 0"
+              class="btn btn-primary"
+              @click="playFirst"
+              id="collection-play-first-btn"
+            >
+              <i class="ph ph-play-fill"></i> Play First
+            </button>
+            <button
+              v-if="displayItems && displayItems.length > 1"
+              class="btn btn-secondary"
+              @click="playRandom"
+              id="collection-shuffle-btn"
+              title="Shuffle Play"
+            >
+              <i class="ph ph-shuffle"></i> Shuffle
+            </button>
+            <button
+              v-if="!collection.smart && !store.profile?.is_kids"
+              class="btn btn-ghost"
+              @click="deleteCollection"
+              style="color:var(--accent)"
+              id="delete-collection-btn"
+            >
+              <i class="ph ph-trash"></i> Delete
+            </button>
+          </div>
         </div>
-        <button v-if="collection && !collection.smart && !store.profile?.is_kids" class="btn btn-ghost" @click="deleteCollection" style="color:var(--accent)">
-          <i class="ph ph-trash"></i> Delete
-        </button>
       </div>
 
-      <div v-if="!collection || collection.items.length === 0" class="empty-state">
-        <div class="empty-icon">📚</div>
+      <div v-if="!collection || !displayItems || displayItems.length === 0" class="empty-state">
+        <div class="empty-icon"><i class="ph ph-stack" style="font-size:3rem;color:var(--accent)"></i></div>
         <div class="empty-title">Collection is empty</div>
-        <div class="empty-subtitle">Add titles from their detail pages.</div>
+        <div class="empty-subtitle">Add titles from their detail pages to populate this collection.</div>
       </div>
 
       <div v-else class="media-grid">
         <media-card
-          v-for="item in collection.items"
+          v-for="item in displayItems"
           :key="item.id"
           :item="item"
           @click="handleClick"
@@ -6899,6 +7119,21 @@ const CollectionDetailPage = {
     const route = VueRouter.useRoute();
     const router = VueRouter.useRouter();
     const collection = ref(null);
+    const sortMode = ref("release");
+
+    const displayItems = computed(() => {
+      if (!collection.value) return [];
+      if (sortMode.value === "timeline" && collection.value.timeline_items && collection.value.timeline_items.length) {
+        return collection.value.timeline_items;
+      }
+      return collection.value.items || [];
+    });
+
+    const heroBackdrop = computed(() => {
+      if (!displayItems.value?.length) return null;
+      const firstWithBackdrop = displayItems.value.find((i) => i.backdrop_path);
+      return firstWithBackdrop ? firstWithBackdrop.backdrop_path : (displayItems.value[0]?.poster_path || null);
+    });
 
     async function load() {
       try {
@@ -6932,9 +7167,33 @@ const CollectionDetailPage = {
       else router.push(`/title/${item.type}/${item.tmdb_id}`);
     }
 
+    function playFirst() {
+      if (displayItems.value?.length) {
+        handleClick(displayItems.value[0]);
+      }
+    }
+
+    function playRandom() {
+      if (displayItems.value?.length) {
+        const idx = Math.floor(Math.random() * displayItems.value.length);
+        handleClick(displayItems.value[idx]);
+      }
+    }
+
     onMounted(load);
 
-    return { store, collection, handleClick, deleteCollection };
+    return {
+      store,
+      collection,
+      sortMode,
+      displayItems,
+      heroBackdrop,
+      imgUrl,
+      handleClick,
+      playFirst,
+      playRandom,
+      deleteCollection
+    };
   },
 };
 
@@ -9710,6 +9969,14 @@ const App = {
           </div>
         </div>
       </div>
+
+      <!-- Global Fix Match Modal -->
+      <fix-match-modal
+        v-if="fixMatchState.show"
+        :target="fixMatchState.target"
+        @close="handleGlobalFixMatchClose"
+        @matched="handleGlobalFixMatchDone"
+      />
     </template>
   `,
   setup() {
@@ -10148,6 +10415,17 @@ const App = {
       return "ph ph-info";
     }
 
+    function handleGlobalFixMatchClose() {
+      fixMatchState.show = false;
+    }
+
+    function handleGlobalFixMatchDone(result) {
+      fixMatchState.show = false;
+      if (typeof fixMatchState.onMatched === "function") {
+        fixMatchState.onMatched(result);
+      }
+    }
+
     return {
       store,
       route,
@@ -10181,6 +10459,9 @@ const App = {
       confirmState,
       handleConfirmOk,
       handleConfirmCancel,
+      fixMatchState,
+      handleGlobalFixMatchClose,
+      handleGlobalFixMatchDone,
       dismissToast,
       getToastIcon,
       navItems,
@@ -10191,6 +10472,245 @@ const App = {
       isNavActive,
     };
   },
+};
+
+// ─── Fix Match Modal Component ─────────────────────────────────
+
+const FixMatchModal = {
+  props: ["target"],
+  emits: ["close", "matched"],
+  template: `
+    <div class="modal-backdrop" style="z-index:999950;background:rgba(0,0,0,0.85);backdrop-filter:blur(20px);" @click.self="$emit('close')">
+      <div class="fixmatch-modal" @click.stop>
+        <div class="fixmatch-header">
+          <div class="fixmatch-header-title">
+            <i class="ph ph-magic-wand" style="color:var(--accent);font-size:1.4rem"></i>
+            <span>Fix Match & Metadata Scraper</span>
+          </div>
+          <button class="shortcuts-close-btn" @click="$emit('close')">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+
+        <div class="fixmatch-body">
+          <div class="fixmatch-target-banner">
+            <div style="font-size:0.75rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">TARGET ITEM</div>
+            <div style="font-weight:700;font-size:1rem;color:var(--text-primary)">
+              {{ target?.title || 'Unknown Media' }}
+              <span v-if="target?.year" style="color:var(--text-muted);font-weight:normal"> ({{ target.year }})</span>
+              <span v-if="target?.type" class="badge" style="margin-left:6px;text-transform:capitalize;font-size:0.72rem">{{ target.type }}</span>
+            </div>
+            <div v-if="target?.file_path" class="unmatched-path-cell" style="display:block;margin-top:4px;max-width:100%;font-size:0.78rem">
+              {{ target.file_path }}
+            </div>
+          </div>
+
+          <!-- Search controls -->
+          <div class="fixmatch-search-controls">
+            <input
+              type="text"
+              v-model="searchQuery"
+              class="form-input"
+              placeholder="Search title on TMDb..."
+              @keyup.enter="search"
+              id="fixmatch-query-input"
+              autofocus
+            />
+            <select v-model="selectedType" class="fixmatch-type-select" @change="search" id="fixmatch-type-select">
+              <option value="movie">Movie</option>
+              <option value="series">Series</option>
+              <option value="anime">Anime</option>
+            </select>
+            <input
+              type="text"
+              v-model="searchYear"
+              class="fixmatch-year-input"
+              placeholder="Year (opt)"
+              maxlength="4"
+              @keyup.enter="search"
+              id="fixmatch-year-input"
+            />
+            <button class="btn btn-primary" @click="search" :disabled="searching" id="fixmatch-search-btn">
+              <i :class="searching ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="searching ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+              {{ searching ? 'Searching...' : 'Search' }}
+            </button>
+          </div>
+
+          <!-- Direct TMDB ID Quick Override -->
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 14px;background:rgba(255,255,255,0.03);border-radius:10px;border:1px solid var(--border);flex-wrap:wrap">
+            <span style="font-size:0.8rem;color:var(--text-muted);font-weight:600">Already know the TMDb ID?</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input
+                type="number"
+                v-model.number="directTmdbId"
+                class="form-input"
+                placeholder="e.g. 299536"
+                style="width:140px;padding:4px 8px;height:32px;font-size:0.85rem"
+                @keyup.enter="applyDirectId"
+              />
+              <button
+                class="btn btn-secondary btn-sm"
+                @click="applyDirectId"
+                :disabled="!directTmdbId || applying"
+              >
+                Apply ID
+              </button>
+            </div>
+          </div>
+
+          <!-- Loading state -->
+          <div v-if="searching" style="display:flex;justify-content:center;padding:2.5rem">
+            <div class="loading-spinner"></div>
+          </div>
+
+          <!-- Results List -->
+          <div v-else-if="results.length > 0" class="fixmatch-results-list">
+            <div
+              v-for="item in results"
+              :key="item.tmdb_id"
+              class="fixmatch-card"
+            >
+              <img
+                v-if="item.poster_path"
+                :src="item.poster_path"
+                class="fixmatch-card-poster"
+                :alt="item.title"
+                loading="lazy"
+                @error="e => e.target.style.display='none'"
+              />
+              <div v-else class="fixmatch-card-poster" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);background:rgba(255,255,255,0.04)">
+                <i class="ph ph-film-strip" style="font-size:1.5rem"></i>
+              </div>
+
+              <div class="fixmatch-card-info">
+                <div class="fixmatch-card-title">
+                  <span>{{ item.title }}</span>
+                  <span class="fixmatch-card-year" v-if="item.year">({{ item.year }})</span>
+                  <span class="fixmatch-id-badge">TMDb {{ item.tmdb_id }}</span>
+                  <span v-if="item.vote_average" class="fixmatch-card-rating">
+                    <i class="ph-fill ph-star"></i> {{ Number(item.vote_average).toFixed(1) }}
+                  </span>
+                </div>
+                <div v-if="item.original_title && item.original_title !== item.title" style="font-size:0.75rem;color:var(--text-muted);font-style:italic">
+                  Original: {{ item.original_title }}
+                </div>
+                <div class="fixmatch-card-overview" :title="item.overview">{{ item.overview || 'No overview available.' }}</div>
+              </div>
+
+              <button
+                class="btn btn-primary btn-sm"
+                @click="applyMatch(item)"
+                :disabled="applying"
+                :id="'btn-apply-match-' + item.tmdb_id"
+              >
+                <i :class="applyingId === item.tmdb_id ? 'ph ph-circle-notch' : 'ph ph-check'" :style="applyingId === item.tmdb_id ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                {{ applyingId === item.tmdb_id ? 'Matching…' : 'Match' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Empty search results -->
+          <div v-else-if="searched" style="text-align:center;padding:2.5rem 1rem;color:var(--text-muted)">
+            <i class="ph ph-magnifying-glass" style="font-size:2.5rem;margin-bottom:8px"></i>
+            <div style="font-weight:700;font-size:1.05rem;color:var(--text-secondary)">No TMDb results found</div>
+            <div style="font-size:0.85rem;margin-top:4px">Try adjusting the query keywords, year, or media type.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `,
+  setup(props, { emit }) {
+    const searchQuery = ref("");
+    const selectedType = ref("movie");
+    const searchYear = ref("");
+    const directTmdbId = ref(null);
+    const results = ref([]);
+    const searching = ref(false);
+    const searched = ref(false);
+    const applying = ref(false);
+    const applyingId = ref(null);
+
+    onMounted(() => {
+      if (props.target) {
+        let cleanTitle = props.target.title || "";
+        if (!cleanTitle && props.target.file_path) {
+          const parts = props.target.file_path.replace(/\\\\/g, "/").split("/");
+          cleanTitle = parts[parts.length - 1].replace(/\\.[^/.]+$/, "");
+        }
+        searchQuery.value = cleanTitle;
+        selectedType.value = props.target.type || "movie";
+        searchYear.value = props.target.year ? String(props.target.year) : "";
+        if (searchQuery.value.trim()) {
+          search();
+        }
+      }
+    });
+
+    async function search() {
+      if (!searchQuery.value.trim()) return;
+      searching.value = true;
+      searched.value = true;
+      try {
+        const queryParams = new URLSearchParams({
+          query: searchQuery.value.trim(),
+          type: selectedType.value,
+          year: searchYear.value.trim()
+        });
+        const res = await API.get(`/api/tmdb/search?${queryParams.toString()}`);
+        results.value = res || [];
+      } catch (e) {
+        addToast("Failed to search TMDb", "error");
+      } finally {
+        searching.value = false;
+      }
+    }
+
+    function applyDirectId() {
+      if (!directTmdbId.value) return;
+      applyMatch({
+        tmdb_id: directTmdbId.value,
+        title: `Direct TMDb #${directTmdbId.value}`
+      });
+    }
+
+    async function applyMatch(item) {
+      if (!item.tmdb_id) return;
+      applying.value = true;
+      applyingId.value = item.tmdb_id;
+      try {
+        const payload = {
+          media_id: props.target?.id,
+          old_tmdb_id: props.target?.tmdb_id,
+          tmdb_id: item.tmdb_id,
+          type: selectedType.value
+        };
+        const res = await API.post("/api/override", payload);
+        addToast(`Matched "${item.title}" successfully! Updated ${res.updated || 1} entries.`, "success");
+        emit("matched", { ...item, type: selectedType.value });
+        emit("close");
+      } catch (e) {
+        addToast(e.message || "Failed to apply match", "error");
+      } finally {
+        applying.value = false;
+        applyingId.value = null;
+      }
+    }
+
+    return {
+      searchQuery,
+      selectedType,
+      searchYear,
+      directTmdbId,
+      results,
+      searching,
+      searched,
+      applying,
+      applyingId,
+      search,
+      applyDirectId,
+      applyMatch
+    };
+  }
 };
 
 // ─── Skip Timestamps Modal Component ───────────────────────────
@@ -10583,5 +11103,6 @@ const app = createApp(App);
 // in template scope otherwise (this is why IMDb-link clicks did nothing).
 app.config.globalProperties.unlockAchievement = unlockAchievement;
 app.component("skip-timestamps-modal", SkipTimestampsModal);
+app.component("fix-match-modal", FixMatchModal);
 app.use(router);
 app.mount("#app");

@@ -32,6 +32,7 @@ from backend.streamer import stream_file
 from backend.subtitles import find_subtitles, get_vtt_path
 from backend.scanner import scan_library, get_scan_status
 from backend.settings import load_config, save_config, test_api_key, apply_system_file_hiding
+from backend.franchises import get_universe_collections
 
 # ─── App Setup ────────────────────────────────────────────────────────────────
 
@@ -1466,6 +1467,7 @@ def api_toggle_favorite(media_id=None):
 def api_get_collections():
     pid = _require_profile()
     result = get_collections(pid)
+    all_media = get_unique_shows(None)
 
     # ─── Smart collections (computed live, read-only) ───
     def _smart(cid, name, desc, items):
@@ -1475,7 +1477,7 @@ def api_get_collections():
         }
 
     unwatched = [
-        m for m in get_unique_shows(None)
+        m for m in all_media
         if not get_progress(pid, m.get("id"))
     ]
     result.insert(0, _smart("smart-unwatched", "Unwatched",
@@ -1484,6 +1486,11 @@ def api_get_collections():
                             "The newest additions to your library", get_recently_added(limit=20)))
     result.insert(2, _smart("smart-top", "Top Rated",
                             "Highest rated titles in your library", get_top_rated(limit=20)))
+
+    # ─── Cinematic Universe & Franchise Collections (2+ matching titles) ───
+    universe_collections = get_universe_collections(all_media, min_count=2)
+    result.extend(universe_collections)
+
     return jsonify(result)
 
 
@@ -1742,29 +1749,96 @@ def api_unmatched():
     return _jsonify_rows(get_unmatched())
 
 
+@app.route("/api/tmdb/search", methods=["GET"])
+def api_tmdb_search():
+    query = request.args.get("query", "").strip()
+    mtype = request.args.get("type", "movie")
+    year = request.args.get("year", "").strip()
+    if not query:
+        return jsonify([])
+    from backend.matcher import search_tmdb
+    results = search_tmdb(query, media_type=mtype, year=year or None)
+    return jsonify(results)
+
+
 @app.route("/api/override", methods=["POST"])
 def api_override():
-    """Manually set a TMDb ID for an unmatched media item."""
+    """
+    Manually set/fix a TMDb ID for a media item or an entire series.
+    Body: { "media_id": <int optional>, "old_tmdb_id": <int optional>, "tmdb_id": <int>, "type": "movie"|"series"|"anime" }
+    """
     data = request.json or {}
-    media_id  = data.get("media_id")
-    tmdb_id   = data.get("tmdb_id")
-    mtype     = data.get("type", "movie")
+    media_id = data.get("media_id")
+    old_tmdb_id = data.get("old_tmdb_id")
+    tmdb_id = data.get("tmdb_id")
+    mtype = data.get("type", "movie")
 
-    if not media_id or not tmdb_id:
-        return jsonify({"error": "media_id and tmdb_id required"}), 400
+    if not tmdb_id:
+        return jsonify({"error": "tmdb_id is required"}), 400
 
-    from backend.matcher import override_match
+    from backend.matcher import override_match, get_season_episodes
     meta = override_match(media_id, tmdb_id, mtype)
     if not meta:
-        return jsonify({"error": "TMDb ID not found"}), 404
+        return jsonify({"error": "TMDb metadata not found for ID"}), 404
 
-    existing = get_media_by_id(media_id)
-    if not existing:
-        return jsonify({"error": "Media not found"}), 404
+    from backend.db import get_conn
+    conn = get_conn()
+    rows = []
+    if old_tmdb_id:
+        rows = conn.execute("SELECT * FROM media WHERE tmdb_id=? AND type=?", (old_tmdb_id, mtype)).fetchall()
+    if not rows and media_id:
+        row = conn.execute("SELECT * FROM media WHERE id=?", (media_id,)).fetchone()
+        if row:
+            if row["type"] in ("series", "anime") and row["tmdb_id"]:
+                rows = conn.execute("SELECT * FROM media WHERE tmdb_id=? AND type=?", (row["tmdb_id"], row["type"])).fetchall()
+            else:
+                rows = [row]
 
-    upsert_media({**existing, **meta, "file_path": existing["file_path"],
-                  "manually_overridden": 1})
-    return jsonify({"ok": True})
+    if not rows and media_id:
+        r = conn.execute("SELECT * FROM media WHERE id=?", (media_id,)).fetchone()
+        if r:
+            rows = [r]
+
+    if not rows:
+        conn.close()
+        return jsonify({"error": "No media records found to update"}), 404
+
+    season_cache = {}
+    updated_count = 0
+    for r in rows:
+        row_dict = dict(r)
+        ep_title = row_dict.get("ep_title")
+        season_num = row_dict.get("season")
+        ep_num = row_dict.get("episode")
+
+        # If it's a series, try to fetch season episode name
+        if mtype in ("series", "anime") and season_num is not None and ep_num is not None:
+            if season_num not in season_cache:
+                season_cache[season_num] = get_season_episodes(tmdb_id, season_num, media_type=mtype)
+            ep_list = season_cache[season_num] or []
+            ep_info = next((e for e in ep_list if e.get("episode_number") == ep_num), None)
+            if ep_info and ep_info.get("name"):
+                ep_title = ep_info.get("name")
+
+        updated_dict = {
+            **row_dict,
+            **meta,
+            "id": row_dict["id"],
+            "file_path": row_dict["file_path"],
+            "type": mtype,
+            "tmdb_id": tmdb_id,
+            "season": row_dict.get("season"),
+            "episode": row_dict.get("episode"),
+            "ep_title": ep_title,
+            "tmdb_matched": 1,
+            "manually_overridden": 1
+        }
+        upsert_media(updated_dict)
+        updated_count += 1
+
+    conn.close()
+    return jsonify({"ok": True, "updated": updated_count})
+
 
 
 @app.route("/api/recache", methods=["POST"])

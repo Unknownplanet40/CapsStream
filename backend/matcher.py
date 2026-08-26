@@ -643,3 +643,54 @@ def fetch_media_backdrops(tmdb_id, media_type="movie"):
     except Exception as e:
         print(f"[Matcher] Error fetching backdrops for {tmdb_id}: {e}")
     return []
+
+
+def search_tmdb(query, media_type="movie", year=None):
+    """
+    Search TMDb for movies or TV shows and return formatted list of candidates.
+    """
+    if not query:
+        return []
+    endpoint = "search/movie" if media_type == "movie" else "search/tv"
+    params = {"query": str(query).strip(), "language": "en-US"}
+    if year:
+        try:
+            y = int(year)
+            if media_type == "movie":
+                params["year"] = str(y)
+            else:
+                params["first_air_date_year"] = str(y)
+        except Exception:
+            pass
+
+    res = _tmdb_get(endpoint, params)
+    if (not res or not res.get("results")) and year:
+        params.pop("year", None)
+        params.pop("first_air_date_year", None)
+        res = _tmdb_get(endpoint, params)
+
+    if not res:
+        return []
+
+    results = []
+    for r in res.get("results", [])[:15]:
+        title = r.get("title") if media_type == "movie" else r.get("name")
+        orig_title = r.get("original_title") if media_type == "movie" else r.get("original_name")
+        release_date = r.get("release_date") if media_type == "movie" else r.get("first_air_date")
+        y = release_date[:4] if release_date else ""
+        poster_path = r.get("poster_path")
+        backdrop_path = r.get("backdrop_path")
+        results.append({
+            "tmdb_id": r.get("id"),
+            "title": title,
+            "original_title": orig_title,
+            "year": y,
+            "release_date": release_date,
+            "overview": r.get("overview", ""),
+            "poster_path": f"https://image.tmdb.org/t/p/w300{poster_path}" if poster_path else None,
+            "backdrop_path": f"https://image.tmdb.org/t/p/w780{backdrop_path}" if backdrop_path else None,
+            "vote_average": round(float(r.get("vote_average", 0)), 1),
+            "media_type": media_type
+        })
+    return results
+
