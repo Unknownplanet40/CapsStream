@@ -22,7 +22,7 @@ from backend.db import (
     init_db, get_all_media, get_media_by_id, get_media_by_tmdb, get_best_media_source, get_media_quality_options,
     search_media, get_unique_shows, get_recently_added, get_top_rated,
     get_by_genre, get_all_genres, get_random_pick,
-    get_all_profiles, get_profile, create_profile, update_profile, delete_profile,
+    get_all_profiles, get_profile, create_profile, update_profile, delete_profile, reorder_profiles,
     verify_pin_raw, hash_pin,
     delete_media_by_id, delete_media_by_tmdb, delete_media_by_title_and_type,
     get_progress, save_progress, delete_progress, get_continue_watching,
@@ -206,6 +206,87 @@ def _require_profile():
     return pid
 
 
+def _get_admin_profiles():
+    all_profs = get_all_profiles()
+    admins = [p for p in all_profs if p.get("is_admin")]
+    if not admins and all_profs:
+        return [all_profs[0]]
+    return admins
+
+
+def _verify_admin_pin(pin):
+    """
+    Check if the provided PIN matches any admin profile.
+    Returns (ok: bool, error_msg: str, status_code: int).
+    """
+    admins = _get_admin_profiles()
+    if not admins:
+        return True, "", 200
+
+    # If any admin profile has no PIN set, permission is granted directly
+    if any(not a.get("has_pin") for a in admins):
+        return True, "", 200
+
+    pin_str = str(pin).strip() if pin is not None else ""
+    if not pin_str:
+        return False, "Admin PIN is required", 401
+
+    for a in admins:
+        if a.get("has_pin"):
+            rem = _pin_lockout_remaining(a["id"])
+            if rem > 0:
+                return False, f"Too many failed attempts — try again in {rem}s", 429
+            if verify_pin_raw(a["id"], pin_str):
+                _clear_pin_failures(a["id"])
+                return True, "", 200
+
+    for a in admins:
+        if a.get("has_pin"):
+            _record_pin_failure(a["id"])
+
+    return False, "Incorrect Admin PIN", 401
+
+
+def _is_admin():
+    """True when the active session profile is an Admin or a valid admin PIN was supplied."""
+    if session.get("is_admin"):
+        return True
+
+    # Check request headers or payload for admin PIN
+    admin_pin = request.headers.get("X-Admin-PIN")
+    if admin_pin is None and request.is_json and request.json:
+        admin_pin = request.json.get("admin_pin")
+    if admin_pin is None:
+        admin_pin = request.args.get("admin_pin")
+
+    if admin_pin is not None:
+        ok, _, _ = _verify_admin_pin(admin_pin)
+        if ok:
+            return True
+
+    pid = _current_profile()
+    if not pid:
+        all_profs = get_all_profiles()
+        return len(all_profs) == 0
+
+    cached = session.get("is_admin")
+    if cached is not None:
+        return bool(cached)
+    try:
+        prof = get_profile(pid)
+        val = bool(prof and prof.get("is_admin", 0))
+        session["is_admin"] = val
+        return val
+    except Exception:
+        return False
+
+
+def _require_admin():
+    """Abort with 403 Forbidden if the active profile or request is not an Administrator."""
+    if not _is_admin():
+        abort(403, description="Administrator privileges required")
+
+
 def _active_is_kids():
     """True when the active session profile is a Kids profile."""
     pid = _current_profile()
@@ -234,25 +315,88 @@ def _kids_overrides():
         return {"allow": set(), "block": set()}
 
 
+def _active_profile_obj():
+    pid = _current_profile()
+    if not pid:
+        return None
+    try:
+        from backend.db import get_profile
+        return get_profile(pid)
+    except Exception:
+        return None
+
+
 def _filter_for_profile(items):
-    """Server-side Kids Mode list filtering incl. parental overrides."""
-    if not _active_is_kids():
+    """Server-side profile filtering for Kids mode, Maturity Rating tiers, and Blocked Genres."""
+    if not items:
+        return []
+    prof = _active_profile_obj()
+    if not prof:
         return items
-    return filter_kids(items, overrides=_kids_overrides())
+
+    if prof.get("is_kids"):
+        return filter_kids(items, overrides=_kids_overrides())
+
+    maturity = (prof.get("maturity_rating") or "All").strip()
+    blocked_str = (prof.get("blocked_genres") or "").strip()
+    blocked_genres = {g.strip().lower() for g in blocked_str.split(",") if g.strip()}
+
+    TEEN_ALLOWED_CERTS = {"g", "pg", "pg-13", "tv-g", "tv-pg", "tv-14", "tv-y", "tv-y7", "u", "12", "12a", "15"}
+    KIDS_ALLOWED_CERTS = {"g", "tv-g", "tv-y", "tv-y7", "u"}
+
+    filtered = []
+    for it in items:
+        # 1. Check blocked genres
+        genres_str = (it.get("genres") or "").lower()
+        if blocked_genres and any(bg in genres_str for bg in blocked_genres):
+            continue
+
+        # 2. Check maturity rating
+        cert = str(it.get("certification") or "").strip().lower()
+        if maturity == "Kids":
+            if cert and cert not in KIDS_ALLOWED_CERTS:
+                continue
+        elif maturity == "Teens":
+            if cert and cert not in TEEN_ALLOWED_CERTS:
+                continue
+
+        filtered.append(it)
+    return filtered
 
 
 def _kids_guard_media(media, deep=True):
     """
     Hard gate for single-item endpoints (detail page / playback).
-    Returns an error response when a Kids profile requests non-kid-safe
-    media; None when the request may proceed.
+    Returns an error response when a profile requests restricted media.
     """
-    if not _active_is_kids() or not media:
+    if not media:
         return None
-    safe, reason = is_kid_safe(media, deep=deep, overrides=_kids_overrides())
-    if not safe:
-        print(f"[KidsFilter] denied '{media.get('title')}' (tmdb {media.get('tmdb_id')}) — {reason}")
-        return jsonify({"error": "Not available in Kids Mode", "reason": "kid_unsafe"}), 404
+    prof = _active_profile_obj()
+    if not prof:
+        return None
+
+    if prof.get("is_kids"):
+        safe, reason = is_kid_safe(media, deep=deep, overrides=_kids_overrides())
+        if not safe:
+            print(f"[KidsFilter] denied '{media.get('title')}' (tmdb {media.get('tmdb_id')}) — {reason}")
+            return jsonify({"error": "Not available in Kids Mode", "reason": "kid_unsafe"}), 404
+        return None
+
+    # Check blocked genres
+    blocked_str = (prof.get("blocked_genres") or "").strip()
+    if blocked_str:
+        blocked_genres = {g.strip().lower() for g in blocked_str.split(",") if g.strip()}
+        genres_str = (media.get("genres") or "").lower()
+        if any(bg in genres_str for bg in blocked_genres):
+            return jsonify({"error": "Title is in your profile's blocked genres list", "reason": "genre_blocked"}), 404
+
+    # Check maturity rating
+    maturity = (prof.get("maturity_rating") or "All").strip()
+    cert = str(media.get("certification") or "").strip().lower()
+    TEEN_ALLOWED_CERTS = {"g", "pg", "pg-13", "tv-g", "tv-pg", "tv-14", "tv-y", "tv-y7", "u", "12", "12a", "15"}
+    if maturity == "Teens" and cert and cert not in TEEN_ALLOWED_CERTS:
+        return jsonify({"error": "Title exceeds profile maturity rating (Teens)", "reason": "maturity_exceeded"}), 404
+
     return None
 
 
@@ -471,6 +615,15 @@ def serve_metadata_image(filename):
     return resp
 
 
+@app.route("/metadata/avatars/<path:filename>")
+def serve_avatar_image(filename):
+    avatars_dir = os.path.join(BASE_DIR, "data", "avatars")
+    os.makedirs(avatars_dir, exist_ok=True)
+    resp = send_from_directory(avatars_dir, filename)
+    resp.headers["Cache-Control"] = "public, max-age=604800"
+    return resp
+
+
 # ─── Profiles API ─────────────────────────────────────────────────────────────
 
 @app.route("/api/profiles", methods=["GET"])
@@ -480,6 +633,13 @@ def api_get_profiles():
 
 @app.route("/api/profiles", methods=["POST"])
 def api_create_profile():
+    _require_admin()
+    cfg = load_config()
+    max_profiles = int(cfg.get("profiles", {}).get("max_profiles", 8) if isinstance(cfg.get("profiles"), dict) else 8)
+    all_prof = get_all_profiles()
+    if len(all_prof) >= max_profiles:
+        return jsonify({"error": f"Maximum profile capacity reached ({max_profiles} profiles)"}), 400
+
     data = request.json or {}
     name = (data.get("name") or "").strip()
     raw_pin = data.get("pin")
@@ -487,6 +647,13 @@ def api_create_profile():
     avatar = data.get("avatar", "🎬")
     color  = data.get("color", "#e50914")
     theme  = str(data.get("theme", "crimson") or "crimson").strip()
+    is_admin = bool(data.get("is_admin", False))
+    custom_avatar_url = str(data.get("custom_avatar_url", "") or "").strip()
+    maturity_rating = str(data.get("maturity_rating", "All") or "All").strip()
+    blocked_genres = str(data.get("blocked_genres", "") or "").strip()
+    default_audio_lang = str(data.get("default_audio_lang", "") or "").strip()
+    default_sub_lang = str(data.get("default_sub_lang", "") or "").strip()
+    auto_lock_minutes = int(data.get("auto_lock_minutes", 0) or 0)
 
     if not name:
         return jsonify({"error": "Name is required"}), 400
@@ -497,20 +664,35 @@ def api_create_profile():
     daily_limit_minutes = int(data.get("daily_limit_minutes", 0) or 0)
     bedtime_curfew = str(data.get("bedtime_curfew", "") or "").strip()
     pin_hash = hash_pin(pin) if pin else None
-    pid = create_profile(name, pin_hash, avatar, color, is_kids=is_kids, daily_limit_minutes=daily_limit_minutes, bedtime_curfew=bedtime_curfew, theme=theme)
+    pid = create_profile(
+        name, pin_hash, avatar, color, is_kids=is_kids,
+        daily_limit_minutes=daily_limit_minutes, bedtime_curfew=bedtime_curfew,
+        theme=theme, is_admin=is_admin, custom_avatar_url=custom_avatar_url,
+        maturity_rating=maturity_rating, blocked_genres=blocked_genres,
+        default_audio_lang=default_audio_lang, default_sub_lang=default_sub_lang,
+        position=len(all_prof), auto_lock_minutes=auto_lock_minutes
+    )
     if is_kids:
         active_pid = _current_profile()
         if active_pid:
             from backend.db import unlock_achievement
             unlock_achievement(active_pid, "kids_creator")
     return jsonify({
-        "id": pid, "name": name, "avatar": avatar, "color": color, "theme": theme, "is_kids": is_kids,
-        "daily_limit_minutes": daily_limit_minutes, "bedtime_curfew": bedtime_curfew
+        "id": pid, "name": name, "avatar": avatar, "color": color, "theme": theme,
+        "is_kids": is_kids, "is_admin": is_admin, "custom_avatar_url": custom_avatar_url,
+        "maturity_rating": maturity_rating, "blocked_genres": blocked_genres,
+        "default_audio_lang": default_audio_lang, "default_sub_lang": default_sub_lang,
+        "daily_limit_minutes": daily_limit_minutes, "bedtime_curfew": bedtime_curfew,
+        "auto_lock_minutes": auto_lock_minutes
     }), 201
 
 
 @app.route("/api/profiles/<int:profile_id>", methods=["PUT"])
 def api_update_profile(profile_id):
+    active_pid = _current_profile()
+    if not _is_admin() and active_pid != profile_id:
+        return jsonify({"error": "Administrator privileges required to edit other profiles"}), 403
+
     data = request.json or {}
     name = (data.get("name") or "").strip()
     raw_pin = data.get("pin")
@@ -518,7 +700,22 @@ def api_update_profile(profile_id):
     avatar = data.get("avatar", "🎬")
     color  = data.get("color", "#e50914")
     theme  = str(data.get("theme", "crimson") or "crimson").strip()
+    is_admin = data.get("is_admin")
+    custom_avatar_url = data.get("custom_avatar_url")
+    maturity_rating = str(data.get("maturity_rating", "All") or "All").strip()
+    blocked_genres = str(data.get("blocked_genres", "") or "").strip()
+    default_audio_lang = str(data.get("default_audio_lang", "") or "").strip()
+    default_sub_lang = str(data.get("default_sub_lang", "") or "").strip()
+    auto_lock_minutes = int(data.get("auto_lock_minutes", 0) or 0)
     update_pin = bool(data.get("update_pin", False))
+
+    if not _is_admin():
+        # Non-admins cannot alter admin status, maturity ratings, or kids mode flags
+        existing = get_profile(profile_id)
+        if existing:
+            is_admin = bool(existing.get("is_admin", 0))
+            maturity_rating = str(existing.get("maturity_rating", "All") or "All")
+            is_kids = bool(existing.get("is_kids", 0))
 
     if not name:
         return jsonify({"error": "Name is required"}), 400
@@ -537,23 +734,80 @@ def api_update_profile(profile_id):
 
     daily_limit_minutes = int(data.get("daily_limit_minutes", 0) or 0)
     bedtime_curfew = str(data.get("bedtime_curfew", "") or "").strip()
-    update_profile(profile_id, name, pin_hash, avatar, color, is_kids, update_pin=update_pin, daily_limit_minutes=daily_limit_minutes, bedtime_curfew=bedtime_curfew, theme=theme)
+    update_profile(
+        profile_id, name, pin_hash, avatar, color, is_kids,
+        update_pin=update_pin, daily_limit_minutes=daily_limit_minutes,
+        bedtime_curfew=bedtime_curfew, theme=theme, is_admin=is_admin,
+        custom_avatar_url=custom_avatar_url, maturity_rating=maturity_rating,
+        blocked_genres=blocked_genres, default_audio_lang=default_audio_lang,
+        default_sub_lang=default_sub_lang, auto_lock_minutes=auto_lock_minutes
+    )
 
-    return jsonify({
-        "id": profile_id,
-        "name": name,
-        "avatar": avatar,
-        "color": color,
-        "theme": theme,
-        "is_kids": is_kids,
-        "has_pin": bool(pin_hash),
-        "daily_limit_minutes": daily_limit_minutes,
-        "bedtime_curfew": bedtime_curfew
-    })
+    if update_pin:
+        _clear_pin_failures(profile_id)
+
+    prof = get_profile(profile_id)
+    return jsonify(_sanitize_profile(prof))
+
+
+@app.route("/api/profiles/<int:profile_id>/avatar", methods=["POST"])
+def api_upload_profile_avatar(profile_id):
+    active_pid = _current_profile()
+    if not _is_admin() and active_pid != profile_id:
+        return jsonify({"error": "Administrator privileges required to update other profiles' avatars"}), 403
+
+    if "avatar" not in request.files:
+        return jsonify({"error": "No avatar image file provided"}), 400
+    file = request.files["avatar"]
+    if not file or not file.filename:
+        return jsonify({"error": "Empty filename"}), 400
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in [".png", ".jpg", ".jpeg", ".webp", ".gif"]:
+        return jsonify({"error": "Supported formats: png, jpg, jpeg, webp, gif"}), 400
+
+    avatars_dir = os.path.join(BASE_DIR, "data", "avatars")
+    os.makedirs(avatars_dir, exist_ok=True)
+    filename = f"avatar_{profile_id}_{int(time.time())}{ext}"
+    target_path = os.path.join(avatars_dir, filename)
+    file.save(target_path)
+
+    custom_url = f"/metadata/avatars/{filename}"
+    prof = get_profile(profile_id)
+    if prof:
+        update_profile(
+            profile_id,
+            name=prof["name"],
+            avatar=prof.get("avatar", "🎬"),
+            color=prof.get("color", "#e50914"),
+            is_kids=bool(prof.get("is_kids")),
+            theme=prof.get("theme", "crimson"),
+            is_admin=bool(prof.get("is_admin")),
+            custom_avatar_url=custom_url,
+            maturity_rating=prof.get("maturity_rating", "All"),
+            blocked_genres=prof.get("blocked_genres", ""),
+            default_audio_lang=prof.get("default_audio_lang", ""),
+            default_sub_lang=prof.get("default_sub_lang", ""),
+            position=prof.get("position", 0),
+            auto_lock_minutes=prof.get("auto_lock_minutes", 0)
+        )
+    return jsonify({"ok": True, "custom_avatar_url": custom_url})
+
+
+@app.route("/api/profiles/reorder", methods=["POST"])
+def api_reorder_profiles():
+    _require_admin()
+    data = request.json or {}
+    ordered_ids = data.get("ordered_ids", [])
+    if not isinstance(ordered_ids, list):
+        return jsonify({"error": "ordered_ids array required"}), 400
+    reorder_profiles([int(i) for i in ordered_ids])
+    return jsonify({"ok": True})
 
 
 @app.route("/api/profiles/<int:profile_id>", methods=["DELETE", "POST"])
 def api_delete_profile(profile_id):
+    _require_admin()
     # 1. Kids profile lockout check
     active_pid = _current_profile()
     if active_pid:
@@ -593,6 +847,30 @@ def api_delete_profile(profile_id):
     return jsonify({"ok": True})
 
 
+def _sanitize_profile(profile):
+    if not profile:
+        return None
+    return {
+        "id": profile["id"],
+        "name": profile["name"],
+        "avatar": profile.get("avatar", "🎬"),
+        "color": profile.get("color", "#e50914"),
+        "theme": profile.get("theme", "crimson"),
+        "is_kids": bool(profile.get("is_kids", 0)),
+        "is_admin": bool(profile.get("is_admin", 0)),
+        "custom_avatar_url": profile.get("custom_avatar_url", ""),
+        "maturity_rating": profile.get("maturity_rating", "All"),
+        "blocked_genres": profile.get("blocked_genres", ""),
+        "default_audio_lang": profile.get("default_audio_lang", ""),
+        "default_sub_lang": profile.get("default_sub_lang", ""),
+        "position": int(profile.get("position", 0) or 0),
+        "auto_lock_minutes": int(profile.get("auto_lock_minutes", 0) or 0),
+        "daily_limit_minutes": int(profile.get("daily_limit_minutes", 0) or 0),
+        "bedtime_curfew": str(profile.get("bedtime_curfew", "") or ""),
+        "has_pin": bool(profile.get("pin_hash")),
+    }
+
+
 @app.route("/api/profiles/auth", methods=["POST"])
 def api_auth_profile():
     data = request.json or {}
@@ -622,15 +900,8 @@ def api_auth_profile():
 
     session["profile_id"] = profile_id
     session["is_kids"] = bool(profile.get("is_kids", 0))
-    return jsonify({"ok": True, "profile": {
-        "id":      profile["id"],
-        "name":    profile["name"],
-        "avatar":  profile["avatar"],
-        "color":   profile["color"],
-        "is_kids": bool(profile.get("is_kids", 0)),
-        "daily_limit_minutes": int(profile.get("daily_limit_minutes", 0) or 0),
-        "bedtime_curfew": str(profile.get("bedtime_curfew", "") or ""),
-    }})
+    session["is_admin"] = bool(profile.get("is_admin", 0))
+    return jsonify({"ok": True, "profile": _sanitize_profile(profile)})
 
 
 @app.route("/api/profiles/me", methods=["GET"])
@@ -641,23 +912,39 @@ def api_me():
     profile = get_profile(pid)
     if not profile:
         session.pop("profile_id", None)
+        session.pop("is_kids", None)
+        session.pop("is_admin", None)
         return jsonify(None)
-    return jsonify({
-        "id":      profile["id"],
-        "name":    profile["name"],
-        "avatar":  profile["avatar"],
-        "color":   profile["color"],
-        "is_kids": bool(profile.get("is_kids", 0)),
-        "daily_limit_minutes": int(profile.get("daily_limit_minutes", 0) or 0),
-        "bedtime_curfew": str(profile.get("bedtime_curfew", "") or ""),
-    })
+    session["is_kids"] = bool(profile.get("is_kids", 0))
+    session["is_admin"] = bool(profile.get("is_admin", 0))
+    return jsonify(_sanitize_profile(profile))
 
 
 @app.route("/api/profiles/logout", methods=["POST"])
 def api_logout():
     session.pop("profile_id", None)
     session.pop("is_kids", None)
+    session.pop("is_admin", None)
     return jsonify({"ok": True})
+
+
+@app.route("/api/profiles/admin-pin-status", methods=["GET"])
+def api_admin_pin_status():
+    admins = _get_admin_profiles()
+    if not admins:
+        return jsonify({"pin_required": False, "admin_count": 0})
+    pin_required = all(bool(a.get("has_pin")) for a in admins)
+    return jsonify({"pin_required": pin_required, "admin_count": len(admins)})
+
+
+@app.route("/api/profiles/verify-admin-pin", methods=["POST"])
+def api_verify_admin_pin():
+    data = request.json or {}
+    pin = data.get("pin", "")
+    ok, err, code = _verify_admin_pin(pin)
+    if ok:
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": err}), code
 
 
 # ─── Settings API ─────────────────────────────────────────────────────────────
@@ -671,7 +958,19 @@ def api_get_settings():
 
 @app.route("/api/settings", methods=["POST"])
 def api_post_settings():
+    _require_profile()
     data = request.json or {}
+    if not _is_admin():
+        # Non-admin users are only allowed to update player preferences
+        cfg = load_config()
+        if "player" in data and isinstance(data["player"], dict):
+            cfg["player"] = data["player"]
+            ok, result = save_config(cfg)
+            if ok:
+                return jsonify({"ok": True, "config": result})
+            return jsonify({"error": result}), 500
+        return jsonify({"error": "Administrator privileges required to change system settings"}), 403
+
     ok, result = save_config(data)
     if ok:
         # Changing the auto-scan interval restarts the countdown from now
@@ -683,6 +982,7 @@ def api_post_settings():
 
 @app.route("/api/settings/test-api", methods=["POST"])
 def api_test_api_key():
+    _require_admin()
     data = request.json or {}
     provider = data.get("provider", "")
     key = data.get("key", "")
@@ -698,6 +998,7 @@ def api_cache_info():
 
 @app.route("/api/system/cache", methods=["DELETE"])
 def api_clear_cache():
+    _require_admin()
     from backend.settings import clear_cache
     cleared = clear_cache()
     return jsonify({"ok": True, "cleared": cleared})
@@ -705,6 +1006,7 @@ def api_clear_cache():
 
 @app.route("/api/system/reset", methods=["POST"])
 def api_system_reset():
+    _require_admin()
     data = request.json or {}
     clear_media = data.get("clear_media_files", False)
     from backend.settings import reset_application
@@ -1472,6 +1774,7 @@ def api_check_update():
 @app.route("/api/system/apply-update", methods=["POST"])
 def api_apply_update():
     """Download and install the latest update package (code files only)."""
+    _require_admin()
     from backend.updater import apply_update
     data = request.json or {}
     try:
@@ -1528,6 +1831,7 @@ def _graceful_shutdown():
 @app.route("/api/system/shutdown", methods=["POST"])
 def api_system_shutdown():
     """Gracefully stop the Flask server, flush databases, then exit."""
+    _require_admin()
     _graceful_shutdown()
     return jsonify({"ok": True, "message": "Server shutting down cleanly"})
 
@@ -1541,6 +1845,7 @@ def api_restart_after_update():
     Every step (including the new server's startup output) is logged to
     data/update_restart.log.
     """
+    _require_admin()
     from backend.updater import spawn_restart_helper
 
     try:
@@ -2159,6 +2464,7 @@ _scan_thread = None
 
 @app.route("/api/scan", methods=["POST"])
 def api_scan():
+    _require_admin()
     global _scan_thread
     status = get_scan_status()
     if status["running"]:
@@ -2192,6 +2498,7 @@ def api_offline_page():
 
 @app.route("/api/system/backup", methods=["GET"])
 def api_system_backup():
+    _require_admin()
     """
     Download a backup zip containing config.json and the library database.
     include_metadata=1 additionally bundles the metadata cache (posters,
@@ -2304,6 +2611,7 @@ def start_auto_backups():
 
 @app.route("/api/system/restore", methods=["POST"])
 def api_system_restore():
+    _require_admin()
     """
     Restore from a backup zip. config.json is applied immediately (with the
     previous version kept in data/pre_restore/); the database is staged and
@@ -2428,6 +2736,7 @@ def start_scan_scheduler():
 
 @app.route("/api/unmatched", methods=["GET"])
 def api_unmatched():
+    _require_admin()
     return _jsonify_rows(get_unmatched())
 
 
@@ -2445,6 +2754,7 @@ def api_tmdb_search():
 
 @app.route("/api/override", methods=["POST"])
 def api_override():
+    _require_admin()
     """
     Manually set/fix a TMDb ID for a media item or an entire series.
     Body: { "media_id": <int optional>, "old_tmdb_id": <int optional>, "tmdb_id": <int>, "type": "movie"|"series"|"anime" }

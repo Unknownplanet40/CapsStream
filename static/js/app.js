@@ -524,13 +524,8 @@ function applyTheme(themeKey, persist = false) {
   if (persist && store.profile?.id) {
     store.profile.theme = validTheme;
     API.put(`/api/profiles/${store.profile.id}`, {
-      name: store.profile.name,
-      avatar: store.profile.avatar,
-      color: store.profile.color,
-      is_kids: store.profile.is_kids,
+      ...store.profile,
       theme: validTheme,
-      daily_limit_minutes: store.profile.daily_limit_minutes,
-      bedtime_curfew: store.profile.bedtime_curfew,
     }).catch((err) => console.warn("[Theme] Failed to persist profile theme:", err));
   }
 }
@@ -2544,9 +2539,11 @@ const SettingsPage = {
   template: `
     <div class="settings-page">
       <div class="settings-header">
-        <div class="settings-title">
+        <div class="settings-title" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px">
           <i class="ph ph-gear" style="color:var(--accent)"></i>
           <span>Application Settings</span>
+          <span v-if="store.profile?.is_admin" class="admin-profile-badge" style="font-size:0.75rem;padding:3px 10px;margin-left:8px">👑 Administrator Mode</span>
+          <span v-else class="teen-profile-badge" style="font-size:0.75rem;padding:3px 10px;margin-left:8px">👤 Personal Preferences</span>
         </div>
       </div>
 
@@ -2594,9 +2591,220 @@ const SettingsPage = {
           </div>
         </div>
 
-        <!-- 0. Updates -->
-        <div class="settings-section" id="settings-updates-section">
+        <!-- Subtitles & Player Defaults (Personal Preferences) -->
+        <div class="settings-section" id="settings-player-section">
           <div class="settings-section-title">
+            <i class="ph ph-subtitles" style="color:var(--accent)"></i>
+            <span>Player & Subtitle Defaults</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Subtitles — Auto Load</div>
+                <div class="settings-desc">Automatically enable and show subtitles on video start if available.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.subtitles.auto_load" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Subtitles — Preferred Language</div>
+                <div class="settings-desc">Default language track selected when loading video subtitles.</div>
+              </div>
+              <select v-model="form.subtitles.preferred_language" class="form-input" style="width:160px">
+                <option value="Auto">Auto (Default)</option>
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="ja">Japanese</option>
+                <option value="de">German</option>
+              </select>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Auto Play Next Episode</div>
+                <div class="settings-desc">Automatically play the next episode when the current one finishes.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.playback.auto_play_next" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Auto-Skip Intro & Recap</div>
+                <div class="settings-desc">Automatically skip intro, recap, and outro ranges when video playback enters their timestamp window.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.playback.auto_skip_intro" id="setting-auto-skip-toggle" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Playback — Resume Behavior</div>
+                <div class="settings-desc">What to do when a video has saved watch progress.</div>
+              </div>
+              <select v-model="form.playback.resume_behavior" class="form-input" style="width:220px">
+                <option value="ask">Ask Every Time</option>
+                <option value="always">Always Resume</option>
+                <option value="never">Always Start Over</option>
+              </select>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Playback — Default Speed</div>
+                <div class="settings-desc">Playback speed applied when a video starts.</div>
+              </div>
+              <select v-model.number="form.playback.default_speed" class="form-input" style="width:140px">
+                <option :value="0.5">0.5x</option>
+                <option :value="0.75">0.75x</option>
+                <option :value="1">1x (Normal)</option>
+                <option :value="1.25">1.25x</option>
+                <option :value="1.5">1.5x</option>
+                <option :value="2">2x</option>
+              </select>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Playback — Auto-Fullscreen</div>
+                <div class="settings-desc">Automatically enter fullscreen mode when video playback starts.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.playback.auto_fullscreen" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Playback — Start Muted</div>
+                <div class="settings-desc">Launch videos muted regardless of the default volume level.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.playback.start_muted" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">OpenSubtitles API Key</div>
+                <div class="settings-desc">Enables automatic subtitle downloads matched to your exact files. Free key at opensubtitles.com/api — free accounts allow 5 downloads per day.</div>
+              </div>
+              <input type="password" v-model="form.subtitles.opensubtitles_api_key" class="form-input" placeholder="Paste your OpenSubtitles API key..." style="width:280px" />
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Subtitles — Auto-Download</div>
+                <div class="settings-desc">When opening a title with no subtitles available, automatically search OpenSubtitles and download one in your preferred language.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.subtitles.auto_download" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start">
+              <div class="settings-label-container">
+                <div class="settings-label">Subtitles — Appearance</div>
+                <div class="settings-desc">Default subtitle text color, size, and background box opacity in the player.</div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:12px;margin-top:10px;width:100%">
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                  <span style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);min-width:110px">Text Color</span>
+                  <button
+                    v-for="c in ['#ffffff', '#ffd700', '#4cc2ff', '#4ade80']"
+                    :key="c"
+                    @click="form.subtitles.appearance.textColor = c"
+                    :style="{
+                      width: '26px', height: '26px', borderRadius: '50%', cursor: 'pointer',
+                      background: c, border: form.subtitles.appearance.textColor === c ? '2px solid var(--accent)' : '2px solid var(--border-subtle)'
+                    }"
+                    :title="c"
+                  ></button>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                  <span style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);min-width:110px">Text Size</span>
+                  <button
+                    v-for="s in [
+                      { label: 'S', v: '0.85rem' },
+                      { label: 'M', v: '1.1rem' },
+                      { label: 'L', v: '1.4rem' },
+                      { label: 'XL', v: '1.8rem' },
+                    ]"
+                    :key="s.v"
+                    class="btn btn-sm"
+                    :class="form.subtitles.appearance.fontSize === s.v ? 'btn-primary' : 'btn-secondary'"
+                    @click="form.subtitles.appearance.fontSize = s.v"
+                    style="min-width:38px"
+                  >{{ s.label }}</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                  <span style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);min-width:110px">Box Opacity</span>
+                  <button
+                    v-for="o in [
+                      { label: 'Off', v: 0 },
+                      { label: '50%', v: 0.5 },
+                      { label: 'Solid', v: 0.85 },
+                    ]"
+                    :key="o.v"
+                    class="btn btn-sm"
+                    :class="form.subtitles.appearance.bgOpacity === o.v ? 'btn-primary' : 'btn-secondary'"
+                    @click="form.subtitles.appearance.bgOpacity = o.v"
+                    style="min-width:56px"
+                  >{{ o.label }}</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Playback — Seek Step (Seconds)</div>
+                <div class="settings-desc">Time in seconds skipped when pressing Arrow Left/Right or skip buttons.</div>
+              </div>
+              <input type="number" v-model.number="form.playback.seek_step" min="1" max="60" class="form-input" style="width:120px" />
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Playback — Default Volume</div>
+                <div class="settings-desc">Initial volume level when launching the video player.</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;width:240px">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  :value="volumePercent"
+                  @input="setVolumePercent($event.target.value)"
+                  class="form-range-slider"
+                  id="setting-default-volume-slider"
+                  :style="{ flex: 1, '--range-progress': volumePercent + '%' }"
+                />
+                <span style="min-width:48px;font-weight:700;font-size:0.85rem;color:var(--accent);text-align:right">
+                  {{ volumePercent }}%
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Admin Only Sections -->
+        <template v-if="store.profile?.is_admin || !store.profile">
+          <!-- 0. Updates -->
+          <div class="settings-section" id="settings-updates-section">
+            <div class="settings-section-title">
             <i class="ph ph-arrow-circle-up" style="color:var(--accent)"></i>
             <span>Updates</span>
           </div>
@@ -3171,215 +3379,6 @@ const SettingsPage = {
           </div>
         </div>
 
-        <!-- 3. Subtitles & Player Defaults -->
-        <div class="settings-section">
-          <div class="settings-section-title">
-            <i class="ph ph-subtitles" style="color:var(--accent)"></i>
-            <span>Player & Subtitle Defaults</span>
-          </div>
-          <div class="settings-group">
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Subtitles — Auto Load</div>
-                <div class="settings-desc">Automatically enable and show subtitles on video start if available.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.subtitles.auto_load" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Subtitles — Preferred Language</div>
-                <div class="settings-desc">Default language track selected when loading video subtitles.</div>
-              </div>
-              <select v-model="form.subtitles.preferred_language" class="form-input" style="width:160px">
-                <option value="Auto">Auto (Default)</option>
-                <option value="en">English</option>
-                <option value="es">Spanish</option>
-                <option value="fr">French</option>
-                <option value="ja">Japanese</option>
-                <option value="de">German</option>
-              </select>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Auto Play Next Episode</div>
-                <div class="settings-desc">Automatically play the next episode when the current one finishes.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.playback.auto_play_next" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Auto-Skip Intro & Recap</div>
-                <div class="settings-desc">Automatically skip intro, recap, and outro ranges when video playback enters their timestamp window.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.playback.auto_skip_intro" id="setting-auto-skip-toggle" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Playback — Resume Behavior</div>
-                <div class="settings-desc">What to do when a video has saved watch progress.</div>
-              </div>
-              <select v-model="form.playback.resume_behavior" class="form-input" style="width:220px">
-                <option value="ask">Ask Every Time</option>
-                <option value="always">Always Resume</option>
-                <option value="never">Always Start Over</option>
-              </select>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Playback — Default Speed</div>
-                <div class="settings-desc">Playback speed applied when a video starts.</div>
-              </div>
-              <select v-model.number="form.playback.default_speed" class="form-input" style="width:140px">
-                <option :value="0.5">0.5x</option>
-                <option :value="0.75">0.75x</option>
-                <option :value="1">1x (Normal)</option>
-                <option :value="1.25">1.25x</option>
-                <option :value="1.5">1.5x</option>
-                <option :value="2">2x</option>
-              </select>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Playback — Auto-Fullscreen</div>
-                <div class="settings-desc">Automatically enter fullscreen mode when video playback starts.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.playback.auto_fullscreen" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Playback — Start Muted</div>
-                <div class="settings-desc">Launch videos muted regardless of the default volume level.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.playback.start_muted" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">OpenSubtitles API Key</div>
-                <div class="settings-desc">Enables automatic subtitle downloads matched to your exact files. Free key at opensubtitles.com/api — free accounts allow 5 downloads per day.</div>
-              </div>
-              <input type="password" v-model="form.subtitles.opensubtitles_api_key" class="form-input" placeholder="Paste your OpenSubtitles API key..." style="width:280px" />
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Subtitles — Auto-Download</div>
-                <div class="settings-desc">When opening a title with no subtitles available, automatically search OpenSubtitles and download one in your preferred language.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.subtitles.auto_download" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <div class="settings-row" style="flex-direction:column;align-items:flex-start">
-              <div class="settings-label-container">
-                <div class="settings-label">Subtitles — Appearance</div>
-                <div class="settings-desc">Default subtitle text color, size, and background box opacity in the player.</div>
-              </div>
-              <div style="display:flex;flex-direction:column;gap:12px;margin-top:10px;width:100%">
-                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                  <span style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);min-width:110px">Text Color</span>
-                  <button
-                    v-for="c in ['#ffffff', '#ffd700', '#4cc2ff', '#4ade80']"
-                    :key="c"
-                    @click="form.subtitles.appearance.textColor = c"
-                    :style="{
-                      width: '26px', height: '26px', borderRadius: '50%', cursor: 'pointer',
-                      background: c, border: form.subtitles.appearance.textColor === c ? '2px solid var(--accent)' : '2px solid var(--border-subtle)'
-                    }"
-                    :title="c"
-                  ></button>
-                </div>
-                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                  <span style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);min-width:110px">Text Size</span>
-                  <button
-                    v-for="s in [
-                      { label: 'S', v: '0.85rem' },
-                      { label: 'M', v: '1.1rem' },
-                      { label: 'L', v: '1.4rem' },
-                      { label: 'XL', v: '1.8rem' },
-                    ]"
-                    :key="s.v"
-                    class="btn btn-sm"
-                    :class="form.subtitles.appearance.fontSize === s.v ? 'btn-primary' : 'btn-secondary'"
-                    @click="form.subtitles.appearance.fontSize = s.v"
-                    style="min-width:38px"
-                  >{{ s.label }}</button>
-                </div>
-                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                  <span style="font-size:0.78rem;font-weight:700;color:var(--text-secondary);min-width:110px">Box Opacity</span>
-                  <button
-                    v-for="o in [
-                      { label: 'Off', v: 0 },
-                      { label: '50%', v: 0.5 },
-                      { label: 'Solid', v: 0.85 },
-                    ]"
-                    :key="o.v"
-                    class="btn btn-sm"
-                    :class="form.subtitles.appearance.bgOpacity === o.v ? 'btn-primary' : 'btn-secondary'"
-                    @click="form.subtitles.appearance.bgOpacity = o.v"
-                    style="min-width:56px"
-                  >{{ o.label }}</button>
-                </div>
-              </div>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Playback — Seek Step (Seconds)</div>
-                <div class="settings-desc">Time in seconds skipped when pressing Arrow Left/Right or skip buttons.</div>
-              </div>
-              <input type="number" v-model.number="form.playback.seek_step" min="1" max="60" class="form-input" style="width:120px" />
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Playback — Default Volume</div>
-                <div class="settings-desc">Initial volume level when launching the video player.</div>
-              </div>
-              <div style="display:flex;align-items:center;gap:12px;width:240px">
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  :value="volumePercent"
-                  @input="setVolumePercent($event.target.value)"
-                  class="form-range-slider"
-                  id="setting-default-volume-slider"
-                  :style="{ flex: 1, '--range-progress': volumePercent + '%' }"
-                />
-                <span style="min-width:48px;font-weight:700;font-size:0.85rem;color:var(--accent);text-align:right">
-                  {{ volumePercent }}%
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- 4. Cache & Storage Management -->
         <div class="settings-section">
           <div class="settings-section-title">
@@ -3564,6 +3563,7 @@ const SettingsPage = {
             </div>
           </div>
         </div>
+        </template>
       </template>
 
       <!-- Shutdown Confirmation Modal -->
@@ -7719,15 +7719,20 @@ const PlayerPage = {
 
         applyResumedProgress();
 
-        // Auto-select preferred subtitle language if auto_load enabled
+        // Auto-select preferred subtitle language if auto_load enabled or profile default set
         if (subtitles.value.length > 0) {
-          const autoLoad = playerSettings.value?.subtitles?.auto_load !== false;
-          if (autoLoad) {
-            let prefLang = (playerSettings.value?.subtitles?.preferred_language || "en").toLowerCase();
-            if (prefLang === "auto") prefLang = "en";
-            const prefIdx = subtitles.value.findIndex((s) => (s.language || "").toLowerCase().startsWith(prefLang) || (s.label || "").toLowerCase().includes(prefLang));
-            const defaultIdx = prefIdx >= 0 ? prefIdx : 0;
-            selectSub(defaultIdx);
+          const profSub = (store.profile?.default_sub_lang || "").toLowerCase();
+          if (profSub === "off") {
+            selectSub(-1);
+          } else {
+            const autoLoad = playerSettings.value?.subtitles?.auto_load !== false;
+            if (autoLoad || profSub) {
+              let prefLang = profSub || (playerSettings.value?.subtitles?.preferred_language || "en").toLowerCase();
+              if (prefLang === "auto") prefLang = "en";
+              const prefIdx = subtitles.value.findIndex((s) => (s.language || "").toLowerCase().startsWith(prefLang) || (s.label || "").toLowerCase().includes(prefLang));
+              const defaultIdx = prefIdx >= 0 ? prefIdx : 0;
+              selectSub(defaultIdx);
+            }
           }
         }
       } catch (e) {
@@ -7741,10 +7746,16 @@ const PlayerPage = {
         audioTracks.value = [];
       }
 
-      // Browsers direct-play the container's DEFAULT-flagged track — align the
-      // UI selection with it so "Track 1" isn't silently playing another track.
-      const defTrack = audioTracks.value.find((t) => t.default);
-      defaultAudioIndex.value = defTrack ? defTrack.index : 0;
+      // Prioritize profile's preferred audio language if available
+      const profAudio = (store.profile?.default_audio_lang || "").toLowerCase();
+      let targetAudio = null;
+      if (profAudio && audioTracks.value.length > 0) {
+        targetAudio = audioTracks.value.find((t) => (t.language || "").toLowerCase().startsWith(profAudio) || (t.title || "").toLowerCase().includes(profAudio));
+      }
+      if (!targetAudio) {
+        targetAudio = audioTracks.value.find((t) => t.default) || audioTracks.value[0];
+      }
+      defaultAudioIndex.value = targetAudio ? targetAudio.index : 0;
       streamState.audioTrack = defaultAudioIndex.value;
 
       if (media.value.type !== "movie" && media.value.tmdb_id) {
@@ -9258,7 +9269,7 @@ const ProfilesPage = {
         <div class="netflix-profiles-list">
           <!-- Profile Cards -->
           <div
-            v-for="profile in profiles"
+            v-for="(profile, pIndex) in profiles"
             :key="profile.id"
             class="netflix-profile-card"
             @click="onProfileClick(profile)"
@@ -9271,7 +9282,8 @@ const ProfilesPage = {
                 border: profile.color ? '3px solid ' + profile.color + '88' : '3px solid transparent'
               }"
             >
-              <span>{{ profile.avatar || '🎬' }}</span>
+              <img v-if="profile.custom_avatar_url" :src="profile.custom_avatar_url" class="netflix-avatar-img" :alt="profile.name" />
+              <span v-else>{{ profile.avatar || '🎬' }}</span>
 
               <!-- Edit Pencil Overlay in Manage Mode -->
               <div v-if="viewMode === 'manage'" class="netflix-avatar-edit-overlay">
@@ -9284,12 +9296,36 @@ const ProfilesPage = {
             <div class="netflix-profile-label">
               {{ profile.name }}
             </div>
-            <div v-if="profile.is_kids" class="kids-profile-badge">🧒 Kids</div>
+
+            <!-- Profile Badges -->
+            <div v-if="profile.is_admin" class="admin-profile-badge">👑 Admin</div>
+            <div v-else-if="profile.is_kids" class="kids-profile-badge">🧒 Kids</div>
+            <div v-else-if="profile.maturity_rating === 'Teens'" class="teen-profile-badge">🛡️ Teens</div>
+
+            <!-- Manage Mode Reordering Controls (Admin Only) -->
+            <div v-if="viewMode === 'manage' && profiles.length > 1 && (store.profile?.is_admin || !store.profile)" class="netflix-profile-reorder-bar" @click.stop>
+              <button
+                class="netflix-reorder-btn"
+                :disabled="pIndex === 0"
+                @click="moveProfile(pIndex, -1)"
+                title="Move Left"
+              >
+                <i class="ph-bold ph-caret-left"></i>
+              </button>
+              <button
+                class="netflix-reorder-btn"
+                :disabled="pIndex === profiles.length - 1"
+                @click="moveProfile(pIndex, 1)"
+                title="Move Right"
+              >
+                <i class="ph-bold ph-caret-right"></i>
+              </button>
+            </div>
           </div>
 
-          <!-- Add Profile Card (visible if under 5 profiles) -->
+          <!-- Add Profile Card (Admin Only) -->
           <div
-            v-if="profiles.length < 5"
+            v-if="profiles.length < 8 && (store.profile?.is_admin || !store.profile)"
             class="netflix-profile-card netflix-add-card"
             @click="openCreateView"
             id="add-profile-btn"
@@ -9328,7 +9364,7 @@ const ProfilesPage = {
         <div class="netflix-form-divider"></div>
 
         <div class="netflix-form-body">
-          <!-- Left: Avatar Preview & Picker -->
+          <!-- Left: Avatar Preview, Custom Upload & Palette -->
           <div class="netflix-form-left">
             <div
               class="netflix-form-avatar-preview"
@@ -9337,19 +9373,31 @@ const ProfilesPage = {
                 border: '3px solid ' + editProfile.color
               }"
             >
-              <span>{{ editProfile.avatar }}</span>
+              <img v-if="editProfile.custom_avatar_url" :src="editProfile.custom_avatar_url" class="netflix-avatar-img" style="border-radius:4px" />
+              <span v-else>{{ editProfile.avatar }}</span>
             </div>
 
-            <!-- Avatar Choices Grid -->
+            <!-- Custom Avatar Upload Controls -->
+            <div class="netflix-avatar-upload-wrap">
+              <input type="file" ref="editAvatarFileInput" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" @change="onEditAvatarSelected" />
+              <button class="netflix-avatar-upload-btn" @click="$refs.editAvatarFileInput.click()">
+                <i class="ph-bold ph-camera"></i> Upload Photo
+              </button>
+              <button v-if="editProfile.custom_avatar_url" class="netflix-avatar-upload-btn" style="color:#ef4444" @click="editProfile.custom_avatar_url = ''">
+                <i class="ph-bold ph-trash"></i> Remove Photo
+              </button>
+            </div>
+
+            <!-- Avatar Choices Grid (Emojis) -->
             <div style="margin-top:14px;max-width:140px">
               <div style="font-size:0.75rem;color:#808080;margin-bottom:6px;font-weight:600">ICON</div>
               <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
                 <div
                   v-for="a in avatars"
                   :key="a"
-                  @click="editProfile.avatar = a"
+                  @click="editProfile.avatar = a; editProfile.custom_avatar_url = ''"
                   style="cursor:pointer;font-size:1.3rem;padding:4px;border-radius:4px;text-align:center;transition:background 0.2s"
-                  :style="editProfile.avatar === a ? { background: 'rgba(255,255,255,0.2)' } : {}"
+                  :style="editProfile.avatar === a && !editProfile.custom_avatar_url ? { background: 'rgba(255,255,255,0.2)' } : {}"
                 >
                   {{ a }}
                 </div>
@@ -9375,7 +9423,7 @@ const ProfilesPage = {
             </div>
           </div>
 
-          <!-- Right: Profile Name, Kids Settings, PIN -->
+          <!-- Right: Profile Name, Maturity, Preferences, PIN -->
           <div class="netflix-form-right">
             <div>
               <input
@@ -9387,69 +9435,174 @@ const ProfilesPage = {
               >
             </div>
 
-            <!-- Kids Setting -->
-            <div style="border-top:1px solid #282828;padding-top:18px">
+            <!-- Kids Setting (Admin Only) -->
+            <div v-if="store.profile?.is_admin || !store.profile" style="border-top:1px solid #282828;padding-top:18px">
               <label class="netflix-checkbox-label">
                 <input type="checkbox" v-model="editProfile.is_kids" id="edit-kids-mode-switch">
                 <div>
-                  <div class="netflix-checkbox-title">Kid?</div>
+                  <div class="netflix-checkbox-title">Kid Profile?</div>
                   <div class="netflix-checkbox-desc">Only see TV shows and movies rated for kids. Locks app Settings.</div>
                 </div>
               </label>
             </div>
 
             <!-- Kids Screen Time Controls -->
-            <div v-if="editProfile.is_kids" style="border-top:1px solid #282828;padding-top:18px">
-              <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">⏰ Daily Watch Limit</div>
-              <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Automatically lock Kids Mode after watching this amount today.</div>
-              <select v-model.number="editProfile.daily_limit_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
-                <option :value="0">No Limit (Unlimited)</option>
-                <option :value="30">30 Minutes / day</option>
-                <option :value="45">45 Minutes / day</option>
-                <option :value="60">1 Hour / day</option>
-                <option :value="90">1.5 Hours / day</option>
-                <option :value="120">2 Hours / day</option>
-                <option :value="180">3 Hours / day</option>
-              </select>
-            </div>
-
-            <div v-if="editProfile.is_kids" style="border-top:1px solid #282828;padding-top:18px">
-              <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🌙 Bedtime Curfew</div>
-              <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Locks Kids Mode at this time in the evening.</div>
-              <select v-model="editProfile.bedtime_curfew" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
-                <option value="">Off (No Bedtime Curfew)</option>
-                <option value="19:00">7:00 PM</option>
-                <option value="19:30">7:30 PM</option>
-                <option value="20:00">8:00 PM</option>
-                <option value="20:30">8:30 PM</option>
-                <option value="21:00">9:00 PM</option>
-                <option value="21:30">9:30 PM</option>
-                <option value="22:00">10:00 PM</option>
-              </select>
-            </div>
-
-            <!-- PIN Protection -->
-            <div v-if="!editProfile.is_kids" style="border-top:1px solid #282828;padding-top:18px">
-              <label class="netflix-checkbox-label" style="margin-bottom:8px">
-                <input type="checkbox" v-model="editProfile.update_pin">
-                <div>
-                  <div class="netflix-checkbox-title">Lock Profile with PIN</div>
-                  <div class="netflix-checkbox-desc">Require a 4-digit PIN to access this profile.</div>
-                </div>
-              </label>
-
-              <div v-if="editProfile.update_pin" style="margin-top:10px">
-                <input
-                  id="edit-profile-pin"
-                  class="netflix-input"
-                  v-model="editProfile.pin"
-                  placeholder="Enter 4-digit PIN (leave empty to remove PIN)"
-                  maxlength="4"
-                  inputmode="numeric"
-                  style="max-width:240px"
-                >
+            <template v-if="editProfile.is_kids">
+              <div style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">⏰ Daily Watch Limit</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Automatically lock Kids Mode after watching this amount today.</div>
+                <select v-model.number="editProfile.daily_limit_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                  <option :value="0">No Limit (Unlimited)</option>
+                  <option :value="30">30 Minutes / day</option>
+                  <option :value="45">45 Minutes / day</option>
+                  <option :value="60">1 Hour / day</option>
+                  <option :value="90">1.5 Hours / day</option>
+                  <option :value="120">2 Hours / day</option>
+                  <option :value="180">3 Hours / day</option>
+                </select>
               </div>
-            </div>
+
+              <div style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🌙 Bedtime Curfew</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Locks Kids Mode at this time in the evening.</div>
+                <select v-model="editProfile.bedtime_curfew" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                  <option value="">Off (No Bedtime Curfew)</option>
+                  <option value="19:00">7:00 PM</option>
+                  <option value="19:30">7:30 PM</option>
+                  <option value="20:00">8:00 PM</option>
+                  <option value="20:30">8:30 PM</option>
+                  <option value="21:00">9:00 PM</option>
+                  <option value="21:30">9:30 PM</option>
+                  <option value="22:00">10:00 PM</option>
+                </select>
+              </div>
+            </template>
+
+            <!-- Adult & Teen Settings -->
+            <template v-else>
+              <!-- Maturity Level Selector (Admin Only) -->
+              <div v-if="store.profile?.is_admin || !store.profile" style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🛡️ Maturity Rating Filter</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Select the highest rating category permitted for this profile.</div>
+                <div class="maturity-pill-selector">
+                  <div
+                    class="maturity-pill"
+                    :class="{ active: editProfile.maturity_rating === 'All' }"
+                    @click="editProfile.maturity_rating = 'All'"
+                  >
+                    <span class="maturity-pill-name">All (Adults)</span>
+                    <span class="maturity-pill-desc">R, TV-MA, Unrestricted</span>
+                  </div>
+                  <div
+                    class="maturity-pill"
+                    :class="{ active: editProfile.maturity_rating === 'Teens' }"
+                    @click="editProfile.maturity_rating = 'Teens'"
+                  >
+                    <span class="maturity-pill-name">Teens</span>
+                    <span class="maturity-pill-desc">PG-13, TV-14, PG, G</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Blocked Genres Exclusions (Admin Only) -->
+              <div v-if="store.profile?.is_admin || !store.profile" style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🚫 Excluded Genres</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Click to block specific genres from appearing in this profile's library.</div>
+                <div class="genre-chip-selector">
+                  <div
+                    v-for="g in availableGenres"
+                    :key="g"
+                    class="genre-chip"
+                    :class="{ blocked: editProfile.blocked_genres_list.includes(g) }"
+                    @click="toggleBlockedGenre(editProfile, g)"
+                  >
+                    <i v-if="editProfile.blocked_genres_list.includes(g)" class="ph-bold ph-x" style="font-size:0.7rem"></i>
+                    {{ g }}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Language & Playback Defaults -->
+              <div style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🌐 Playback Language Defaults</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:10px">Automatically select preferred audio and subtitle tracks on playback.</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                  <div>
+                    <label style="font-size:0.75rem;color:#808080;font-weight:600;display:block;margin-bottom:4px">PREFERRED AUDIO</label>
+                    <select v-model="editProfile.default_audio_lang" class="form-input" style="width:100%;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                      <option value="">Auto (Default Track)</option>
+                      <option value="en">English (en)</option>
+                      <option value="ja">Japanese (ja)</option>
+                      <option value="es">Spanish (es)</option>
+                      <option value="fr">French (fr)</option>
+                      <option value="de">German (de)</option>
+                      <option value="ko">Korean (ko)</option>
+                      <option value="zh">Chinese (zh)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="font-size:0.75rem;color:#808080;font-weight:600;display:block;margin-bottom:4px">PREFERRED SUBTITLES</label>
+                    <select v-model="editProfile.default_sub_lang" class="form-input" style="width:100%;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                      <option value="">Auto / System Default</option>
+                      <option value="off">Off (Subtitles Disabled)</option>
+                      <option value="en">English (en)</option>
+                      <option value="es">Spanish (es)</option>
+                      <option value="fr">French (fr)</option>
+                      <option value="de">German (de)</option>
+                      <option value="ja">Japanese (ja)</option>
+                      <option value="ko">Korean (ko)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Inactivity Auto-Lock -->
+              <div style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">⏳ Inactivity Auto-Lock</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Return to Profile Switcher when idle.</div>
+                <select v-model.number="editProfile.auto_lock_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                  <option :value="0">Never (Stay Logged In)</option>
+                  <option :value="15">15 Minutes</option>
+                  <option :value="30">30 Minutes</option>
+                  <option :value="60">1 Hour</option>
+                  <option :value="120">2 Hours</option>
+                </select>
+              </div>
+
+              <!-- Admin Privileges Toggle (if active user is Admin) -->
+              <div v-if="store.profile?.is_admin" style="border-top:1px solid #282828;padding-top:18px">
+                <label class="netflix-checkbox-label">
+                  <input type="checkbox" v-model="editProfile.is_admin">
+                  <div>
+                    <div class="netflix-checkbox-title">👑 Administrator Privileges</div>
+                    <div class="netflix-checkbox-desc">Allow full access to system settings, media deletion, and profile management.</div>
+                  </div>
+                </label>
+              </div>
+
+              <!-- PIN Protection -->
+              <div style="border-top:1px solid #282828;padding-top:18px">
+                <label class="netflix-checkbox-label" style="margin-bottom:8px">
+                  <input type="checkbox" v-model="editProfile.update_pin">
+                  <div>
+                    <div class="netflix-checkbox-title">Lock Profile with PIN</div>
+                    <div class="netflix-checkbox-desc">{{ editProfile.has_existing_pin ? 'PIN lock is active. Uncheck to remove PIN lock.' : 'Require a 4-digit PIN to access this profile.' }}</div>
+                  </div>
+                </label>
+
+                <div v-if="editProfile.update_pin" style="margin-top:10px">
+                  <input
+                    id="edit-profile-pin"
+                    class="netflix-input"
+                    v-model="editProfile.pin"
+                    :placeholder="editProfile.has_existing_pin ? 'Enter new 4-digit PIN (leave empty to keep current)' : 'Enter 4-digit PIN'"
+                    maxlength="4"
+                    inputmode="numeric"
+                    style="max-width:280px"
+                  >
+                </div>
+              </div>
+            </template>
           </div>
         </div>
 
@@ -9464,7 +9617,7 @@ const ProfilesPage = {
             Cancel
           </button>
           <button
-            v-if="profiles.length > 1 && !store.profile?.is_kids"
+            v-if="profiles.length > 1 && (store.profile?.is_admin || !store.profile)"
             class="netflix-btn-danger"
             @click="confirmDeleteProfile(editTarget)"
             id="delete-profile-btn"
@@ -9545,56 +9698,161 @@ const ProfilesPage = {
               <label class="netflix-checkbox-label">
                 <input type="checkbox" v-model="newProfile.is_kids" id="kids-mode-switch">
                 <div>
-                  <div class="netflix-checkbox-title">Kid?</div>
+                  <div class="netflix-checkbox-title">Kid Profile?</div>
                   <div class="netflix-checkbox-desc">Only see TV shows and movies rated for kids. Locks app Settings.</div>
                 </div>
               </label>
             </div>
 
-            <!-- Kids Screen Time Controls -->
-            <div v-if="newProfile.is_kids" style="border-top:1px solid #282828;padding-top:18px">
-              <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">⏰ Daily Watch Limit</div>
-              <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Automatically lock Kids Mode after watching this amount today.</div>
-              <select v-model.number="newProfile.daily_limit_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
-                <option :value="0">No Limit (Unlimited)</option>
-                <option :value="30">30 Minutes / day</option>
-                <option :value="45">45 Minutes / day</option>
-                <option :value="60">1 Hour / day</option>
-                <option :value="90">1.5 Hours / day</option>
-                <option :value="120">2 Hours / day</option>
-                <option :value="180">3 Hours / day</option>
-              </select>
-            </div>
+            <!-- Kids Controls -->
+            <template v-if="newProfile.is_kids">
+              <div style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">⏰ Daily Watch Limit</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Automatically lock Kids Mode after watching this amount today.</div>
+                <select v-model.number="newProfile.daily_limit_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                  <option :value="0">No Limit (Unlimited)</option>
+                  <option :value="30">30 Minutes / day</option>
+                  <option :value="45">45 Minutes / day</option>
+                  <option :value="60">1 Hour / day</option>
+                  <option :value="90">1.5 Hours / day</option>
+                  <option :value="120">2 Hours / day</option>
+                  <option :value="180">3 Hours / day</option>
+                </select>
+              </div>
 
-            <div v-if="newProfile.is_kids" style="border-top:1px solid #282828;padding-top:18px">
-              <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🌙 Bedtime Curfew</div>
-              <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Locks Kids Mode at this time in the evening.</div>
-              <select v-model="newProfile.bedtime_curfew" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
-                <option value="">Off (No Bedtime Curfew)</option>
-                <option value="19:00">7:00 PM</option>
-                <option value="19:30">7:30 PM</option>
-                <option value="20:00">8:00 PM</option>
-                <option value="20:30">8:30 PM</option>
-                <option value="21:00">9:00 PM</option>
-                <option value="21:30">9:30 PM</option>
-                <option value="22:00">10:00 PM</option>
-              </select>
-            </div>
+              <div style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🌙 Bedtime Curfew</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Locks Kids Mode at this time in the evening.</div>
+                <select v-model="newProfile.bedtime_curfew" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                  <option value="">Off (No Bedtime Curfew)</option>
+                  <option value="19:00">7:00 PM</option>
+                  <option value="19:30">7:30 PM</option>
+                  <option value="20:00">8:00 PM</option>
+                  <option value="20:30">8:30 PM</option>
+                  <option value="21:00">9:00 PM</option>
+                  <option value="21:30">9:30 PM</option>
+                  <option value="22:00">10:00 PM</option>
+                </select>
+              </div>
+            </template>
 
-            <!-- PIN Protection -->
-            <div v-if="!newProfile.is_kids" style="border-top:1px solid #282828;padding-top:18px">
-              <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">PIN Protection (Optional)</div>
-              <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Leave empty for instant access without a PIN.</div>
-              <input
-                id="new-profile-pin"
-                class="netflix-input"
-                v-model="newProfile.pin"
-                placeholder="4-digit PIN"
-                maxlength="4"
-                inputmode="numeric"
-                style="max-width:240px"
-              >
-            </div>
+            <!-- Adult / Teen New Settings -->
+            <template v-else>
+              <!-- Maturity Level Selector -->
+              <div style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🛡️ Maturity Rating Filter</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Select the highest rating category permitted for this profile.</div>
+                <div class="maturity-pill-selector">
+                  <div
+                    class="maturity-pill"
+                    :class="{ active: newProfile.maturity_rating === 'All' }"
+                    @click="newProfile.maturity_rating = 'All'"
+                  >
+                    <span class="maturity-pill-name">All (Adults)</span>
+                    <span class="maturity-pill-desc">R, TV-MA, Unrestricted</span>
+                  </div>
+                  <div
+                    class="maturity-pill"
+                    :class="{ active: newProfile.maturity_rating === 'Teens' }"
+                    @click="newProfile.maturity_rating = 'Teens'"
+                  >
+                    <span class="maturity-pill-name">Teens</span>
+                    <span class="maturity-pill-desc">PG-13, TV-14, PG, G</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Blocked Genres Exclusions -->
+              <div style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🚫 Excluded Genres</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Click to block specific genres from appearing in this profile's library.</div>
+                <div class="genre-chip-selector">
+                  <div
+                    v-for="g in availableGenres"
+                    :key="g"
+                    class="genre-chip"
+                    :class="{ blocked: newProfile.blocked_genres_list.includes(g) }"
+                    @click="toggleBlockedGenre(newProfile, g)"
+                  >
+                    <i v-if="newProfile.blocked_genres_list.includes(g)" class="ph-bold ph-x" style="font-size:0.7rem"></i>
+                    {{ g }}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Language & Playback Defaults -->
+              <div style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🌐 Playback Language Defaults</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:10px">Automatically select preferred audio and subtitle tracks on playback.</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                  <div>
+                    <label style="font-size:0.75rem;color:#808080;font-weight:600;display:block;margin-bottom:4px">PREFERRED AUDIO</label>
+                    <select v-model="newProfile.default_audio_lang" class="form-input" style="width:100%;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                      <option value="">Auto (Default Track)</option>
+                      <option value="en">English (en)</option>
+                      <option value="ja">Japanese (ja)</option>
+                      <option value="es">Spanish (es)</option>
+                      <option value="fr">French (fr)</option>
+                      <option value="de">German (de)</option>
+                      <option value="ko">Korean (ko)</option>
+                      <option value="zh">Chinese (zh)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="font-size:0.75rem;color:#808080;font-weight:600;display:block;margin-bottom:4px">PREFERRED SUBTITLES</label>
+                    <select v-model="newProfile.default_sub_lang" class="form-input" style="width:100%;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                      <option value="">Auto / System Default</option>
+                      <option value="off">Off (Subtitles Disabled)</option>
+                      <option value="en">English (en)</option>
+                      <option value="es">Spanish (es)</option>
+                      <option value="fr">French (fr)</option>
+                      <option value="de">German (de)</option>
+                      <option value="ja">Japanese (ja)</option>
+                      <option value="ko">Korean (ko)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Inactivity Auto-Lock -->
+              <div style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">⏳ Inactivity Auto-Lock</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Return to Profile Switcher when idle.</div>
+                <select v-model.number="newProfile.auto_lock_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                  <option :value="0">Never (Stay Logged In)</option>
+                  <option :value="15">15 Minutes</option>
+                  <option :value="30">30 Minutes</option>
+                  <option :value="60">1 Hour</option>
+                  <option :value="120">2 Hours</option>
+                </select>
+              </div>
+
+              <!-- Admin Privileges Toggle -->
+              <div v-if="store.profile?.is_admin" style="border-top:1px solid #282828;padding-top:18px">
+                <label class="netflix-checkbox-label">
+                  <input type="checkbox" v-model="newProfile.is_admin">
+                  <div>
+                    <div class="netflix-checkbox-title">👑 Administrator Privileges</div>
+                    <div class="netflix-checkbox-desc">Allow full access to system settings, media deletion, and profile management.</div>
+                  </div>
+                </label>
+              </div>
+
+              <!-- PIN Protection -->
+              <div style="border-top:1px solid #282828;padding-top:18px">
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">PIN Protection (Optional)</div>
+                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Leave empty for instant access without a PIN.</div>
+                <input
+                  id="new-profile-pin"
+                  class="netflix-input"
+                  v-model="newProfile.pin"
+                  placeholder="4-digit PIN"
+                  maxlength="4"
+                  inputmode="numeric"
+                  style="max-width:240px"
+                >
+              </div>
+            </template>
           </div>
         </div>
 
@@ -9684,6 +9942,31 @@ const ProfilesPage = {
           <button class="btn btn-ghost btn-full" style="margin-top:1.25rem;border-radius:12px" @click="mathGateTarget = null">Cancel</button>
         </div>
       </div>
+
+      <!-- Admin PIN Verification Modal -->
+      <div class="modal-backdrop" v-if="adminPinModalTarget" @click.self="adminPinModalTarget = false" style="background:rgba(0,0,0,0.88);z-index:999">
+        <div class="modal" style="background:#181818;border:1px solid rgba(229,9,20,0.4);text-align:center;max-width:380px;border-radius:20px;padding:2rem 1.5rem">
+          <div style="font-size:2.2rem;margin-bottom:0.25rem">👑</div>
+          <h3 style="font-size:1.35rem;font-weight:700;margin-bottom:0.35rem">Administrator Verification</h3>
+          <p style="font-size:0.85rem;color:#a0a0a0;margin-bottom:1.25rem">Enter Admin PIN to manage profile</p>
+          <div class="pin-display" style="justify-content:center;gap:12px;margin-bottom:1.5rem">
+            <div v-for="i in 4" :key="i" class="pin-dot"
+              :class="{ filled: adminPin.length >= i, error: adminPinError }">
+            </div>
+          </div>
+          <div class="pin-pad">
+            <button v-for="n in [1,2,3,4,5,6,7,8,9,'',0,'⌫']" :key="n"
+              class="pin-key"
+              :class="{ backspace: n === '⌫' }"
+              @click="handleAdminPinKey(n)"
+              :id="'admin-pin-key-' + n"
+              :disabled="n === ''"
+            >{{ n }}</button>
+          </div>
+          <div class="modal-error" v-if="adminPinError" style="margin-top:10px">{{ adminPinError }}</div>
+          <button class="btn btn-ghost btn-full" style="margin-top:1.25rem;border-radius:12px" @click="adminPinModalTarget = false">Cancel</button>
+        </div>
+      </div>
     </div>
   `,
   setup() {
@@ -9699,6 +9982,15 @@ const ProfilesPage = {
     const mathGateError = ref("");
     const mathProblem = reactive({ num1: 7, num2: 8, answer: 15 });
 
+    const editAvatarFileInput = ref(null);
+
+    const availableGenres = [
+      "Action", "Adventure", "Animation", "Comedy", "Crime",
+      "Documentary", "Drama", "Family", "Fantasy", "History",
+      "Horror", "Music", "Mystery", "Romance", "Science Fiction",
+      "Thriller", "War", "Western"
+    ];
+
     const editTarget = ref(null);
     const editProfile = reactive({
       name: "",
@@ -9706,6 +9998,13 @@ const ProfilesPage = {
       color: "#e50914",
       theme: "crimson",
       is_kids: false,
+      is_admin: false,
+      custom_avatar_url: "",
+      maturity_rating: "All",
+      blocked_genres_list: [],
+      default_audio_lang: "",
+      default_sub_lang: "",
+      auto_lock_minutes: 0,
       pin: "",
       update_pin: false,
       daily_limit_minutes: 0,
@@ -9722,9 +10021,124 @@ const ProfilesPage = {
       theme: "crimson",
       pin: "",
       is_kids: false,
+      is_admin: false,
+      custom_avatar_url: "",
+      maturity_rating: "All",
+      blocked_genres_list: [],
+      default_audio_lang: "",
+      default_sub_lang: "",
+      auto_lock_minutes: 0,
       daily_limit_minutes: 0,
       bedtime_curfew: "",
     });
+
+    function toggleBlockedGenre(profObj, genre) {
+      const idx = profObj.blocked_genres_list.indexOf(genre);
+      if (idx === -1) {
+        profObj.blocked_genres_list.push(genre);
+      } else {
+        profObj.blocked_genres_list.splice(idx, 1);
+      }
+    }
+
+    const adminPinModalTarget = ref(false);
+    const adminPin = ref("");
+    const adminPinError = ref("");
+    const adminPinCallback = ref(null);
+    const currentAdminPin = ref("");
+
+    async function requireAdminAuth(actionCallback) {
+      if (store.profile?.is_admin) {
+        currentAdminPin.value = "";
+        actionCallback("");
+        return;
+      }
+      try {
+        const res = await API.get("/api/profiles/admin-pin-status");
+        if (!res.pin_required) {
+          currentAdminPin.value = "";
+          actionCallback("");
+          return;
+        }
+      } catch (e) {
+        /* fallback */
+      }
+      adminPin.value = "";
+      adminPinError.value = "";
+      adminPinCallback.value = actionCallback;
+      adminPinModalTarget.value = true;
+    }
+
+    async function handleAdminPinKey(key) {
+      adminPinError.value = "";
+      if (key === "⌫") {
+        adminPin.value = adminPin.value.slice(0, -1);
+        return;
+      }
+      if (key === "") return;
+      if (adminPin.value.length >= 4) return;
+      adminPin.value += key.toString();
+      if (adminPin.value.length === 4) {
+        try {
+          const res = await API.post("/api/profiles/verify-admin-pin", { pin: adminPin.value });
+          if (res.ok) {
+            const entered = adminPin.value;
+            currentAdminPin.value = entered;
+            const cb = adminPinCallback.value;
+            adminPinModalTarget.value = false;
+            adminPinCallback.value = null;
+            adminPin.value = "";
+            adminPinError.value = "";
+            if (cb) cb(entered);
+          }
+        } catch (e) {
+          adminPinError.value = e.message || "Incorrect Admin PIN";
+          adminPin.value = "";
+        }
+      }
+    }
+
+    async function onEditAvatarSelected(e) {
+      const file = e.target.files?.[0];
+      if (!file || !editTarget.value) return;
+      const formData = new FormData();
+      formData.append("avatar", file);
+      if (currentAdminPin.value) {
+        formData.append("admin_pin", currentAdminPin.value);
+      }
+      try {
+        const headers = currentAdminPin.value ? { "X-Admin-PIN": currentAdminPin.value } : {};
+        const resp = await fetch(`/api/profiles/${editTarget.value.id}/avatar`, {
+          method: "POST",
+          headers: headers,
+          body: formData,
+        });
+        const res = await resp.json();
+        if (resp.ok && res.custom_avatar_url) {
+          editProfile.custom_avatar_url = res.custom_avatar_url;
+          addToast("Profile avatar uploaded ✓", "success");
+        } else {
+          addToast(res.error || "Upload failed", "error");
+        }
+      } catch (err) {
+        addToast("Failed to upload avatar image", "error");
+      }
+    }
+
+    async function moveProfile(index, delta) {
+      requireAdminAuth(async (validPin) => {
+        const newIndex = index + delta;
+        if (newIndex < 0 || newIndex >= profiles.value.length) return;
+        const item = profiles.value.splice(index, 1)[0];
+        profiles.value.splice(newIndex, 0, item);
+        const orderedIds = profiles.value.map((p) => p.id);
+        try {
+          await API.post("/api/profiles/reorder", { ordered_ids: orderedIds, admin_pin: validPin });
+        } catch (e) {
+          /* ignore */
+        }
+      });
+    }
 
     function generateMathProblem() {
       const n1 = Math.floor(Math.random() * 8) + 4;
@@ -9798,7 +10212,10 @@ const ProfilesPage = {
 
     function onProfileClick(profile) {
       if (viewMode.value === "manage") {
-        openEditView(profile);
+        requireAdminAuth((validPin) => {
+          currentAdminPin.value = validPin;
+          openEditView(profile);
+        });
       } else {
         selectProfile(profile);
       }
@@ -9811,21 +10228,41 @@ const ProfilesPage = {
       editProfile.color = profile.color || "#e50914";
       editProfile.theme = profile.theme || "crimson";
       editProfile.is_kids = !!profile.is_kids;
+      editProfile.is_admin = !!profile.is_admin;
+      editProfile.custom_avatar_url = profile.custom_avatar_url || "";
+      editProfile.maturity_rating = profile.maturity_rating || "All";
+      editProfile.blocked_genres_list = (profile.blocked_genres || "").split(",").map((s) => s.trim()).filter(Boolean);
+      editProfile.default_audio_lang = profile.default_audio_lang || "";
+      editProfile.default_sub_lang = profile.default_sub_lang || "";
+      editProfile.auto_lock_minutes = profile.auto_lock_minutes || 0;
+      editProfile.has_existing_pin = !!profile.has_pin;
+      editProfile.update_pin = !!profile.has_pin;
       editProfile.pin = "";
-      editProfile.update_pin = false;
       editProfile.daily_limit_minutes = profile.daily_limit_minutes || 0;
       editProfile.bedtime_curfew = profile.bedtime_curfew || "";
       viewMode.value = "edit";
     }
 
     function openCreateView() {
-      newProfile.name = "";
-      newProfile.avatar = "🎬";
-      newProfile.color = "#e50914";
-      newProfile.theme = "crimson";
-      newProfile.pin = "";
-      newProfile.is_kids = false;
-      viewMode.value = "create";
+      requireAdminAuth((validPin) => {
+        currentAdminPin.value = validPin;
+        newProfile.name = "";
+        newProfile.avatar = "🎬";
+        newProfile.color = "#e50914";
+        newProfile.theme = "crimson";
+        newProfile.pin = "";
+        newProfile.is_kids = false;
+        newProfile.is_admin = false;
+        newProfile.custom_avatar_url = "";
+        newProfile.maturity_rating = "All";
+        newProfile.blocked_genres_list = [];
+        newProfile.default_audio_lang = "";
+        newProfile.default_sub_lang = "";
+        newProfile.auto_lock_minutes = 0;
+        newProfile.daily_limit_minutes = 0;
+        newProfile.bedtime_curfew = "";
+        viewMode.value = "create";
+      });
     }
 
     async function saveEditProfile() {
@@ -9833,6 +10270,34 @@ const ProfilesPage = {
         addToast("Please enter a name", "error");
         return;
       }
+
+      let updatePinFlag = false;
+      let pinToSend = "";
+
+      if (editProfile.is_kids) {
+        updatePinFlag = true;
+        pinToSend = "";
+      } else if (!editProfile.update_pin) {
+        // User unchecked PIN lock -> remove PIN
+        if (editProfile.has_existing_pin) {
+          updatePinFlag = true;
+          pinToSend = "";
+        }
+      } else {
+        // User checked / kept PIN lock
+        if (editProfile.pin.trim()) {
+          if (editProfile.pin.trim().length !== 4) {
+            addToast("PIN must be exactly 4 digits", "error");
+            return;
+          }
+          updatePinFlag = true;
+          pinToSend = editProfile.pin.trim();
+        } else if (!editProfile.has_existing_pin) {
+          addToast("Please enter a 4-digit PIN", "error");
+          return;
+        }
+      }
+
       try {
         const res = await API.put(`/api/profiles/${editTarget.value.id}`, {
           name: editProfile.name.trim(),
@@ -9840,11 +10305,21 @@ const ProfilesPage = {
           color: editProfile.color,
           theme: editProfile.theme || editTarget.value?.theme || "crimson",
           is_kids: editProfile.is_kids,
-          pin: editProfile.pin || "",
-          update_pin: editProfile.update_pin,
+          is_admin: editProfile.is_admin,
+          custom_avatar_url: editProfile.custom_avatar_url,
+          maturity_rating: editProfile.maturity_rating,
+          blocked_genres: editProfile.blocked_genres_list.join(","),
+          default_audio_lang: editProfile.default_audio_lang,
+          default_sub_lang: editProfile.default_sub_lang,
+          auto_lock_minutes: editProfile.auto_lock_minutes,
+          pin: pinToSend,
+          update_pin: updatePinFlag,
           daily_limit_minutes: editProfile.daily_limit_minutes,
           bedtime_curfew: editProfile.bedtime_curfew,
+          admin_pin: currentAdminPin.value,
         });
+
+        currentAdminPin.value = "";
 
         const idx = profiles.value.findIndex((p) => p.id === editTarget.value.id);
         if (idx !== -1) {
@@ -9868,19 +10343,11 @@ const ProfilesPage = {
     const deletePinError = ref("");
 
     async function confirmDeleteProfile(profile) {
-      if (store.profile?.is_kids) {
-        addToast("Kids profiles cannot delete profiles", "error");
-        return;
-      }
       if (profiles.value.length <= 1) {
         addToast("Cannot delete the only profile", "error");
         return;
       }
-      if (profile.has_pin) {
-        deletePinTarget.value = profile;
-        deletePin.value = "";
-        deletePinError.value = "";
-      } else {
+      requireAdminAuth(async (validPin) => {
         const ok = await customConfirm({
           title: "Delete Profile",
           message: `Are you sure you want to delete profile "${profile.name}"? This action cannot be undone.`,
@@ -9889,8 +10356,8 @@ const ProfilesPage = {
           okText: "Delete Profile"
         });
         if (!ok) return;
-        executeDeleteProfile(profile, "");
-      }
+        executeDeleteProfile(profile, validPin);
+      });
     }
 
     function handleDeletePinKey(key) {
@@ -9909,7 +10376,7 @@ const ProfilesPage = {
 
     async function executeDeleteProfile(profile, pinVal) {
       try {
-        await API.post(`/api/profiles/${profile.id}`, { pin: pinVal });
+        await API.post(`/api/profiles/${profile.id}`, { pin: pinVal, admin_pin: pinVal });
         profiles.value = profiles.value.filter((p) => p.id !== profile.id);
         if (store.profile?.id === profile.id) {
           store.profile = null;
@@ -9920,7 +10387,7 @@ const ProfilesPage = {
         addToast("Profile deleted", "success");
       } catch (e) {
         if (profile.has_pin) {
-          deletePinError.value = "Incorrect PIN";
+          deletePinError.value = e.message || "Incorrect PIN";
           deletePin.value = "";
         } else {
           addToast(e.message || "Failed to delete profile", "error");
@@ -9955,14 +10422,13 @@ const ProfilesPage = {
         if (enteredPin === "") {
           pinTarget.value = profile;
         } else {
-          pinError.value = "Incorrect PIN";
+          pinError.value = e.message || "Incorrect PIN";
           pin.value = "";
         }
       }
     }
 
     function handlePinKey(key) {
-      // Any new input clears a previous wrong-PIN error state immediately
       pinError.value = "";
       if (key === "⌫") {
         pin.value = pin.value.slice(0, -1);
@@ -9981,17 +10447,30 @@ const ProfilesPage = {
         addToast("Please enter a name", "error");
         return;
       }
+      if (newProfile.pin && newProfile.pin.trim().length !== 4) {
+        addToast("PIN must be exactly 4 digits", "error");
+        return;
+      }
       try {
         const p = await API.post("/api/profiles", {
           name: newProfile.name.trim(),
-          pin: newProfile.pin || "",
+          pin: newProfile.pin.trim() || "",
           avatar: newProfile.avatar,
           color: newProfile.color,
           theme: newProfile.theme || "crimson",
           is_kids: newProfile.is_kids,
+          is_admin: newProfile.is_admin,
+          custom_avatar_url: newProfile.custom_avatar_url,
+          maturity_rating: newProfile.maturity_rating,
+          blocked_genres: newProfile.blocked_genres_list.join(","),
+          default_audio_lang: newProfile.default_audio_lang,
+          default_sub_lang: newProfile.default_sub_lang,
+          auto_lock_minutes: newProfile.auto_lock_minutes,
           daily_limit_minutes: newProfile.daily_limit_minutes,
           bedtime_curfew: newProfile.bedtime_curfew,
+          admin_pin: currentAdminPin.value,
         });
+        currentAdminPin.value = "";
         profiles.value.push(p);
         viewMode.value = "select";
         newProfile.name = "";
@@ -10004,6 +10483,45 @@ const ProfilesPage = {
       }
     }
 
+    function onProfilesKeyDown(e) {
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) return;
+
+      if (adminPinModalTarget.value) {
+        if (e.key >= "0" && e.key <= "9") {
+          e.preventDefault();
+          handleAdminPinKey(e.key);
+        } else if (e.key === "Backspace") {
+          e.preventDefault();
+          handleAdminPinKey("⌫");
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          adminPinModalTarget.value = false;
+        }
+      } else if (pinTarget.value) {
+        if (e.key >= "0" && e.key <= "9") {
+          e.preventDefault();
+          handlePinKey(e.key);
+        } else if (e.key === "Backspace") {
+          e.preventDefault();
+          handlePinKey("⌫");
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          pinTarget.value = null;
+        }
+      } else if (deletePinTarget.value) {
+        if (e.key >= "0" && e.key <= "9") {
+          e.preventDefault();
+          handleDeletePinKey(e.key);
+        } else if (e.key === "Backspace") {
+          e.preventDefault();
+          handleDeletePinKey("⌫");
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          deletePinTarget.value = null;
+        }
+      }
+    }
+
     watch(
       () => route.query,
       () => {
@@ -10013,7 +10531,12 @@ const ProfilesPage = {
     );
 
     onMounted(() => {
+      window.addEventListener("keydown", onProfilesKeyDown);
       load();
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener("keydown", onProfilesKeyDown);
     });
 
     return {
@@ -10023,11 +10546,20 @@ const ProfilesPage = {
       pinTarget,
       pin,
       pinError,
+      adminPinModalTarget,
+      adminPin,
+      adminPinError,
+      handleAdminPinKey,
       editTarget,
       editProfile,
       newProfile,
       avatars,
       colors,
+      availableGenres,
+      editAvatarFileInput,
+      onEditAvatarSelected,
+      toggleBlockedGenre,
+      moveProfile,
       onProfileClick,
       openEditView,
       openCreateView,
@@ -11937,12 +12469,17 @@ const App = {
 
             <!-- Profile -->
             <div class="nav-profile" @click.stop="toggleProfileMenu" id="nav-profile" data-tooltip="Profile Menu"
-              :style="{ background: store.profile?.color + '33' || 'var(--bg-card)' }">
-              {{ store.profile?.avatar || '👤' }}
+              :style="{ background: store.profile?.color ? store.profile.color + '33' : 'var(--bg-card)', borderColor: store.profile?.color ? store.profile.color + '88' : 'transparent' }">
+              <img v-if="store.profile?.custom_avatar_url" :src="store.profile.custom_avatar_url" class="nav-profile-avatar-img" :alt="store.profile?.name" />
+              <span v-else>{{ store.profile?.avatar || '👤' }}</span>
               <div class="profile-dropdown" v-if="showProfileMenu" @click.stop>
                 <div v-if="store?.profile" class="profile-dropdown-item" style="font-weight:600;color:var(--text-primary);cursor:default" @click.stop>
-                  {{ store.profile?.avatar }} {{ store.profile?.name }}
-                  <span v-if="store.profile?.is_kids" style="font-size:0.75rem;color:#fdcb6e;margin-left:4px;">🧒 Kids</span>
+                  <img v-if="store.profile?.custom_avatar_url" :src="store.profile.custom_avatar_url" class="dropdown-profile-avatar-img" />
+                  <span v-else>{{ store.profile?.avatar }}</span>
+                  <span style="margin-left:6px">{{ store.profile?.name }}</span>
+                  <span v-if="store.profile?.is_admin" class="admin-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">👑 Admin</span>
+                  <span v-else-if="store.profile?.is_kids" class="kids-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">🧒 Kids</span>
+                  <span v-else-if="store.profile?.maturity_rating === 'Teens'" class="teen-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">🛡️ Teens</span>
                 </div>
                 <div class="profile-dropdown-divider" v-if="store?.profile"></div>
                 <div class="profile-dropdown-item" @click.stop="goFavorites" id="dd-watchlist">❤️ Watchlist</div>
@@ -12237,17 +12774,17 @@ const App = {
           <span>Add to Collection</span>
         </div>
 
-        <div v-if="!store.profile?.is_kids" class="context-menu-item" @click="handleContextMenuFixMatch">
+        <div v-if="store.profile?.is_admin" class="context-menu-item" @click="handleContextMenuFixMatch">
           <i class="ph ph-magic-wand"></i>
           <span>Fix Match</span>
         </div>
 
-        <div v-if="!store.profile?.is_kids && contextMenuState.item.tmdb_id" class="context-menu-item" @click="handleContextKidsOverride('allow')">
+        <div v-if="store.profile?.is_admin && contextMenuState.item.tmdb_id" class="context-menu-item" @click="handleContextKidsOverride('allow')">
           <i class="ph ph-shield-check" style="color:#2ecc71"></i>
           <span>Kids Mode: Always Allow</span>
         </div>
 
-        <div v-if="!store.profile?.is_kids && contextMenuState.item.tmdb_id" class="context-menu-item danger" @click="handleContextKidsOverride('block')">
+        <div v-if="store.profile?.is_admin && contextMenuState.item.tmdb_id" class="context-menu-item danger" @click="handleContextKidsOverride('block')">
           <i class="ph ph-shield-warning"></i>
           <span>Kids Mode: Block Title</span>
         </div>
@@ -12781,6 +13318,21 @@ const App = {
             }
           }
         }
+
+        // 3. Inactivity Auto-Lock Check
+        if (store.profile && store.profile.auto_lock_minutes > 0) {
+          const isPlayingVideo = router.currentRoute.value.path === "/player" || !!document.querySelector("video:not([paused])");
+          if (!isPlayingVideo) {
+            const idleMins = (Date.now() - (window._lastActivityTimestamp || Date.now())) / 60000;
+            if (idleMins >= store.profile.auto_lock_minutes) {
+              window._lastActivityTimestamp = Date.now();
+              addToast("Profile auto-locked due to inactivity", "info");
+              API.post("/api/profiles/logout").catch(() => {});
+              store.profile = null;
+              router.push("/profiles");
+            }
+          }
+        }
       }, 10000);
     }
 
@@ -12842,6 +13394,11 @@ const App = {
     }
 
     onMounted(async () => {
+      window._lastActivityTimestamp = Date.now();
+      const markActivity = () => { window._lastActivityTimestamp = Date.now(); };
+      window.addEventListener("mousemove", markActivity, { passive: true });
+      window.addEventListener("keydown", markActivity, { passive: true });
+      window.addEventListener("touchstart", markActivity, { passive: true });
       window.addEventListener("mouseover", handleTooltipMouseOver);
       window.addEventListener("keydown", handleGlobalKeyDown);
 

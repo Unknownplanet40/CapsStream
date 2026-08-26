@@ -65,6 +65,9 @@ DEFAULT_CONFIG = {
         "resume_behavior": "ask",
         "auto_fullscreen": False,
         "start_muted": False
+    },
+    "profiles": {
+        "max_profiles": 8
     }
 }
 
@@ -99,7 +102,7 @@ def load_config():
         merged.update(data)
 
         # Deep merge nested dicts
-        for key in ["metadata_sources", "media_paths", "disabled_paths", "library", "updates", "subtitles", "playback"]:
+        for key in ["metadata_sources", "media_paths", "disabled_paths", "library", "updates", "subtitles", "playback", "profiles"]:
             if key in data and isinstance(data[key], dict):
                 default_sub = dict(DEFAULT_CONFIG.get(key, {}))
                 for sub_k, sub_v in data[key].items():

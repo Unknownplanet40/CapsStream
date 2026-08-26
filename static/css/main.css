@@ -619,6 +619,23 @@ ol {
   transform: none !important;
 }
 
+.nav-profile-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+.dropdown-profile-avatar-img {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-block;
+  vertical-align: middle;
+}
+
 .nav-profile:focus,
 .nav-profile:focus-visible,
 .nav-profile:focus-within,
@@ -6180,6 +6197,186 @@ body.kids-mode-theme .card-badge {
   color: #fed330;
 }
 
+/* Profile Badges */
+.admin-profile-badge {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #ffd700;
+  background: rgba(255, 215, 0, 0.16);
+  border: 1px solid rgba(255, 215, 0, 0.45);
+  border-radius: var(--radius-pill);
+  padding: 3px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 10px rgba(255, 215, 0, 0.2);
+}
+
+.teen-profile-badge {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.16);
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  border-radius: var(--radius-pill);
+  padding: 3px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 10px rgba(167, 139, 250, 0.2);
+}
+
+/* Custom Avatar Image & Upload */
+.netflix-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.netflix-avatar-upload-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.netflix-avatar-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.netflix-avatar-upload-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+/* Maturity & Genre Selector UI */
+.maturity-pill-selector {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.maturity-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.maturity-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.maturity-pill.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent, #ffffff);
+  box-shadow: 0 4px 14px var(--accent-glow, rgba(229, 9, 20, 0.4));
+}
+
+.maturity-pill-name {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.maturity-pill-desc {
+  font-size: 0.7rem;
+  opacity: 0.85;
+}
+
+.genre-chip-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.genre-chip {
+  padding: 5px 11px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  border-radius: 99px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.genre-chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.genre-chip.blocked {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #ef4444;
+  text-decoration: line-through;
+}
+
+/* Manage Mode Profile Reordering Controls */
+.netflix-profile-reorder-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.netflix-reorder-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.netflix-reorder-btn:hover:not(:disabled) {
+  background: #ffffff;
+  color: #000000;
+  border-color: #ffffff;
+  transform: scale(1.1);
+}
+
+.netflix-reorder-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
 /* Kids Profile Badge */
 .kids-profile-badge {
   font-size: 0.75rem;
@@ -6189,7 +6386,6 @@ body.kids-mode-theme .card-badge {
   border: 1px solid rgba(0, 210, 211, 0.4);
   border-radius: var(--radius-pill);
   padding: 3px 10px;
-  margin-top: 6px;
   display: inline-flex;
   align-items: center;
   gap: 4px;

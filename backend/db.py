@@ -307,6 +307,37 @@ def init_db():
         if "theme" not in pcols:
             conn.execute("ALTER TABLE profiles ADD COLUMN theme TEXT DEFAULT 'crimson'")
             print("[DB] Migrated: added theme column to profiles")
+        if "is_admin" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN is_admin INTEGER DEFAULT 0")
+            print("[DB] Migrated: added is_admin column to profiles")
+        if "custom_avatar_url" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN custom_avatar_url TEXT DEFAULT ''")
+            print("[DB] Migrated: added custom_avatar_url column to profiles")
+        if "maturity_rating" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN maturity_rating TEXT DEFAULT 'All'")
+            print("[DB] Migrated: added maturity_rating column to profiles")
+        if "blocked_genres" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN blocked_genres TEXT DEFAULT ''")
+            print("[DB] Migrated: added blocked_genres column to profiles")
+        if "default_audio_lang" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN default_audio_lang TEXT DEFAULT ''")
+            print("[DB] Migrated: added default_audio_lang column to profiles")
+        if "default_sub_lang" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN default_sub_lang TEXT DEFAULT ''")
+            print("[DB] Migrated: added default_sub_lang column to profiles")
+        if "position" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN position INTEGER DEFAULT 0")
+            print("[DB] Migrated: added position column to profiles")
+        if "auto_lock_minutes" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN auto_lock_minutes INTEGER DEFAULT 0")
+            print("[DB] Migrated: added auto_lock_minutes column to profiles")
+
+        # Guarantee at least one admin profile exists if profiles exist
+        conn.execute("""
+            UPDATE profiles SET is_admin = 1
+            WHERE id = (SELECT id FROM profiles WHERE is_kids = 0 ORDER BY id ASC LIMIT 1)
+            AND NOT EXISTS (SELECT 1 FROM profiles WHERE is_admin = 1)
+        """)
     except Exception as e:
         print("[DB] Migration notice:", e)
 
@@ -1025,9 +1056,11 @@ def get_unmatched():
 def get_all_profiles():
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, name, avatar, color, theme, is_kids, daily_limit_minutes, bedtime_curfew, "
+        "SELECT id, name, avatar, color, theme, is_kids, is_admin, custom_avatar_url, "
+        "maturity_rating, blocked_genres, default_audio_lang, default_sub_lang, position, auto_lock_minutes, "
+        "daily_limit_minutes, bedtime_curfew, "
         "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
-        "FROM profiles"
+        "FROM profiles ORDER BY position ASC, id ASC"
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -1040,11 +1073,24 @@ def get_profile(profile_id):
     return dict(row) if row else None
 
 
-def create_profile(name, pin_hash, avatar="🎦", color="#e50914", is_kids=False, daily_limit_minutes=0, bedtime_curfew="", theme="crimson"):
+def create_profile(name, pin_hash, avatar="🎬", color="#e50914", is_kids=False,
+                   daily_limit_minutes=0, bedtime_curfew="", theme="crimson",
+                   is_admin=False, custom_avatar_url="", maturity_rating="All",
+                   blocked_genres="", default_audio_lang="", default_sub_lang="",
+                   position=0, auto_lock_minutes=0):
     conn = get_conn()
+    count_row = conn.execute("SELECT COUNT(*) FROM profiles").fetchone()
+    if count_row and count_row[0] == 0:
+        is_admin = True
+
     cur = conn.execute(
-        "INSERT INTO profiles (name, pin_hash, avatar, color, is_kids, daily_limit_minutes, bedtime_curfew, theme) VALUES (?,?,?,?,?,?,?,?)",
-        (name, pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0), str(bedtime_curfew or ''), str(theme or 'crimson'))
+        "INSERT INTO profiles (name, pin_hash, avatar, color, is_kids, daily_limit_minutes, bedtime_curfew, theme, "
+        "is_admin, custom_avatar_url, maturity_rating, blocked_genres, default_audio_lang, default_sub_lang, position, auto_lock_minutes) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (name.strip(), pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0),
+         str(bedtime_curfew or ''), str(theme or 'crimson'), 1 if is_admin else 0,
+         str(custom_avatar_url or ''), str(maturity_rating or 'All'), str(blocked_genres or ''),
+         str(default_audio_lang or ''), str(default_sub_lang or ''), int(position or 0), int(auto_lock_minutes or 0))
     )
     conn.commit()
     pid = cur.lastrowid
@@ -1052,22 +1098,56 @@ def create_profile(name, pin_hash, avatar="🎦", color="#e50914", is_kids=False
     return pid
 
 
-def update_profile(profile_id, name, pin_hash=None, avatar="🎦", color="#e50914", is_kids=False, update_pin=False, daily_limit_minutes=0, bedtime_curfew="", theme="crimson"):
+def update_profile(profile_id, name, pin_hash=None, avatar="🎬", color="#e50914", is_kids=False,
+                   update_pin=False, daily_limit_minutes=0, bedtime_curfew="", theme="crimson",
+                   is_admin=None, custom_avatar_url=None, maturity_rating="All",
+                   blocked_genres="", default_audio_lang="", default_sub_lang="",
+                   position=None, auto_lock_minutes=0):
     conn = get_conn()
+    row = conn.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
+    if not row:
+        conn.close()
+        return
+    existing = dict(row)
+
+    admin_val = 1 if is_admin else (0 if is_admin is not None else existing.get("is_admin", 0))
+    custom_avatar = custom_avatar_url if custom_avatar_url is not None else existing.get("custom_avatar_url", "")
+    pos_val = position if position is not None else existing.get("position", 0)
+
     if is_kids:
         pin_hash = None
         update_pin = True
+        admin_val = 0
 
     if update_pin:
         conn.execute(
-            "UPDATE profiles SET name=?, pin_hash=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, bedtime_curfew=?, theme=? WHERE id=?",
-            (name, pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0), str(bedtime_curfew or ''), str(theme or 'crimson'), profile_id)
+            "UPDATE profiles SET name=?, pin_hash=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, "
+            "bedtime_curfew=?, theme=?, is_admin=?, custom_avatar_url=?, maturity_rating=?, blocked_genres=?, "
+            "default_audio_lang=?, default_sub_lang=?, position=?, auto_lock_minutes=? WHERE id=?",
+            (name, pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0),
+             str(bedtime_curfew or ''), str(theme or 'crimson'), int(admin_val or 0), str(custom_avatar or ''),
+             str(maturity_rating or 'All'), str(blocked_genres or ''), str(default_audio_lang or ''),
+             str(default_sub_lang or ''), int(pos_val or 0), int(auto_lock_minutes or 0), profile_id)
         )
     else:
         conn.execute(
-            "UPDATE profiles SET name=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, bedtime_curfew=?, theme=? WHERE id=?",
-            (name, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0), str(bedtime_curfew or ''), str(theme or 'crimson'), profile_id)
+            "UPDATE profiles SET name=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, "
+            "bedtime_curfew=?, theme=?, is_admin=?, custom_avatar_url=?, maturity_rating=?, blocked_genres=?, "
+            "default_audio_lang=?, default_sub_lang=?, position=?, auto_lock_minutes=? WHERE id=?",
+            (name, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0),
+             str(bedtime_curfew or ''), str(theme or 'crimson'), int(admin_val or 0), str(custom_avatar or ''),
+             str(maturity_rating or 'All'), str(blocked_genres or ''), str(default_audio_lang or ''),
+             str(default_sub_lang or ''), int(pos_val or 0), int(auto_lock_minutes or 0), profile_id)
         )
+    conn.commit()
+    conn.close()
+
+
+def reorder_profiles(ordered_ids):
+    """Update profile order position."""
+    conn = get_conn()
+    for pos, pid in enumerate(ordered_ids):
+        conn.execute("UPDATE profiles SET position=? WHERE id=?", (pos, int(pid)))
     conn.commit()
     conn.close()
 
@@ -1075,6 +1155,12 @@ def update_profile(profile_id, name, pin_hash=None, avatar="🎦", color="#e5091
 def delete_profile(profile_id):
     conn = get_conn()
     conn.execute("DELETE FROM profiles WHERE id=?", (profile_id,))
+    # Ensure at least one remaining adult profile is admin
+    conn.execute("""
+        UPDATE profiles SET is_admin = 1
+        WHERE id = (SELECT id FROM profiles WHERE is_kids = 0 ORDER BY id ASC LIMIT 1)
+        AND NOT EXISTS (SELECT 1 FROM profiles WHERE is_admin = 1)
+    """)
     conn.commit()
     conn.close()
 
@@ -1126,7 +1212,7 @@ def verify_pin_raw(profile_id, raw_pin):
         if not stored:
             return True
 
-        raw = str(raw_pin or "").strip()
+        raw = str(raw_pin).strip() if raw_pin is not None else ""
         if not raw:
             return False  # PIN required but none supplied
 
