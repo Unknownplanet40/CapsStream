@@ -2184,7 +2184,7 @@ def api_override():
     if not tmdb_id:
         return jsonify({"error": "tmdb_id is required"}), 400
 
-    from backend.matcher import override_match, get_season_episodes
+    from backend.matcher import override_match, fetch_season_episodes
     meta = override_match(media_id, tmdb_id, mtype)
     if not meta:
         return jsonify({"error": "TMDb metadata not found for ID"}), 404
@@ -2222,7 +2222,7 @@ def api_override():
         # If it's a series, try to fetch season episode name
         if mtype in ("series", "anime") and season_num is not None and ep_num is not None:
             if season_num not in season_cache:
-                season_cache[season_num] = get_season_episodes(tmdb_id, season_num, media_type=mtype)
+                season_cache[season_num] = fetch_season_episodes(tmdb_id, season_num)
             ep_list = season_cache[season_num] or []
             ep_info = next((e for e in ep_list if e.get("episode_number") == ep_num), None)
             if ep_info and ep_info.get("name"):
