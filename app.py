@@ -1435,41 +1435,10 @@ def api_restart_after_update():
     Every step (including the new server's startup output) is logged to
     data/update_restart.log.
     """
-    import sys as _sys
     from backend.updater import spawn_restart_helper
 
     try:
         spawn_restart_helper()
-        # Belt-and-braces: also drop a batch fallback that relaunches via
-        # start.bat if the helper itself somehow fails within 3 minutes.
-        pid = os.getpid()
-        helper = os.path.join(BASE_DIR, "_finish_update_fallback.bat")
-        with open(helper, "w", encoding="utf-8") as f:
-            f.write(
-                "@echo off\r\n"
-                "rem Fallback: if the python helper failed, run start.bat manually.\r\n"
-                "rem (ping-delay works even in a detached, console-less context)\r\n"
-                "ping -n 181 127.0.0.1 >nul\r\n"
-                f"tasklist /FI \"PID eq {pid}\" 2>nul | find /I \"{pid}\" >nul\r\n"
-                "if not errorlevel 1 (\r\n"
-                f"  cd /d \"{BASE_DIR}\"\r\n"
-                "  call start.bat\r\n"
-                ")\r\n"
-            )
-        # CREATE_NO_WINDOW keeps the fallback cmd (and its ping delay) fully
-        # invisible; DETACHED_PROCESS alone still lets console children show.
-        hide = 0
-        if hasattr(subprocess, "CREATE_NO_WINDOW"):
-            hide = subprocess.CREATE_NO_WINDOW
-        subprocess.Popen(
-            ["cmd", "/c", helper],
-            cwd=BASE_DIR,
-            creationflags=hide | subprocess.CREATE_NEW_PROCESS_GROUP,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        print(f"[Updater] Restart helper spawned; fallback armed ({helper})")
     except Exception as e:
         return jsonify({"ok": False, "error": f"Could not spawn restart helper: {e}"}), 500
 
@@ -1499,6 +1468,17 @@ def _prune_old_logs():
             print(f"[Maintenance] Pruned {removed} old log file(s)")
     except Exception as e:
         print(f"[Maintenance] Log prune failed: {e}")
+
+    # Remove obsolete restart helpers — the batch fallback could resurrect a
+    # stopped server via Windows PID reuse, so it must never linger on disk.
+    for legacy in ("_finish_update_fallback.bat", "_finish_update.bat"):
+        fp = os.path.join(BASE_DIR, legacy)
+        if os.path.isfile(fp):
+            try:
+                os.remove(fp)
+                print(f"[Maintenance] Removed obsolete restart script: {legacy}")
+            except OSError:
+                pass
 
 
 def _db_maintenance_daemon():
