@@ -364,6 +364,94 @@ function openGlobalFixMatch(target, onMatched) {
   fixMatchState.show = true;
 }
 
+// ─── Custom Global Context Menu System ────────────────────────
+
+const contextMenuState = reactive({
+  show: false,
+  x: 0,
+  y: 0,
+  item: null,
+  isFavorite: false,
+});
+
+function openGlobalContextMenu(e, item) {
+  if (!item) return;
+  if (e && typeof e.preventDefault === "function") e.preventDefault();
+  if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+
+  const menuWidth = 240;
+  const menuHeight = 300;
+  let clickX = (e && e.clientX) || 100;
+  let clickY = (e && e.clientY) || 100;
+
+  if (e && e.currentTarget && typeof e.currentTarget.getBoundingClientRect === "function") {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      clickX = rect.left;
+      clickY = rect.bottom + 4;
+    }
+  }
+
+  const maxX = window.innerWidth - menuWidth - 16;
+  const maxY = window.innerHeight - menuHeight - 16;
+
+  contextMenuState.x = Math.max(16, Math.min(clickX, maxX));
+  contextMenuState.y = Math.max(16, Math.min(clickY, maxY));
+  contextMenuState.item = item;
+  contextMenuState.isFavorite = !!item.is_favorite;
+  contextMenuState.show = true;
+}
+
+function closeGlobalContextMenu() {
+  contextMenuState.show = false;
+  contextMenuState.item = null;
+}
+
+// ─── Global Collection Picker System ──────────────────────────
+
+const collectionPickerState = reactive({
+  show: false,
+  item: null,
+  collections: [],
+  inlineName: "",
+});
+
+function openGlobalCollectionPicker(item) {
+  if (!item) return;
+  collectionPickerState.item = item;
+  collectionPickerState.show = true;
+  API.get("/api/collections").then((res) => {
+    collectionPickerState.collections = res || [];
+  }).catch(() => {});
+}
+
+// ─── Global Trailer Modal System ──────────────────────────────
+
+const globalTrailerState = reactive({
+  show: false,
+  url: null,
+  title: ""
+});
+
+async function openGlobalTrailer(item) {
+  if (!item) return;
+  const mediaId = item.id || item.tmdb_id;
+  if (!mediaId) return;
+  try {
+    const res = await API.get(`/api/media/${mediaId}/trailer`);
+    if (res && res.embed_url) {
+      unlockAchievement("trailer_buff");
+      globalTrailerState.url = res.embed_url;
+      globalTrailerState.title = `${item.title} — ${res.title || 'Official Trailer'}`;
+      globalTrailerState.show = true;
+    } else {
+      addToast("No trailer found for this title", "info");
+    }
+  } catch (e) {
+    addToast("No trailer available for this title", "info");
+  }
+}
+
 function triggerAchievementUnlock(ach) {
   if (!ach) return;
   playAchievementSound();
@@ -606,6 +694,7 @@ const MediaCard = {
          @mouseenter="showTooltip = true"
          @mouseleave="showTooltip = false"
          @click="$emit('click', cardItem)"
+         @contextmenu.prevent="openCardMenu($event)"
          :id="'card-' + (cardItem.id || 'card')">
 
       <div v-if="cardItem.is_mounted === false && showTooltip" class="unmounted-tooltip">
@@ -638,6 +727,16 @@ const MediaCard = {
         <span v-if="isContinue && calcTimeLeft(cardItem)" class="card-badge" style="right:var(--space-sm);left:auto;background:rgba(10,10,15,0.85);border:1px solid var(--border-strong)">
           {{ calcTimeLeft(cardItem) }}
         </span>
+
+        <!-- 3-Dots Context Menu Button -->
+        <button
+          class="card-menu-btn"
+          @click.stop="openCardMenu($event)"
+          title="More options"
+          :id="'menu-btn-' + (cardItem.id || 'card')"
+        >
+          <i class="ph-bold ph-dots-three-vertical"></i>
+        </button>
 
         <button v-if="isContinue"
                 class="card-remove-btn"
@@ -689,7 +788,11 @@ const MediaCard = {
       imgError.value = true;
     }
 
-    return { cardItem, posterSrc, handleImgError, imgUrl, formatRating, calcProgressPercent, calcTimeLeft, showTooltip };
+    function openCardMenu(e) {
+      openGlobalContextMenu(e, cardItem.value);
+    }
+
+    return { cardItem, posterSrc, handleImgError, openCardMenu, imgUrl, formatRating, calcProgressPercent, calcTimeLeft, showTooltip };
   },
 };
 
@@ -9977,6 +10080,150 @@ const App = {
         @close="handleGlobalFixMatchClose"
         @matched="handleGlobalFixMatchDone"
       />
+
+      <!-- Floating Global Context Menu -->
+      <div
+        v-if="contextMenuState.show && contextMenuState.item"
+        class="floating-context-menu"
+        :style="{ top: contextMenuState.y + 'px', left: contextMenuState.x + 'px' }"
+        @click.stop
+      >
+        <div class="context-menu-header">
+          <div class="context-menu-title" :title="contextMenuState.item.title">
+            {{ contextMenuState.item.title }}
+          </div>
+          <div class="context-menu-meta">
+            <span v-if="contextMenuState.item.year">{{ contextMenuState.item.year }}</span>
+            <span v-if="contextMenuState.item.type" class="badge" style="text-transform:capitalize;font-size:0.65rem">{{ contextMenuState.item.type }}</span>
+            <span v-if="contextMenuState.item.rating" style="color:var(--gold);font-weight:700">★ {{ formatRating(contextMenuState.item.rating) }}</span>
+          </div>
+        </div>
+
+        <div class="context-menu-item" @click="handleContextMenuPlay">
+          <i class="ph-fill ph-play"></i>
+          <span>{{ contextMenuState.item.position > 0 ? 'Resume Playback' : 'Play Title' }}</span>
+        </div>
+
+        <div class="context-menu-item" @click="handleContextMenuDetails">
+          <i class="ph ph-info"></i>
+          <span>View Details</span>
+        </div>
+
+        <div class="context-menu-item" @click="handleContextMenuTrailer">
+          <i class="ph ph-film-strip"></i>
+          <span>Watch Trailer</span>
+        </div>
+
+        <div class="context-menu-divider"></div>
+
+        <div class="context-menu-item" @click="handleContextMenuFav">
+          <i :class="contextMenuState.isFavorite ? 'ph-fill ph-heart' : 'ph ph-heart'"></i>
+          <span>{{ contextMenuState.isFavorite ? 'Remove from Watchlist' : 'Add to Watchlist' }}</span>
+        </div>
+
+        <div v-if="!store.profile?.is_kids" class="context-menu-item" @click="handleContextMenuCollection">
+          <i class="ph ph-plus-circle"></i>
+          <span>Add to Collection</span>
+        </div>
+
+        <div v-if="!store.profile?.is_kids" class="context-menu-item" @click="handleContextMenuFixMatch">
+          <i class="ph ph-magic-wand"></i>
+          <span>Fix Match</span>
+        </div>
+
+        <template v-if="contextMenuState.item.position > 0">
+          <div class="context-menu-divider"></div>
+          <div class="context-menu-item danger" @click="handleContextMenuResetProgress">
+            <i class="ph ph-x-circle"></i>
+            <span>Remove from Continue</span>
+          </div>
+        </template>
+      </div>
+
+      <!-- Global Collection Picker Modal -->
+      <div
+        class="modal-backdrop"
+        v-if="collectionPickerState.show"
+        style="z-index:999995;background:rgba(0,0,0,0.85);backdrop-filter:blur(20px);"
+        @click.self="collectionPickerState.show = false"
+      >
+        <div class="shortcuts-modal-card" style="max-width:440px" @click.stop>
+          <div class="shortcuts-modal-inner" style="text-align:left">
+            <div class="shortcuts-modal-header" style="margin-bottom:1rem">
+              <div class="shortcuts-header-title" style="color:var(--text-primary);display:flex;align-items:center;gap:10px">
+                <i class="ph ph-stack" style="color:var(--accent);font-size:1.4rem"></i>
+                <span>Add to Collection</span>
+              </div>
+              <button class="shortcuts-close-btn" @click="collectionPickerState.show = false">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+
+            <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1rem">
+              Select a collection for <strong>{{ collectionPickerState.item?.title }}</strong>:
+            </div>
+
+            <!-- Create new collection inline -->
+            <div style="display:flex;gap:8px;margin-bottom:1.25rem">
+              <input
+                type="text"
+                v-model="collectionPickerState.inlineName"
+                class="form-input"
+                placeholder="New collection name..."
+                @keyup.enter="createAndAddToCollection"
+              />
+              <button class="btn btn-primary btn-sm" @click="createAndAddToCollection">
+                Create
+              </button>
+            </div>
+
+            <div v-if="collectionPickerState.collections.length === 0" style="text-align:center;padding:1.5rem;color:var(--text-muted);font-size:0.85rem">
+              No custom collections yet. Type a name above to create one!
+            </div>
+
+            <div v-else style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+              <div
+                v-for="col in userCustomCollections"
+                :key="col.id"
+                class="collection-select-item"
+                style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:rgba(255,255,255,0.04);border-radius:10px;cursor:pointer;transition:background 0.2s"
+                @click="toggleItemInCollection(col)"
+              >
+                <div>
+                  <div style="font-weight:700;font-size:0.9rem">{{ col.name }}</div>
+                  <div style="font-size:0.75rem;color:var(--text-muted)">{{ (col.items || []).length }} titles</div>
+                </div>
+                <i :class="isItemInCol(col) ? 'ph-fill ph-check-circle' : 'ph ph-circle'" :style="{ color: isItemInCol(col) ? 'var(--accent)' : 'var(--text-muted)', fontSize: '1.3rem' }"></i>
+              </div>
+            </div>
+
+            <button class="btn btn-ghost btn-full" style="margin-top:1.25rem" @click="collectionPickerState.show = false">
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Global Trailer Modal -->
+      <div
+        class="modal-backdrop"
+        v-if="globalTrailerState.show"
+        style="z-index:999998;background:rgba(0,0,0,0.92);backdrop-filter:blur(24px);"
+        @click.self="globalTrailerState.show = false"
+      >
+        <div class="trailer-modal-content" @click.stop style="width:90vw;max-width:960px;aspect-ratio:16/9;background:#000;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.15);box-shadow:0 24px 70px rgba(0,0,0,0.95);position:relative">
+          <button class="shortcuts-close-btn" style="position:absolute;top:12px;right:12px;z-index:10;background:rgba(0,0,0,0.7);color:#fff;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center" @click="globalTrailerState.show = false">
+            <i class="ph ph-x"></i>
+          </button>
+          <iframe
+            v-if="globalTrailerState.url"
+            :src="globalTrailerState.url"
+            style="width:100%;height:100%;border:none"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen
+          ></iframe>
+        </div>
+      </div>
     </template>
   `,
   setup() {
@@ -10304,11 +10551,27 @@ const App = {
       }
     }
 
-    // Close profile menu on outside click
+    // Close profile menu and floating context menu on outside click
     function handleOutsideClick(e) {
       if (!e.target.closest("#nav-profile")) {
         showProfileMenu.value = false;
       }
+      if (contextMenuState.show) {
+        const menuEl = e.target.closest(".floating-context-menu");
+        const menuBtn = e.target.closest(".card-menu-btn");
+        if (!menuEl && !menuBtn) {
+          closeGlobalContextMenu();
+        }
+      }
+    }
+
+    function handleGlobalKeyDown(e) {
+      if (e.key === "Escape") {
+        if (contextMenuState.show) closeGlobalContextMenu();
+        if (collectionPickerState.show) collectionPickerState.show = false;
+        if (globalTrailerState.show) globalTrailerState.show = false;
+      }
+      handleGlobalShortcutsKey(e);
     }
 
     // Dynamic tooltip direction & alignment calculator
@@ -10335,7 +10598,7 @@ const App = {
 
     onMounted(async () => {
       window.addEventListener("mouseover", handleTooltipMouseOver);
-      window.addEventListener("keydown", handleGlobalShortcutsKey);
+      window.addEventListener("keydown", handleGlobalKeyDown);
 
       try {
         // Restore a persisted session (survives page refresh) before anything else
@@ -10364,7 +10627,12 @@ const App = {
 
       window.addEventListener("scroll", () => {
         navScrolled.value = window.scrollY > 20;
-      });
+        if (contextMenuState.show) closeGlobalContextMenu();
+      }, { passive: true });
+
+      window.addEventListener("resize", () => {
+        if (contextMenuState.show) closeGlobalContextMenu();
+      }, { passive: true });
 
       window.addEventListener("click", handleOutsideClick);
 
@@ -10385,7 +10653,7 @@ const App = {
     onUnmounted(() => {
       window.removeEventListener("click", handleOutsideClick);
       window.removeEventListener("mouseover", handleTooltipMouseOver);
-      window.removeEventListener("keydown", handleGlobalShortcutsKey);
+      window.removeEventListener("keydown", handleGlobalKeyDown);
       clearInterval(scanPollTimer);
     });
 
@@ -10413,6 +10681,141 @@ const App = {
       if (type === "error") return "ph ph-warning-octagon";
       if (type === "warning") return "ph ph-warning";
       return "ph ph-info";
+    }
+
+    // ─── Global Context Menu Action Handlers ──────────────────
+    function handleContextMenuPlay() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item) return;
+      if (item.is_mounted === false) {
+        addToast("Source drive not mounted. Please connect drive to watch this title.", "error");
+        return;
+      }
+      if (item.type === "movie" && item.id) {
+        router.push(`/watch/${item.id}`);
+      } else if (item.position > 0 && item.id) {
+        router.push(`/watch/${item.id}`);
+      } else if (item.type === "movie") {
+        router.push(`/title/movie/${item.id || item.tmdb_id}`);
+      } else {
+        router.push(`/title/${item.type || "series"}/${item.tmdb_id || item.id}`);
+      }
+    }
+
+    function handleContextMenuDetails() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item) return;
+      if (item.type === "movie" && item.id) {
+        router.push(`/title/movie/${item.id}`);
+      } else {
+        router.push(`/title/${item.type || "series"}/${item.tmdb_id || item.id}`);
+      }
+    }
+
+    function handleContextMenuTrailer() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item) return;
+      openGlobalTrailer(item);
+    }
+
+    async function handleContextMenuFav() {
+      const item = contextMenuState.item;
+      if (!item) return;
+      const idToFav = item.id || item.tmdb_id;
+      if (!idToFav) return;
+      try {
+        const res = await API.post("/api/favorites/toggle", { media_id: idToFav });
+        item.is_favorite = res.is_favorite;
+        contextMenuState.isFavorite = res.is_favorite;
+        addToast(res.is_favorite ? "Added to Watchlist ❤️" : "Removed from Watchlist", "info");
+      } catch (e) {
+        addToast("Failed to update watchlist", "error");
+      }
+      closeGlobalContextMenu();
+    }
+
+    function handleContextMenuCollection() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item) return;
+      openGlobalCollectionPicker(item);
+    }
+
+    function handleContextMenuFixMatch() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item) return;
+      openGlobalFixMatch(item, () => {
+        if (route.path === "/") {
+          location.reload();
+        }
+      });
+    }
+
+    async function handleContextMenuResetProgress() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item || !item.id) return;
+      try {
+        await API.del(`/api/progress/${item.id}`);
+        item.position = 0;
+        item.duration = 0;
+        addToast("Progress reset for " + item.title, "info");
+        if (route.path === "/") {
+          location.reload();
+        }
+      } catch (e) {
+        addToast("Failed to reset progress", "error");
+      }
+    }
+
+    // ─── Global Collection Picker Helpers ──────────────────────
+    const userCustomCollections = computed(() => {
+      return (collectionPickerState.collections || []).filter((c) => !c.smart && !c.universe);
+    });
+
+    function isItemInCol(col) {
+      if (!collectionPickerState.item) return false;
+      const mediaId = collectionPickerState.item.id || collectionPickerState.item.tmdb_id;
+      return (col.items || []).some((i) => i.id === mediaId || i.tmdb_id === mediaId);
+    }
+
+    async function toggleItemInCollection(col) {
+      if (!collectionPickerState.item) return;
+      const mediaId = collectionPickerState.item.id || collectionPickerState.item.tmdb_id;
+      if (!mediaId) return;
+      const alreadyIn = isItemInCol(col);
+      try {
+        if (alreadyIn) {
+          await API.del(`/api/collections/${col.id}/items/${mediaId}`);
+          col.items = (col.items || []).filter((i) => i.id !== mediaId && i.tmdb_id !== mediaId);
+          addToast(`Removed from "${col.name}"`, "info");
+        } else {
+          await API.post(`/api/collections/${col.id}/items`, { media_id: mediaId });
+          if (!col.items) col.items = [];
+          col.items.push({ id: mediaId, tmdb_id: collectionPickerState.item.tmdb_id });
+          addToast(`Added to "${col.name}" ✓`, "success");
+        }
+      } catch (e) {
+        addToast("Failed to update collection", "error");
+      }
+    }
+
+    async function createAndAddToCollection() {
+      const name = collectionPickerState.inlineName.trim();
+      if (!name) return;
+      try {
+        const col = await API.post("/api/collections", { name });
+        col.items = [];
+        collectionPickerState.collections.unshift(col);
+        collectionPickerState.inlineName = "";
+        await toggleItemInCollection(col);
+      } catch (e) {
+        addToast("Failed to create collection", "error");
+      }
     }
 
     function handleGlobalFixMatchClose() {
@@ -10462,6 +10865,21 @@ const App = {
       fixMatchState,
       handleGlobalFixMatchClose,
       handleGlobalFixMatchDone,
+      contextMenuState,
+      handleContextMenuPlay,
+      handleContextMenuDetails,
+      handleContextMenuTrailer,
+      handleContextMenuFav,
+      handleContextMenuCollection,
+      handleContextMenuFixMatch,
+      handleContextMenuResetProgress,
+      collectionPickerState,
+      globalTrailerState,
+      userCustomCollections,
+      isItemInCol,
+      toggleItemInCollection,
+      createAndAddToCollection,
+      formatRating,
       dismissToast,
       getToastIcon,
       navItems,

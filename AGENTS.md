@@ -15,8 +15,11 @@ Whenever the user asks to commit, release, or save changes in this project, foll
    - Formulate a clear, structured conventional commit message (`feat(...)`, `fix(...)`, `refactor(...)`, `chore(...)`).
    - Include a concise title and bullet points summarizing key enhancements, fixes, and affected components.
 
-4. **Stage, Commit & Push**:
+4. **Stage & Commit**:
    - Stage all relevant files (`git add`).
    - Commit using the generated commit message (`git commit`).
-   - Push the committed changes to the remote repository (`git push`).
-   - Report the new version number, commit hash, and push confirmation to the user.
+
+5. **Ask Before Push (Mandatory)**:
+   - **ALWAYS** ask the user for confirmation before executing `git push`.
+   - Only run `git push` once the user explicitly approves.
+   - Report the new version number, commit hash, and push status to the user.

@@ -9469,3 +9469,159 @@ kbd.about-kbd {
   white-space: nowrap;
 }
 
+/* ─── Media Card Context Menu & 3-Dots Button ───────────────── */
+.card-menu-btn {
+  position: absolute;
+  top: var(--space-sm);
+  right: var(--space-sm);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(15, 15, 22, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity 180ms ease,
+    transform 180ms cubic-bezier(0.32, 0.72, 0, 1),
+    background 180ms ease,
+    border-color 180ms ease;
+  z-index: 20;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.media-card:hover .card-menu-btn,
+.media-card:focus-within .card-menu-btn,
+.card-menu-btn.active {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.continue-card .card-menu-btn {
+  right: calc(var(--space-sm) + 32px);
+}
+
+.card-menu-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  transform: scale(1.12);
+  box-shadow: 0 0 14px rgba(229, 9, 20, 0.5);
+}
+
+/* Floating Glass Context Menu */
+.floating-context-menu {
+  position: fixed;
+  z-index: 999990;
+  min-width: 220px;
+  max-width: 280px;
+  background: rgba(18, 18, 26, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.92),
+    0 0 35px rgba(0, 0, 0, 0.6),
+    inset 0 1px 1px rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  animation: context-menu-pop 0.15s cubic-bezier(0.2, 0, 0, 1);
+  transform-origin: top left;
+  user-select: none;
+}
+
+@keyframes context-menu-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.context-menu-header {
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 4px;
+}
+
+.context-menu-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.context-menu-meta {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    transform 100ms ease;
+}
+
+.context-menu-item i {
+  font-size: 1.15rem;
+  color: var(--accent);
+  flex-shrink: 0;
+  transition: transform var(--transition-fast);
+}
+
+.context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  transform: translateX(2px);
+}
+
+.context-menu-item:hover i {
+  transform: scale(1.15);
+}
+
+.context-menu-item.danger {
+  color: #ff5555;
+}
+
+.context-menu-item.danger i {
+  color: #ff5555;
+}
+
+.context-menu-item.danger:hover {
+  background: rgba(229, 9, 20, 0.16);
+  color: var(--accent);
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 4px 0;
+}
+
+
