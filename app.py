@@ -83,6 +83,17 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024  # 2GB max upload (bac
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 
+# ─── Per-request DB connection teardown ───────────────────────────────────────
+# Ensures the shared Flask-g connection is committed and closed at the end of
+# every request so we never leak a connection or leave WAL writes uncommitted.
+
+@app.teardown_appcontext
+def _teardown_db_conn(exc):
+    """Release the per-request SQLite connection stored in Flask g."""
+    from backend.db import release_conn
+    release_conn()
+
+
 def get_app_version():
     """Read the version from the VERSION file (fallback to 2.0.0.0)."""
     try:
@@ -195,9 +206,16 @@ def _active_is_kids():
     pid = _current_profile()
     if not pid:
         return False
+    # Fast path: is_kids flag cached in the session by the login endpoint
+    cached = session.get("is_kids")
+    if cached is not None:
+        return bool(cached)
+    # Fallback: query DB once and cache in session for subsequent requests
     try:
         prof = get_profile(pid)
-        return bool(prof and prof.get("is_kids"))
+        is_kids = bool(prof and prof.get("is_kids"))
+        session["is_kids"] = is_kids
+        return is_kids
     except Exception:
         return False
 
@@ -241,6 +259,19 @@ _GITHUB_PROFILE_CACHE = {"data": None, "fetched_at": 0.0}
 
 _API_HEALTH_CACHE = {"ts": 0.0, "data": None}
 API_HEALTH_TTL_SEC = 120
+
+# ─── Home-page response cache ────────────────────────────────────────────────
+# /api/home fires 9–11 DB queries; caching the base rows for 30 s is safe
+# because library content rarely changes mid-session.  Profile-specific
+# continue_watching is always fetched fresh and merged in.
+_HOME_CACHE: dict = {"data": None, "ts": 0.0}
+_HOME_CACHE_TTL = 30.0  # seconds
+
+
+def _bust_home_cache():
+    """Invalidate the /api/home cache (call after scan, library write, etc.)."""
+    _HOME_CACHE["data"] = None
+    _HOME_CACHE["ts"] = 0.0
 
 
 def _probe_url(url, timeout=4):
@@ -576,6 +607,7 @@ def api_auth_profile():
     _clear_pin_failures(profile_id)
 
     session["profile_id"] = profile_id
+    session["is_kids"] = bool(profile.get("is_kids", 0))
     return jsonify({"ok": True, "profile": {
         "id":      profile["id"],
         "name":    profile["name"],
@@ -610,6 +642,7 @@ def api_me():
 @app.route("/api/profiles/logout", methods=["POST"])
 def api_logout():
     session.pop("profile_id", None)
+    session.pop("is_kids", None)
     return jsonify({"ok": True})
 
 
@@ -672,68 +705,85 @@ def api_system_reset():
 def api_home():
     pid = _current_profile()
     kids = _active_is_kids()
-    rows = []
 
-    # Continue Watching (profile-specific)
+    # ── Cache hit: return base rows + fresh continue_watching ──
+    now = time.time()
+    cache_valid = (
+        _HOME_CACHE["data"] is not None
+        and now - _HOME_CACHE["ts"] < _HOME_CACHE_TTL
+    )
+
+    if cache_valid:
+        rows = list(_HOME_CACHE["data"])  # shallow copy of the cached list
+    else:
+        rows = []
+
+        # Recently Added
+        recent = get_recently_added(limit=20)
+        if recent:
+            rows.append({"title": "Recently Added", "type": "row", "items": recent})
+
+        # Top Rated
+        top = get_top_rated(limit=20)
+        if top:
+            rows.append({"title": "Top Rated", "type": "row", "items": top})
+
+        # Movies
+        movies = get_top_rated(limit=20, media_type="movie")
+        if not movies:
+            movies = get_unique_shows("movie")[:20]
+        if movies:
+            rows.append({"title": "Movies", "type": "row", "items": movies})
+
+        # Series
+        series = get_unique_shows("series")
+        if series:
+            rows.append({"title": "Series", "type": "row", "items": series[:20]})
+
+        # Anime
+        anime = get_unique_shows("anime")
+        if anime:
+            rows.append({"title": "Anime", "type": "row", "items": anime[:20]})
+
+        # Random Pick
+        random_picks = get_random_pick(limit=10)
+        if random_picks:
+            rows.append({"title": "Discover Something New", "type": "row", "items": random_picks})
+
+        # Genre rows
+        genres = get_all_genres()
+        priority_genres = ["Action", "Comedy", "Drama", "Horror", "Sci-Fi", "Science Fiction",
+                           "Romance", "Thriller", "Animation", "Documentary", "Fantasy"]
+        shown_genres = [g for g in priority_genres if g in genres]
+        if not shown_genres:
+            shown_genres = genres[:5]
+
+        for genre in shown_genres[:4]:  # Max 4 genre rows
+            items = get_by_genre(genre, limit=15)
+            if items:
+                rows.append({"title": genre, "type": "row", "items": items})
+
+        # Store the profile-agnostic base in the cache
+        _HOME_CACHE["data"] = rows
+        _HOME_CACHE["ts"] = now
+
+    # ── Always fetch continue_watching fresh (profile-specific) ──
+    final_rows = []
     if pid:
         cw = get_continue_watching(pid, limit=15)
         if cw:
-            rows.append({"title": "Continue Watching", "type": "continue", "items": cw})
-
-    # Recently Added
-    recent = get_recently_added(limit=20)
-    if recent:
-        rows.append({"title": "Recently Added", "type": "row", "items": recent})
-
-    # Top Rated
-    top = get_top_rated(limit=20)
-    if top:
-        rows.append({"title": "Top Rated", "type": "row", "items": top})
-
-    # Movies
-    movies = get_top_rated(limit=20, media_type="movie")
-    if not movies:
-        movies = get_unique_shows("movie")[:20]
-    if movies:
-        rows.append({"title": "Movies", "type": "row", "items": movies})
-
-    # Series
-    series = get_unique_shows("series")
-    if series:
-        rows.append({"title": "Series", "type": "row", "items": series[:20]})
-
-    # Anime
-    anime = get_unique_shows("anime")
-    if anime:
-        rows.append({"title": "Anime", "type": "row", "items": anime[:20]})
-
-    # Random Pick
-    random_picks = get_random_pick(limit=10)
-    if random_picks:
-        rows.append({"title": "Discover Something New", "type": "row", "items": random_picks})
-
-    # Genre rows
-    genres = get_all_genres()
-    priority_genres = ["Action", "Comedy", "Drama", "Horror", "Sci-Fi", "Science Fiction",
-                       "Romance", "Thriller", "Animation", "Documentary", "Fantasy"]
-    shown_genres = [g for g in priority_genres if g in genres]
-    if not shown_genres:
-        shown_genres = genres[:5]
-
-    for genre in shown_genres[:4]:  # Max 4 genre rows
-        items = get_by_genre(genre, limit=15)
-        if items:
-            rows.append({"title": genre, "type": "row", "items": items})
+            final_rows.append({"title": "Continue Watching", "type": "continue", "items": cw})
+    final_rows.extend(rows)
 
     if kids:
         filtered_rows = []
-        for row in rows:
+        for row in final_rows:
             items = _filter_for_profile(row.get("items"))
             if items:
                 filtered_rows.append({**row, "items": items})
-        rows = filtered_rows
+        final_rows = filtered_rows
 
-    return jsonify(rows)
+    return jsonify(final_rows)
 
 
 @app.route("/api/library", methods=["GET"])
@@ -773,6 +823,7 @@ def api_library_delete():
 
     removed = delete_media_by_tmdb(tmdb_id, mtype)
     print(f"[Library] Deleted {removed} row(s) for tmdb {tmdb_id} ({mtype}) — source files untouched.")
+    _bust_home_cache()
     return jsonify({"ok": True, "removed": removed})
 
 
@@ -1981,6 +2032,7 @@ def api_scan():
 
     def run_scan():
         scan_library()
+        _bust_home_cache()
         # New titles need ratings before Kids Mode can judge them accurately
         start_background_enrichment()
 

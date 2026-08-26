@@ -607,27 +607,44 @@ def fetch_imdb_id(tmdb_id, media_type="movie"):
     return None
 
 
+# In-memory cache for backdrop lists: disk cache already avoids network hits
+# across restarts, but this avoids even the JSON file read on repeat detail views.
+_BACKDROPS_CACHE: dict = {}  # (tmdb_id, media_type) → (list, fetched_at)
+_BACKDROPS_CACHE_TTL = 3600  # 1 hour
+
+
 def fetch_media_backdrops(tmdb_id, media_type="movie"):
     """
     Fetches alternative backdrop images from TMDb API for a movie/show.
     Returns list of backdrop image paths.
+    Results are cached in-memory (1 h TTL) after the first disk or network fetch.
     """
-    key = _api_key()
-    if not key or not tmdb_id:
+    import time as _time
+    key = (tmdb_id, media_type)
+    entry = _BACKDROPS_CACHE.get(key)
+    if entry is not None:
+        paths, fetched_at = entry
+        if _time.time() - fetched_at < _BACKDROPS_CACHE_TTL:
+            return paths
+
+    api_key = _api_key()
+    if not api_key or not tmdb_id:
         return []
 
     cache_file = os.path.join(METADATA_DIR, f"backdrops_{media_type}_{tmdb_id}.json")
     if os.path.isfile(cache_file):
         try:
             with open(cache_file, encoding="utf-8") as f:
-                return json.load(f)
+                paths = json.load(f)
+            _BACKDROPS_CACHE[key] = (paths, _time.time())
+            return paths
         except Exception:
             pass
 
     endpoint = "tv" if media_type in ("series", "anime") else "movie"
     url = f"{TMDB_BASE}/{endpoint}/{tmdb_id}/images"
     try:
-        r = requests.get(url, params={"api_key": key, "include_image_language": "en,null"}, timeout=8)
+        r = requests.get(url, params={"api_key": api_key, "include_image_language": "en,null"}, timeout=8)
         if r.status_code == 200:
             data = r.json()
             raw_backdrops = data.get("backdrops") or []
@@ -639,6 +656,7 @@ def fetch_media_backdrops(tmdb_id, media_type="movie"):
                     paths.append(local_img or fp)
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(paths, f)
+            _BACKDROPS_CACHE[key] = (paths, _time.time())
             return paths
     except Exception as e:
         print(f"[Matcher] Error fetching backdrops for {tmdb_id}: {e}")

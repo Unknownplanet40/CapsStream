@@ -72,11 +72,25 @@ DEFAULT_CONFIG = {
 # NOTE: The built-in "media/" default folders have been removed.
 # Users provide their own media sources via Settings → Media Scanner Paths.
 
+# In-process config cache: avoid reading config.json on every single request.
+# TTL of 5 seconds is short enough to pick up manual edits quickly while
+# eliminating the O(N-requests) disk reads that add up for common API calls.
+_CONFIG_CACHE: dict = {"data": None, "ts": 0.0}
+_CONFIG_CACHE_TTL = 5.0  # seconds
+
 def load_config():
     """Load configuration from config.json with fallback defaults."""
+    import time as _time
+    now = _time.time()
+    if _CONFIG_CACHE["data"] is not None and now - _CONFIG_CACHE["ts"] < _CONFIG_CACHE_TTL:
+        return _CONFIG_CACHE["data"]
+
     if not os.path.exists(CONFIG_PATH):
         save_config(DEFAULT_CONFIG)
-        return dict(DEFAULT_CONFIG)
+        result = dict(DEFAULT_CONFIG)
+        _CONFIG_CACHE["data"] = result
+        _CONFIG_CACHE["ts"] = now
+        return result
 
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -130,6 +144,8 @@ def load_config():
             if env_val:
                 merged[secret] = env_val
 
+        _CONFIG_CACHE["data"] = merged
+        _CONFIG_CACHE["ts"] = now
         return merged
     except Exception as e:
         print(f"[Settings] Error loading config.json: {e}")
@@ -203,6 +219,9 @@ def save_config(new_data):
 
         # Apply system file hiding rules live
         apply_system_file_hiding()
+
+        # Bust the in-process config cache so the next read picks up new values
+        _CONFIG_CACHE["ts"] = 0.0
 
         return True, config
     except Exception as e:

@@ -190,17 +190,40 @@ def pre_flight():
         log(f"System file hiding step skipped: {e}")
 
     if os.path.isfile(PYTHON):
-        try:
-            subprocess.run(
-                [PYTHON, "-m", "pip", "install", "-q", "-r",
-                 os.path.join(ROOT, "requirements.txt")],
-                cwd=ROOT, timeout=600,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                creationflags=0x08000000 if os.name == "nt" else 0,
-            )
-            log("Dependency check complete")
-        except Exception as e:
-            log(f"pip install step failed (continuing): {e}")
+        req_file = os.path.join(ROOT, "requirements.txt")
+        stamp_file = os.path.join(ROOT, "data", "pip_stamp")
+        _run_pip = True
+        if os.path.isfile(req_file):
+            try:
+                import hashlib as _hl
+                with open(req_file, "rb") as _f:
+                    current_hash = _hl.md5(_f.read()).hexdigest()
+                if os.path.isfile(stamp_file):
+                    with open(stamp_file, encoding="utf-8") as _sf:
+                        stored_hash = _sf.read().strip()
+                    if stored_hash == current_hash:
+                        log("requirements.txt unchanged — skipping pip install")
+                        _run_pip = False
+            except Exception as _e:
+                log(f"pip stamp check failed ({_e}) — running pip to be safe")
+        if _run_pip:
+            try:
+                subprocess.run(
+                    [PYTHON, "-m", "pip", "install", "-q", "-r", req_file],
+                    cwd=ROOT, timeout=600,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    creationflags=0x08000000 if os.name == "nt" else 0,
+                )
+                # Write the stamp so subsequent launches can skip this step
+                try:
+                    os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)
+                    with open(stamp_file, "w", encoding="utf-8") as _sf:
+                        _sf.write(current_hash if os.path.isfile(req_file) else "")
+                except Exception:
+                    pass
+                log("Dependency check complete")
+            except Exception as e:
+                log(f"pip install step failed (continuing): {e}")
     else:
         fail(f"Python interpreter not found at:\n{PYTHON}")
 
