@@ -4492,6 +4492,7 @@ const PlayerPage = {
           :srclang="(sub.language || 'en').toLowerCase().slice(0,2)"
           :label="sub.label"
           @load="() => { syncTextTracks(); updateActiveCueText(); }"
+          @error="onSubtitleTrackError(sub)"
         />
       </video>
 
@@ -6217,6 +6218,20 @@ const PlayerPage = {
       });
     }
 
+    // A subtitle track failed to load (404 — e.g. ffmpeg could not convert
+    // the embedded stream). Drop it from the menu so it can't be picked again.
+    function onSubtitleTrackError(sub) {
+      const idx = subtitles.value.indexOf(sub);
+      if (idx === -1) return;
+      subtitles.value.splice(idx, 1);
+      if (selectedSub.value === idx) {
+        selectedSub.value = -1;
+      } else if (selectedSub.value > idx) {
+        selectedSub.value--;
+      }
+      console.warn(`[Player] Subtitle track unavailable, removed: ${sub.label || sub.filename}`);
+    }
+
     function onVideoPlaying() {
       isPlaying.value = true;
       isBuffering.value = false;
@@ -7287,6 +7302,7 @@ const PlayerPage = {
       hoverSeekbar,
       selectSpeed,
       selectSub,
+      onSubtitleTrackError,
       syncTextTracks,
       onVideoPlaying,
       onVideoPause,
@@ -10882,6 +10898,13 @@ const App = {
             <span>Remove from Continue</span>
           </div>
         </template>
+
+        <template v-if="contextMenuState.item.type !== 'series'">
+          <div class="context-menu-item" @click="handleContextMenuMarkWatched">
+            <i class="ph ph-check-circle" style="color:#2ecc71"></i>
+            <span>Mark as Watched</span>
+          </div>
+        </template>
       </div>
 
       <!-- Global Collection Picker Modal -->
@@ -11507,6 +11530,21 @@ const App = {
       });
     }
 
+    async function handleContextMenuMarkWatched() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item || !item.id) return;
+      try {
+        await API.post("/api/progress/mark-watched", { media_id: item.id });
+        addToast(`✅ Marked "${item.title}" as watched`, "success");
+        if (route.path === "/") {
+          location.reload();
+        }
+      } catch (e) {
+        addToast("Failed to mark as watched", "error");
+      }
+    }
+
     async function handleContextKidsOverride(action) {
       const item = contextMenuState.item;
       closeGlobalContextMenu();
@@ -11652,6 +11690,7 @@ const App = {
       handleContextMenuCollection,
       handleContextMenuFixMatch,
       handleContextKidsOverride,
+      handleContextMenuMarkWatched,
       handleContextMenuResetProgress,
       collectionPickerState,
       globalTrailerState,

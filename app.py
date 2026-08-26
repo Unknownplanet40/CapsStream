@@ -22,7 +22,8 @@ from backend.db import (
     init_db, get_all_media, get_media_by_id, get_media_by_tmdb, get_best_media_source, get_media_quality_options,
     search_media, get_unique_shows, get_recently_added, get_top_rated,
     get_by_genre, get_all_genres, get_random_pick,
-    get_all_profiles, get_profile, create_profile, update_profile, delete_profile, verify_pin,
+    get_all_profiles, get_profile, create_profile, update_profile, delete_profile,
+    verify_pin_raw, hash_pin,
     get_progress, save_progress, delete_progress, get_continue_watching,
     get_favorites, toggle_favorite, is_favorite,
     get_collections, create_collection, delete_collection,
@@ -50,7 +51,33 @@ SERVER_START_TIME = time.time()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
-app.secret_key = "capsstream_secret_key_fixed_v1"
+
+
+def _load_or_create_secret_key():
+    """
+    Per-install secret key for session signing, persisted to data/secret_key.
+    A unique key per install beats the old hardcoded value: sessions can't be
+    forged by anyone who read the source, while still surviving restarts.
+    """
+    import secrets as _secrets
+    key_file = os.path.join(BASE_DIR, "data", "secret_key")
+    try:
+        os.makedirs(os.path.dirname(key_file), exist_ok=True)
+        if os.path.isfile(key_file):
+            with open(key_file, encoding="utf-8") as f:
+                key = f.read().strip()
+            if key:
+                return key
+        key = _secrets.token_hex(32)
+        with open(key_file, "w", encoding="utf-8") as f:
+            f.write(key)
+        return key
+    except Exception:
+        # data/ unavailable — fall back to an ephemeral random key
+        return _secrets.token_hex(32)
+
+
+app.secret_key = _load_or_create_secret_key()
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024  # 2GB max upload (backup restore)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
@@ -86,7 +113,36 @@ def load_config():
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _hash_pin(pin):
-    return hashlib.sha256(pin.encode()).hexdigest()
+    """Deprecated alias — use backend.db.hash_pin (salted PBKDF2)."""
+    from backend.db import hash_pin
+    return hash_pin(pin)
+
+
+# ─── PIN Brute-Force Protection ──────────────────────────────────────────────
+
+_PIN_FAILS = {}          # profile_id -> [monotonic timestamps of failures]
+_PIN_MAX_ATTEMPTS = 5
+_PIN_LOCKOUT_SEC = 600   # 10 minutes
+
+
+def _pin_lockout_remaining(profile_id):
+    now = time.monotonic()
+    fails = [t for t in _PIN_FAILS.get(profile_id, []) if now - t < _PIN_LOCKOUT_SEC]
+    _PIN_FAILS[profile_id] = fails
+    if len(fails) >= _PIN_MAX_ATTEMPTS:
+        return int(_PIN_LOCKOUT_SEC - (now - fails[0])) + 1
+    return 0
+
+
+def _record_pin_failure(profile_id):
+    now = time.monotonic()
+    fails = [t for t in _PIN_FAILS.get(profile_id, []) if now - t < _PIN_LOCKOUT_SEC]
+    fails.append(now)
+    _PIN_FAILS[profile_id] = fails
+
+
+def _clear_pin_failures(profile_id):
+    _PIN_FAILS.pop(profile_id, None)
 
 
 def _current_profile():
@@ -361,7 +417,7 @@ def api_create_profile():
     is_kids = bool(data.get("is_kids", False))
     daily_limit_minutes = int(data.get("daily_limit_minutes", 0) or 0)
     bedtime_curfew = str(data.get("bedtime_curfew", "") or "").strip()
-    pin_hash = _hash_pin(pin) if pin else None
+    pin_hash = hash_pin(pin) if pin else None
     pid = create_profile(name, pin_hash, avatar, color, is_kids=is_kids, daily_limit_minutes=daily_limit_minutes, bedtime_curfew=bedtime_curfew, theme=theme)
     if is_kids:
         active_pid = _current_profile()
@@ -396,7 +452,7 @@ def api_update_profile(profile_id):
             pin = str(raw_pin).strip() if raw_pin is not None else ""
             if pin and len(pin) != 4:
                 return jsonify({"error": "PIN must be exactly 4 digits"}), 400
-            pin_hash = _hash_pin(pin) if pin else None
+            pin_hash = hash_pin(pin) if pin else None
         else:
             pin_hash = None
 
@@ -439,11 +495,18 @@ def api_delete_profile(profile_id):
     data = request.json if (request.data and request.is_json) else {}
     raw_pin = data.get("pin") if data else request.args.get("pin")
     pin = str(raw_pin).strip() if raw_pin is not None else ""
-    pin_hash = _hash_pin(pin) if pin else None
 
-    if target.get("pin_hash") and target.get("pin_hash") != "":
-        if not verify_pin(profile_id, pin_hash):
+    if target.get("pin_hash"):
+        remaining = _pin_lockout_remaining(profile_id)
+        if remaining > 0:
+            return jsonify({
+                "error": f"Too many failed attempts — try again in {remaining}s",
+                "retry_after": remaining,
+            }), 429
+        if not verify_pin_raw(profile_id, pin):
+            _record_pin_failure(profile_id)
             return jsonify({"error": "Incorrect PIN"}), 401
+        _clear_pin_failures(profile_id)
 
     delete_profile(profile_id)
     if session.get("profile_id") == profile_id:
@@ -461,13 +524,22 @@ def api_auth_profile():
     if not profile_id:
         return jsonify({"error": "profile_id required"}), 400
 
+    # Brute-force guard: 5 failed attempts locks the profile for 10 minutes
+    remaining = _pin_lockout_remaining(profile_id)
+    if remaining > 0:
+        return jsonify({
+            "error": f"Too many failed attempts — try again in {remaining}s",
+            "retry_after": remaining,
+        }), 429
+
     profile = get_profile(profile_id)
     if not profile:
         return jsonify({"error": "Profile not found"}), 404
 
-    pin_hash = _hash_pin(pin) if pin else ""
-    if not verify_pin(profile_id, pin_hash if pin else None):
+    if not verify_pin_raw(profile_id, pin):
+        _record_pin_failure(profile_id)
         return jsonify({"error": "Incorrect PIN"}), 401
+    _clear_pin_failures(profile_id)
 
     session["profile_id"] = profile_id
     return jsonify({"ok": True, "profile": {
@@ -1586,6 +1658,28 @@ def api_delete_progress(media_id):
     return jsonify({"ok": True})
 
 
+@app.route("/api/progress/mark-watched", methods=["POST"])
+def api_mark_watched():
+    """Mark a title as fully watched without playing it."""
+    pid = _require_profile()
+    data = request.json or {}
+    media_id = data.get("media_id")
+    if not media_id:
+        return jsonify({"error": "media_id required"}), 400
+
+    media = get_media_by_id(int(media_id))
+    if not media:
+        return jsonify({"error": "Not found"}), 404
+
+    guard = _kids_guard_media(media, deep=True)
+    if guard:
+        return guard
+
+    duration = int(media.get("duration") or 0)
+    save_progress(pid, media.get("id"), duration, duration, True)
+    return jsonify({"ok": True, "completed": True})
+
+
 # ─── Favorites ────────────────────────────────────────────────────────────────
 
 @app.route("/api/favorites", methods=["GET"])
@@ -1801,6 +1895,73 @@ def api_system_backup():
             os.remove(zip_path)
         except Exception:
             pass
+
+
+# ─── Automatic Backups ────────────────────────────────────────────────────────
+
+AUTO_BACKUP_DIR = os.path.join(BASE_DIR, "data", "backups")
+AUTO_BACKUP_KEEP = 4  # newest zips to retain
+
+
+def _create_auto_backup():
+    """Create a config + database zip in data/backups (WAL-checkpointed)."""
+    import zipfile
+    from backend.settings import CONFIG_PATH
+    from backend.db import get_conn
+
+    db_path = os.path.join(BASE_DIR, "data", "capsstream.db")
+    if not os.path.isfile(db_path):
+        return None
+
+    # Checkpoint the WAL so the copied file contains every committed write
+    try:
+        conn = get_conn()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.close()
+    except Exception:
+        pass
+
+    os.makedirs(AUTO_BACKUP_DIR, exist_ok=True)
+    name = f"autobackup-{time.strftime('%Y%m%d-%H%M')}.zip"
+    path = os.path.join(AUTO_BACKUP_DIR, name)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        if os.path.isfile(CONFIG_PATH):
+            zf.write(CONFIG_PATH, "config.json")
+        zf.write(db_path, "data/capsstream.db")
+
+    # Rotate — keep only the newest AUTO_BACKUP_KEEP archives
+    backups = sorted(
+        f for f in os.listdir(AUTO_BACKUP_DIR)
+        if f.startswith("autobackup-") and f.endswith(".zip")
+    )
+    for old in backups[:-AUTO_BACKUP_KEEP]:
+        try:
+            os.remove(os.path.join(AUTO_BACKUP_DIR, old))
+        except OSError:
+            pass
+    return path
+
+
+def _auto_backup_loop():
+    cfg = load_config()
+    backup_cfg = cfg.get("backup") or {}
+    if backup_cfg.get("auto_backup") is False:
+        print("[Backup] Auto-backup disabled in settings")
+        return
+    interval_hours = int(backup_cfg.get("backup_interval_hours", 168) or 168)
+
+    while True:
+        try:
+            path = _create_auto_backup()
+            if path:
+                print(f"[Backup] Auto-backup created: {os.path.basename(path)}")
+        except Exception as e:
+            print(f"[Backup] Auto-backup failed: {e}")
+        time.sleep(interval_hours * 3600)
+
+
+def start_auto_backups():
+    threading.Thread(target=_auto_backup_loop, daemon=True, name="auto-backup").start()
 
 
 @app.route("/api/system/restore", methods=["POST"])
@@ -2538,6 +2699,9 @@ if __name__ == "__main__":
     # Background pass: fill missing TMDb certifications so Kids Mode bulk-list
     # filtering uses real ratings. Delayed 90s to avoid competing with launch.
     threading.Timer(90, start_background_enrichment).start()
+
+    # Weekly automatic config + database backups (data/backups, keep 4)
+    start_auto_backups()
 
     # Load config and apply system file hiding
     cfg = load_config()

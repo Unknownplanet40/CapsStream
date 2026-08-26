@@ -2,6 +2,8 @@
 db.py — SQLite database schema, initialization, and query helpers for CapsStream.
 """
 
+import hashlib
+import hmac
 import sqlite3
 import os
 import shutil
@@ -924,6 +926,67 @@ def verify_pin(profile_id, pin_hash):
     if not stored:
         return True  # No PIN set (NULL or legacy empty string)
     return stored == pin_hash
+
+
+# ─── PIN Hashing (salted PBKDF2 with transparent legacy upgrade) ─────────────
+
+_PBKDF2_ITERATIONS = 120_000
+
+
+def hash_pin(pin):
+    """
+    Salted PBKDF2-SHA256 PIN hash, stored as:
+      'pbkdf2$<iterations>$<salt_hex>$<hash_hex>'
+    A unique per-profile salt defeats rainbow tables (plain SHA-256 did not).
+    """
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt, _PBKDF2_ITERATIONS)
+    return f"pbkdf2${_PBKDF2_ITERATIONS}${salt.hex()}${digest.hex()}"
+
+
+def verify_pin_raw(profile_id, raw_pin):
+    """
+    Verify a raw PIN string against the stored profile hash.
+      - no PIN stored        → True  (open profile, any/no PIN accepted)
+      - legacy plain SHA-256 → compare directly, auto-upgrade to salted on match
+      - pbkdf2$ format       → constant-time compare
+    """
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT pin_hash FROM profiles WHERE id=?", (profile_id,)
+        ).fetchone()
+        stored = row["pin_hash"] if row else None
+
+        if not stored:
+            return True
+
+        raw = str(raw_pin or "").strip()
+        if not raw:
+            return False  # PIN required but none supplied
+
+        if stored.startswith("pbkdf2$"):
+            try:
+                _, iters, salt_hex, hash_hex = stored.split("$")
+                digest = hashlib.pbkdf2_hmac(
+                    "sha256", raw.encode(), bytes.fromhex(salt_hex), int(iters)
+                )
+                return hmac.compare_digest(digest.hex(), hash_hex)
+            except Exception:
+                return False
+
+        # Legacy unsalted SHA-256 — verify, then transparently upgrade
+        legacy = hashlib.sha256(raw.encode()).hexdigest()
+        if hmac.compare_digest(legacy, stored):
+            conn.execute(
+                "UPDATE profiles SET pin_hash=? WHERE id=?",
+                (hash_pin(raw), profile_id),
+            )
+            conn.commit()
+            return True
+        return False
+    finally:
+        conn.close()
 
 
 # ─── Kids Mode Parental Overrides ─────────────────────────────────────────────
