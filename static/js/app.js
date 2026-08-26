@@ -5226,7 +5226,10 @@ const PlayerPage = {
           {{ playerError }}
         </div>
         <div style="display:flex;gap:12px;justify-content:center">
-          <button class="btn btn-primary" @click="playerError = null; if (videoRef) videoRef.play().catch(()=>{})">Resume Playback</button>
+          <button class="btn btn-primary" @click="recoverFromError" :disabled="recovering">
+            <i :class="recovering ? 'ph ph-circle-notch' : 'ph ph-arrow-counter-clockwise'" :style="recovering ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+            {{ recovering ? 'Recovering…' : 'Resume Playback' }}
+          </button>
           <button class="btn btn-secondary" @click="goBack">Go Back</button>
         </div>
       </div>
@@ -6989,7 +6992,67 @@ const PlayerPage = {
         const isHeavy4k = p.includes("2160") || p.includes("4k") || p.includes("uhd");
         playerError.value = isHeavy4k
           ? "Playback failed — 4K/HEVC content needs hardware acceleration or a compatible browser (Edge recommended). Try another quality source or enable HW acceleration."
-          : "Your browser cannot play this video codec natively (e.g. AC-3 audio or HEVC in MKV). Try another file format or Edge browser.";
+          : "The stream was interrupted (connection dropped or the server stopped sending data). Use Resume Playback to reconnect from where you left off.";
+      }
+    }
+
+    // ─── Error recovery: reload the stream and resume from last position ──
+    // video.play() alone can never revive a dead/stalled stream — the source
+    // must be refetched. This reloads /api/stream/<id> fresh, seeks back to
+    // the last playback position, and resumes.
+    const recovering = ref(false);
+
+    async function recoverFromError() {
+      const v = videoRef.value;
+      if (!v) return;
+      recovering.value = true;
+      try {
+        const resumeAt = isFinite(v.currentTime) ? v.currentTime : 0;
+        const src = v.currentSrc || v.src || "";
+        if (!src) { recovering.value = false; return; }
+
+        // Cache-bust so the browser issues a real network request instead of
+        // replaying its buffered (dead) response
+        const bustUrl = src + (src.includes("?") ? "&" : "?") + "recover=" + Date.now();
+        playerError.value = null;
+
+        await new Promise((resolve) => {
+          let done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            v.removeEventListener("loadedmetadata", onReady);
+            v.removeEventListener("error", onFail);
+            clearTimeout(timeout);
+            resolve();
+          };
+          const onReady = () => {
+            try {
+              if (resumeAt > 1 && v.duration && resumeAt < v.duration - 2) {
+                v.currentTime = resumeAt;
+              }
+            } catch (e) {}
+            finish();
+          };
+          const onFail = () => {
+            playerError.value = "Could not reconnect to the stream. The server may be stopped — go back and relaunch it.";
+            finish();
+          };
+          const timeout = setTimeout(() => {
+            playerError.value = "Reconnecting timed out — the server may not be responding.";
+            finish();
+          }, 15000);
+          v.addEventListener("loadedmetadata", onReady);
+          v.addEventListener("error", onFail);
+          v.src = bustUrl;
+          v.load();
+        });
+
+        await v.play().catch(() => {});
+      } catch (e) {
+        console.warn("[Player] Recovery failed:", e);
+      } finally {
+        recovering.value = false;
       }
     }
 
@@ -7034,7 +7097,7 @@ const PlayerPage = {
                       (codecInfo.value?.tags || []).some((t) => t.includes("HEVC"));
         playerError.value = heavy
           ? "Decoder appears stuck — this 4K/HEVC stream exceeds what this device can handle. Enable hardware acceleration, use Edge, or pick a lower-quality source."
-          : "Playback appears stuck. Press Play again or reload the stream.";
+          : "Playback appears stuck. Use Resume Playback to reload the stream from where you left off.";
       }
     }
 
@@ -7480,6 +7543,7 @@ const PlayerPage = {
       onLoadedMetadata,
       onEnded,
       onVideoError,
+      recoverFromError,
       subStyle,
       updateSubStyle,
       subOffsetMs,
