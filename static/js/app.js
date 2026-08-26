@@ -2474,6 +2474,24 @@ const SettingsPage = {
               {{ updateState.message || 'Check for updates to see if a new version is available.' }}
             </div>
 
+            <!-- Live update progress -->
+            <div v-if="updateInstalling && updateProgress && updateProgress.stage === 'downloading' && updateProgress.total" style="margin-top:10px">
+              <div style="height:6px;border-radius:3px;background:var(--bg-secondary);overflow:hidden">
+                <div style="height:100%;background:var(--accent);transition:width .4s" :style="{ width: Math.round(100 * (updateProgress.bytes_done || 0) / (updateProgress.total || 1)) + '%' }"></div>
+              </div>
+              <div style="font-size:.8rem;color:var(--text-secondary);margin-top:4px">
+                Downloading… {{ Math.round((updateProgress.bytes_done || 0) / 1048576 * 10) / 10 }} / {{ Math.round((updateProgress.total || 0) / 1048576 * 10) / 10 }} MB
+              </div>
+            </div>
+            <div v-else-if="updateInstalling && updateProgress && ['verifying','extracting','validating','installing'].includes(updateProgress.stage)" style="font-size:.85rem;color:var(--text-secondary);margin-top:8px">
+              <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:6px"></i>{{ updateProgress.message || (updateProgress.stage[0].toUpperCase() + updateProgress.stage.slice(1)) + '…' }}
+            </div>
+
+            <!-- One-click restart for backend updates -->
+            <div v-if="restartPending" style="margin-top:10px;padding:10px 14px;border-radius:12px;background:rgba(253,203,110,.12);border:1px solid rgba(253,203,110,.35);color:#fdcb6e;font-size:.87rem">
+              <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:6px"></i>Restarting — the server will come back online in a few seconds…
+            </div>
+
             <div
               v-if="updateState.changelog"
               class="changelog-box"
@@ -2494,6 +2512,15 @@ const SettingsPage = {
               >
                 <i :class="updateInstalling ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="updateInstalling ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
                 {{ updateInstalling ? 'Installing...' : 'Install Update' }}
+              </button>
+              <button
+                v-if="updateState.status === 'up_to_date' && !restartPending && !updateInstalling && /restart CapsStream/i.test(updateState.message)"
+                class="btn btn-primary"
+                @click="restartAfterUpdate"
+                id="btn-restart-update"
+              >
+                <i class="ph ph-arrow-clockwise" style="margin-right:6px"></i>
+                Restart &amp; Finish Update
               </button>
             </div>
           </div>
@@ -3701,7 +3728,8 @@ const SettingsPage = {
       message: "",
     });
     const updateChecking = ref(false);
-    const updateInstalling = ref(false);
+      const updateInstalling = ref(false);
+      const restartPending = ref(false);
 
     async function loadSystemInfo() {
       try {
@@ -3779,8 +3807,50 @@ const SettingsPage = {
       }
     }
 
+    const updateProgress = ref(null);
+    let progressTimer = null;
+
+    function pollUpdateProgress() {
+      if (progressTimer) clearInterval(progressTimer);
+      progressTimer = setInterval(async () => {
+        try {
+          const p = await API.get("/api/system/update-progress");
+          updateProgress.value = p;
+          const stage = p.stage || "idle";
+          if (!updateInstalling.value && !restartPending.value) {
+            // Update finished or failed elsewhere — stop polling
+            if (stage === "idle" || stage === "done" || stage === "failed") {
+              clearInterval(progressTimer);
+              progressTimer = null;
+            }
+          }
+        } catch (e) {}
+      }, 1000);
+    }
+
+    async function restartAfterUpdate() {
+      restartPending.value = true;
+      try {
+        await API.post("/api/system/restart-after-update", {});
+        updateState.value = { ...updateState.value, message: "Restarting — the server will come back in a few seconds…" };
+        // Poll until the server comes back, then hard-reload
+        const check = setInterval(async () => {
+          try {
+            await fetch("/api/system/info", { cache: "no-store" });
+            clearInterval(check);
+            location.href = location.origin + location.pathname + "?v=" + Date.now();
+          } catch (e) {}
+        }, 1500);
+      } catch (e) {
+        addToast(e.message || "Restart failed", "error");
+        restartPending.value = false;
+      }
+    }
+
     async function installUpdate() {
       updateInstalling.value = true;
+      updateProgress.value = null;
+      pollUpdateProgress();
       try {
         const r = await API.post("/api/system/apply-update", {});
         if (r.success && r.ui_only) {
@@ -3789,6 +3859,8 @@ const SettingsPage = {
             // Hard, cache-busting reload so the new UI appears immediately
             location.href = location.origin + location.pathname + "?v=" + Date.now();
           }, 900);
+        } else if (r.success && r.restart_required) {
+          updateState.value = { ...updateState.value, status: "up_to_date", message: r.message };
         } else if (r.success) {
           updateState.value = { ...updateState.value, status: "up_to_date", message: r.message };
         } else {
@@ -3798,6 +3870,9 @@ const SettingsPage = {
         addToast(e.message || "Install failed", "error");
       } finally {
         updateInstalling.value = false;
+        setTimeout(() => {
+          if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+        }, 5000);
       }
     }
 
@@ -4316,6 +4391,9 @@ const SettingsPage = {
       updateState,
       updateChecking,
       updateInstalling,
+      restartPending,
+      updateProgress,
+      restartAfterUpdate,
       changelogHtml,
       checkUpdates,
       installUpdate,

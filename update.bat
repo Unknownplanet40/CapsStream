@@ -22,6 +22,9 @@ if not exist "%PYTHON%" (
     exit /b 1
 )
 
+echo  Applying any pending update files...
+"%PYTHON%" -c "from backend.updater import apply_pending_swaps; apply_pending_swaps()"
+
 echo  Checking for updates...
 "%PYTHON%" -c "import json; from backend.updater import check_for_update; print(json.dumps(check_for_update(), indent=2))"
 

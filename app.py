@@ -1304,7 +1304,7 @@ def api_apply_update():
     from backend.updater import apply_update
     data = request.json or {}
     try:
-        result = apply_update(data.get("download_url"))
+        result = apply_update(data.get("download_url"), force=bool(data.get("force")))
         return jsonify(result)
     except Exception as e:
         return jsonify({
@@ -1313,6 +1313,102 @@ def api_apply_update():
             "restart_required": False,
             "ui_only": False,
         }), 500
+
+
+@app.route("/api/system/update-progress", methods=["GET"])
+def api_update_progress():
+    """Live progress of a running update (download %, extracting, installing...)."""
+    from backend.updater import get_update_progress
+    return jsonify(get_update_progress())
+
+
+# ─── Restart After Update ─────────────────────────────────────────────────────
+
+def _graceful_shutdown():
+    """Shared shutdown flow: stop HTTP server, grace period, flush SQLite, exit."""
+    def _shutdown():
+        import time as _t
+        # Stop accepting new connections first
+        try:
+            func = request.environ.get("werkzeug.server.shutdown")
+            if func:
+                func()
+        except Exception:
+            pass
+        # Grace period: let in-flight requests and daemon workers finish
+        _t.sleep(1.0)
+        # Flush SQLite WAL so all committed data is written into the main db file
+        try:
+            from backend.db import get_conn
+            conn = get_conn()
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                conn.close()
+        except Exception as e:
+            print(f"[Shutdown] SQLite checkpoint failed: {e}")
+        # Hard-exit. sys.exit() cannot be used here: raised inside a daemon
+        # thread it only terminates that thread, leaving the server alive.
+        os._exit(0)
+
+    threading.Thread(target=_shutdown, daemon=True).start()
+
+
+@app.route("/api/system/shutdown", methods=["POST"])
+def api_system_shutdown():
+    """Gracefully stop the Flask server, flush databases, then exit."""
+    _graceful_shutdown()
+    return jsonify({"ok": True, "message": "Server shutting down cleanly"})
+
+
+@app.route("/api/system/restart-after-update", methods=["POST"])
+def api_restart_after_update():
+    """
+    One-click finish for restart-required updates: spawns a detached helper
+    that waits for this process to exit, applies any pending locked-file
+    swaps, then relaunches the server — and shuts the current server down.
+    """
+    pid = os.getpid()
+    helper = os.path.join(BASE_DIR, "_finish_update.bat")
+    python_dir = os.path.join(BASE_DIR, "winpython", "python")
+    python_exe = os.path.join(python_dir, "python.exe")
+
+    script = f"""@echo off
+rem CapsStream one-click update finisher — waits for PID {pid} to exit,
+rem applies pending file swaps, then relaunches the server.
+setlocal
+set "ROOT={BASE_DIR}"
+:waitloop
+tasklist /FI \"PID eq {pid}\" 2>nul | find /I \"{pid}\" >nul
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto waitloop
+)
+cd /d \"%ROOT%\"
+if exist \"{python_exe}\" (
+    \"{python_exe}\" -c \"from backend.updater import apply_pending_swaps; apply_pending_swaps()\" >nul 2>&1
+)
+start \"\" /D \"%ROOT%\" \"{python_exe}\" \"%ROOT%app.py\"
+endlocal
+"""
+    try:
+        with open(helper, "w", encoding="utf-8") as f:
+            f.write(script)
+        flags = 0
+        if hasattr(subprocess, "DETACHED_PROCESS"):
+            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(
+            ["cmd", "/c", helper],
+            cwd=BASE_DIR,
+            creationflags=flags,
+            close_fds=True,
+        )
+        print(f"[Updater] Restart helper spawned ({helper})")
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Could not spawn restart helper: {e}"}), 500
+
+    _graceful_shutdown()
+    return jsonify({"ok": True, "message": "Restarting to finish the update"})
 
 
 # ─── Live Server Logs ─────────────────────────────────────────────────────────
@@ -1810,38 +1906,6 @@ def api_scan():
 @app.route("/api/scan/status", methods=["GET"])
 def api_scan_status():
     return jsonify(get_scan_status())
-
-
-@app.route("/api/system/shutdown", methods=["POST"])
-def api_system_shutdown():
-    """Gracefully stop the Flask server, flush databases, then exit."""
-    def _shutdown():
-        import time as _t
-        # Stop accepting new connections first
-        try:
-            func = request.environ.get("werkzeug.server.shutdown")
-            if func:
-                func()
-        except Exception:
-            pass
-        # Grace period: let in-flight requests and daemon workers finish
-        _t.sleep(1.0)
-        # Flush SQLite WAL so all committed data is written into the main db file
-        try:
-            from backend.db import get_conn
-            conn = get_conn()
-            try:
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            finally:
-                conn.close()
-        except Exception as e:
-            print(f"[Shutdown] SQLite checkpoint failed: {e}")
-        # Hard-exit. sys.exit() cannot be used here: raised inside a daemon
-        # thread it only terminates that thread, leaving the server alive.
-        os._exit(0)
-
-    threading.Thread(target=_shutdown, daemon=True).start()
-    return jsonify({"ok": True, "message": "Server shutting down cleanly"})
 
 
 @app.route("/offline-page")

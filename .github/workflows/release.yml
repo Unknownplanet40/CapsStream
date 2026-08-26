@@ -47,6 +47,16 @@ jobs:
             static \
             templates \
             -x "*__pycache__*" "*.pyc" "*.pyo"
+
+          # Gate: refuse to publish an incomplete package
+          for f in app.py VERSION backend static/js/app.js static/css/main.css templates/index.html; do
+            if ! unzip -l "$ZIP" | grep -q "$f"; then
+              echo "::error::Update zip is missing critical file: $f"
+              exit 1
+            fi
+          done
+
+          sha256sum "$ZIP" > sha256sums.txt
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
           unzip -l "$ZIP"
 
@@ -88,9 +98,29 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          gh release create "${GITHUB_REF_NAME}" "$ZIP" \
+          gh release create "${GITHUB_REF_NAME}" "$ZIP" sha256sums.txt \
             --title "CapsStream ${GITHUB_REF_NAME}" \
             --notes "$(cat changelog.txt | sed 's/^/- /' | sed "s/^/ /")"
+
+      - name: Wait until the release asset is actually downloadable
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/CapsStream-update-${TAG}.zip"
+          CODE="000"
+          for i in $(seq 1 24); do
+            CODE=$(curl -sIL -o /dev/null -w '%{http_code}' "$URL")
+            if [ "$CODE" = "200" ] || [ "$CODE" = "302" ]; then
+              echo "Asset is downloadable (HTTP $CODE) after attempt $i"
+              break
+            fi
+            echo "Attempt $i: HTTP $CODE — waiting…"
+            sleep 5
+          done
+          if [ "$CODE" != "200" ] && [ "$CODE" != "302" ]; then
+            echo "::error::Release asset never became downloadable — NOT updating version.json so clients keep the previous working release."
+            exit 1
+          fi
 
       - name: Update version.json in the repository
         shell: bash
