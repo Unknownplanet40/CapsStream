@@ -6052,6 +6052,22 @@ body.kids-mode-theme .card-badge {
   border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
+/* Kids Mode active banner */
+.kids-mode-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: calc(var(--nav-height) + 8px) 2rem 0 2rem;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgba(253, 203, 110, 0.12);
+  border: 1px solid rgba(253, 203, 110, 0.35);
+  color: #fdcb6e;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.kids-mode-banner i { font-size: 1.05rem; }
+
 /* Category Bubbles Container */
 .kids-category-bubbles {
   display: flex;

@@ -37,6 +37,7 @@ from backend.franchises import get_universe_collections
 from backend.network_inspector import (
     init_network_inspector, get_recorded_requests, clear_recorded_requests
 )
+from backend.kids_filter import is_kid_safe, filter_kids
 
 # Initialize outgoing HTTP interceptor
 init_network_inspector()
@@ -97,6 +98,33 @@ def _require_profile():
     if not pid:
         abort(401, description="No profile selected")
     return pid
+
+
+def _active_is_kids():
+    """True when the active session profile is a Kids profile."""
+    pid = _current_profile()
+    if not pid:
+        return False
+    try:
+        prof = get_profile(pid)
+        return bool(prof and prof.get("is_kids"))
+    except Exception:
+        return False
+
+
+def _kids_guard_media(media, deep=True):
+    """
+    Hard gate for single-item endpoints (detail page / playback).
+    Returns an error response when a Kids profile requests non-kid-safe
+    media; None when the request may proceed.
+    """
+    if not _active_is_kids() or not media:
+        return None
+    safe, reason = is_kid_safe(media, deep=deep)
+    if not safe:
+        print(f"[KidsFilter] denied '{media.get('title')}' (tmdb {media.get('tmdb_id')}) — {reason}")
+        return jsonify({"error": "Not available in Kids Mode", "reason": "kid_unsafe"}), 404
+    return None
 
 
 def _jsonify_rows(rows):
@@ -521,6 +549,7 @@ def api_system_reset():
 @app.route("/api/home", methods=["GET"])
 def api_home():
     pid = _current_profile()
+    kids = _active_is_kids()
     rows = []
 
     # Continue Watching (profile-specific)
@@ -574,13 +603,24 @@ def api_home():
         if items:
             rows.append({"title": genre, "type": "row", "items": items})
 
+    if kids:
+        filtered_rows = []
+        for row in rows:
+            items = filter_kids(row.get("items"))
+            if items:
+                filtered_rows.append({**row, "items": items})
+        rows = filtered_rows
+
     return jsonify(rows)
 
 
 @app.route("/api/library", methods=["GET"])
 def api_library():
     media_type = request.args.get("type")
-    return _jsonify_rows(get_unique_shows(media_type if media_type else None))
+    rows = get_unique_shows(media_type if media_type else None)
+    if _active_is_kids():
+        rows = filter_kids(rows)
+    return _jsonify_rows(rows)
 
 
 # ─── Anime Detection (Series → Anime reclassification) ────────────────────────
@@ -672,6 +712,10 @@ def api_media_detail(media_id):
     media = get_best_media_source(media_id)
     if not media:
         return jsonify({"error": "Not found"}), 404
+
+    guard = _kids_guard_media(media, deep=True)
+    if guard:
+        return guard
 
     if not media.get("logo_path"):
         from backend.matcher import ensure_media_logo
@@ -1012,6 +1056,8 @@ def api_search():
 
     from backend.db import search_media
     results = search_media(query=q, media_type=media_type, genre=genre, sort_by=sort_by)
+    if _active_is_kids():
+        results = filter_kids(results)
     return jsonify(results)
 
 
@@ -1058,6 +1104,10 @@ def api_stream(media_id):
     media = get_best_media_source(media_id)
     if not media:
         abort(404)
+
+    guard = _kids_guard_media(media, deep=True)
+    if guard:
+        return guard
 
     # Audio-only mode: the player keeps video native (muted) and streams just
     # the chosen track to a synced <audio> element.
@@ -1241,6 +1291,11 @@ def api_stream_start(media_id):
     media = get_best_media_source(media_id)
     if not media:
         abort(404)
+
+    guard = _kids_guard_media(media, deep=True)
+    if guard:
+        return guard
+
     start_time = request.args.get("start", type=float, default=0.0)
     from backend.streamer import find_keyframe_before
     aligned = find_keyframe_before(media["file_path"], start_time)
@@ -1468,7 +1523,10 @@ def api_delete_progress(media_id):
 @app.route("/api/favorites", methods=["GET"])
 def api_get_favorites():
     pid = _require_profile()
-    return _jsonify_rows(get_favorites(pid))
+    favs = get_favorites(pid)
+    if _active_is_kids():
+        favs = filter_kids(favs)
+    return _jsonify_rows(favs)
 
 
 @app.route("/api/favorites/toggle", methods=["POST"])
@@ -1491,6 +1549,9 @@ def api_get_collections():
     pid = _require_profile()
     result = get_collections(pid)
     all_media = get_unique_shows(None)
+    kids = _active_is_kids()
+    if kids:
+        all_media = filter_kids(all_media)
 
     # ─── Smart collections (computed live, read-only) ───
     def _smart(cid, name, desc, items):
@@ -1513,6 +1574,14 @@ def api_get_collections():
     # ─── Cinematic Universe & Franchise Collections (2+ matching titles) ───
     universe_collections = get_universe_collections(all_media, min_count=2)
     result.extend(universe_collections)
+
+    if kids:
+        filtered = []
+        for col in result:
+            items = filter_kids(col.get("items"))
+            if items:
+                filtered.append({**col, "items": items})
+        result = filtered
 
     return jsonify(result)
 

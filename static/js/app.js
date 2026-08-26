@@ -572,33 +572,81 @@ function triggerAchievementUnlock(ach) {
 }
 
 // ─── Kids Mode Content Filter ─────────────────────────────────
+// Secondary safety layer — the backend (backend/kids_filter.py) is the
+// primary enforcement point and filters every media endpoint server-side.
 
 const KIDS_SAFE_GENRES = [
-  "animation", "family", "adventure", "comedy", "fantasy", 
-  "science fiction", "sci-fi", "music", "documentary", "kids"
+  "animation", "family", "kids", "children"
 ];
 
 const KIDS_BLOCKED_GENRES = [
-  "horror", "thriller", "crime", "war", "romance", "mystery", "action"
+  "horror", "thriller", "crime", "war", "romance", "mystery"
 ];
+
+// Action/Drama only tolerated alongside a core safe genre
+const KIDS_SOFT_GENRES = ["action", "drama"];
+const KIDS_NEUTRAL_GENRES = [
+  "adventure", "comedy", "fantasy", "music", "musical", "science fiction",
+  "sci-fi", "sport", "sports", "history", "western"
+];
+
+const KID_SAFE_RATINGS = ["g", "pg", "tv-y", "tv-y7", "tv-g", "tv-pg"];
+const KID_BLOCKED_RATINGS = ["pg-13", "tv-14", "r", "nc-17", "tv-ma", "nr", "unrated"];
+
+const KID_KEYWORD_BLOCKLIST = [
+  /\bsex\b/i, /\bsexual\w*/i, /\bsexuality\b/i, /\bsexy\b/i,
+  /\bporn\w*/i, /\berotic\w*/i, /\bnude\b/i, /\bnudity\b/i, /\bnaked\b/i,
+  /\bintercourse\b/i, /\bfornicat\w*/i, /\bprostitut\w*/i,
+  /\bpuberty\b/i, /\bcontracept\w*/i, /\babortion\w*/i,
+  /\bmasturbat\w*/i, /\borgasm\w*/i, /\bfetish\w*/i, /\bbdsm\b/i,
+  /\bkink\w*/i, /\bsensual\w*/i, /\bkamasutra\b/i,
+  /\bqueer sex\b/i, /\bsex\s*ed(?:ucation)?\b/i, /\bbirds\s+and\s+bees\b/i,
+  /\bhuman\s+reproduction\b/i, /\breproductive\s+(?:system|organs|health)\b/i,
+  /\bhentai\b/i, /\becchi\b/i, /\byaoi\b/i, /\byuri\b/i,
+  /\bstriptease\b/i, /\bstripper\b/i, /\bthreesome\b/i, /\borgy\b/i
+];
+
+const KID_DOC_SAFE_RE = /\b(animal\w*|wildlife|nature|ocean\w*|sea |underwater|shark|whale|dolphin|dinosaur\w*|space|planet\w*|solar system|universe|weather|volcano\w*|jungle|rainforest|penguin\w*|polar bear\w*|lion\w*|elephant\w*|insect\w*|bug\b|bugs\b|reptile\w*|bird\w*|forest\w*|farm\b|science|experiment\w*|robot\w*)\b/i;
+
+function _kidsGenreSet(item) {
+  const set = new Set(
+    (item.genres || "").split(",").map(g => g.trim().toLowerCase()).filter(Boolean)
+  );
+  if (item.type === "anime") set.add("animation");
+  return set;
+}
 
 function isKidSafeItem(item) {
   if (!item) return false;
-  const genres = (item.genres || "").toLowerCase();
-  const isAnimatedOrFamily = genres.includes("animation") || genres.includes("family") || item.type === "anime";
-  
-  // Block strictly mature genres (Action allowed ONLY if animated or family)
-  const hasBlockedGenre = KIDS_BLOCKED_GENRES.some(g => {
-    if (g === "action") {
-      return genres.includes("action") && !isAnimatedOrFamily;
-    }
-    return genres.includes(g);
-  });
-  if (hasBlockedGenre) return false;
+  const genres = _kidsGenreSet(item);
+  const hasCoreSafe = KIDS_SAFE_GENRES.some((g) => genres.has(g));
+  const hardBlocked = [...genres].filter((g) => KIDS_BLOCKED_GENRES.includes(g));
+  const softBlocked = [...genres].filter((g) => KIDS_SOFT_GENRES.includes(g));
+  const known = new Set([...KIDS_SAFE_GENRES, ...KIDS_BLOCKED_GENRES, ...KIDS_SOFT_GENRES, ...KIDS_NEUTRAL_GENRES]);
+  const unknown = [...genres].filter((g) => !known.has(g));
 
-  // Must match at least one safe genre keyword or be anime/animation
-  const hasSafeGenre = KIDS_SAFE_GENRES.some(g => genres.includes(g)) || isAnimatedOrFamily;
-  if (genres && !hasSafeGenre) return false;
+  if (hardBlocked.length) return false;
+  if (softBlocked.length && !hasCoreSafe) return false;
+  if (!hasCoreSafe) return false;
+
+  // Documentary-only titles must be clearly child-friendly nature/science
+  if (genres.size === 1 && genres.has("documentary")) {
+    const text = `${item.title || ""} ${item.overview || ""} ${item.tagline || ""}`;
+    if (!KID_DOC_SAFE_RE.test(text)) return false;
+  }
+
+  // Keyword denylist over title/tagline/overview
+  const text = `${item.title || ""} ${item.original_title || ""} ${item.ep_title || ""} ${item.tagline || ""} ${item.overview || ""}`;
+  if (KID_KEYWORD_BLOCKLIST.some((rx) => rx.test(text))) return false;
+
+  // Rating gate when certification data exists
+  const cert = (item.certification || "").trim().toLowerCase();
+  if (cert) {
+    if (!KID_SAFE_RATINGS.includes(cert)) return false;
+  } else if (softBlocked.length || unknown.length) {
+    // Missing rating: require pure kid-core genres
+    return false;
+  }
 
   return true;
 }
@@ -1140,6 +1188,12 @@ const HomePage = {
         @detail="handleDetail"
         @trailer="handleTrailer"
       />
+
+      <!-- Kids Mode active indicator -->
+      <div v-if="store.profile?.is_kids" class="kids-mode-banner" id="kids-mode-banner">
+        <i class="ph ph-shield-check"></i>
+        <span>🧒 Kids Mode is on — only kid-friendly titles are shown</span>
+      </div>
 
       <!-- Kids Category Bubbles Tray -->
       <div v-if="store.profile?.is_kids && !loading && kidsItemCount > 0" class="kids-category-bubbles">

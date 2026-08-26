@@ -158,6 +158,9 @@ def init_db():
         if "imdb_id" not in cols:
             conn.execute("ALTER TABLE media ADD COLUMN imdb_id TEXT")
             print("[DB] Migrated: added imdb_id column to media")
+        if "certification" not in cols:
+            conn.execute("ALTER TABLE media ADD COLUMN certification TEXT")
+            print("[DB] Migrated: added certification column to media")
         
         for sc in ["recap_start", "recap_end", "intro_start", "intro_end", "outro_start", "outro_end", "preview_start", "preview_end"]:
             if sc not in cols:
@@ -908,9 +911,10 @@ def verify_pin(profile_id, pin_hash):
     conn.close()
     if not row:
         return False
-    if row["pin_hash"] is None:
-        return True  # No PIN set
-    return row["pin_hash"] == pin_hash
+    stored = row["pin_hash"]
+    if not stored:
+        return True  # No PIN set (NULL or legacy empty string)
+    return stored == pin_hash
 
 
 # ─── Watch Progress Queries ───────────────────────────────────────────────────
