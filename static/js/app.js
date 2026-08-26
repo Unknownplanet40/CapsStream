@@ -4141,6 +4141,8 @@ const SettingsPage = {
     }
 
     async function executeShutdown() {
+      // Re-entry guard: a second click must not reset the close state
+      if (isShuttingDown.value) return;
       showShutdownModal.value = false;
       isShuttingDown.value = true;
       shutdownCountdown.value = 2;
@@ -4152,10 +4154,15 @@ const SettingsPage = {
 
       // Prefetch the offline page while the server is still reachable — it is
       // rendered as the final screen if the browser blocks window.close()
-      try {
-        const res = await fetch("/static/offline.html", { cache: "no-store" });
-        if (res.ok) _offlinePageHtml = await res.text();
-      } catch (e) {}
+      for (const url of ["/offline-page", "/static/offline.html"]) {
+        try {
+          const res = await fetch(url, { cache: "no-store" });
+          if (res.ok) {
+            _offlinePageHtml = await res.text();
+            break;
+          }
+        } catch (e) {}
+      }
 
       try {
         await API.post("/api/system/shutdown");
@@ -4174,6 +4181,7 @@ const SettingsPage = {
     }
 
     let _offlinePageHtml = null;
+    let _pageReplaced = false;
 
     function _tryWindowClose() {
       let closed = false;
@@ -4195,6 +4203,8 @@ const SettingsPage = {
     function _blankOutPage() {
       // Browser refused window.close() — replace the document with the
       // prefetched offline page (auto-reloads when the server returns).
+      if (_pageReplaced) return;
+      _pageReplaced = true;
       try {
         if (_offlinePageHtml) {
           document.open();

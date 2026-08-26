@@ -15,7 +15,7 @@ import threading
 import subprocess
 from flask import (
     Flask, jsonify, request, send_file,
-    render_template, session, abort, Response
+    send_from_directory, render_template, session, abort, Response
 )
 
 from backend.db import (
@@ -1609,6 +1609,12 @@ def api_system_shutdown():
 
     threading.Thread(target=_shutdown, daemon=True).start()
     return jsonify({"ok": True, "message": "Server shutting down cleanly"})
+
+
+@app.route("/offline-page")
+def api_offline_page():
+    """Serve the standalone offline page used by the shutdown flow."""
+    return send_from_directory(app.static_folder, "offline.html")
 
 
 # ─── Backup & Restore ─────────────────────────────────────────────────────────
