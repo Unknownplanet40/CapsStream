@@ -4635,10 +4635,11 @@ video::cue {
   gap: 14px;
   padding: 12px;
   border-radius: var(--radius-md);
-  background: rgba(18, 18, 26, 0.94);
+  background: rgba(18, 18, 26, 0.96);
   border: 1px solid var(--border-strong);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(16px);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   cursor: pointer;
   animation: slideUpWidget 0.2s ease-out;
 }
@@ -6636,7 +6637,6 @@ body.kids-mode-theme .suggestion-tag:hover {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 1.5rem;
   overflow-x: auto;
   padding-bottom: 0.35rem;
   flex-wrap: nowrap;
@@ -6665,6 +6665,226 @@ body.kids-mode-theme .suggestion-tag:hover {
   color: #fff;
   border-color: var(--accent);
   box-shadow: 0 3px 12px var(--accent-dim);
+}
+
+/* ─── Trophy Case Grouping Controls & Group Headers ─────────── */
+
+.trophy-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.25rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.trophy-options-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.trophy-group-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.trophy-group-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.trophy-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.trophy-view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0.35rem 0.75rem;
+  border-radius: 16px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.trophy-view-btn:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.trophy-view-btn.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 10px var(--accent-dim);
+}
+
+.trophy-groups-container {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.trophy-group-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.trophy-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 1.15rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.trophy-group-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.trophy-group-icon {
+  font-size: 1.25rem;
+}
+
+.trophy-group-title {
+  font-weight: 800;
+  font-size: 1rem;
+  color: #fff;
+}
+
+.trophy-group-badge-count {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.trophy-group-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 140px;
+}
+
+.trophy-group-progress-bar {
+  width: 100px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.trophy-group-progress-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.5s ease;
+}
+
+.trophy-group-percent {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  min-width: 32px;
+  text-align: right;
+}
+
+/* Badge Tier Group Styling */
+.trophy-group-header.group-platinum {
+  border-left: 4px solid #a855f7;
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.12) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border-color: rgba(168, 85, 247, 0.3);
+}
+.trophy-group-header.group-platinum .trophy-group-title {
+  color: #c084fc;
+}
+.trophy-group-header.group-platinum .trophy-group-badge-count {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+.trophy-group-progress-fill.fill-platinum {
+  background: linear-gradient(90deg, #a855f7, #38bdf8);
+}
+
+.trophy-group-header.group-gold {
+  border-left: 4px solid #ffd700;
+  background: linear-gradient(90deg, rgba(255, 215, 0, 0.12) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border-color: rgba(255, 215, 0, 0.3);
+}
+.trophy-group-header.group-gold .trophy-group-title {
+  color: #ffd700;
+}
+.trophy-group-header.group-gold .trophy-group-badge-count {
+  background: rgba(255, 215, 0, 0.2);
+  color: #ffd700;
+  border: 1px solid rgba(255, 215, 0, 0.4);
+}
+.trophy-group-progress-fill.fill-gold {
+  background: linear-gradient(90deg, #f59e0b, #ffd700);
+}
+
+.trophy-group-header.group-silver {
+  border-left: 4px solid #c0c0c0;
+  background: linear-gradient(90deg, rgba(192, 192, 192, 0.12) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border-color: rgba(192, 192, 192, 0.3);
+}
+.trophy-group-header.group-silver .trophy-group-title {
+  color: #e2e8f0;
+}
+.trophy-group-header.group-silver .trophy-group-badge-count {
+  background: rgba(192, 192, 192, 0.2);
+  color: #e2e8f0;
+  border: 1px solid rgba(192, 192, 192, 0.4);
+}
+.trophy-group-progress-fill.fill-silver {
+  background: linear-gradient(90deg, #94a3b8, #e2e8f0);
+}
+
+.trophy-group-header.group-bronze {
+  border-left: 4px solid #cd7f32;
+  background: linear-gradient(90deg, rgba(205, 127, 50, 0.12) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border-color: rgba(205, 127, 50, 0.3);
+}
+.trophy-group-header.group-bronze .trophy-group-title {
+  color: #cd7f32;
+}
+.trophy-group-header.group-bronze .trophy-group-badge-count {
+  background: rgba(205, 127, 50, 0.2);
+  color: #cd7f32;
+  border: 1px solid rgba(205, 127, 50, 0.4);
+}
+.trophy-group-progress-fill.fill-bronze {
+  background: linear-gradient(90deg, #b45309, #cd7f32);
 }
 
 .achievements-grid {
@@ -8360,11 +8580,14 @@ body.kids-mode-theme .suggestion-tag:hover {
   right: 32px;
   z-index: 240;
   pointer-events: auto;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  isolation: isolate;
 }
 
 /* Skip pill redesigned to match the next-episode meta-card style */
 .player-skip-btn {
-  background: rgba(18, 18, 26, 0.94);
+  background: rgba(18, 18, 26, 0.96);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   padding: 12px;
@@ -8373,9 +8596,9 @@ body.kids-mode-theme .suggestion-tag:hover {
   align-items: center;
   gap: 12px;
   cursor: pointer;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   text-align: left;
   transition:
     border-color 150ms ease,

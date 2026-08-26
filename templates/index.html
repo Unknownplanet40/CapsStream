@@ -92,77 +92,98 @@
       var streamShown = false;
       var animStarted = false;
       var startTime = null;
+      var audioStartTime = null;
+
+      function showCaps() {
+        if (capsShown) return;
+        capsShown = true;
+        words[0].style.opacity = "1";
+      }
+
+      function onStreamShown() {
+        if (streamShown) return;
+        showCaps();
+        streamShown = true;
+        words[1].style.opacity = "1";
+
+        // Always wait for "Stream" to show, then wait 1500ms before fading out
+        setTimeout(function () {
+          if (!splash || !splash.parentNode) return;
+          splash.style.transition = "opacity 0.55s ease";
+          splash.style.opacity = "0";
+
+          setTimeout(function () {
+            try { sessionStorage.setItem("cs_splash_done", "1"); } catch (e) {}
+            if (splash.parentNode) splash.parentNode.removeChild(splash);
+          }, 550);
+        }, 1500);
+      }
+
+      function syncFrame(now) {
+        if (!splash || !splash.parentNode) return;
+
+        var elapsed;
+        if (bellPlayed && audioStartTime !== null) {
+          elapsed = now - audioStartTime;
+          if (bell.currentTime > 0) {
+            var ct = bell.currentTime * 1000;
+            if (Math.abs(elapsed - ct) > 60) {
+              audioStartTime = now - ct;
+              elapsed = ct;
+            }
+          }
+        } else {
+          elapsed = now - startTime;
+        }
+
+        // First ding onset ≈ 415 ms -> "caps"
+        if (!capsShown && elapsed >= 415) {
+          showCaps();
+        }
+        // Second ding onset ≈ 1615 ms -> "Stream"
+        if (!streamShown && elapsed >= 1615) {
+          onStreamShown();
+        }
+
+        if (!streamShown) {
+          requestAnimationFrame(syncFrame);
+        }
+      }
 
       function startAnimation() {
         if (animStarted) return;
         animStarted = true;
         startTime = performance.now();
-
-        function syncFrame(now) {
-          if (!splash || !splash.parentNode) return;
-          var elapsed = now - startTime;
-
-          // If audio has started and reporting currentTime, lock onto exact audio time
-          if (bellPlayed && bell.currentTime > 0) {
-            elapsed = bell.currentTime * 1000;
-          }
-
-          // First ding primary onset ≈ 417.7 ms -> "caps"
-          if (!capsShown && elapsed >= 417.7) {
-            words[0].style.opacity = "1";
-            capsShown = true;
-          }
-          // Second stronger ding peak ≈ 1616 ms -> "Stream"
-          if (!streamShown && elapsed >= 1616) {
-            words[1].style.opacity = "1";
-            streamShown = true;
-          }
-
-          if (elapsed < 3500) {
-            requestAnimationFrame(syncFrame);
-          }
-        }
         requestAnimationFrame(syncFrame);
-
-        setTimeout(function () {
-          splash.style.transition = "opacity 0.55s ease";
-          splash.style.opacity = "0";
-        }, 2900);
-
-        setTimeout(function () {
-          try { sessionStorage.setItem("cs_splash_done", "1"); } catch (e) {}
-          if (splash.parentNode) splash.parentNode.removeChild(splash);
-        }, 3500);
       }
+
+      function markAudioPlaying() {
+        bellPlayed = true;
+        var now = performance.now();
+        var ct = (bell.currentTime || 0) * 1000;
+        audioStartTime = now - ct;
+        if (!animStarted) {
+          startAnimation();
+        }
+      }
+
+      bell.addEventListener("playing", markAudioPlaying);
+      bell.addEventListener("play", markAudioPlaying);
 
       function tryBell() {
         if (bellPlayed) return;
         var p = bell.play();
         if (p && p.then) {
           p.then(function () {
-            bellPlayed = true;
-            if (!animStarted) {
-              startAnimation();
-            } else {
-              // Resync if audio started slightly after visual frame start
-              startTime = performance.now() - (bell.currentTime * 1000);
-            }
+            markAudioPlaying();
           }).catch(function () {
             // Autoplay blocked — start visual timer anyway so UI doesn't hang
             startAnimation();
           });
         } else {
-          bellPlayed = true;
-          startAnimation();
+          markAudioPlaying();
         }
       }
-
-      bell.addEventListener("play", function () {
-        bellPlayed = true;
-        if (!animStarted) {
-          startAnimation();
-        }
-      });
 
       tryBell();
 

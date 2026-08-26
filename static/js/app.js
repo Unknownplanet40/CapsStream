@@ -9692,21 +9692,115 @@ const StatsPage = {
             </div>
           </div>
 
-          <!-- Category Filter Tabs -->
-          <div class="trophy-category-tabs" style="margin-top:1.25rem" v-if="stats.achievements">
-            <button
-              v-for="cat in categories"
-              :key="cat"
-              class="trophy-category-tab"
-              :class="{ active: activeCategory === cat }"
-              @click="activeCategory = cat"
-            >
-              {{ cat }}
-            </button>
+          <!-- Controls Row: Category Filter Tabs & Group By Selector -->
+          <div class="trophy-controls-row" v-if="stats.achievements">
+            <!-- Category Filter Tabs -->
+            <div class="trophy-category-tabs">
+              <button
+                v-for="cat in categories"
+                :key="cat"
+                class="trophy-category-tab"
+                :class="{ active: activeCategory === cat }"
+                @click="activeCategory = cat"
+              >
+                {{ cat }}
+              </button>
+            </div>
+
+            <!-- Group By Selector Toolbar -->
+            <div class="trophy-options-toolbar">
+              <div class="trophy-group-selector">
+                <span class="trophy-group-label"><i class="ph ph-stack"></i> Group:</span>
+                <div class="trophy-view-toggle">
+                  <button
+                    class="trophy-view-btn"
+                    :class="{ active: groupBy === 'badge' }"
+                    @click="groupBy = 'badge'"
+                    title="Group by badge rarity (Bronze, Silver, Gold, Platinum)"
+                  >
+                    <i class="ph ph-medal"></i> Badge Tier
+                  </button>
+                  <button
+                    class="trophy-view-btn"
+                    :class="{ active: groupBy === 'category' }"
+                    @click="groupBy = 'category'"
+                    title="Group by category"
+                  >
+                    <i class="ph ph-folder"></i> Category
+                  </button>
+                  <button
+                    class="trophy-view-btn"
+                    :class="{ active: groupBy === 'none' }"
+                    @click="groupBy = 'none'"
+                    title="Flat Grid View"
+                  >
+                    <i class="ph ph-grid-four"></i> Flat
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <!-- Achievements Grid -->
-          <div v-if="filteredAchievements && filteredAchievements.length" class="achievements-grid">
+          <!-- Grouped View (by Badge Tier or Category) -->
+          <div v-if="groupBy !== 'none' && groupedAchievements && groupedAchievements.length" class="trophy-groups-container">
+            <div
+              v-for="group in groupedAchievements"
+              :key="group.key"
+              class="trophy-group-section"
+            >
+              <!-- Group Header -->
+              <div class="trophy-group-header" :class="'group-' + group.key.toLowerCase().replace(/[^a-z0-9]/g, '')">
+                <div class="trophy-group-title-wrap">
+                  <span class="trophy-group-icon">{{ group.icon }}</span>
+                  <span class="trophy-group-title">{{ group.name }}</span>
+                  <span class="trophy-group-badge-count">
+                    {{ group.unlockedCount }} / {{ group.totalCount }} Unlocked
+                  </span>
+                </div>
+                <div class="trophy-group-progress-wrap">
+                  <div class="trophy-group-progress-bar">
+                    <div
+                      class="trophy-group-progress-fill"
+                      :class="'fill-' + group.key.toLowerCase().replace(/[^a-z0-9]/g, '')"
+                      :style="{ width: group.percent + '%' }"
+                    ></div>
+                  </div>
+                  <span class="trophy-group-percent">{{ group.percent }}%</span>
+                </div>
+              </div>
+
+              <!-- Group Grid -->
+              <div class="achievements-grid">
+                <div
+                  v-for="ach in group.items"
+                  :key="ach.id"
+                  class="achievement-card"
+                  :class="['rarity-' + (ach.rarity || 'bronze').toLowerCase(), { unlocked: ach.unlocked }]"
+                >
+                  <div class="achievement-icon-wrapper">
+                    {{ ach.unlocked ? ach.icon : '🔒' }}
+                  </div>
+                  <div class="achievement-info">
+                    <div class="achievement-header">
+                      <span class="achievement-title">{{ ach.title }}</span>
+                      <div class="achievement-badge-group">
+                        <span class="rarity-badge" :class="(ach.rarity || 'bronze').toLowerCase()">{{ ach.rarity || 'Bronze' }}</span>
+                        <span v-if="ach.unlocked" class="achievement-badge">UNLOCKED</span>
+                        <span v-else class="achievement-badge locked">LOCKED</span>
+                      </div>
+                    </div>
+                    <div class="achievement-desc">{{ ach.description }}</div>
+                    <div v-if="ach.unlocked && ach.unlocked_at" class="achievement-unlocked-date">
+                      <i class="ph ph-check-circle" style="color:#10b981"></i> {{ ach.unlocked_at }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Flat Grid View (when groupBy === 'none') -->
+          <div v-else-if="filteredAchievements && filteredAchievements.length" class="achievements-grid">
             <div
               v-for="ach in filteredAchievements"
               :key="ach.id"
@@ -9732,6 +9826,7 @@ const StatsPage = {
               </div>
             </div>
           </div>
+
           <div v-else style="color:var(--text-muted);text-align:center;padding:1.5rem">
             No achievements found in this category.
           </div>
@@ -9803,6 +9898,15 @@ const StatsPage = {
     const stats = ref(null);
     const loading = ref(true);
     const activeCategory = ref("All");
+    const groupBy = ref("badge");
+
+    const BADGE_TIERS = [
+      { key: "Platinum", name: "Platinum Badges", icon: "💎", color: "#a855f7" },
+      { key: "Gold", name: "Gold Badges", icon: "🥇", color: "#ffd700" },
+      { key: "Silver", name: "Silver Badges", icon: "🥈", color: "#c0c0c0" },
+      { key: "Bronze", name: "Bronze Badges", icon: "🥉", color: "#cd7f32" },
+    ];
+
     const categories = computed(() => {
       if (!stats.value?.achievements?.length) {
         return ["All", "Milestones", "Viewing Habits", "Player Master", "Discovery", "Collector"];
@@ -9827,6 +9931,52 @@ const StatsPage = {
       if (!stats.value?.achievements) return [];
       if (activeCategory.value === "All") return stats.value.achievements;
       return stats.value.achievements.filter(a => a.category === activeCategory.value);
+    });
+
+    const groupedAchievements = computed(() => {
+      const list = filteredAchievements.value;
+      if (!list || !list.length) return [];
+
+      if (groupBy.value === "badge") {
+        return BADGE_TIERS.map(tier => {
+          const items = list.filter(a => (a.rarity || "Bronze").toLowerCase() === tier.key.toLowerCase());
+          const unlocked = items.filter(a => a.unlocked).length;
+          const total = items.length;
+          const percent = total ? Math.round((unlocked / total) * 100) : 0;
+          return {
+            key: tier.key,
+            name: tier.name,
+            icon: tier.icon,
+            color: tier.color,
+            items,
+            unlockedCount: unlocked,
+            totalCount: total,
+            percent,
+          };
+        }).filter(g => g.items.length > 0);
+      }
+
+      if (groupBy.value === "category") {
+        const cats = Array.from(new Set(list.map(a => a.category).filter(Boolean)));
+        return cats.map(cat => {
+          const items = list.filter(a => a.category === cat);
+          const unlocked = items.filter(a => a.unlocked).length;
+          const total = items.length;
+          const percent = total ? Math.round((unlocked / total) * 100) : 0;
+          return {
+            key: cat,
+            name: cat,
+            icon: "📁",
+            color: "var(--accent)",
+            items,
+            unlockedCount: unlocked,
+            totalCount: total,
+            percent,
+          };
+        }).filter(g => g.items.length > 0);
+      }
+
+      return [];
     });
 
     const maxWeeklyMinutes = computed(() => {
@@ -9888,10 +10038,12 @@ const StatsPage = {
       loading,
       activeCategory,
       categories,
+      groupBy,
       unlockedCount,
       totalCount,
       completionPercent,
       filteredAchievements,
+      groupedAchievements,
       maxWeeklyMinutes,
       formatTimeSpent,
       calcGenrePercent,
