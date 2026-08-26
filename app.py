@@ -24,6 +24,7 @@ from backend.db import (
     get_by_genre, get_all_genres, get_random_pick,
     get_all_profiles, get_profile, create_profile, update_profile, delete_profile,
     verify_pin_raw, hash_pin,
+    delete_media_by_id, delete_media_by_tmdb,
     get_progress, save_progress, delete_progress, get_continue_watching,
     get_favorites, toggle_favorite, is_favorite,
     get_collections, create_collection, delete_collection,
@@ -709,6 +710,37 @@ def api_library():
     if _active_is_kids():
         rows = _filter_for_profile(rows)
     return _jsonify_rows(rows)
+
+
+@app.route("/api/library/delete", methods=["POST"])
+def api_library_delete():
+    """
+    Remove a title (or single episode) from the library database.
+    Files on disk are NEVER touched — this only cleans CapsStream's records.
+
+    Body: { "tmdb_id": <int>, "type": "movie"|"series"|"anime" }  → whole title
+       or { "media_id": <int> }                                   → single row
+    """
+    if _active_is_kids():
+        return jsonify({"error": "Not available in Kids Mode"}), 403
+
+    data = request.json or {}
+    tmdb_id = data.get("tmdb_id")
+    mtype = data.get("type")
+    media_id = data.get("media_id")
+
+    if not tmdb_id and media_id:
+        row = get_media_by_id(int(media_id))
+        if not row:
+            return jsonify({"error": "Media not found"}), 404
+        tmdb_id, mtype = row.get("tmdb_id"), row.get("type")
+
+    if not tmdb_id or not mtype:
+        return jsonify({"error": "tmdb_id and type (or media_id) required"}), 400
+
+    removed = delete_media_by_tmdb(tmdb_id, mtype)
+    print(f"[Library] Deleted {removed} row(s) for tmdb {tmdb_id} ({mtype}) — source files untouched.")
+    return jsonify({"ok": True, "removed": removed})
 
 
 # ─── Anime Detection (Series → Anime reclassification) ────────────────────────

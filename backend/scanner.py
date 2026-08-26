@@ -16,7 +16,7 @@ import re
 import json
 import time
 import threading
-from backend.db import upsert_media, get_all_media
+from backend.db import upsert_media, get_all_media, get_conn, is_drive_mounted
 from backend.matcher import match_movie, match_show, fetch_season_episodes
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -517,6 +517,12 @@ def scan_library(callback=None):
         )
         print(f"[Scanner] Scan complete. {count} new files added.")
         try:
+            removed = _prune_missing_files()
+            if removed:
+                _set_status(removed_missing=removed)
+        except Exception as e:
+            print(f"[Scanner] Missing-file prune failed: {e}")
+        try:
             new_episodes = _diff_new_episodes()
             if new_episodes:
                 _set_status(new_episodes=new_episodes)
@@ -528,6 +534,47 @@ def scan_library(callback=None):
             print(f"[Scanner] Intro detection pass failed to start: {e}")
 
     return {"new_files": count, "matched": matched_count, "errors": _scan_status["errors"]}
+
+
+# ─── Missing-file pruning ─────────────────────────────────────────────────────
+
+def _prune_missing_files():
+    """
+    Remove library entries whose source file no longer exists — but ONLY when
+    the file's drive is currently mounted, so temporarily disconnected
+    external/NAS drives never wipe the library. Disabled via
+    config: library.remove_missing_files = false.
+    Returns the number of rows removed.
+    """
+    try:
+        from backend.settings import load_config
+        lib_cfg = (load_config().get("library") or {})
+        if lib_cfg.get("remove_missing_files") is False:
+            return 0
+    except Exception:
+        pass
+
+    conn = get_conn()
+    rows = conn.execute("SELECT id, file_path FROM media").fetchall()
+    to_delete = []
+    for r in rows:
+        fp = r["file_path"]
+        if os.path.isfile(fp):
+            continue                      # still there — fine
+        if not is_drive_mounted(fp):
+            continue                      # drive offline — keep, don't wipe
+        to_delete.append(r["id"])
+
+    if not to_delete:
+        conn.close()
+        return 0
+
+    # Progress/favorites cascade-delete via FK on media.id
+    conn.executemany("DELETE FROM media WHERE id=?", [(i,) for i in to_delete])
+    conn.commit()
+    conn.close()
+    print(f"[Scanner] Pruned {len(to_delete)} library entries whose source file no longer exists.")
+    return len(to_delete)
 
 
 # ─── Background intro detection pass ─────────────────────────────────────────

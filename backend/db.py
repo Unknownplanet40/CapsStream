@@ -539,6 +539,37 @@ def get_media_by_id(media_id):
     return enrich_mounted(item)
 
 
+def delete_media_by_id(media_id):
+    """
+    Remove a single media row (one movie file or one episode).
+    Watch progress and favorites cascade-delete via FK.
+    Returns number of rows removed.
+    """
+    conn = get_conn()
+    cur = conn.execute("DELETE FROM media WHERE id=?", (int(media_id),))
+    conn.commit()
+    n = cur.rowcount
+    conn.close()
+    return n
+
+
+def delete_media_by_tmdb(tmdb_id, media_type):
+    """
+    Remove every row of a title (all episodes of a series/anime, or all
+    quality copies of a movie). Progress/favorites cascade via FK.
+    Returns number of rows removed.
+    """
+    conn = get_conn()
+    cur = conn.execute(
+        "DELETE FROM media WHERE tmdb_id=? AND type=?",
+        (int(tmdb_id), media_type),
+    )
+    conn.commit()
+    n = cur.rowcount
+    conn.close()
+    return n
+
+
 def update_skip_timestamps(media_id, data):
     """
     Updates recap/intro/outro/preview skip markers for a media item.

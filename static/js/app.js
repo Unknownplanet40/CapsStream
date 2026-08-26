@@ -10983,6 +10983,11 @@ const App = {
             <span>Mark as Watched</span>
           </div>
         </template>
+
+        <div v-if="!store.profile?.is_kids" class="context-menu-item danger" @click="handleContextMenuDelete">
+          <i class="ph ph-trash"></i>
+          <span>Delete from Library</span>
+        </div>
       </div>
 
       <!-- Global Collection Picker Modal -->
@@ -11623,6 +11628,32 @@ const App = {
       }
     }
 
+    async function handleContextMenuDelete() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item) return;
+      const label = item.title || "this title";
+      const scope = (item.type === "movie") ? `"${label}"` : `all ${label} episodes`;
+      if (!confirm(
+        `Remove ${scope} from the CapsStream library?\n\n` +
+        "Your video files on disk are NOT deleted — this only removes the title from the app. " +
+        "Watch progress and watchlist entries for it will be lost."
+      )) return;
+      try {
+        const r = await API.post("/api/library/delete", {
+          tmdb_id: item.tmdb_id,
+          type: item.type,
+          media_id: item.id,
+        });
+        addToast(`🗑️ Removed "${label}" from the library (${r.removed ?? 0} entries)`, "success");
+        if (route.path === "/") {
+          location.reload();
+        }
+      } catch (e) {
+        addToast(e.message || "Failed to delete", "error");
+      }
+    }
+
     async function handleContextKidsOverride(action) {
       const item = contextMenuState.item;
       closeGlobalContextMenu();
@@ -11769,6 +11800,7 @@ const App = {
       handleContextMenuFixMatch,
       handleContextKidsOverride,
       handleContextMenuMarkWatched,
+      handleContextMenuDelete,
       handleContextMenuResetProgress,
       collectionPickerState,
       globalTrailerState,

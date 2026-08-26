@@ -39,7 +39,8 @@ DEFAULT_CONFIG = {
     "library": {
         "scan_on_startup": True,
         "scan_interval_hours": 0,
-        "skip_patterns": "sample,trailer"
+        "skip_patterns": "sample,trailer",
+        "remove_missing_files": True
     },
     "updates": {
         "auto_check": True
