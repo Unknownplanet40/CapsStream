@@ -687,8 +687,8 @@ def search_tmdb(query, media_type="movie", year=None):
             "year": y,
             "release_date": release_date,
             "overview": r.get("overview", ""),
-            "poster_path": f"https://image.tmdb.org/t/p/w300{poster_path}" if poster_path else None,
-            "backdrop_path": f"https://image.tmdb.org/t/p/w780{backdrop_path}" if backdrop_path else None,
+            "poster_path": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None,
+            "backdrop_path": f"https://image.tmdb.org/t/p/original{backdrop_path}" if backdrop_path else None,
             "vote_average": round(float(r.get("vote_average", 0)), 1),
             "media_type": media_type
         })

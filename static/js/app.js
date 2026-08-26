@@ -711,14 +711,37 @@ function trackPlayerFeature(feature) {
   } catch (e) {}
 }
 
-function imgUrl(path) {
+function imgUrl(path, size = "original") {
   if (!path) return null;
-  if (path.startsWith("http")) return path;
-  if (path.startsWith("/")) return `https://image.tmdb.org/t/p/w185${path}`;
+  if (path.startsWith("http")) {
+    if (path.includes("image.tmdb.org/t/p/")) {
+      return path.replace(/\/t\/p\/w(185|300)/, `/t/p/${size === "poster" ? "w500" : "original"}`);
+    }
+    return path;
+  }
+  if (path.startsWith("/")) {
+    const tmdbSize = size === "poster" ? "w500" : "original";
+    return `https://image.tmdb.org/t/p/${tmdbSize}${path}`;
+  }
   if (path.startsWith("images/")) return `/metadata/${path}`;
   if (!path.startsWith("metadata/")) return `/metadata/images/${path}`;
   return `/${path}`;
 }
+
+// Fallback: if a full-res TMDB image fails to load, retry once at w500.
+// (capture phase required — image error events do not bubble)
+document.addEventListener(
+  "error",
+  (e) => {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement) || img.dataset.sizeFallback) return;
+    const src = img.currentSrc || img.src || "";
+    if (!src.includes("/t/p/original")) return;
+    img.dataset.sizeFallback = "1";
+    img.src = src.replace("/t/p/original", "/t/p/w500");
+  },
+  true
+);
 
 function formatRating(r) {
   return r ? r.toFixed(1) : "—";
@@ -2778,6 +2801,131 @@ const SettingsPage = {
           </div>
         </div>
 
+        <!-- 2d. Outgoing Network Activity & Request Inspector -->
+        <div class="settings-section" id="settings-network-section">
+          <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <i class="ph ph-broadcast" style="color:var(--accent)"></i>
+              <span>Outgoing Network Activity & Request Inspector</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-secondary btn-sm" @click="loadNetworkRequests" :disabled="loadingNetwork" id="btn-refresh-network">
+                <i :class="loadingNetwork ? 'ph ph-circle-notch' : 'ph ph-arrows-clockwise'" :style="loadingNetwork ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                {{ loadingNetwork ? 'Refreshing...' : 'Refresh Log' }}
+              </button>
+              <button class="btn btn-ghost btn-sm" @click="clearNetworkRequests" :disabled="!networkList.length" id="btn-clear-network" title="Clear recorded requests">
+                <i class="ph ph-trash" style="margin-right:4px"></i> Clear Log
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="network-inspector-container">
+              <!-- Summary bar -->
+              <div class="network-summary-bar">
+                <div class="network-metric-chip">
+                  <span class="metric-label">Total Outgoing:</span>
+                  <span class="metric-val">{{ networkSummary.total || 0 }}</span>
+                </div>
+                <div class="network-metric-chip">
+                  <span class="metric-label">Success Rate:</span>
+                  <span class="metric-val" :style="{ color: networkSummary.failed > 0 ? '#fbbf24' : '#10b981' }">
+                    {{ networkSummary.success_rate || 100 }}% ({{ networkSummary.success || 0 }}/{{ networkSummary.total || 0 }})
+                  </span>
+                </div>
+                <div class="network-metric-chip">
+                  <span class="metric-label">Avg Latency:</span>
+                  <span class="metric-val" style="color:#38bdf8">{{ networkSummary.avg_latency_ms || 0 }} ms</span>
+                </div>
+                <div class="network-metric-chip" style="margin-left:auto">
+                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.78rem;color:var(--text-secondary)">
+                    <input type="checkbox" v-model="networkAutoRefresh" style="cursor:pointer" />
+                    <span>Auto-Refresh (3s)</span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Filter Toolbar -->
+              <div class="network-toolbar">
+                <div class="network-filters">
+                  <span style="font-size:0.78rem;color:var(--text-secondary);font-weight:600">Service:</span>
+                  <select v-model="networkServiceFilter" class="form-input" style="font-size:0.8rem;padding:4px 8px;width:150px">
+                    <option value="all">All Services</option>
+                    <option value="TMDb API">TMDb API</option>
+                    <option value="TMDb CDN">TMDb CDN (Images)</option>
+                    <option value="OpenSubtitles">OpenSubtitles</option>
+                    <option value="AniSkip">AniSkip</option>
+                    <option value="Jikan / MAL">Jikan / MAL</option>
+                    <option value="GitHub">GitHub</option>
+                    <option value="YTS Subs">YTS Subs</option>
+                  </select>
+
+                  <span style="font-size:0.78rem;color:var(--text-secondary);font-weight:600;margin-left:6px">Status:</span>
+                  <select v-model="networkStatusFilter" class="form-input" style="font-size:0.8rem;padding:4px 8px;width:120px">
+                    <option value="all">All Status</option>
+                    <option value="success">Success (2xx/3xx)</option>
+                    <option value="error">Errors / Failed</option>
+                  </select>
+                </div>
+                <div style="font-size:0.76rem;color:var(--text-muted)">
+                  Showing {{ filteredNetworkList.length }} recorded requests
+                </div>
+              </div>
+
+              <!-- Request Table -->
+              <div class="network-table-wrap">
+                <div v-if="loadingNetwork && !networkList.length" style="padding:2.5rem;text-align:center">
+                  <div class="loading-spinner"></div>
+                </div>
+
+                <div v-else-if="!filteredNetworkList.length" style="padding:2rem;text-align:center;color:var(--text-muted)">
+                  <i class="ph ph-broadcast" style="font-size:1.8rem;opacity:0.4;margin-bottom:6px;display:block"></i>
+                  <span>No outgoing HTTP requests recorded yet. Trigger a library scan, metadata refresh, or search to record activity.</span>
+                </div>
+
+                <table v-else class="network-table">
+                  <thead>
+                    <tr>
+                      <th style="width:75px">Time</th>
+                      <th style="width:130px">Service</th>
+                      <th style="width:65px">Method</th>
+                      <th>Target URL</th>
+                      <th style="width:90px">Status</th>
+                      <th style="width:85px;text-align:right">Duration</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="req in filteredNetworkList" :key="req.id">
+                      <td style="color:var(--text-muted);font-family:monospace;font-size:0.75rem">{{ req.timestamp }}</td>
+                      <td>
+                        <span class="network-service-badge" :class="getServiceBadgeClass(req.service)">
+                          {{ req.service }}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="network-method-tag">{{ req.method }}</span>
+                      </td>
+                      <td>
+                        <div class="network-url-text" :title="req.url">
+                          {{ req.url }}
+                        </div>
+                      </td>
+                      <td>
+                        <span class="network-status-tag" :class="req.ok ? 'ok' : 'err'" :title="req.error || ''">
+                          {{ req.status_code || 'ERR' }}
+                        </span>
+                      </td>
+                      <td style="text-align:right">
+                        <span class="network-latency-text">{{ req.duration_ms }} ms</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 3. Subtitles & Player Defaults -->
         <div class="settings-section">
           <div class="settings-section-title">
@@ -3077,12 +3225,12 @@ const SettingsPage = {
                     <span>{{ kp.avatar }} {{ kp.name }}</span>
                     <span style="font-size:0.75rem;background:rgba(253,203,110,0.15);color:#fdcb6e;padding:2px 8px;border-radius:12px;font-weight:700">🧒 Kids Profile</span>
                   </div>
-                  <div class="settings-desc">Set daily watch limits and evening bedtime curfew for {{ kp.name }}.</div>
+                  <div class="settings-desc">Set daily watch limits and evening bedtime curfew for {{ kp.name }}. Changes save automatically when you select a value.</div>
                 </div>
-                <div style="display:flex;gap:12px;flex-wrap:wrap">
+                <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
                   <div>
                     <label style="display:block;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;font-weight:600">Daily Limit</label>
-                    <select v-model.number="kp.daily_limit_minutes" @change="saveKidsProfileLimits(kp)" class="form-input" style="min-width:140px;font-size:0.85rem">
+                    <select v-model.number="kp.daily_limit_minutes" class="form-input" style="min-width:140px;font-size:0.85rem">
                       <option :value="0">No Limit</option>
                       <option :value="30">30 Mins / day</option>
                       <option :value="45">45 Mins / day</option>
@@ -3094,7 +3242,7 @@ const SettingsPage = {
                   </div>
                   <div>
                     <label style="display:block;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;font-weight:600">Bedtime Curfew</label>
-                    <select v-model="kp.bedtime_curfew" @change="saveKidsProfileLimits(kp)" class="form-input" style="min-width:140px;font-size:0.85rem">
+                    <select v-model="kp.bedtime_curfew" class="form-input" style="min-width:140px;font-size:0.85rem">
                       <option value="">Off (None)</option>
                       <option value="19:00">7:00 PM</option>
                       <option value="19:30">7:30 PM</option>
@@ -3104,6 +3252,16 @@ const SettingsPage = {
                       <option value="21:30">9:30 PM</option>
                       <option value="22:00">10:00 PM</option>
                     </select>
+                  </div>
+                  <div style="display:flex;align-items:flex-end">
+                    <button
+                      class="btn btn-primary"
+                      style="font-size:0.82rem;padding:7px 14px;height:auto"
+                      @click="saveKidsProfileLimits(kp)"
+                      :id="'btn-save-kids-' + kp.id"
+                    >
+                      <i class="ph ph-floppy-disk" style="margin-right:5px"></i> Save
+                    </button>
                   </div>
                 </div>
               </div>
@@ -3130,7 +3288,94 @@ const SettingsPage = {
             </div>
           </div>
         </div>
+
+        <!-- 8. Server Control & Shutdown -->
+        <div class="settings-section" id="settings-shutdown-section" style="border:1px solid rgba(239,68,68,0.35);background:rgba(239,68,68,0.04)">
+          <div class="settings-section-title">
+            <i class="ph ph-power" style="color:#ef4444"></i>
+            <span style="color:#ef4444">Server Control & Shutdown</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label" style="color:var(--text-primary);display:flex;align-items:center;gap:8px">
+                  <span>Shutdown CapsStream Server</span>
+                  <span class="server-status-pill online" style="font-size:0.7rem;padding:2px 8px">
+                    <span class="status-dot"></span> Active
+                  </span>
+                </div>
+                <div class="settings-desc">Gracefully stops the backend server process, flushes SQLite databases, and closes the browser window cleanly.</div>
+              </div>
+              <button class="btn btn-primary danger" @click="showShutdownModal = true" id="btn-open-shutdown">
+                <i class="ph ph-power" style="margin-right:6px"></i>
+                Shutdown Server
+              </button>
+            </div>
+          </div>
+        </div>
       </template>
+
+      <!-- Shutdown Confirmation Modal -->
+      <div v-if="showShutdownModal" class="modal-backdrop" style="z-index:500;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showShutdownModal = false">
+        <div class="shortcuts-modal-card" style="max-width:480px" @click.stop>
+          <div class="shortcuts-modal-inner" style="text-align:left">
+            <div class="shortcuts-modal-header" style="margin-bottom:1rem;border-bottom-color:rgba(239,68,68,0.3)">
+              <div class="shortcuts-header-title" style="color:#ef4444">
+                <i class="ph ph-power" style="font-size:1.6rem"></i>
+                <span>Shutdown Server?</span>
+              </div>
+              <button class="shortcuts-close-btn" @click="showShutdownModal = false">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+
+            <div style="font-size:0.9rem;color:var(--text-secondary);line-height:1.5;margin-bottom:1rem">
+              Are you sure you want to stop the CapsStream server? This will stop all active streams and background tasks.
+            </div>
+
+            <div class="shortcuts-modal-footer" style="margin-top:1.5rem;display:flex;justify-content:flex-end;gap:10px">
+              <button class="btn btn-secondary" @click="showShutdownModal = false">Cancel</button>
+              <button class="btn btn-primary danger" @click="executeShutdown" id="btn-confirm-shutdown">
+                <i class="ph ph-power" style="margin-right:6px"></i> Yes, Shutdown Server
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fullscreen Shutdown Overlay -->
+      <div v-if="isShuttingDown" class="shutdown-overlay">
+        <div class="shutdown-modal-box">
+          <div class="shutdown-icon-wrap" :class="{ offline: shutdownCompleted }">
+            <i :class="shutdownCompleted ? 'ph ph-check-circle' : 'ph ph-power'"></i>
+          </div>
+
+          <h2 class="shutdown-title">
+            {{ shutdownCompleted ? 'Server Offline' : 'Shutting Down Server...' }}
+          </h2>
+
+          <p class="shutdown-desc">
+            {{ shutdownCompleted 
+                ? 'The CapsStream server has stopped cleanly. You may now safely close this browser tab or window.' 
+                : 'Saving database state and closing active background workers.' }}
+          </p>
+
+          <div v-if="!shutdownCompleted" class="shutdown-countdown-pill">
+            <i class="ph ph-hourglass-medium"></i>
+            <span>Closing window in {{ shutdownCountdown }}s</span>
+          </div>
+
+          <div class="shutdown-hint-box" v-if="shutdownCompleted">
+            <span>To start CapsStream again, launch <strong>start.bat</strong> or <strong>Start CapsStream Silent.vbs</strong> in your project folder.</span>
+          </div>
+
+          <div v-if="shutdownCompleted" style="margin-top:0.5rem">
+            <button class="btn btn-secondary btn-lg" @click="closeCurrentWindow">
+              <i class="ph ph-x-circle" style="margin-right:6px"></i> Close Window
+            </button>
+          </div>
+        </div>
+      </div>
 
       <!-- Fresh Start Warning & Confirmation Modal -->
       <div v-if="showResetModal" class="modal-backdrop" style="z-index:500;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showResetModal = false">
@@ -3725,7 +3970,12 @@ const SettingsPage = {
     }
 
     const allProfiles = ref([]);
-    const kidsProfiles = computed(() => (allProfiles.value || []).filter((p) => p.is_kids));
+    // Use a writable ref (not computed) so v-model mutations on kp fields persist
+    const kidsProfiles = ref([]);
+
+    watch(allProfiles, (profiles) => {
+      kidsProfiles.value = (profiles || []).filter((p) => p.is_kids);
+    }, { deep: true });
 
     async function loadAllProfiles() {
       try {
@@ -3734,11 +3984,24 @@ const SettingsPage = {
     }
 
     async function saveKidsProfileLimits(kp) {
+      // Read the latest values directly from the kidsProfiles ref entry
+      const source = kidsProfiles.value.find((p) => p.id === kp.id) || kp;
+      const payload = {
+        ...source,
+        daily_limit_minutes: Number(source.daily_limit_minutes) || 0,
+        bedtime_curfew: source.bedtime_curfew || "",
+      };
       try {
-        await API.put(`/api/profiles/${kp.id}`, kp);
-        addToast(`Screen time settings saved for ${kp.name} ✓`, "success");
+        const updated = await API.put(`/api/profiles/${payload.id}`, payload);
+        // Sync the backend response back into allProfiles so store stays consistent
+        const idx = allProfiles.value.findIndex((p) => p.id === payload.id);
+        if (idx !== -1) {
+          allProfiles.value[idx] = { ...allProfiles.value[idx], ...updated };
+          allProfiles.value = [...allProfiles.value]; // trigger reactivity
+        }
+        addToast(`Screen time settings saved for ${payload.name} ✓`, "success");
       } catch (e) {
-        addToast("Failed to save screen time settings", "error");
+        addToast(`Failed to save screen time settings: ${e.message}`, "error");
       }
     }
 
@@ -3764,6 +4027,84 @@ const SettingsPage = {
       });
     }
 
+    // ─── Outgoing Network Activity & Request Inspector ──────────
+    const networkList = ref([]);
+    const networkSummary = ref({ total: 0, success: 0, failed: 0, success_rate: 100, avg_latency_ms: 0 });
+    const loadingNetwork = ref(false);
+    const networkServiceFilter = ref("all");
+    const networkStatusFilter = ref("all");
+    const networkAutoRefresh = ref(false);
+    let networkPollInterval = null;
+
+    async function loadNetworkRequests() {
+      loadingNetwork.value = true;
+      try {
+        const res = await API.get("/api/system/network-requests?limit=150");
+        networkList.value = res?.requests || [];
+        networkSummary.value = res?.summary || { total: 0, success: 0, failed: 0, success_rate: 100, avg_latency_ms: 0 };
+      } catch (e) {
+      } finally {
+        loadingNetwork.value = false;
+      }
+    }
+
+    async function clearNetworkRequests() {
+      try {
+        await API.post("/api/system/network-requests/clear");
+        networkList.value = [];
+        networkSummary.value = { total: 0, success: 0, failed: 0, success_rate: 100, avg_latency_ms: 0 };
+        addToast("Network activity log cleared", "info");
+      } catch (e) {
+        addToast("Failed to clear network log", "error");
+      }
+    }
+
+    const filteredNetworkList = computed(() => {
+      let list = networkList.value || [];
+      if (networkServiceFilter.value && networkServiceFilter.value !== "all") {
+        list = list.filter(r => r.service === networkServiceFilter.value);
+      }
+      if (networkStatusFilter.value === "success") {
+        list = list.filter(r => r.ok);
+      } else if (networkStatusFilter.value === "error") {
+        list = list.filter(r => !r.ok);
+      }
+      return list;
+    });
+
+    function getServiceBadgeClass(service) {
+      if (!service) return "";
+      const s = service.toLowerCase();
+      if (s.includes("tmdb cdn")) return "tmdb-cdn";
+      if (s.includes("tmdb")) return "tmdb-api";
+      if (s.includes("opensub")) return "opensubtitles";
+      if (s.includes("aniskip")) return "aniskip";
+      if (s.includes("jikan") || s.includes("mal")) return "jikan";
+      if (s.includes("github")) return "github";
+      if (s.includes("yts")) return "yts";
+      return "";
+    }
+
+    watch(networkAutoRefresh, (val) => {
+      if (val) {
+        if (!networkPollInterval) {
+          networkPollInterval = setInterval(loadNetworkRequests, 3000);
+        }
+      } else {
+        if (networkPollInterval) {
+          clearInterval(networkPollInterval);
+          networkPollInterval = null;
+        }
+      }
+    });
+
+    onUnmounted(() => {
+      if (networkPollInterval) {
+        clearInterval(networkPollInterval);
+        networkPollInterval = null;
+      }
+    });
+
     onMounted(() => {
       if (store.profile?.is_kids) {
         addToast("Settings is locked in Kids Mode 🔒", "warning");
@@ -3774,12 +4115,117 @@ const SettingsPage = {
       loadCacheInfo();
       loadAllProfiles();
       loadUnmatched();
+      loadNetworkRequests();
     });
 
     const currentTheme = computed(() => store.profile?.theme || localStorage.getItem("capsstream_theme") || "crimson");
 
     function selectTheme(themeId) {
       applyTheme(themeId, true);
+    }
+
+    // ─── Server Shutdown & Power Management ─────────────────────
+    const showShutdownModal = ref(false);
+    const isShuttingDown = ref(false);
+    const shutdownCountdown = ref(2);
+    const shutdownCompleted = ref(false);
+    let _windowCloseCalled = false;
+
+    function _stopAllPolling() {
+      // Kill network auto-refresh interval if running
+      networkAutoRefresh.value = false;
+      if (networkPollInterval) {
+        clearInterval(networkPollInterval);
+        networkPollInterval = null;
+      }
+    }
+
+    async function executeShutdown() {
+      showShutdownModal.value = false;
+      isShuttingDown.value = true;
+      shutdownCountdown.value = 2;
+      shutdownCompleted.value = false;
+      _windowCloseCalled = false;
+
+      // Stop all background polling immediately so no more API calls are made
+      _stopAllPolling();
+
+      // Prefetch the offline page while the server is still reachable — it is
+      // rendered as the final screen if the browser blocks window.close()
+      try {
+        const res = await fetch("/static/offline.html", { cache: "no-store" });
+        if (res.ok) _offlinePageHtml = await res.text();
+      } catch (e) {}
+
+      try {
+        await API.post("/api/system/shutdown");
+      } catch (e) {
+        // Expected — server exits immediately after responding
+      }
+
+      const timer = setInterval(() => {
+        shutdownCountdown.value--;
+        if (shutdownCountdown.value <= 0) {
+          clearInterval(timer);
+          shutdownCompleted.value = true;
+          closeCurrentWindow();
+        }
+      }, 1000);
+    }
+
+    let _offlinePageHtml = null;
+
+    function _tryWindowClose() {
+      let closed = false;
+      try { window.close(); } catch (e) {}
+      // Re-check: window.close() is async-ish in some browsers
+      try {
+        if (window.closed) closed = true;
+      } catch (e) {}
+      if (closed) return true;
+      // Legacy fallback: re-open self, then close (works in some engines)
+      try {
+        const win = window.open("", "_self");
+        if (win) win.close();
+        if (window.closed) closed = true;
+      } catch (e) {}
+      return closed;
+    }
+
+    function _blankOutPage() {
+      // Browser refused window.close() — replace the document with the
+      // prefetched offline page (auto-reloads when the server returns).
+      try {
+        if (_offlinePageHtml) {
+          document.open();
+          document.write(_offlinePageHtml);
+          document.close();
+          return;
+        }
+        document.title = "CapsStream";
+        document.body.style.margin = "0";
+        document.body.style.background = "#000";
+        document.body.innerHTML =
+          '<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;' +
+          'flex-direction:column;gap:12px;color:#666;font-family:sans-serif;text-align:center;padding:2rem">' +
+          '<i class="ph ph-power" style="font-size:3rem;color:#444"></i>' +
+          '<div>Server stopped &mdash; this tab can now be closed.</div>' +
+          '<div style="font-size:0.85em">To start again, launch <strong>start.bat</strong>.</div>' +
+          "</div>";
+      } catch (e) {}
+    }
+
+    function closeCurrentWindow() {
+      // Guard: only attempt once to avoid repeated browser warnings
+      if (_windowCloseCalled) return;
+      _windowCloseCalled = true;
+
+      if (_tryWindowClose()) return;
+
+      // Give the browser a beat, then retry once before falling back
+      setTimeout(() => {
+        if (!_tryWindowClose()) _blankOutPage();
+      }, 250);
     }
 
     return {
@@ -3837,6 +4283,22 @@ const SettingsPage = {
       loadUnmatched,
       openFixMatchForItem,
       formatFileSize,
+      networkList,
+      networkSummary,
+      loadingNetwork,
+      networkServiceFilter,
+      networkStatusFilter,
+      networkAutoRefresh,
+      filteredNetworkList,
+      loadNetworkRequests,
+      clearNetworkRequests,
+      getServiceBadgeClass,
+      showShutdownModal,
+      isShuttingDown,
+      shutdownCountdown,
+      shutdownCompleted,
+      executeShutdown,
+      closeCurrentWindow,
     };
   },
 };
@@ -10074,23 +10536,6 @@ const App = {
                 <div class="profile-dropdown-item" @click.stop="goAbout" id="dd-about">ℹ️ About CapsStream</div>
                 <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="editCurrentProfile" id="dd-edit-profile">✏️ Edit Profile</div>
                 <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="switchProfile" id="dd-switch">👤 Switch Profile</div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-divider"></div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-section-title">🎨 Theme Presets</div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-themes">
-                  <button
-                    v-for="t in THEME_PRESETS"
-                    :key="t.id"
-                    class="theme-mini-chip"
-                    :class="{ active: currentTheme === t.id }"
-                    :style="{ '--chip-color': t.accent }"
-                    @click.stop="selectTheme(t.id)"
-                    :title="t.name"
-                  >
-                    <span class="theme-mini-dot" :style="{ background: t.accent }"></span>
-                    <span class="theme-mini-name">{{ t.name }}</span>
-                    <i v-if="currentTheme === t.id" class="ph-bold ph-check theme-mini-check"></i>
-                  </button>
-                </div>
                 <div class="profile-dropdown-divider"></div>
                 <div class="profile-dropdown-item danger" @click.stop="logout" v-if="store.profile" id="dd-logout">🚪 Sign Out</div>
               </div>

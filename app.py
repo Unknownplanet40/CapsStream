@@ -7,6 +7,7 @@ Or double-click start.bat
 
 import os
 import re
+import sys
 import json
 import shutil
 import hashlib
@@ -33,6 +34,12 @@ from backend.subtitles import find_subtitles, get_vtt_path
 from backend.scanner import scan_library, get_scan_status
 from backend.settings import load_config, save_config, test_api_key, apply_system_file_hiding
 from backend.franchises import get_universe_collections
+from backend.network_inspector import (
+    init_network_inspector, get_recorded_requests, clear_recorded_requests
+)
+
+# Initialize outgoing HTTP interceptor
+init_network_inspector()
 
 # ─── App Setup ────────────────────────────────────────────────────────────────
 
@@ -138,8 +145,8 @@ def _get_api_health(config):
     else:
         health["tmdb"] = {"status": "unconfigured", "latency_ms": None}
 
-    ok, ms = _probe_url("https://api.aniskip.com/v2/health")
-    health["aniskip"] = {"status": "ok" if ok else "error", "latency_ms": None}
+    ok, ms = _probe_url("https://api.aniskip.com/v2/skip-times/21/1?types=op&episodeLength=0")
+    health["aniskip"] = {"status": "ok" if ok else "error", "latency_ms": ms}
 
     # Poster/metadata cache is fully local — healthy when its directory is usable
     try:
@@ -1574,19 +1581,34 @@ def api_scan_status():
 
 @app.route("/api/system/shutdown", methods=["POST"])
 def api_system_shutdown():
-    """Gracefully stop the Flask server (used by the Live Logs page's Stop Server button)."""
+    """Gracefully stop the Flask server, flush databases, then exit."""
     def _shutdown():
+        import time as _t
+        # Stop accepting new connections first
         try:
             func = request.environ.get("werkzeug.server.shutdown")
             if func:
                 func()
         except Exception:
             pass
-        # Hard fallback — the dev server occasionally ignores the graceful path
-        threading.Timer(1.5, os._exit, args=(0,)).start()
+        # Grace period: let in-flight requests and daemon workers finish
+        _t.sleep(1.0)
+        # Flush SQLite WAL so all committed data is written into the main db file
+        try:
+            from backend.db import get_conn
+            conn = get_conn()
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                conn.close()
+        except Exception as e:
+            print(f"[Shutdown] SQLite checkpoint failed: {e}")
+        # sys.exit runs atexit handlers and Python finalizers (flushes open files);
+        # remaining threads are daemons, so the interpreter will not hang.
+        sys.exit(0)
 
     threading.Thread(target=_shutdown, daemon=True).start()
-    return jsonify({"ok": True, "message": "Server shutting down"})
+    return jsonify({"ok": True, "message": "Server shutting down cleanly"})
 
 
 # ─── Backup & Restore ─────────────────────────────────────────────────────────
@@ -1965,7 +1987,7 @@ def _media_duration_seconds(file_path):
         from backend.proc_utils import CREATE_NO_WINDOW
         out = subprocess.run(
             [ffprobe, "-v", "quiet", "-print_format", "json", "-show_format", file_path],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
             creationflags=CREATE_NO_WINDOW,
         )
         info = json.loads(out.stdout)
@@ -2325,6 +2347,29 @@ def api_system_info():
             "anime": anime_count
         }
     })
+
+
+# ─── Network Activity & Outgoing Request Inspector ───────────────────────────
+
+@app.route("/api/system/network-requests", methods=["GET"])
+def api_get_network_requests():
+    """Return recorded outgoing HTTP requests and activity metrics."""
+    service_filter = request.args.get("service")
+    status_filter = request.args.get("status")
+    try:
+        limit = int(request.args.get("limit", 150))
+    except (TypeError, ValueError):
+        limit = 150
+    limit = max(1, min(limit, 200))
+    data = get_recorded_requests(limit=limit, service_filter=service_filter, status_filter=status_filter)
+    return jsonify(data)
+
+
+@app.route("/api/system/network-requests/clear", methods=["POST"])
+def api_clear_network_requests():
+    """Clear recorded outgoing HTTP requests."""
+    clear_recorded_requests()
+    return jsonify({"ok": True, "message": "Network activity log cleared"})
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────

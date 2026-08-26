@@ -126,7 +126,7 @@ def probe_chapters_for_skips(file_path):
         file_path
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=6,
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=6,
                              creationflags=CREATE_NO_WINDOW)
         if res.returncode == 0:
             data = json.loads(res.stdout)
@@ -251,7 +251,8 @@ def fetch_skip_times(media_id):
         mal_id = get_mal_id_for_title(title, tmdb_id)
         if mal_id:
             try:
-                url = f"https://api.aniskip.com/v2/skip-times/{mal_id}/{ep_num}?types=op&types=ed&types=recap"
+                duration_sec = int(media.get("duration") or 0)
+                url = f"https://api.aniskip.com/v2/skip-times/{mal_id}/{ep_num}?types=op&types=ed&types=recap&episodeLength={duration_sec}"
                 r = requests.get(url, headers={"User-Agent": "CapsStream/1.0"}, timeout=6)
                 if r.status_code == 200:
                     res = r.json()

@@ -845,7 +845,11 @@ def get_unmatched():
 
 def get_all_profiles():
     conn = get_conn()
-    rows = conn.execute("SELECT id, name, avatar, color, theme, is_kids, (CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at FROM profiles").fetchall()
+    rows = conn.execute(
+        "SELECT id, name, avatar, color, theme, is_kids, daily_limit_minutes, bedtime_curfew, "
+        "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
+        "FROM profiles"
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

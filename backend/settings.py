@@ -261,7 +261,7 @@ def browse_folder_dialog():
                 '$dialog.Description = "Select Media Folder"; '
                 'if ($dialog.ShowDialog() -eq "OK") { Write-Output $dialog.SelectedPath }'
             )
-            res = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True, timeout=30,
+            res = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                                  creationflags=CREATE_NO_WINDOW)
             out = res.stdout.strip()
             if out:

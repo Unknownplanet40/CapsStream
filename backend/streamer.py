@@ -248,7 +248,7 @@ def describe_hw_encoder(force=False):
             try:
                 res = subprocess.run(
                     [ff, "-hide_banner", "-encoders"],
-                    capture_output=True, text=True, timeout=15,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
                     creationflags=CREATE_NO_WINDOW,
                 )
                 encoders_text = res.stdout or ""

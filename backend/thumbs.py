@@ -138,7 +138,7 @@ def generate_sheet(media_id, file_path, duration):
         probe = subprocess.run(
             [FFPROBE_BIN, "-v", "quiet", "-print_format", "json",
              "-show_streams", sheet],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
             creationflags=creation,
         )
         import json as _json

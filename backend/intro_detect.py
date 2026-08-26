@@ -43,7 +43,7 @@ def detect_intro(file_path):
     ]
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120,
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
             creationflags=CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY,
         )
     except Exception:
