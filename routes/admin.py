@@ -289,7 +289,10 @@ def _write_last_scheduled_scan(ts):
 
 @admin_bp.route("/api/scan", methods=["POST"])
 def api_scan():
-    from routes.media import bust_home_cache
+    try:
+        from .media import bust_home_cache
+    except ImportError:
+        from routes.media import bust_home_cache
     require_admin()
     global _scan_thread
     from backend.scanner import scan_library, get_scan_status

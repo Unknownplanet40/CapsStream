@@ -25,6 +25,27 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
     except Exception:
         pass
 
+# Ensure 'routes' package maps to 'backend.routes' in sys.modules so all legacy/deferred imports resolve
+try:
+    import backend.routes as _br
+    sys.modules.setdefault("routes", _br)
+    import backend.routes.middleware as _bm
+    sys.modules.setdefault("routes.middleware", _bm)
+    import backend.routes.profiles as _bp
+    sys.modules.setdefault("routes.profiles", _bp)
+    import backend.routes.media as _bme
+    sys.modules.setdefault("routes.media", _bme)
+    import backend.routes.streaming as _bs
+    sys.modules.setdefault("routes.streaming", _bs)
+    import backend.routes.library as _bl
+    sys.modules.setdefault("routes.library", _bl)
+    import backend.routes.social as _bso
+    sys.modules.setdefault("routes.social", _bso)
+    import backend.routes.admin as _ba
+    sys.modules.setdefault("routes.admin", _ba)
+except Exception:
+    pass
+
 from flask import (
     Flask, jsonify, request, send_file,
     send_from_directory, render_template, session, abort, Response, make_response
@@ -258,10 +279,26 @@ def service_worker():
 @app.route("/manifest.webmanifest")
 @app.route("/manifest.json")
 def web_manifest():
-    resp = make_response(send_from_directory(os.path.join(BASE_DIR, "static"), "manifest.webmanifest"))
-    resp.headers["Content-Type"] = "application/manifest+json"
-    resp.headers["Cache-Control"] = "public, max-age=86400"
-    return resp
+    manifest_path = os.path.join(BASE_DIR, "static", "manifest.webmanifest")
+    if not os.path.isfile(manifest_path):
+        manifest_path = os.path.join(BASE_DIR, "static", "manifest.json")
+    if os.path.isfile(manifest_path):
+        resp = make_response(send_file(manifest_path, mimetype="application/manifest+json"))
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
+    return jsonify({
+        "name": "CapsStream",
+        "short_name": "CapsStream",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#050508",
+        "theme_color": "#050508",
+        "icons": [
+            {"src": "/static/img/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/static/img/icon-512.png", "sizes": "512x512", "type": "image/png"},
+            {"src": "/static/img/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+        ]
+    })
 
 
 @app.route("/offline.html")
