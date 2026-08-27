@@ -153,9 +153,24 @@ def api_home():
         if cw:
             final_rows.append({"title": "Continue Watching", "type": "continue", "items": cw})
         recs = get_profile_recommendations(pid, limit=2)
-        if recs:
-            final_rows.extend(recs)
-    final_rows.extend(rows)
+    else:
+        recs = []
+
+    rec_idx = 0
+    for i, r in enumerate(rows):
+        final_rows.append(r)
+        # Place 1st recommendation row after Recently Added / 1st catalog row
+        if rec_idx == 0 and recs and (r.get("title") == "Recently Added" or i == 0):
+            final_rows.append(recs[0])
+            rec_idx += 1
+        # Place 2nd recommendation row after Top Rated or 3rd catalog row
+        elif rec_idx == 1 and len(recs) > 1 and (r.get("title") == "Top Rated" or i == 2):
+            final_rows.append(recs[1])
+            rec_idx += 1
+
+    while rec_idx < len(recs):
+        final_rows.append(recs[rec_idx])
+        rec_idx += 1
 
     if kids:
         filtered_rows = []

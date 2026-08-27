@@ -5449,7 +5449,6 @@ const PlayerPage = {
   template: `
     <div
       class="custom-player-wrapper"
-      :class="{ 'credits-shrunk': showCreditsShrink }"
       @mousemove="showControls"
       @touchstart="onPlayerTouchStart"
       @touchmove="onPlayerTouchMove"
@@ -6159,60 +6158,63 @@ const PlayerPage = {
         </div>
       </div>
 
-      <!-- End-Credits Shrink & Next Episode Preview Overlay -->
+      <!-- Netflix / Disney+ Floating Right-Side Next Episode Card -->
       <transition name="fade">
-        <div v-if="showCreditsShrink && hasNextEp" class="credits-shrink-overlay" @click.stop>
-          <div class="credits-shrink-panel">
-            <div class="credits-shrink-top">
-              <div class="credits-shrink-timer-badge">
-                <i class="ph ph-hourglass-high"></i>
-                <span>NEXT EPISODE IN {{ Math.ceil(nextEpCountdownSeconds) }}s</span>
-              </div>
-              <button class="credits-shrink-close-btn" @click="dismissCreditsShrink" title="Expand Full Credits">
-                <i class="ph ph-arrows-out-simple"></i>
-              </button>
+        <div v-if="showCreditsShrink && hasNextEp" class="next-ep-floating-card" @click.stop>
+          <div class="next-ep-floating-header">
+            <div class="next-ep-floating-badge">
+              <i class="ph ph-hourglass-high"></i>
+              <span>Next Episode in {{ Math.ceil(nextEpCountdownSeconds) }}s</span>
             </div>
+            <button class="next-ep-floating-close" @click="dismissCreditsShrink" title="Dismiss (Watch Credits)">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
 
-            <!-- Next Episode Preview Card -->
-            <div class="credits-shrink-card" @click="handleNextEpClick">
-              <div class="credits-shrink-thumb-wrap">
-                <img
-                  v-if="nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path"
-                  :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path)"
-                  class="credits-shrink-thumb-img"
-                  @error="e => e.target.style.display = 'none'"
-                />
-                <div v-else class="credits-shrink-thumb-fallback">
-                  <i class="ph ph-film-strip"></i>
-                </div>
-                <div class="credits-shrink-play-overlay">
-                  <i class="ph-fill ph-play"></i>
-                </div>
-              </div>
-              <div class="credits-shrink-info">
-                <div class="credits-shrink-ep-code">
-                  S{{ (nextEp.season || activeDrawerSeason).toString().padStart(2,'0') }}E{{ (nextEp.episode || 1).toString().padStart(2,'0') }}
-                </div>
-                <div class="credits-shrink-ep-title" :title="nextEp.ep_title || nextEp.title">
-                  {{ nextEp.ep_title || nextEp.title || ('Episode ' + nextEp.episode) }}
-                </div>
-                <div v-if="nextEp.overview" class="credits-shrink-ep-desc">
-                  {{ nextEp.overview }}
-                </div>
-              </div>
-            </div>
+          <!-- Progress countdown line -->
+          <div class="next-ep-floating-progress-bar">
+            <div class="next-ep-floating-progress-fill" :style="{ width: nextEpProgressPercent + '%' }"></div>
+          </div>
 
-            <!-- Next Episode Actions -->
-            <div class="credits-shrink-actions">
-              <button class="btn btn-primary btn-full" @click="handleNextEpClick" id="btn-credits-play-next">
+          <!-- Preview Body -->
+          <div class="next-ep-floating-body" @click="handleNextEpClick">
+            <div class="next-ep-floating-thumb-wrap">
+              <img
+                v-if="nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path"
+                :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path)"
+                class="next-ep-floating-thumb-img"
+                @error="e => e.target.style.display = 'none'"
+              />
+              <div v-else class="next-ep-floating-thumb-fallback">
+                <i class="ph ph-film-strip"></i>
+              </div>
+              <div class="next-ep-floating-play-icon">
                 <i class="ph-fill ph-play"></i>
-                <span>Play Next Episode</span>
-              </button>
-              <button class="btn btn-secondary btn-full" @click="dismissCreditsShrink" id="btn-credits-watch-credits">
-                <i class="ph ph-film-slate"></i>
-                <span>Watch Credits</span>
-              </button>
+              </div>
             </div>
+
+            <div class="next-ep-floating-info">
+              <div class="next-ep-floating-ep-code">
+                S{{ (nextEp.season || activeDrawerSeason).toString().padStart(2,'0') }}E{{ (nextEp.episode || 1).toString().padStart(2,'0') }}
+              </div>
+              <div class="next-ep-floating-title" :title="nextEp.ep_title || nextEp.title">
+                {{ nextEp.ep_title || nextEp.title || ('Episode ' + nextEp.episode) }}
+              </div>
+              <div v-if="nextEp.duration" class="next-ep-floating-duration">
+                {{ formatDuration(nextEp.duration) }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="next-ep-floating-actions">
+            <button class="btn btn-primary btn-full" @click="handleNextEpClick" id="btn-next-ep-play-now">
+              <i class="ph-fill ph-play"></i>
+              <span>Play Next</span>
+            </button>
+            <button class="btn btn-secondary btn-full" @click="dismissCreditsShrink" id="btn-next-ep-dismiss">
+              <span>Watch Credits</span>
+            </button>
           </div>
         </div>
       </transition>
