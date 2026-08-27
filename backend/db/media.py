@@ -12,7 +12,6 @@ _DRIVE_MOUNT_CACHE_TIME = 0
 def is_drive_mounted(file_path):
     """Check if the drive root of a file path is mounted, cached for 5 seconds."""
     global _DRIVE_MOUNT_CACHE, _DRIVE_MOUNT_CACHE_TIME
-    import time
     now = time.time()
     if now - _DRIVE_MOUNT_CACHE_TIME > 5:
         _DRIVE_MOUNT_CACHE = {}
@@ -21,13 +20,27 @@ def is_drive_mounted(file_path):
     if not file_path:
         return True
 
-    drive = os.path.splitdrive(file_path)[0]
+    # Support Windows drive letters on both Windows and POSIX (e.g. CI testing)
+    import ntpath
+    drive = ntpath.splitdrive(file_path)[0]
     if drive:
-        drive_root = drive + os.sep
+        drive_root = drive + "\\"
         if drive_root in _DRIVE_MOUNT_CACHE:
             return _DRIVE_MOUNT_CACHE[drive_root]
-        mounted = os.path.exists(drive_root)
+        if os.name == "nt":
+            mounted = os.path.exists(drive + os.sep)
+        else:
+            mounted = os.path.exists(file_path) or os.path.exists(drive_root)
         _DRIVE_MOUNT_CACHE[drive_root] = mounted
+        return mounted
+
+    if file_path.startswith("/"):
+        parts = [p for p in file_path.split("/") if p]
+        mount_check = "/" + parts[0] if parts else "/"
+        if mount_check in _DRIVE_MOUNT_CACHE:
+            return _DRIVE_MOUNT_CACHE[mount_check]
+        mounted = os.path.exists(mount_check)
+        _DRIVE_MOUNT_CACHE[mount_check] = mounted
         return mounted
 
     return True
