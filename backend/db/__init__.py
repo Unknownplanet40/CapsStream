@@ -70,6 +70,7 @@ from .playback import (
     save_progress,
     delete_progress,
     get_continue_watching,
+    get_profile_recommendations,
 )
 
 from .achievements import (

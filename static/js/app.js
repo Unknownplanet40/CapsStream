@@ -3326,6 +3326,19 @@ const SettingsPage = {
 
             <div class="settings-row">
               <div class="settings-label-container">
+                <div class="settings-label">Inactivity Sleep Prompt</div>
+                <div class="settings-desc">Pause playback and prompt 'Are you still watching?' after uninterrupted auto-advances.</div>
+              </div>
+              <select v-model.number="form.playback.inactivity_sleep_limit" class="form-input" style="width:200px">
+                <option :value="0">Disabled</option>
+                <option :value="2">After 2 Episodes</option>
+                <option :value="3">After 3 Episodes (Default)</option>
+                <option :value="5">After 5 Episodes</option>
+              </select>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
                 <div class="settings-label">Auto-Skip Intro & Recap</div>
                 <div class="settings-desc">Automatically skip intro, recap, and outro ranges when video playback enters their timestamp window.</div>
               </div>
@@ -4424,6 +4437,7 @@ const SettingsPage = {
       },
       playback: {
         auto_play_next: true,
+        inactivity_sleep_limit: 3,
         auto_skip_intro: false,
         seek_step: 10,
         default_volume: 1,
@@ -5435,6 +5449,7 @@ const PlayerPage = {
   template: `
     <div
       class="custom-player-wrapper"
+      :class="{ 'credits-shrunk': showCreditsShrink }"
       @mousemove="showControls"
       @touchstart="onPlayerTouchStart"
       @touchmove="onPlayerTouchMove"
@@ -5766,13 +5781,39 @@ const PlayerPage = {
               </div>
 
               <!-- Audio Track Menu (Only shown if video has multiple audio tracks) -->
-              <div v-if="audioTracks && audioTracks.length > 1" style="position:relative">
-                <button class="ctrl-btn" @click="showAudioMenu = !showAudioMenu; showSubMenu = false; showSpeedMenu = false; showQualityMenu = false" title="Audio Track" id="ctrl-audio" style="font-size:0.85rem;font-weight:700">
+              <!-- Audio Track & Sound Enhancer Menu -->
+              <div style="position:relative">
+                <button class="ctrl-btn" @click="showAudioMenu = !showAudioMenu; showSubMenu = false; showSpeedMenu = false; showQualityMenu = false" title="Audio Track & Sound Enhancer" id="ctrl-audio" style="font-size:0.85rem;font-weight:700">
                   <i class="ph ph-microphone-stage" style="font-size:1.35rem"></i>
                 </button>
-                <div v-if="showAudioMenu" class="player-popup-menu" @click.stop style="min-width:200px">
+                <div v-if="showAudioMenu" class="player-popup-menu" @click.stop style="min-width:220px">
+                  <div style="font-size:0.75rem;color:var(--text-muted);padding:4px 12px 6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">
+                    Audio Tracks
+                  </div>
+                  <div v-if="!audioTracks || !audioTracks.length" class="player-menu-item active">
+                    Default Audio
+                  </div>
                   <div v-for="track in audioTracks" :key="track.index" class="player-menu-item" :class="{ active: (streamState.audioTrack ?? defaultAudioIndex) === track.index }" @click="selectAudioTrack(track.index)">
                     {{ track.title }}<span v-if="track.index === defaultAudioIndex" style="opacity:0.6;font-weight:400"> · Default</span>
+                  </div>
+
+                  <!-- Sound Enhancer / Night Mode -->
+                  <div style="border-top:1px solid rgba(255,255,255,0.1);margin:6px 0 4px"></div>
+                  <div style="font-size:0.75rem;color:var(--text-muted);padding:4px 12px 6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;display:flex;align-items:center;justify-content:space-between">
+                    <span>Sound Enhancer</span>
+                    <span style="color:var(--accent);text-transform:capitalize;font-size:0.7rem;font-weight:700">{{ audioEnhancerMode }}</span>
+                  </div>
+                  <div style="display:flex;gap:4px;padding:0 12px 6px">
+                    <button
+                      v-for="opt in [{ id: 'off', label: 'Off' }, { id: 'dialogue', label: 'Dialogue' }, { id: 'night', label: 'Night' }]"
+                      :key="opt.id"
+                      class="player-aspect-pill"
+                      :class="{ active: audioEnhancerMode === opt.id }"
+                      @click="setAudioEnhancerMode(opt.id)"
+                      :title="opt.id === 'dialogue' ? 'Boosts speech frequencies for crystal clear dialogue' : opt.id === 'night' ? 'Dialogue boost + compresses loud sound effects & explosions' : 'Standard audio output'"
+                    >
+                      {{ opt.label }}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -5880,6 +5921,28 @@ const PlayerPage = {
                         @click="aspectRatioFit = mode"
                       >
                         {{ mode.charAt(0).toUpperCase() + mode.slice(1) }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Sound Enhancer Mode inside Player Options -->
+                  <div class="player-menu-section-item" style="padding:4px 12px 6px">
+                    <div style="font-size:0.8rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                      <span style="display:flex;align-items:center;gap:6px">
+                        <i class="ph ph-speaker-high" style="font-size:0.95rem"></i> Sound Mode
+                      </span>
+                      <span style="font-size:0.72rem;color:var(--accent);text-transform:capitalize;font-weight:700">{{ audioEnhancerMode }}</span>
+                    </div>
+                    <div class="player-aspect-pills" style="display:flex;gap:4px">
+                      <button
+                        v-for="opt in [{ id: 'off', label: 'Off' }, { id: 'dialogue', label: 'Dialogue' }, { id: 'night', label: 'Night' }]"
+                        :key="opt.id"
+                        class="player-aspect-pill"
+                        :class="{ active: audioEnhancerMode === opt.id }"
+                        @click="setAudioEnhancerMode(opt.id)"
+                        :title="opt.id === 'dialogue' ? 'Boosts speech frequencies for crystal clear dialogue' : opt.id === 'night' ? 'Dialogue boost + compresses loud sound effects & explosions' : 'Standard audio output'"
+                      >
+                        {{ opt.label }}
                       </button>
                     </div>
                   </div>
@@ -6070,6 +6133,89 @@ const PlayerPage = {
           </div>
         </div>
       </div>
+
+      <!-- "Are You Still Watching?" Inactivity Sleep Modal -->
+      <div v-if="showInactivityPrompt" class="modal-backdrop" @click.stop>
+        <div class="resume-modal-card inactivity-sleep-card" @click.stop>
+          <div class="resume-card-info" style="text-align:center">
+            <div class="resume-badge" style="background:rgba(245,158,11,0.15);color:#fbbf24;border-color:rgba(245,158,11,0.3)">
+              <i class="ph ph-moon-stars"></i> INACTIVITY PAUSE
+            </div>
+            <div class="resume-card-heading">Are you still watching?</div>
+            <div class="resume-card-subtext" style="margin-top:6px">
+              Playback paused after {{ consecutiveAutoAdvances }} continuous auto-advances.
+            </div>
+          </div>
+          <div class="resume-card-actions" style="margin-top:1.5rem">
+            <button class="btn btn-primary btn-full" @click="confirmStillWatching" id="btn-still-watching-continue" autoFocus>
+              <i class="ph-fill ph-play"></i>
+              <span>I'm Still Watching</span>
+            </button>
+            <button class="btn btn-secondary btn-full" @click="goHome" id="btn-still-watching-home">
+              <i class="ph ph-house"></i>
+              <span>Back to Home</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- End-Credits Shrink & Next Episode Preview Overlay -->
+      <transition name="fade">
+        <div v-if="showCreditsShrink && hasNextEp" class="credits-shrink-overlay" @click.stop>
+          <div class="credits-shrink-panel">
+            <div class="credits-shrink-top">
+              <div class="credits-shrink-timer-badge">
+                <i class="ph ph-hourglass-high"></i>
+                <span>NEXT EPISODE IN {{ Math.ceil(nextEpCountdownSeconds) }}s</span>
+              </div>
+              <button class="credits-shrink-close-btn" @click="dismissCreditsShrink" title="Expand Full Credits">
+                <i class="ph ph-arrows-out-simple"></i>
+              </button>
+            </div>
+
+            <!-- Next Episode Preview Card -->
+            <div class="credits-shrink-card" @click="handleNextEpClick">
+              <div class="credits-shrink-thumb-wrap">
+                <img
+                  v-if="nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path"
+                  :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path)"
+                  class="credits-shrink-thumb-img"
+                  @error="e => e.target.style.display = 'none'"
+                />
+                <div v-else class="credits-shrink-thumb-fallback">
+                  <i class="ph ph-film-strip"></i>
+                </div>
+                <div class="credits-shrink-play-overlay">
+                  <i class="ph-fill ph-play"></i>
+                </div>
+              </div>
+              <div class="credits-shrink-info">
+                <div class="credits-shrink-ep-code">
+                  S{{ (nextEp.season || activeDrawerSeason).toString().padStart(2,'0') }}E{{ (nextEp.episode || 1).toString().padStart(2,'0') }}
+                </div>
+                <div class="credits-shrink-ep-title" :title="nextEp.ep_title || nextEp.title">
+                  {{ nextEp.ep_title || nextEp.title || ('Episode ' + nextEp.episode) }}
+                </div>
+                <div v-if="nextEp.overview" class="credits-shrink-ep-desc">
+                  {{ nextEp.overview }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Next Episode Actions -->
+            <div class="credits-shrink-actions">
+              <button class="btn btn-primary btn-full" @click="handleNextEpClick" id="btn-credits-play-next">
+                <i class="ph-fill ph-play"></i>
+                <span>Play Next Episode</span>
+              </button>
+              <button class="btn btn-secondary btn-full" @click="dismissCreditsShrink" id="btn-credits-watch-credits">
+                <i class="ph ph-film-slate"></i>
+                <span>Watch Credits</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
 
       <!-- Online Subtitles Search Modal -->
       <div v-if="showOnlineSubModal" class="modal-backdrop" @click.self="showOnlineSubModal = false">
@@ -8211,6 +8357,7 @@ const PlayerPage = {
       }
       updateActiveCueText();
       checkAutoSkip();
+      checkCreditsShrink();
     }
 
     let hasResumedProgress = false;
@@ -8294,8 +8441,136 @@ const PlayerPage = {
       }
       bindPipListeners();
       syncTextTracks();
-      setTimeout(syncTextTracks, 200);
-      applyResumedProgress();
+      // ─── Web Audio API (Dialogue Boost & Night Mode) ─────────────
+      if (audioEnhancerMode.value !== "off") {
+        initWebAudio();
+        applyAudioEnhancer();
+      }
+    }
+
+    // ─── Web Audio API (Dialogue Boost & Night Mode) ─────────────
+    const audioEnhancerMode = ref(localStorage.getItem("capsstream_audio_enhancer") || "off");
+    let audioCtx = null;
+    let audioSource = null;
+    let dialogueFilterNode = null;
+    let compressorNode = null;
+
+    function initWebAudio() {
+      if (!videoRef.value || audioCtx) return;
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        audioCtx = new AudioContextClass();
+        audioSource = audioCtx.createMediaElementSource(videoRef.value);
+
+        dialogueFilterNode = audioCtx.createBiquadFilter();
+        dialogueFilterNode.type = "peaking";
+        dialogueFilterNode.frequency.setValueAtTime(2200, audioCtx.currentTime);
+        dialogueFilterNode.Q.setValueAtTime(1.2, audioCtx.currentTime);
+        dialogueFilterNode.gain.setValueAtTime(0, audioCtx.currentTime);
+
+        compressorNode = audioCtx.createDynamicsCompressor();
+        compressorNode.threshold.setValueAtTime(-24, audioCtx.currentTime);
+        compressorNode.knee.setValueAtTime(12, audioCtx.currentTime);
+        compressorNode.ratio.setValueAtTime(1, audioCtx.currentTime);
+        compressorNode.attack.setValueAtTime(0.003, audioCtx.currentTime);
+        compressorNode.release.setValueAtTime(0.25, audioCtx.currentTime);
+
+        audioSource.connect(dialogueFilterNode);
+        dialogueFilterNode.connect(compressorNode);
+        compressorNode.connect(audioCtx.destination);
+
+        applyAudioEnhancer();
+      } catch (e) {
+        console.warn("[WebAudio] Init skipped:", e);
+      }
+    }
+
+    function applyAudioEnhancer() {
+      if (!audioCtx || !dialogueFilterNode || !compressorNode) return;
+      if (audioCtx.state === "suspended") {
+        audioCtx.resume().catch(() => {});
+      }
+      const t = audioCtx.currentTime;
+      if (audioEnhancerMode.value === "dialogue") {
+        dialogueFilterNode.gain.setTargetAtTime(5.0, t, 0.05);
+        compressorNode.ratio.setTargetAtTime(1.5, t, 0.05);
+        compressorNode.threshold.setTargetAtTime(-20, t, 0.05);
+      } else if (audioEnhancerMode.value === "night") {
+        dialogueFilterNode.gain.setTargetAtTime(6.0, t, 0.05);
+        compressorNode.ratio.setTargetAtTime(8.0, t, 0.05);
+        compressorNode.threshold.setTargetAtTime(-26, t, 0.05);
+      } else {
+        dialogueFilterNode.gain.setTargetAtTime(0, t, 0.05);
+        compressorNode.ratio.setTargetAtTime(1.0, t, 0.05);
+      }
+    }
+
+    function setAudioEnhancerMode(mode) {
+      audioEnhancerMode.value = mode;
+      localStorage.setItem("capsstream_audio_enhancer", mode);
+      if (mode !== "off") {
+        initWebAudio();
+      }
+      applyAudioEnhancer();
+      addToast(mode === "dialogue" ? "Sound: Dialogue Boost Enabled" : mode === "night" ? "Sound: Night Mode Enabled" : "Sound: Standard Audio", "info");
+    }
+
+    // ─── Inactivity Sleep Prompt (Netflix Style) ─────────────────
+    const showInactivityPrompt = ref(false);
+    const consecutiveAutoAdvances = ref(0);
+    const inactivitySleepLimit = computed(() => {
+      const p = store.profile?.inactivity_sleep_limit ?? playerSettings.value?.playback?.inactivity_sleep_limit;
+      if (p !== undefined && p !== null) return Number(p);
+      return 3;
+    });
+
+    function resetInactivityCounter() {
+      consecutiveAutoAdvances.value = 0;
+      showInactivityPrompt.value = false;
+    }
+
+    function confirmStillWatching() {
+      resetInactivityCounter();
+      if (videoRef.value) {
+        videoRef.value.play().catch(() => {});
+      }
+    }
+
+    // ─── End-Credits Shrink & Next Episode Preview ───────────────
+    const showCreditsShrink = ref(false);
+    const creditsShrinkDismissed = ref(false);
+
+    function checkCreditsShrink() {
+      if (!isSeriesMedia.value || !hasNextEp.value || creditsShrinkDismissed.value || isEnded.value) {
+        return;
+      }
+      const curr = currentTime.value;
+      const dur = displayDuration.value;
+      let shouldShrink = false;
+
+      if (skipTimes.value?.ed && skipTimes.value.ed.start > 0) {
+        if (curr >= skipTimes.value.ed.start) {
+          shouldShrink = true;
+        }
+      } else if (media.value?.outro_start && media.value.outro_start > 0) {
+        if (curr >= media.value.outro_start) {
+          shouldShrink = true;
+        }
+      } else if (dur > 90 && (dur - curr) <= 30) {
+        shouldShrink = true;
+      }
+
+      if (shouldShrink && !showCreditsShrink.value) {
+        showCreditsShrink.value = true;
+        startAutoAdvanceCountdown(10.0);
+      }
+    }
+
+    function dismissCreditsShrink() {
+      showCreditsShrink.value = false;
+      creditsShrinkDismissed.value = true;
+      cancelAutoAdvance();
     }
 
     const isEnded = ref(false);
@@ -8303,14 +8578,13 @@ const PlayerPage = {
     const nextEpProgressPercent = ref(0);
     let autoAdvanceInterval = null;
 
-    function startAutoAdvanceCountdown() {
+    function startAutoAdvanceCountdown(durationSec = 5.0) {
       cancelAutoAdvance();
       isEnded.value = true;
       controlsHidden.value = false;
-      nextEpCountdownSeconds.value = 5.0;
+      nextEpCountdownSeconds.value = durationSec;
       nextEpProgressPercent.value = 0;
 
-      const durationSec = 5.0;
       const startTime = Date.now();
 
       autoAdvanceInterval = setInterval(() => {
@@ -8321,7 +8595,7 @@ const PlayerPage = {
 
         if (remaining <= 0) {
           cancelAutoAdvance();
-          playNext();
+          playNext(true);
         }
       }, 50);
     }
@@ -8337,10 +8611,9 @@ const PlayerPage = {
 
     function handleNextEpClick() {
       cancelAutoAdvance();
-      playNext();
+      playNext(false);
       unlockAchievementSilently("next_ep_advance");
     }
-
 
     // ─── In-Player Episodes & Seasons Drawer ──────────────────────
     const showEpisodesDrawer = ref(false);
@@ -9004,8 +9277,18 @@ const PlayerPage = {
       router.push("/");
     }
 
-    async function playNext() {
+    async function playNext(isAuto = false) {
       await saveProgressNow();
+      if (isAuto) {
+        consecutiveAutoAdvances.value++;
+        if (inactivitySleepLimit.value > 0 && consecutiveAutoAdvances.value >= inactivitySleepLimit.value) {
+          if (videoRef.value) videoRef.value.pause();
+          showInactivityPrompt.value = true;
+          return;
+        }
+      } else {
+        consecutiveAutoAdvances.value = 0;
+      }
       if (videoRef.value) {
         videoRef.value.pause();
         try { videoRef.value.currentTime = 0; } catch (e) {}
@@ -9014,6 +9297,8 @@ const PlayerPage = {
       showResumeModal.value = false;
       resumeTime.value = 0;
       hasResumedProgress = false;
+      showCreditsShrink.value = false;
+      creditsShrinkDismissed.value = false;
       if (nextEp.value && nextEp.value.id && nextEp.value.is_local !== false && nextEp.value.is_mounted !== false) {
         router.push(`/watch/${nextEp.value.id}`);
       }
@@ -9058,13 +9343,15 @@ const PlayerPage = {
       // Clean up Web Audio graph
       if (audioCtx) {
         try {
-          if (gainNode) gainNode.disconnect();
+          if (compressorNode) compressorNode.disconnect();
+          if (dialogueFilterNode) dialogueFilterNode.disconnect();
           if (audioSource) audioSource.disconnect();
           audioCtx.close().catch(() => {});
         } catch (e) {}
         audioCtx = null;
-        gainNode = null;
         audioSource = null;
+        dialogueFilterNode = null;
+        compressorNode = null;
       }
 
       // Revoke any custom uploaded subtitle blob URLs
@@ -9229,6 +9516,13 @@ const PlayerPage = {
       nextEpProgressPercent,
       handleNextEpClick,
       cancelAutoAdvance,
+      audioEnhancerMode,
+      setAudioEnhancerMode,
+      showInactivityPrompt,
+      consecutiveAutoAdvances,
+      confirmStillWatching,
+      showCreditsShrink,
+      dismissCreditsShrink,
       showEpisodesDrawer,
       toggleEpisodesDrawer,
       seriesData,

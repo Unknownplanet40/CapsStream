@@ -15,7 +15,7 @@ from backend.db import (
     get_all_media, get_media_by_id, get_media_by_tmdb, get_best_media_source,
     get_media_quality_options, search_media as db_search_media, get_unique_shows,
     get_recently_added, get_top_rated, get_by_genre, get_all_genres,
-    get_random_pick, get_continue_watching, get_progress, is_favorite,
+    get_random_pick, get_continue_watching, get_profile_recommendations, get_progress, is_favorite,
     get_unmatched, upsert_media,
     delete_media_by_id, delete_media_by_tmdb, delete_media_by_title_and_type,
 )
@@ -152,6 +152,9 @@ def api_home():
         cw = get_continue_watching(pid, limit=15)
         if cw:
             final_rows.append({"title": "Continue Watching", "type": "continue", "items": cw})
+        recs = get_profile_recommendations(pid, limit=2)
+        if recs:
+            final_rows.extend(recs)
     final_rows.extend(rows)
 
     if kids:

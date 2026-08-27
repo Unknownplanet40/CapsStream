@@ -92,3 +92,92 @@ def get_continue_watching(profile_id, limit=20):
     return list(deduped.values())[:limit]
 
 
+def get_profile_recommendations(profile_id, limit=2):
+    """
+    Find recently watched seeds (in-progress or completed) for profile_id,
+    and find matching unique titles in the library based on shared genres and cast.
+    Returns list of row dicts: [{"title": "Because you watched ...", "type": "row", "is_recommendation": True, "seed_title": "...", "items": [...]}, ...]
+    """
+    import json
+    from backend.db.media import get_unique_shows, enrich_mounted_list
+
+    conn = get_conn()
+    recent_rows = conn.execute("""
+        SELECT m.id, m.tmdb_id, m.title, m.type, m.genres, m.cast_json, wp.updated_at
+        FROM watch_progress wp
+        JOIN media m ON m.id = wp.media_id
+        WHERE wp.profile_id=? AND wp.position > 15
+        ORDER BY wp.updated_at DESC
+        LIMIT 40
+    """, (profile_id,)).fetchall()
+    conn.close()
+
+    if not recent_rows:
+        return []
+
+    seen_seeds = set()
+    seed_list = []
+    for r in recent_rows:
+        d = dict(r)
+        key = (d.get("tmdb_id") or d.get("title"), d.get("type"))
+        if key not in seen_seeds:
+            seen_seeds.add(key)
+            seed_list.append(d)
+        if len(seed_list) >= limit:
+            break
+
+    if not seed_list:
+        return []
+
+    all_shows = enrich_mounted_list(get_unique_shows(None))
+    recommendations = []
+
+    for seed in seed_list:
+        seed_genres = [g.strip().lower() for g in (seed.get("genres") or "").split(",") if g.strip()]
+        seed_cast = []
+        if seed.get("cast_json"):
+            try:
+                c_data = json.loads(seed["cast_json"])
+                seed_cast = [c.get("name", "").lower() for c in c_data if c.get("name")]
+            except Exception:
+                pass
+
+        if not seed_genres and not seed_cast:
+            continue
+
+        scored_items = []
+        for show in all_shows:
+            # Skip the seed itself
+            if (show.get("tmdb_id") and show.get("tmdb_id") == seed.get("tmdb_id")) or (show.get("title") == seed.get("title")):
+                continue
+
+            show_genres = [g.strip().lower() for g in (show.get("genres") or "").split(",") if g.strip()]
+            genre_overlap = len(set(seed_genres) & set(show_genres))
+
+            actor_overlap = 0
+            if seed_cast and show.get("cast_json"):
+                try:
+                    show_c_data = json.loads(show["cast_json"])
+                    show_cast = [c.get("name", "").lower() for c in show_c_data if c.get("name")]
+                    actor_overlap = len(set(seed_cast) & set(show_cast))
+                except Exception:
+                    pass
+
+            score = (genre_overlap * 2.5) + (actor_overlap * 3.5) + (float(show.get("rating") or 0) * 0.1)
+            if genre_overlap > 0 or actor_overlap > 0:
+                scored_items.append((score, show))
+
+        scored_items.sort(key=lambda x: x[0], reverse=True)
+        items = [x[1] for x in scored_items[:15]]
+        if len(items) >= 2:
+            recommendations.append({
+                "title": f"Because you watched {seed['title']}",
+                "type": "row",
+                "is_recommendation": True,
+                "seed_title": seed["title"],
+                "items": items,
+            })
+
+    return recommendations
+
+
