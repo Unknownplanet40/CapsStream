@@ -44,12 +44,13 @@ jobs:
             "Start CapsStream Silent.vbs" \
             VERSION \
             backend \
+            routes \
             static \
             templates \
             -x "*__pycache__*" "*.pyc" "*.pyo"
 
           # Gate: refuse to publish an incomplete package
-          for f in app.py VERSION backend static/js/app.js static/css/main.css templates/index.html; do
+          for f in app.py VERSION backend routes static/js/app.js static/css/main.css templates/index.html; do
             if ! unzip -l "$ZIP" | grep -q "$f"; then
               echo "::error::Update zip is missing critical file: $f"
               exit 1

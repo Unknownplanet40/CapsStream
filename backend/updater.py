@@ -68,7 +68,7 @@ ALLOWED_FILES = {
     "app.py", "requirements.txt", "start.bat", "update.bat", "VERSION",
     "silent_launcher.py", "Start CapsStream Silent.vbs",
 }
-ALLOWED_DIRS = ("backend", "static", "templates")
+ALLOWED_DIRS = ("backend", "routes", "static", "templates")
 
 # Files/dirs an update may NEVER touch (defense in depth — the allow-list
 # above already excludes them, this is a second guard)
@@ -77,7 +77,7 @@ DENY = ("config.json", ".env", "data", "media", "winpython", "ffmpeg", ".git")
 # Files whose change requires an application restart.
 # NOTE: VERSION is intentionally excluded — get_app_version() reads it live
 # on every request, so version bumps alone never need a restart.
-RESTART_INDICATORS = ("app.py", "backend/", "requirements.txt", "start.bat", "update.bat")
+RESTART_INDICATORS = ("app.py", "backend/", "routes/", "requirements.txt", "start.bat", "update.bat")
 
 # Commit-message override: appending [restart] (or +restart) to a commit
 # forces the restart prompt even when file comparison finds no backend change.
