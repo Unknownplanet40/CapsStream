@@ -381,6 +381,9 @@ def api_media_detail(media_id):
     else:
         media["cast"] = []
 
+    from backend.video_probe import probe_video_resolution
+    media["video_info"] = probe_video_resolution(media["file_path"])
+
     from backend.subtitles import get_all_subtitles
     media["subtitles"] = get_all_subtitles(media["file_path"], media_id)
     media["quality_options"] = get_media_quality_options(media_id)

@@ -6571,6 +6571,9 @@ const PlayerPage = {
         return `/api/stream/${mediaId}`;
       }
       let url = `/api/stream/${mediaId}?transcode=1&max_height=1080`;
+      if (streamState.audioTrack !== null && streamState.audioTrack !== undefined) {
+        url += `&audio_track=${streamState.audioTrack}`;
+      }
       if (streamState.streamStart > 0) {
         url += `&start=${Number(streamState.streamStart).toFixed(3)}`;
       }
@@ -6673,6 +6676,7 @@ const PlayerPage = {
 
     function isRemoteAudioActive() {
       return (
+        !streamState.transcode &&
         streamState.audioTrack !== null &&
         streamState.audioTrack !== undefined &&
         streamState.audioTrack !== defaultAudioIndex.value
@@ -6995,28 +6999,51 @@ const PlayerPage = {
       return target;
     }
 
+    let pendingSeekTarget = null;
+    let seekDebounceTimer = null;
+
     function seekTo(targetTime) {
       if (!videoRef.value) return;
       const maxDur = media.value?.duration || duration.value || 0;
       const validTarget = Math.min(Math.max(0, targetTime), maxDur > 0 ? maxDur : targetTime);
       suppressResume = true;
+      pendingSeekTarget = validTarget;
+      currentTime.value = contentToPlayer(validTarget);
 
-      if (streamState.transcode) {
-        // Converted stream: align to keyframe, restart stream there
-        isBuffering.value = true;
-        const token = ++reloadToken;
-        alignedStreamStart(validTarget).then((startAt) => {
-          if (token !== reloadToken) return;
-          streamState.streamStart = startAt;
-          swapStream(0);
-        });
-      } else {
-        // Video seeks natively (range requests). The remote audio element is
-        // re-pointed at the new position by the seeked-hook below.
-        videoRef.value.currentTime = validTarget;
-        currentTime.value = validTarget;
+      if (seekDebounceTimer) {
+        clearTimeout(seekDebounceTimer);
       }
-      saveProgressNow();
+
+      // Smooth seek debouncing (80ms): accumulates multiple rapid skip/seek requests
+      // without bombarding Chromium's demuxer or aborting range requests mid-packet.
+      seekDebounceTimer = setTimeout(() => {
+        seekDebounceTimer = null;
+        const target = pendingSeekTarget;
+        pendingSeekTarget = null;
+        if (target === null || target === undefined || !videoRef.value) return;
+
+        if (streamState.transcode) {
+          isBuffering.value = true;
+          const token = ++reloadToken;
+          alignedStreamStart(target).then((startAt) => {
+            if (token !== reloadToken) return;
+            streamState.streamStart = startAt;
+            swapStream(0);
+          });
+        } else {
+          try {
+            if (videoRef.value.fastSeek && Math.abs(videoRef.value.currentTime - target) > 15) {
+              videoRef.value.fastSeek(target);
+            } else {
+              videoRef.value.currentTime = target;
+            }
+          } catch (e) {
+            try { videoRef.value.currentTime = target; } catch (err) {}
+          }
+          currentTime.value = target;
+        }
+        saveProgressNow();
+      }, 80);
     }
 
     function executeSkipAction() {
@@ -7476,8 +7503,9 @@ const PlayerPage = {
     function skip(seconds) {
       if (!videoRef.value) return;
       const step = seconds !== undefined && seconds !== null ? seconds : playerSettings.value?.playback?.seek_step || 10;
-      // currentTime is player time - seekTo expects CONTENT time
-      const targetTime = Math.min(Math.max(0, playerToContent((currentTime.value || 0) + step)), duration.value || 0);
+      const basePos = pendingSeekTarget !== null ? pendingSeekTarget : playerToContent(currentTime.value || 0);
+      const maxDur = media.value?.duration || duration.value || 0;
+      const targetTime = Math.min(Math.max(0, basePos + step), maxDur > 0 ? maxDur : basePos + step);
       triggerSeekOSD(step >= 0 ? "forward" : "back", Math.abs(step));
       seekTo(targetTime);
     }
@@ -7842,10 +7870,108 @@ const PlayerPage = {
       console.warn(`[Player] Subtitle track unavailable, removed: ${sub.label || sub.filename}`);
     }
 
+    // ─── Video Frame Rendering Health Monitor ──────────────────────
+    // Detects when the browser is playing audio successfully (currentTime advancing)
+    // but failing to decode or display video frames (black screen / unsupported codec).
+    let renderHealthTimer = null;
+    let lastRenderedFrameTime = 0;
+    let lastRenderedFrameCount = 0;
+    let lastPlaybackStartTime = 0;
+    let rvfcHandle = null;
+    let consecutiveZeroFrameChecks = 0;
+    let hasAutoFallbackTriggered = false;
+
+    function setupVideoFrameCallback() {
+      const v = videoRef.value;
+      if (!v) return;
+      if ("requestVideoFrameCallback" in v) {
+        const onFrame = (now, metadata) => {
+          lastRenderedFrameTime = Date.now();
+          lastRenderedFrameCount++;
+          consecutiveZeroFrameChecks = 0;
+          if (videoRef.value && !videoRef.value.paused) {
+            try {
+              rvfcHandle = videoRef.value.requestVideoFrameCallback(onFrame);
+            } catch (e) {}
+          }
+        };
+        try {
+          if (rvfcHandle && "cancelVideoFrameCallback" in v) {
+            v.cancelVideoFrameCallback(rvfcHandle);
+          }
+          rvfcHandle = v.requestVideoFrameCallback(onFrame);
+        } catch (e) {}
+      }
+    }
+
+    function checkVideoRenderingHealth() {
+      const v = videoRef.value;
+      if (!v || v.paused || v.ended || v.seeking || !media.value) {
+        consecutiveZeroFrameChecks = 0;
+        return;
+      }
+
+      const now = Date.now();
+      const playingDuration = (now - lastPlaybackStartTime) / 1000;
+      const currentPos = v.currentTime || 0;
+
+      // Only check health after playback has been active for at least 2.2 seconds
+      if (playingDuration < 2.2 || currentPos < 1.0) {
+        return;
+      }
+
+      // Read total decoded/rendered video frames from standard or browser APIs
+      let decodedFrames = -1;
+      try {
+        if (typeof v.getVideoPlaybackQuality === "function") {
+          const q = v.getVideoPlaybackQuality();
+          if (q && typeof q.totalVideoFrames === "number") {
+            decodedFrames = q.totalVideoFrames;
+          }
+        }
+      } catch (e) {}
+
+      if (decodedFrames < 0) {
+        if (typeof v.webkitDecodedFrameCount === "number") {
+          decodedFrames = v.webkitDecodedFrameCount;
+        } else if (typeof v.mozDecodedFrames === "number") {
+          decodedFrames = v.mozDecodedFrames;
+        } else {
+          decodedFrames = lastRenderedFrameCount;
+        }
+      }
+
+      // Check 1: Video dimensions are 0 (e.g., container demuxed audio but dropped video stream)
+      const zeroDimensions = v.videoWidth === 0 && v.videoHeight === 0;
+
+      // Check 2: Zero decoded/rendered frames while audio has been playing for > 2.2s
+      const zeroDecodedFrames = decodedFrames === 0 && lastRenderedFrameCount === 0;
+
+      // Check 3: Frame rendering froze > 4.5s ago while currentTime continues to advance
+      const frameRendererFrozen = lastRenderedFrameTime > 0 && (now - lastRenderedFrameTime > 4500) && (now - lastPlaybackStartTime > 5000);
+
+      if (zeroDimensions || zeroDecodedFrames || frameRendererFrozen) {
+        consecutiveZeroFrameChecks++;
+        console.warn(`[Player Health] Video rendering issue detected (zeroDimensions: ${zeroDimensions}, zeroFrames: ${zeroDecodedFrames}, frameFrozen: ${frameRendererFrozen}, checkCount: ${consecutiveZeroFrameChecks})`);
+
+        // If verified over 2 consecutive checks (~2.4s) and compat transcode not active:
+        if (consecutiveZeroFrameChecks >= 2 && !streamState.transcode && !hasAutoFallbackTriggered) {
+          hasAutoFallbackTriggered = true;
+          console.warn("[Player Health] Video not displaying while audio plays. Auto-switching to converted compatibility stream...");
+          addToast("Unsupported video codec — switching to converted playback...", "info");
+          enableCompatPlayback();
+        }
+      } else {
+        consecutiveZeroFrameChecks = 0;
+      }
+    }
+
     function onVideoPlaying() {
       isPlaying.value = true;
       isBuffering.value = false;
       playerError.value = null;
+      lastPlaybackStartTime = Date.now();
+      setupVideoFrameCallback();
       syncTextTracks();
       setTimeout(syncTextTracks, 150);
       // Instantly resume the remote audio track with the video
@@ -8758,7 +8884,16 @@ const PlayerPage = {
         // automatically fallback to converted transcode mode (1080p H.264/AAC)
         if (!streamState.transcode && (v.error.code === 3 || v.error.code === 4)) {
           console.warn("[HTML5 Player] Video decode failed natively (code " + v.error.code + "). Automatically switching to converted compatibility stream...");
-          addToast("Video decode error detected — switching to converted playback...", "info");
+          addToast("Video decode issue detected — switching to converted playback...", "info");
+          playerError.value = null;
+          enableCompatPlayback();
+          return;
+        }
+
+        // If transcode stream encountered a pipeline hiccup, restart from keyframe
+        if (streamState.transcode && (v.error.code === 3 || v.error.code === 4)) {
+          console.warn("[HTML5 Player] Converted stream hiccup — reconnecting at keyframe...");
+          playerError.value = null;
           enableCompatPlayback();
           return;
         }
@@ -8772,64 +8907,20 @@ const PlayerPage = {
     }
 
     // ─── Error recovery: reload the stream and resume from last position ──
-    // video.play() alone can never revive a dead/stalled stream — the source
-    // must be refetched. This reloads /api/stream/<id> fresh, seeks back to
-    // the last playback position, and resumes.
+    // Resumes playback via the hardware-accelerated compatibility stream at the current
+    // timestamp so we never reload a broken raw stream that only plays audio.
     const recovering = ref(false);
 
     async function recoverFromError() {
       const v = videoRef.value;
       if (!v) return;
-      if (!streamState.transcode && v.error && (v.error.code === 3 || v.error.code === 4)) {
-        enableCompatPlayback();
-        return;
-      }
       recovering.value = true;
+      playerError.value = null;
       try {
-        const resumeAt = isFinite(v.currentTime) ? v.currentTime : 0;
-        const src = v.currentSrc || v.src || "";
-        if (!src) { recovering.value = false; return; }
-
-        // Cache-bust so the browser issues a real network request instead of
-        // replaying its buffered (dead) response
-        const bustUrl = src + (src.includes("?") ? "&" : "?") + "recover=" + Date.now();
-        playerError.value = null;
-
-        await new Promise((resolve) => {
-          let done = false;
-          const finish = () => {
-            if (done) return;
-            done = true;
-            v.removeEventListener("loadedmetadata", onReady);
-            v.removeEventListener("error", onFail);
-            clearTimeout(timeout);
-            resolve();
-          };
-          const onReady = () => {
-            try {
-              if (resumeAt > 1 && v.duration && resumeAt < v.duration - 2) {
-                v.currentTime = resumeAt;
-              }
-            } catch (e) {}
-            finish();
-          };
-          const onFail = () => {
-            playerError.value = "Could not reconnect to the stream. The server may be stopped — go back and relaunch it.";
-            finish();
-          };
-          const timeout = setTimeout(() => {
-            playerError.value = "Reconnecting timed out — the server may not be responding.";
-            finish();
-          }, 15000);
-          v.addEventListener("loadedmetadata", onReady);
-          v.addEventListener("error", onFail);
-          v.src = bustUrl;
-          v.load();
-        });
-
-        await v.play().catch(() => {});
+        await enableCompatPlayback();
       } catch (e) {
         console.warn("[Player] Recovery failed:", e);
+        playerError.value = "Could not reconnect to the stream. Try refreshing or relaunching the server.";
       } finally {
         recovering.value = false;
       }
@@ -9089,6 +9180,11 @@ const PlayerPage = {
       resumeTime.value = 0;
       hasResumedProgress = false;
       suppressResume = false;
+      hasAutoFallbackTriggered = false;
+      consecutiveZeroFrameChecks = 0;
+      lastRenderedFrameCount = 0;
+      lastRenderedFrameTime = 0;
+      lastPlaybackStartTime = 0;
       reloadToken++;                       // invalidate any in-flight swaps
       streamState.mediaId = Number(mediaId);
       streamState.audioTrack = null;
@@ -9146,6 +9242,17 @@ const PlayerPage = {
       try {
         media.value = await API.get(`/api/media/${mediaId}`);
         subtitles.value = media.value.subtitles || [];
+
+        // Pre-emptive compatibility check: if media is HEVC and browser lacks native decode support
+        const vInfo = media.value.video_info || {};
+        const codecTag = (vInfo.codec || "").toLowerCase();
+        const filePath = (media.value.file_path || "").toLowerCase();
+        const isHevc = codecTag.includes("265") || codecTag.includes("hevc") || filePath.includes("x265") || filePath.includes("hevc") || filePath.includes("h.265");
+
+        if (isHevc && !hevcSupported && !streamState.transcode) {
+          console.info("[Player] HEVC content detected on browser without native HEVC decoder. Starting in converted mode...");
+          streamState.transcode = true;
+        }
 
         // Auto-download subtitles via OpenSubtitles when none exist and enabled
         if (!subtitles.value.length) {
@@ -9245,6 +9352,9 @@ const PlayerPage = {
       // a wedged 4K HEVC decoder stops firing timeupdate entirely.
       stallTimer = setInterval(() => checkPlaybackStall(), 2000);
 
+      // Active video rendering health check — ensures video frames are decoding alongside audio
+      renderHealthTimer = setInterval(() => checkVideoRenderingHealth(), 1200);
+
       // Kick off initial playback through the controller (it owns the src)
       swapStream(0);
       window.addEventListener("keydown", handleKeyboard);
@@ -9324,11 +9434,17 @@ const PlayerPage = {
       detachRemoteAudio();
       clearInterval(progressTimer);
       clearInterval(stallTimer);
+      clearInterval(renderHealthTimer);
+      if (rvfcHandle && videoRef.value && "cancelVideoFrameCallback" in videoRef.value) {
+        try { videoRef.value.cancelVideoFrameCallback(rvfcHandle); } catch (e) {}
+      }
       clearTimeout(hideTimer);
       clearTimeout(thumbRetryTimer);
       clearTimeout(volumeOSDTimer);
       clearTimeout(seekOSDTimer);
       clearTimeout(nextEpHideTimer);
+      if (seekDebounceTimer) { clearTimeout(seekDebounceTimer); seekDebounceTimer = null; }
+      pendingSeekTarget = null;
       if (playerAchTimer) clearTimeout(playerAchTimer);
       if (hoverRafId) cancelAnimationFrame(hoverRafId);
 
@@ -9372,6 +9488,10 @@ const PlayerPage = {
       () => {
         cancelAutoAdvance();
         clearInterval(progressTimer);
+        clearInterval(stallTimer);
+        clearInterval(renderHealthTimer);
+        if (seekDebounceTimer) { clearTimeout(seekDebounceTimer); seekDebounceTimer = null; }
+        pendingSeekTarget = null;
         if (videoRef.value) {
           videoRef.value.pause();
           try { videoRef.value.currentTime = 0; } catch (e) {}
