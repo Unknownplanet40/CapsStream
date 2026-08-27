@@ -5849,6 +5849,19 @@ const PlayerPage = {
                 </div>
               </div>
 
+              <!-- Episodes & Seasons Drawer Button (Series / Anime) -->
+              <div style="position:relative" v-if="isSeriesMedia">
+                <button
+                  class="ctrl-btn"
+                  :class="{ active: showEpisodesDrawer }"
+                  @click="toggleEpisodesDrawer"
+                  title="Episodes & Seasons (E)"
+                  id="ctrl-episodes"
+                >
+                  <i class="ph ph-squares-four" style="font-size:1.35rem"></i>
+                </button>
+              </div>
+
               <!-- Queue & Playlist Drawer Button -->
               <div style="position:relative">
                 <button
@@ -6032,6 +6045,98 @@ const PlayerPage = {
           </button>
         </div>
       </div>
+
+      <!-- In-Player Slide-Out Episodes & Seasons Drawer -->
+      <transition name="slide-left">
+        <div v-if="showEpisodesDrawer" class="player-episodes-drawer" @click.stop>
+          <div class="episodes-drawer-header">
+            <div class="episodes-drawer-title-group">
+              <div class="episodes-drawer-show-title" :title="seriesData?.title || media?.title">
+                <i class="ph ph-television" style="color:var(--accent);margin-right:6px"></i>
+                <span>{{ seriesData?.title || media?.title || 'Episodes' }}</span>
+              </div>
+              <!-- Season Selector Pills -->
+              <div class="drawer-season-pills" v-if="drawerSeasonsList.length > 1">
+                <button
+                  v-for="sNum in drawerSeasonsList"
+                  :key="sNum"
+                  class="drawer-season-pill"
+                  :class="{ active: activeDrawerSeason === sNum }"
+                  @click="activeDrawerSeason = sNum"
+                >
+                  Season {{ sNum }}
+                </button>
+              </div>
+            </div>
+            <button class="queue-close-btn" @click="showEpisodesDrawer = false" title="Close Episodes (Esc)">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+
+          <!-- Episodes List -->
+          <div class="episodes-drawer-list">
+            <div
+              v-for="ep in drawerEpisodesList"
+              :key="ep.id || ('ep-' + ep.season + '-' + ep.episode)"
+              class="drawer-ep-item"
+              :class="{
+                'active-playing': Number(ep.id) === Number(media?.id) || (ep.season === media?.season && ep.episode === media?.episode),
+                'missing-ep': ep.is_local === false || ep.is_mounted === false
+              }"
+              @click="playEpisodeFromDrawer(ep)"
+            >
+              <!-- 16:9 Episode Thumbnail -->
+              <div class="drawer-ep-thumb-wrap">
+                <img
+                  v-if="ep.still_path || ep.backdrop_path || seriesData?.backdrop_path"
+                  :src="imgUrl(ep.still_path || ep.backdrop_path || seriesData?.backdrop_path)"
+                  class="drawer-ep-thumb-img"
+                  @error="e => e.target.style.display = 'none'"
+                />
+                <div v-else class="drawer-ep-thumb-fallback">
+                  <i class="ph ph-film-strip"></i>
+                </div>
+
+                <!-- Watch Progress Line -->
+                <div v-if="calcProgressPercent(ep) > 0" class="drawer-ep-progress-bar">
+                  <div class="drawer-ep-progress-fill" :style="{ width: calcProgressPercent(ep) + '%' }"></div>
+                </div>
+
+                <!-- Active Now Playing Overlay / Equalizer -->
+                <div v-if="Number(ep.id) === Number(media?.id) || (ep.season === media?.season && ep.episode === media?.episode)" class="drawer-ep-playing-overlay">
+                  <div class="now-playing-equalizer">
+                    <span></span><span></span><span></span>
+                  </div>
+                </div>
+
+                <!-- Play Hover Icon -->
+                <div v-else-if="ep.is_local !== false && ep.is_mounted !== false" class="drawer-ep-hover-overlay">
+                  <i class="ph-fill ph-play"></i>
+                </div>
+
+                <!-- Missing Episode Overlay -->
+                <div v-else class="drawer-ep-missing-overlay">
+                  <span>{{ ep.is_mounted === false ? 'Unmounted' : 'Missing' }}</span>
+                </div>
+              </div>
+
+              <!-- Episode Info -->
+              <div class="drawer-ep-info">
+                <div class="drawer-ep-meta-row">
+                  <span class="drawer-ep-code">S{{ (ep.season || activeDrawerSeason).toString().padStart(2,'0') }}E{{ (ep.episode || 1).toString().padStart(2,'0') }}</span>
+                  <span v-if="ep.duration" class="drawer-ep-duration">{{ formatDuration(ep.duration) }}</span>
+                </div>
+                <div class="drawer-ep-title" :title="ep.ep_title || ep.title || ('Episode ' + ep.episode)">
+                  {{ ep.ep_title || ep.title || ('Episode ' + ep.episode) }}
+                </div>
+                <div v-if="ep.overview" class="drawer-ep-overview">
+                  {{ ep.overview }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
 
       <!-- In-Player Slide-Out Queue Drawer -->
       <transition name="slide-left">
@@ -6995,7 +7100,6 @@ const PlayerPage = {
       const modes = ["contain", "cover", "fill"];
       const idx = modes.indexOf(aspectRatioFit.value);
       aspectRatioFit.value = modes[(idx + 1) % modes.length];
-      addToast(`Aspect Ratio: ${aspectRatioFit.value.toUpperCase()}`, "info");
     }
 
     function triggerDoubleTapRipple(side) {
@@ -7049,10 +7153,8 @@ const PlayerPage = {
         const scale = currentDist / (touchGestureState.initialPinchDist || 1);
         if (scale > 1.25 && aspectRatioFit.value !== "cover") {
           aspectRatioFit.value = "cover";
-          addToast("Zoom to Fill (Cover)", "info");
         } else if (scale < 0.85 && aspectRatioFit.value !== "contain") {
           aspectRatioFit.value = "contain";
-          addToast("Original Fit (Contain)", "info");
         }
         return;
       }
@@ -8167,12 +8269,68 @@ const PlayerPage = {
     }
 
 
+    // ─── In-Player Episodes & Seasons Drawer ──────────────────────
+    const showEpisodesDrawer = ref(false);
+    const seriesData = ref(null);
+    const activeDrawerSeason = ref(1);
+
+    const isSeriesMedia = computed(() => {
+      if (!media.value) return false;
+      return media.value.type === "series" || media.value.type === "anime" || (seriesData.value && Object.keys(seriesData.value.seasons || {}).length > 0);
+    });
+
+    const drawerSeasonsList = computed(() => {
+      if (!seriesData.value?.seasons) return [];
+      return Object.keys(seriesData.value.seasons).map(Number).sort((a, b) => a - b);
+    });
+
+    const drawerEpisodesList = computed(() => {
+      if (!seriesData.value?.seasons) return [];
+      const eps = seriesData.value.seasons[activeDrawerSeason.value] || [];
+      return eps.slice().sort((a, b) => (a.episode || 0) - (b.episode || 0));
+    });
+
+    function toggleEpisodesDrawer() {
+      showEpisodesDrawer.value = !showEpisodesDrawer.value;
+      if (showEpisodesDrawer.value) {
+        showQueueDrawer.value = false;
+        showSpeedMenu.value = false;
+        showSubMenu.value = false;
+        showAudioMenu.value = false;
+        showQualityMenu.value = false;
+        showControls();
+        if (media.value?.season) {
+          activeDrawerSeason.value = Number(media.value.season) || 1;
+        }
+        Vue.nextTick(() => {
+          const activeEl = document.querySelector(".drawer-ep-item.active-playing");
+          if (activeEl) {
+            activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        });
+      }
+    }
+
+    function playEpisodeFromDrawer(ep) {
+      if (ep.is_local === false || ep.is_mounted === false) {
+        addToast(ep.is_mounted === false ? "This episode is on an unmounted drive" : "This episode is not downloaded locally", "warning");
+        return;
+      }
+      if (!ep.id || Number(ep.id) === Number(media.value?.id)) return;
+      showEpisodesDrawer.value = false;
+      router.push(`/watch/${ep.id}`);
+    }
+
+
     // ─── Queue & Playlist Drawer ─────────────────────────────────
     const showQueueDrawer = ref(false);
 
     function toggleQueueDrawer() {
       showQueueDrawer.value = !showQueueDrawer.value;
-      if (showQueueDrawer.value) showControls();
+      if (showQueueDrawer.value) {
+        showEpisodesDrawer.value = false;
+        showControls();
+      }
     }
 
     function toggleQueueShuffle() {
@@ -8459,6 +8617,11 @@ const PlayerPage = {
           e.preventDefault();
           toggleMute();
           break;
+        case "e":
+        case "E":
+          e.preventDefault();
+          if (isSeriesMedia.value) toggleEpisodesDrawer();
+          break;
         case "q":
         case "Q":
           e.preventDefault();
@@ -8468,6 +8631,15 @@ const PlayerPage = {
         case "N":
           e.preventDefault();
           if (hasNextEp.value) handleNextEpClick();
+          break;
+        case "Escape":
+          if (showEpisodesDrawer.value) {
+            e.preventDefault();
+            showEpisodesDrawer.value = false;
+          } else if (showQueueDrawer.value) {
+            e.preventDefault();
+            showQueueDrawer.value = false;
+          }
           break;
         case "[":
         case "BracketLeft":
@@ -8682,6 +8854,10 @@ const PlayerPage = {
       if (media.value.type !== "movie" && media.value.tmdb_id) {
         try {
           const show = await API.get(`/api/show/${media.value.tmdb_id}?type=${media.value.type}`);
+          seriesData.value = show;
+          if (media.value.season) {
+            activeDrawerSeason.value = Number(media.value.season) || 1;
+          }
           const allEps = Object.values(show.seasons || {})
             .flat()
             .sort((a, b) => {
@@ -8706,9 +8882,11 @@ const PlayerPage = {
           }
         } catch (e) {
           nextEp.value = null;
+          seriesData.value = null;
         }
       } else {
         nextEp.value = null;
+        seriesData.value = null;
       }
 
       if (store.profile) {
@@ -8978,6 +9156,14 @@ const PlayerPage = {
       nextEpProgressPercent,
       handleNextEpClick,
       cancelAutoAdvance,
+      showEpisodesDrawer,
+      toggleEpisodesDrawer,
+      seriesData,
+      activeDrawerSeason,
+      drawerSeasonsList,
+      drawerEpisodesList,
+      playEpisodeFromDrawer,
+      isSeriesMedia,
       showQueueDrawer,
       toggleQueueDrawer,
       toggleQueueShuffle,
