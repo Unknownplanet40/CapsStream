@@ -974,6 +974,34 @@ ol {
   border-color: #ffffff;
 }
 
+.netflix-avatar-lock-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1.5px solid rgba(255, 215, 0, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffd700;
+  font-size: 0.95rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6), 0 0 10px rgba(255, 215, 0, 0.2);
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0.2, 1), background 0.2s ease, border-color 0.2s ease;
+  z-index: 3;
+}
+
+.netflix-profile-card:hover .netflix-avatar-lock-badge {
+  transform: scale(1.12);
+  background: rgba(0, 0, 0, 0.9);
+  border-color: #ffd700;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.7), 0 0 14px rgba(255, 215, 0, 0.4);
+}
+
 .netflix-profile-label {
   font-size: 1.15rem;
   color: #808080;
@@ -7117,7 +7145,7 @@ body.kids-mode-theme .suggestion-tag:hover {
 
 /* Rarity Tiers Glow Effects */
 
-/* 🥉 Bronze */
+/* Bronze */
 .achievement-card.rarity-bronze.unlocked {
   background: linear-gradient(135deg, rgba(205, 127, 50, 0.12) 0%, rgba(205, 127, 50, 0.03) 100%);
   border-color: rgba(205, 127, 50, 0.45);
@@ -7134,7 +7162,7 @@ body.kids-mode-theme .suggestion-tag:hover {
   color: #cd7f32;
 }
 
-/* 🥈 Silver */
+/* Silver */
 .achievement-card.rarity-silver.unlocked {
   background: linear-gradient(135deg, rgba(192, 192, 192, 0.14) 0%, rgba(192, 192, 192, 0.03) 100%);
   border-color: rgba(192, 192, 192, 0.5);
@@ -7151,7 +7179,7 @@ body.kids-mode-theme .suggestion-tag:hover {
   color: #e2e8f0;
 }
 
-/* 🥇 Gold */
+/* Gold */
 .achievement-card.rarity-gold.unlocked {
   background: linear-gradient(135deg, rgba(255, 215, 0, 0.15) 0%, rgba(255, 215, 0, 0.03) 100%);
   border-color: rgba(255, 215, 0, 0.55);
@@ -7168,7 +7196,7 @@ body.kids-mode-theme .suggestion-tag:hover {
   color: #ffd700;
 }
 
-/* 💎 Platinum */
+/* Platinum */
 .achievement-card.rarity-platinum.unlocked {
   background: linear-gradient(135deg, rgba(168, 85, 247, 0.18) 0%, rgba(6, 182, 212, 0.08) 100%);
   border-color: rgba(168, 85, 247, 0.65);
@@ -12468,6 +12496,75 @@ h1, h2, h3,
   text-align: left;
   flex: 1;
   min-width: 0;
+}
+
+/* ─── Profile Active In-Use Presence Styles ───────────────── */
+.netflix-profile-card.is-in-use .netflix-avatar-wrap {
+  opacity: 0.8;
+  border-color: rgba(34, 197, 94, 0.45);
+}
+
+.netflix-profile-card.is-in-use:hover .netflix-avatar-wrap {
+  opacity: 1;
+  border-color: #22c55e;
+  transform: scale(1.05);
+}
+
+.profile-in-use-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  margin-top: -4px;
+}
+
+.profile-in-use-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+  animation: inUsePulse 1.8s infinite;
+}
+
+@keyframes inUsePulse {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+  70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+
+/* ─── Session Evicted Modal ───────────────────────────────── */
+.session-evicted-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  z-index: 99999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.session-evicted-card {
+  width: 100%;
+  max-width: 420px;
+  background: rgba(18, 18, 28, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 24px;
+  padding: 28px 24px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.95), 0 0 30px rgba(229, 9, 20, 0.3);
+  animation: slideUpModal 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 

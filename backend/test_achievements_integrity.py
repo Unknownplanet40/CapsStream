@@ -74,9 +74,9 @@ class TestAchievementsIntegrity(unittest.TestCase):
         # Create a test standard profile and a test kids profile
         conn = get_conn()
         cur = conn.cursor()
-        cur.execute("INSERT INTO profiles (name, is_kids, avatar, color) VALUES ('Test Adult', 0, '👤', '#e50914')")
+        cur.execute("INSERT INTO profiles (name, is_kids, avatar, color) VALUES ('Test Adult', 0, 'ph-user', '#e50914')")
         adult_pid = cur.lastrowid
-        cur.execute("INSERT INTO profiles (name, is_kids, avatar, color) VALUES ('Test Kid', 1, '🧒', '#fdcb6e')")
+        cur.execute("INSERT INTO profiles (name, is_kids, avatar, color) VALUES ('Test Kid', 1, 'ph-baby', '#fdcb6e')")
         kid_pid = cur.lastrowid
         conn.commit()
         conn.close()

@@ -635,8 +635,10 @@ def serve_metadata_image(filename):
     # Return instant fallback SVG so the HTTP worker thread is freed immediately
     svg = """<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">
       <rect width="300" height="450" fill="#181824"/>
-      <text x="50%" y="48%" dominant-baseline="middle" text-anchor="middle" fill="#666" font-size="48">🎬</text>
-      <text x="50%" y="58%" dominant-baseline="middle" text-anchor="middle" fill="#888" font-family="sans-serif" font-size="14">Loading...</text>
+      <g transform="translate(118, 175) scale(1.6)" fill="#444455">
+        <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/>
+      </g>
+      <text x="50%" y="60%" dominant-baseline="middle" text-anchor="middle" fill="#888" font-family="sans-serif" font-size="14">Loading...</text>
     </svg>"""
     return Response(svg, mimetype="image/svg+xml", headers={"Cache-Control": "public, max-age=5"})
 
@@ -650,11 +652,35 @@ def serve_avatar_image(filename):
     return resp
 
 
-# ─── Profiles API ─────────────────────────────────────────────────────────────
+# ─── Profiles API & Active Presence Tracking ─────────────────────────────────
+
+_ACTIVE_PROFILE_LOCK = threading.Lock()
+_ACTIVE_PROFILE_SESSIONS = {}  # profile_id -> { "session_id": str, "device_name": str, "last_seen": float, "evicted": bool }
+
 
 @app.route("/api/profiles", methods=["GET"])
 def api_get_profiles():
-    return jsonify(get_all_profiles())
+    now = time.time()
+    with _ACTIVE_PROFILE_LOCK:
+        # Clean up stale sessions (> 45s without heartbeat)
+        stale_pids = [pid for pid, sess in _ACTIVE_PROFILE_SESSIONS.items() if now - sess.get("last_seen", 0) > 45]
+        for pid in stale_pids:
+            del _ACTIVE_PROFILE_SESSIONS[pid]
+        active_map = {pid: dict(sess) for pid, sess in _ACTIVE_PROFILE_SESSIONS.items()}
+
+    profiles = get_all_profiles()
+    for p in profiles:
+        pid = p.get("id")
+        sess = active_map.get(pid)
+        if sess and not sess.get("evicted"):
+            p["in_use"] = True
+            p["active_device"] = sess.get("device_name", "Another Device")
+            p["active_session_id"] = sess.get("session_id", "")
+        else:
+            p["in_use"] = False
+            p["active_device"] = ""
+            p["active_session_id"] = ""
+    return jsonify(profiles)
 
 
 @app.route("/api/profiles", methods=["POST"])
@@ -670,7 +696,7 @@ def api_create_profile():
     name = (data.get("name") or "").strip()
     raw_pin = data.get("pin")
     pin = str(raw_pin).strip() if raw_pin is not None else ""
-    avatar = data.get("avatar", "🎬")
+    avatar = data.get("avatar", "ph-film-strip")
     color  = data.get("color", "#e50914")
     theme  = str(data.get("theme", "crimson") or "crimson").strip()
     is_admin = bool(data.get("is_admin", False))
@@ -723,7 +749,7 @@ def api_update_profile(profile_id):
     name = (data.get("name") or "").strip()
     raw_pin = data.get("pin")
     is_kids = bool(data.get("is_kids", False))
-    avatar = data.get("avatar", "🎬")
+    avatar = data.get("avatar", "ph-film-strip")
     color  = data.get("color", "#e50914")
     theme  = str(data.get("theme", "crimson") or "crimson").strip()
     is_admin = data.get("is_admin")
@@ -804,7 +830,7 @@ def api_upload_profile_avatar(profile_id):
         update_profile(
             profile_id,
             name=prof["name"],
-            avatar=prof.get("avatar", "🎬"),
+            avatar=prof.get("avatar", "ph-film-strip"),
             color=prof.get("color", "#e50914"),
             is_kids=bool(prof.get("is_kids")),
             theme=prof.get("theme", "crimson"),
@@ -879,7 +905,7 @@ def _sanitize_profile(profile):
     return {
         "id": profile["id"],
         "name": profile["name"],
-        "avatar": profile.get("avatar", "🎬"),
+        "avatar": profile.get("avatar", "ph-film-strip"),
         "color": profile.get("color", "#e50914"),
         "theme": profile.get("theme", "crimson"),
         "is_kids": bool(profile.get("is_kids", 0)),
@@ -903,9 +929,26 @@ def api_auth_profile():
     profile_id = data.get("profile_id")
     raw_pin = data.get("pin")
     pin = str(raw_pin).strip() if raw_pin is not None else ""
+    force_takeover = bool(data.get("force_takeover", False))
+    client_session_id = str(data.get("session_id") or "").strip()
+    device_name = str(data.get("device_name") or "Desktop App").strip()
 
     if not profile_id:
         return jsonify({"error": "profile_id required"}), 400
+
+    now = time.time()
+    # Check if profile is active in another session
+    with _ACTIVE_PROFILE_LOCK:
+        curr_sess = _ACTIVE_PROFILE_SESSIONS.get(profile_id)
+        if curr_sess and not curr_sess.get("evicted") and (now - curr_sess.get("last_seen", 0) <= 45):
+            if client_session_id and curr_sess.get("session_id") != client_session_id:
+                if not force_takeover:
+                    return jsonify({
+                        "status": "in_use",
+                        "in_use": True,
+                        "device_name": curr_sess.get("device_name", "Another Device"),
+                        "message": f"This profile is currently active on {curr_sess.get('device_name', 'another device')}."
+                    }), 409
 
     # Brute-force guard: 5 failed attempts locks the profile for 10 minutes
     remaining = _pin_lockout_remaining(profile_id)
@@ -924,10 +967,62 @@ def api_auth_profile():
         return jsonify({"error": "Incorrect PIN"}), 401
     _clear_pin_failures(profile_id)
 
+    # Claim active presence / Evict old session
+    with _ACTIVE_PROFILE_LOCK:
+        old_sess = _ACTIVE_PROFILE_SESSIONS.get(profile_id)
+        if old_sess and client_session_id and old_sess.get("session_id") != client_session_id:
+            old_sess["evicted"] = True
+        _ACTIVE_PROFILE_SESSIONS[profile_id] = {
+            "session_id": client_session_id,
+            "device_name": device_name,
+            "last_seen": now,
+            "evicted": False,
+        }
+
     session["profile_id"] = profile_id
     session["is_kids"] = bool(profile.get("is_kids", 0))
     session["is_admin"] = bool(profile.get("is_admin", 0))
     return jsonify({"ok": True, "profile": _sanitize_profile(profile)})
+
+
+@app.route("/api/profiles/heartbeat", methods=["POST"])
+def api_profile_heartbeat():
+    data = request.json or {}
+    client_session_id = str(data.get("session_id") or "").strip()
+    device_name = str(data.get("device_name") or "Desktop App").strip()
+    pid = _current_profile()
+    if not pid:
+        return jsonify({"status": "no_profile", "evicted": False})
+
+    now = time.time()
+    with _ACTIVE_PROFILE_LOCK:
+        sess = _ACTIVE_PROFILE_SESSIONS.get(pid)
+        if sess:
+            if sess.get("evicted") or (client_session_id and sess.get("session_id") != client_session_id):
+                return jsonify({"status": "evicted", "evicted": True})
+            sess["last_seen"] = now
+            sess["device_name"] = device_name
+        else:
+            _ACTIVE_PROFILE_SESSIONS[pid] = {
+                "session_id": client_session_id,
+                "device_name": device_name,
+                "last_seen": now,
+                "evicted": False,
+            }
+    return jsonify({"status": "ok", "evicted": False})
+
+
+@app.route("/api/profiles/release", methods=["POST"])
+def api_release_profile():
+    data = request.json or {}
+    client_session_id = str(data.get("session_id") or "").strip()
+    pid = _current_profile() or data.get("profile_id")
+    if pid:
+        with _ACTIVE_PROFILE_LOCK:
+            sess = _ACTIVE_PROFILE_SESSIONS.get(pid)
+            if sess and (not client_session_id or sess.get("session_id") == client_session_id):
+                del _ACTIVE_PROFILE_SESSIONS[pid]
+    return jsonify({"ok": True})
 
 
 @app.route("/api/profiles/me", methods=["GET"])
@@ -948,9 +1043,12 @@ def api_me():
 
 @app.route("/api/profiles/logout", methods=["POST"])
 def api_logout():
-    session.pop("profile_id", None)
+    pid = session.pop("profile_id", None)
     session.pop("is_kids", None)
     session.pop("is_admin", None)
+    if pid:
+        with _ACTIVE_PROFILE_LOCK:
+            _ACTIVE_PROFILE_SESSIONS.pop(pid, None)
     return jsonify({"ok": True})
 
 
@@ -3427,7 +3525,7 @@ def _ensure_single_instance(host, port):
             if not _port_owner_pid(port):
                 break
     else:
-        print(f"\n  ❌ ERROR: Port {port} is already in use by another program (pid {owner}).")
+        print(f"\n  [ERROR] Port {port} is already in use by another program (pid {owner}).")
         if cmdline:
                 print(f"     Command line: {cmdline[:200]}")
         print(f"     CapsStream cannot start. Free the port or change 'port' in config.json.\n")

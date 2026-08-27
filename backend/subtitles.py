@@ -531,7 +531,7 @@ def download_online_subtitle(slug, media_id):
                         f.writelines(vtt_lines)
 
                     return {
-                        "label": f"🌐 {slug.replace('-', ' ').title()[:30]}",
+                        "label": f"{slug.replace('-', ' ').title()[:30]} (Online)",
                         "url": f"/api/subtitles/{media_id}/{out_vtt_filename}",
                         "language": "en",
                         "is_online": True

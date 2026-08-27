@@ -159,7 +159,7 @@ def init_db():
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             name       TEXT NOT NULL,
             pin_hash   TEXT,
-            avatar     TEXT DEFAULT '🎬',
+            avatar     TEXT DEFAULT 'ph-film-strip',
             color      TEXT DEFAULT '#e50914',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
@@ -1073,7 +1073,7 @@ def get_profile(profile_id):
     return dict(row) if row else None
 
 
-def create_profile(name, pin_hash, avatar="🎬", color="#e50914", is_kids=False,
+def create_profile(name, pin_hash, avatar="ph-film-strip", color="#e50914", is_kids=False,
                    daily_limit_minutes=0, bedtime_curfew="", theme="crimson",
                    is_admin=False, custom_avatar_url="", maturity_rating="All",
                    blocked_genres="", default_audio_lang="", default_sub_lang="",
@@ -1098,7 +1098,7 @@ def create_profile(name, pin_hash, avatar="🎬", color="#e50914", is_kids=False
     return pid
 
 
-def update_profile(profile_id, name, pin_hash=None, avatar="🎬", color="#e50914", is_kids=False,
+def update_profile(profile_id, name, pin_hash=None, avatar="ph-film-strip", color="#e50914", is_kids=False,
                    update_pin=False, daily_limit_minutes=0, bedtime_curfew="", theme="crimson",
                    is_admin=None, custom_avatar_url=None, maturity_rating="All",
                    blocked_genres="", default_audio_lang="", default_sub_lang="",
@@ -2181,7 +2181,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_first_watch",
         "title": "Little Streamer",
-        "icon": "🎬",
+        "icon": "ph-film-strip",
         "description": "Watch your very first cartoon or movie",
         "category": "Little Milestones",
         "rarity": "Bronze"
@@ -2189,7 +2189,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_first_finish",
         "title": "Storybook Finisher",
-        "icon": "🏁",
+        "icon": "ph-flag-checkered",
         "description": "Watch a show or movie all the way to the end",
         "category": "Little Milestones",
         "rarity": "Bronze"
@@ -2197,7 +2197,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_time_1h",
         "title": "Cartoon Explorer",
-        "icon": "⏱️",
+        "icon": "ph-timer",
         "description": "Enjoy 1 hour of fun streaming",
         "category": "Little Milestones",
         "rarity": "Bronze"
@@ -2205,7 +2205,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_time_3h",
         "title": "Adventure Fan",
-        "icon": "🍿",
+        "icon": "ph-popcorn",
         "description": "Enjoy 3 hours of streaming fun",
         "category": "Little Milestones",
         "rarity": "Silver"
@@ -2213,7 +2213,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_time_10h",
         "title": "Super Streamer",
-        "icon": "🌟",
+        "icon": "ph-sparkle",
         "description": "Reach 10 hours of total streaming",
         "category": "Little Milestones",
         "rarity": "Gold"
@@ -2221,7 +2221,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_time_25h",
         "title": "Mega Movie Star",
-        "icon": "🚀",
+        "icon": "ph-rocket",
         "description": "Reach 25 hours of playtime",
         "category": "Little Milestones",
         "rarity": "Platinum"
@@ -2229,7 +2229,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_titles_5",
         "title": "Five Star Fun",
-        "icon": "⭐",
+        "icon": "ph-star",
         "description": "Watch 5 different cartoons or movies",
         "category": "Little Milestones",
         "rarity": "Bronze"
@@ -2237,7 +2237,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_titles_15",
         "title": "Show Collector",
-        "icon": "📚",
+        "icon": "ph-books",
         "description": "Watch 15 different cartoons or movies",
         "category": "Little Milestones",
         "rarity": "Silver"
@@ -2245,7 +2245,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_titles_30",
         "title": "Library Champion",
-        "icon": "👑",
+        "icon": "ph-crown",
         "description": "Watch 30 different cartoons or movies",
         "category": "Little Milestones",
         "rarity": "Gold"
@@ -2253,7 +2253,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_streak_2",
         "title": "Weekend Fan",
-        "icon": "🎉",
+        "icon": "ph-confetti",
         "description": "Watch shows 2 days in a row",
         "category": "Little Milestones",
         "rarity": "Bronze"
@@ -2261,7 +2261,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_streak_3",
         "title": "Cartoon Streak",
-        "icon": "🔥",
+        "icon": "ph-fire",
         "description": "Watch shows 3 days in a row",
         "category": "Little Milestones",
         "rarity": "Silver"
@@ -2269,7 +2269,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_streak_5",
         "title": "High Five Streak",
-        "icon": "✋",
+        "icon": "ph-hand-palm",
         "description": "Stream every day for 5 days",
         "category": "Little Milestones",
         "rarity": "Gold"
@@ -2277,7 +2277,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_streak_7",
         "title": "Weekly Champion",
-        "icon": "📅",
+        "icon": "ph-calendar",
         "description": "Stream every day for a full week",
         "category": "Little Milestones",
         "rarity": "Platinum"
@@ -2285,7 +2285,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_quick_show",
         "title": "Quick Chuckles",
-        "icon": "⚡",
+        "icon": "ph-lightning",
         "description": "Finish a short cartoon under 15 minutes",
         "category": "Little Milestones",
         "rarity": "Bronze"
@@ -2295,7 +2295,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_animation_fan",
         "title": "Toon Lover",
-        "icon": "🎨",
+        "icon": "ph-palette",
         "description": "Watch 3 or more Animated cartoons or shows",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
@@ -2303,7 +2303,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_family_time",
         "title": "Family Fun",
-        "icon": "🎈",
+        "icon": "ph-balloon",
         "description": "Watch 3 Family or Adventure movies",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
@@ -2311,7 +2311,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_comedy_kid",
         "title": "Giggle Box",
-        "icon": "😂",
+        "icon": "ph-smiley",
         "description": "Watch 3 funny Comedy shows",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
@@ -2319,7 +2319,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_fantasy_magic",
         "title": "Magic Kingdom",
-        "icon": "🧙‍♂️",
+        "icon": "ph-wand",
         "description": "Watch 3 Fantasy or magical adventures",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
@@ -2327,7 +2327,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_sci_fi_space",
         "title": "Space Explorer",
-        "icon": "🚀",
+        "icon": "ph-rocket",
         "description": "Watch 3 Sci-Fi or space adventures",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
@@ -2335,7 +2335,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_genre_adventurer",
         "title": "Curious Explorer",
-        "icon": "🔍",
+        "icon": "ph-magnifying-glass",
         "description": "Watch shows from 3 different categories",
         "category": "Cartoon Explorer",
         "rarity": "Silver"
@@ -2343,7 +2343,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_trailer_scout",
         "title": "Sneak Peek",
-        "icon": "🍿",
+        "icon": "ph-popcorn",
         "description": "Watch an official video preview or trailer",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
@@ -2351,7 +2351,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_search_helper",
         "title": "Treasure Hunter",
-        "icon": "🔎",
+        "icon": "ph-magnifying-glass",
         "description": "Search for your favorite cartoon or character",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
@@ -2359,7 +2359,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_bubble_explorer",
         "title": "Bubble Popper",
-        "icon": "🫧",
+        "icon": "ph-circles-three-plus",
         "description": "Click a category bubble on the Kids Home page",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
@@ -2369,7 +2369,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_fullscreen_fun",
         "title": "Big Screen Magic",
-        "icon": "🖥️",
+        "icon": "ph-monitor",
         "description": "Play your video in full screen mode",
         "category": "Fun Player",
         "rarity": "Bronze"
@@ -2377,7 +2377,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_play_pause",
         "title": "Freeze Dance",
-        "icon": "⏸️",
+        "icon": "ph-play-pause",
         "description": "Pause and resume your show",
         "category": "Fun Player",
         "rarity": "Bronze"
@@ -2385,7 +2385,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_volume_whisper",
         "title": "Whisper Quiet",
-        "icon": "🤫",
+        "icon": "ph-speaker-slash",
         "description": "Adjust the volume to a quiet level or mute",
         "category": "Fun Player",
         "rarity": "Bronze"
@@ -2393,7 +2393,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_volume_party",
         "title": "Party Volume",
-        "icon": "🔊",
+        "icon": "ph-speaker-high",
         "description": "Turn up the volume for your favorite song or scene",
         "category": "Fun Player",
         "rarity": "Bronze"
@@ -2401,7 +2401,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_pip_hero",
         "title": "Mini Magic Screen",
-        "icon": "🖼️",
+        "icon": "ph-picture-in-picture",
         "description": "Open the video in a mini pop-out window",
         "category": "Fun Player",
         "rarity": "Silver"
@@ -2409,7 +2409,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_next_episode",
         "title": "Next Adventure",
-        "icon": "⏭️",
+        "icon": "ph-skip-forward",
         "description": "Jump straight to the next episode",
         "category": "Fun Player",
         "rarity": "Bronze"
@@ -2417,7 +2417,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_sub_reading",
         "title": "Reading Helper",
-        "icon": "💬",
+        "icon": "ph-chat-circle",
         "description": "Turn on subtitles to read along with the characters",
         "category": "Fun Player",
         "rarity": "Bronze"
@@ -2425,7 +2425,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_speed_turbo",
         "title": "Turbo Speed",
-        "icon": "⚡",
+        "icon": "ph-lightning",
         "description": "Watch a scene in fast speed",
         "category": "Fun Player",
         "rarity": "Bronze"
@@ -2433,7 +2433,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_speed_slowmo",
         "title": "Super Slow-Mo",
-        "icon": "🐌",
+        "icon": "ph-hare",
         "description": "Watch a scene in slow motion",
         "category": "Fun Player",
         "rarity": "Bronze"
@@ -2441,7 +2441,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_rewind_seeker",
         "title": "Time Rewind",
-        "icon": "⏪",
+        "icon": "ph-rewind",
         "description": "Rewind to replay a favorite part",
         "category": "Fun Player",
         "rarity": "Bronze"
@@ -2451,7 +2451,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_fav_1",
         "title": "First Favorite",
-        "icon": "💖",
+        "icon": "ph-heart",
         "description": "Add your very first favorite cartoon",
         "category": "Sticker Collector",
         "rarity": "Bronze"
@@ -2459,7 +2459,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_fav_5",
         "title": "Sticker Collection",
-        "icon": "❤️",
+        "icon": "ph-heart",
         "description": "Save 5 shows to your Favorites",
         "category": "Sticker Collector",
         "rarity": "Silver"
@@ -2467,7 +2467,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_fav_15",
         "title": "Super Treasure Box",
-        "icon": "💎",
+        "icon": "ph-diamond",
         "description": "Save 15 shows to your Favorites",
         "category": "Sticker Collector",
         "rarity": "Gold"
@@ -2475,7 +2475,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_collection_builder",
         "title": "Toy Box Creator",
-        "icon": "📁",
+        "icon": "ph-folder-star",
         "description": "Create a custom cartoon playlist or collection",
         "category": "Sticker Collector",
         "rarity": "Silver"
@@ -2483,7 +2483,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_avatar_dress",
         "title": "Dress Up Time",
-        "icon": "🎭",
+        "icon": "ph-mask-happy",
         "description": "Choose a fun avatar icon or favorite color",
         "category": "Sticker Collector",
         "rarity": "Bronze"
@@ -2493,7 +2493,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_trophy_5",
         "title": "Little Star",
-        "icon": "🌟",
+        "icon": "ph-star",
         "description": "Unlock 5 badges in your Kids Trophy Case",
         "category": "Junior Champion",
         "rarity": "Bronze"
@@ -2501,7 +2501,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_trophy_10",
         "title": "Bronze Scout",
-        "icon": "🥉",
+        "icon": "ph-medal",
         "description": "Unlock 10 badges in your Kids Trophy Case",
         "category": "Junior Champion",
         "rarity": "Bronze"
@@ -2509,7 +2509,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_trophy_20",
         "title": "Silver Champion",
-        "icon": "🥈",
+        "icon": "ph-medal",
         "description": "Unlock 20 badges in your Kids Trophy Case",
         "category": "Junior Champion",
         "rarity": "Silver"
@@ -2517,7 +2517,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_trophy_30",
         "title": "Golden Superstar",
-        "icon": "🥇",
+        "icon": "ph-trophy",
         "description": "Unlock 30 badges in your Kids Trophy Case",
         "category": "Junior Champion",
         "rarity": "Gold"
@@ -2525,7 +2525,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_trophy_all",
         "title": "Ultimate Legend",
-        "icon": "👑",
+        "icon": "ph-crown",
         "description": "Collect all badges in the Kids Trophy Case!",
         "category": "Junior Champion",
         "rarity": "Platinum"

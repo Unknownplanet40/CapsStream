@@ -176,7 +176,7 @@ async function toggleItemInPlaylist(playlist) {
   const mediaId = playlistPickerState.item.id;
   try {
     await API.post(`/api/playlists/${playlist.id}/items`, { media_id: mediaId });
-    addToast(`Added "${playlistPickerState.item.title}" to ${playlist.name} 📋`, "success");
+    addToast(`Added "${playlistPickerState.item.title}" to ${playlist.name}`, "success");
     const lists = await API.get("/api/playlists");
     playlistPickerState.playlists = Array.isArray(lists) ? lists : [];
   } catch (e) {
@@ -191,7 +191,7 @@ async function createAndAddToPlaylist() {
     const pl = await API.post("/api/playlists", { name });
     if (pl && pl.id) {
       await API.post(`/api/playlists/${pl.id}/items`, { media_id: playlistPickerState.item.id });
-      addToast(`Created "${name}" and added title! 📋`, "success");
+      addToast(`Created "${name}" and added title!`, "success");
       playlistPickerState.inlineName = "";
       const lists = await API.get("/api/playlists");
       playlistPickerState.playlists = Array.isArray(lists) ? lists : [];
@@ -210,7 +210,7 @@ function addPickerItemToQueue(playNext = false) {
     addToast(`Added "${media.title}" to play next ⏭️`, "success");
   } else {
     store.queue.push(media);
-    addToast(`Added "${media.title}" to queue 📋`, "success");
+    addToast(`Added "${media.title}" to queue`, "success");
   }
   playlistPickerState.show = false;
 }
@@ -230,7 +230,7 @@ function setSleepTimer(minutes) {
   }
   store.sleepTimerMinutes = minutes;
   store.sleepTimerEndsAt = Date.now() + minutes * 60 * 1000;
-  addToast(`Bedtime timer set for ${minutes} minutes 🌙`, "success");
+  addToast(`Bedtime timer set for ${minutes} minutes`, "success");
 
   sleepTimerInterval = setInterval(() => {
     if (!store.sleepTimerEndsAt) {
@@ -315,7 +315,7 @@ function checkRamUsage(info) {
 
   if (level === "critical") {
     addToast(
-      `🔴 System memory almost full — ${pct}% (${usage}). Close other applications to avoid playback stutters or crashes.`,
+      `System memory almost full — ${pct}% (${usage}). Close other applications to avoid playback stutters or crashes.`,
       "error",
       10000
     );
@@ -333,7 +333,7 @@ function handleServerOffline() {
     store.serverOnline = false;
     if (!isServerOfflineToastActive) {
       isServerOfflineToastActive = true;
-      addToast("⚠️ Server Disconnected — CapsStream backend is unreachable or offline.", "error", 6000);
+      addToast("Server Disconnected — CapsStream backend is unreachable or offline.", "error", 6000);
     }
   }
 }
@@ -681,7 +681,7 @@ function triggerAchievementUnlock(ach) {
   playAchievementSound();
   const item = {
     id: Date.now() + Math.random(),
-    icon: ach.icon || "🏆",
+    icon: ach.icon || "ph-trophy",
     title: ach.title || "Achievement Unlocked!",
     description: ach.description || "You earned a new trophy in your Trophy Case!",
     rarity: ach.rarity || "Gold",
@@ -836,10 +836,10 @@ async function pollScanStatus() {
         const ne = status.new_episodes || [];
         for (let i = 0; i < Math.min(ne.length, 3); i++) {
           const n = ne[i];
-          addToast(`📺 ${n.added} new episode${n.added > 1 ? "s" : ""} of ${n.title} added`, "info", 6000);
+          addToast(`${n.added} new episode${n.added > 1 ? "s" : ""} of ${n.title} added`, "info", 6000);
         }
         if (ne.length > 3) {
-          addToast(`📺 …and ${ne.reduce((s, n) => s + n.added, 0) - ne.slice(0, 3).reduce((s, n) => s + n.added, 0)} more new episodes across other shows`, "info", 6000);
+          addToast(`…and ${ne.reduce((s, n) => s + n.added, 0) - ne.slice(0, 3).reduce((s, n) => s + n.added, 0)} more new episodes across other shows`, "info", 6000);
         }
       }
     } catch (e) {
@@ -856,9 +856,9 @@ function unlockAchievement(achievementId) {
     .then((res) => {
       if (res && res.unlocked) {
         if (store.profile?.is_kids) {
-          addToast(`🌟 Kids Badge Unlocked: ${res.unlocked.icon} ${res.unlocked.title}! 🎉`, "success");
+          addToast(`Kids Badge Unlocked: ${res.unlocked.icon} ${res.unlocked.title}!`, "success");
         } else {
-          addToast(`🏆 Achievement Unlocked: ${res.unlocked.icon} ${res.unlocked.title}!`, "success");
+          addToast(`Achievement Unlocked: ${res.unlocked.icon} ${res.unlocked.title}!`, "success");
         }
       }
     })
@@ -1010,7 +1010,7 @@ const MediaCard = {
           @error="handleImgError"
         >
         <div v-else class="card-poster-placeholder">
-          <span class="placeholder-icon">🎬</span>
+          <span class="placeholder-icon"><i class="ph-bold ph-film-strip"></i></span>
           <span class="placeholder-title">{{ cardItem.title }}</span>
         </div>
 
@@ -1019,7 +1019,7 @@ const MediaCard = {
         </div>
 
         <span v-if="showBadge !== false && !isContinue && cardItem.is_mounted !== false && cardItem.type !== 'anime'" class="card-badge" :class="cardItem.type">
-          {{ cardItem.type === 'series' ? '📺 Series' : '🎬 Movie' }}
+          {{ cardItem.type === 'series' ? 'Series' : 'Movie' }}
         </span>
 
         <span v-if="isContinue && calcTimeLeft(cardItem)" class="continue-time-badge">
@@ -1061,7 +1061,7 @@ const MediaCard = {
           <div v-else class="card-meta">
             <span v-if="cardItem.year">{{ cardItem.year }}</span>
             <span v-if="cardItem.rating" class="card-rating">
-              ⭐ {{ formatRating(cardItem.rating) }}
+              <i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ formatRating(cardItem.rating) }}
             </span>
           </div>
         </div>
@@ -1194,7 +1194,7 @@ const TrailerModal = {
       try {
         const res = await API.post("/api/achievements/unlock", { achievement_id: "trailer_buff" });
         if (res && res.unlocked) {
-          addToast(`🏆 Achievement Unlocked: ${res.unlocked.icon} ${res.unlocked.title}!`, "success");
+          addToast(`Achievement Unlocked: ${res.unlocked.icon} ${res.unlocked.title}!`, "success");
         }
       } catch (e) {}
     });
@@ -1208,7 +1208,7 @@ const TrailerModal = {
             <span>{{ title || 'Official Trailer' }}</span>
           </div>
           <button class="btn btn-ghost btn-sm" @click="$emit('close')" style="padding:4px 8px;font-size:1.2rem;color:var(--text-secondary)">
-            ✕
+            <i class="ph ph-x"></i>
           </button>
         </div>
         <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;background:#000">
@@ -1251,7 +1251,7 @@ const HeroBanner = {
 
       <div class="hero-content">
         <div class="hero-badge">
-          {{ current.type === 'anime' ? '🎌 Anime' : current.type === 'series' ? '📺 Series' : '🎬 Movie' }}
+          {{ current.type === 'anime' ? 'Anime' : current.type === 'series' ? 'Series' : 'Movie' }}
         </div>
         <div class="hero-title-container">
           <img v-if="current.logo_path" :src="imgUrl(current.logo_path)" :alt="current.title" class="hero-logo-img" />
@@ -1259,7 +1259,7 @@ const HeroBanner = {
         </div>
         <div class="hero-meta">
           <span v-if="current.year">{{ current.year }}</span>
-          <span v-if="current.rating" class="hero-rating">⭐ {{ formatRating(current.rating) }}</span>
+          <span v-if="current.rating" class="hero-rating"><i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ formatRating(current.rating) }}</span>
           <span v-if="current.genres">{{ current.genres.split(',').slice(0,3).join(' · ') }}</span>
         </div>
         <p class="hero-overview">{{ current.overview }}</p>
@@ -1332,33 +1332,33 @@ const HomePage = {
       <!-- Kids Mode active indicator -->
       <div v-if="store.profile?.is_kids" class="kids-mode-banner" id="kids-mode-banner">
         <i class="ph ph-shield-check"></i>
-        <span>🧒 Kids Mode is on — only kid-friendly titles are shown</span>
+        <span>Kids Mode is on — only kid-friendly titles are shown</span>
       </div>
 
       <!-- Kids Category Bubbles Tray -->
       <div v-if="store.profile?.is_kids && !loading && kidsItemCount > 0" class="kids-category-bubbles">
         <div class="kids-bubble-item" :class="{ active: selectedCategory === 'all' }" @click="selectCategory('all')">
-          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #ff7675, #d63031)">🌟</div>
+          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #ff7675, #d63031)"><i class="ph-bold ph-star"></i></div>
           <span class="kids-bubble-label">All Fun</span>
         </div>
         <div class="kids-bubble-item" :class="{ active: selectedCategory === 'cartoons' }" @click="selectCategory('cartoons')">
-          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #74b9ff, #0984e3)">🎨</div>
+          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #74b9ff, #0984e3)"><i class="ph-bold ph-palette"></i></div>
           <span class="kids-bubble-label">Cartoons & Anime</span>
         </div>
         <div class="kids-bubble-item" :class="{ active: selectedCategory === 'adventures' }" @click="selectCategory('adventures')">
-          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #55efc4, #00b894)">🚀</div>
+          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #55efc4, #00b894)"><i class="ph-bold ph-rocket"></i></div>
           <span class="kids-bubble-label">Adventures</span>
         </div>
         <div class="kids-bubble-item" :class="{ active: selectedCategory === 'magic' }" @click="selectCategory('magic')">
-          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #a29bfe, #6c5ce7)">🪄</div>
+          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #a29bfe, #6c5ce7)"><i class="ph-bold ph-wand"></i></div>
           <span class="kids-bubble-label">Magic & Fantasy</span>
         </div>
         <div class="kids-bubble-item" :class="{ active: selectedCategory === 'comedy' }" @click="selectCategory('comedy')">
-          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #ffeaa7, #fdcb6e)">😄</div>
+          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #ffeaa7, #fdcb6e)"><i class="ph-bold ph-smiley"></i></div>
           <span class="kids-bubble-label">Funny Laughs</span>
         </div>
         <div class="kids-bubble-item" :class="{ active: selectedCategory === 'family' }" @click="selectCategory('family')">
-          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #fd79a8, #e84393)">🦁</div>
+          <div class="kids-bubble-icon" style="background: linear-gradient(135deg, #fd79a8, #e84393)"><i class="ph-bold ph-paw-print"></i></div>
           <span class="kids-bubble-label">Animals & Family</span>
         </div>
       </div>
@@ -1400,7 +1400,7 @@ const HomePage = {
         </div>
 
         <div v-else-if="!loading && (!rows || rows.length === 0)" class="empty-state" style="padding-top: calc(var(--nav-height) + 2rem); text-align: center; max-width: 600px; margin: 0 auto;">
-          <div class="empty-icon" style="font-size: 3.5rem; margin-bottom: 1rem;">🎬</div>
+          <div class="empty-icon" style="font-size: 3.5rem; margin-bottom: 1rem;"><i class="ph-bold ph-film-strip"></i></div>
           <div class="empty-title" style="font-size: 1.5rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem;">
             No Media Found in Library
           </div>
@@ -1492,12 +1492,12 @@ const HomePage = {
           const comedyItems = filtered.filter(i => (i.genres || '').toLowerCase().includes('comedy'));
 
           const kidsRows = [];
-          if (animationItems.length) kidsRows.push({ title: "🎨 Animation & Cartoons", items: animationItems, categoryKey: "cartoons" });
-          if (adventureItems.length) kidsRows.push({ title: "🚀 Fun Adventures", items: adventureItems, categoryKey: "adventures" });
-          if (magicItems.length) kidsRows.push({ title: "🪄 Magic & Fantasy", items: magicItems, categoryKey: "magic" });
-          if (familyItems.length) kidsRows.push({ title: "🦁 Animals & Family", items: familyItems, categoryKey: "family" });
-          if (comedyItems.length) kidsRows.push({ title: "😄 Funny Laughs", items: comedyItems, categoryKey: "comedy" });
-          if (filtered.length && kidsRows.length === 0) kidsRows.push({ title: "✨ Kids Movies & Shows", items: filtered, categoryKey: "all" });
+          if (animationItems.length) kidsRows.push({ title: "Animation & Cartoons", items: animationItems, categoryKey: "cartoons" });
+          if (adventureItems.length) kidsRows.push({ title: "Fun Adventures", items: adventureItems, categoryKey: "adventures" });
+          if (magicItems.length) kidsRows.push({ title: "Magic & Fantasy", items: magicItems, categoryKey: "magic" });
+          if (familyItems.length) kidsRows.push({ title: "Animals & Family", items: familyItems, categoryKey: "family" });
+          if (comedyItems.length) kidsRows.push({ title: "Funny Laughs", items: comedyItems, categoryKey: "comedy" });
+          if (filtered.length && kidsRows.length === 0) kidsRows.push({ title: "Kids Movies & Shows", items: filtered, categoryKey: "all" });
 
           kidsAllRows.value = kidsRows;
           applyKidsCategoryFilter();
@@ -1710,13 +1710,13 @@ const DetailPage = {
             class="detail-poster"
             :alt="media.title"
           >
-          <div v-else class="detail-poster" style="background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:3rem;">🎬</div>
+          <div v-else class="detail-poster" style="background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:3rem;"><i class="ph-bold ph-film-strip" style="color:var(--text-muted)"></i></div>
         </div>
 
         <!-- Info -->
         <div class="detail-info">
           <div class="detail-type-badge">
-            {{ media.type === 'anime' ? '🎌 Anime' : media.type === 'series' ? '📺 Series' : '🎬 Movie' }}
+            {{ media.type === 'anime' ? 'Anime' : media.type === 'series' ? 'Series' : 'Movie' }}
           </div>
 
           <div class="detail-title-container">
@@ -1726,7 +1726,7 @@ const DetailPage = {
 
           <div class="detail-meta">
             <span v-if="media.year">{{ media.year }}</span>
-            <span v-if="media.rating" class="detail-rating">⭐ {{ formatRating(media.rating) }}</span>
+            <span v-if="media.rating" class="detail-rating"><i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ formatRating(media.rating) }}</span>
             <span v-if="media.vote_count" style="font-size:0.8rem;color:var(--text-muted)">{{ media.vote_count.toLocaleString() }} votes</span>
             <span v-if="media.runtime">{{ formatDuration(media.runtime * 60) }}</span>
             <a v-if="media.imdb_id" :href="'https://www.imdb.com/title/' + media.imdb_id" target="_blank" class="imdb-link-badge" title="Open IMDb Page" @click="unlockAchievement('imdb_surfer')">
@@ -1734,7 +1734,7 @@ const DetailPage = {
               <span class="imdb-id-text">{{ media.imdb_id }}</span>
             </a>
             <span v-if="media.has_multi_audio" class="multi-audio-badge" :title="media.audio_tracks ? media.audio_tracks.map(t => t.title).join(', ') : 'Multiple audio tracks available'">
-              🎙️ Multi-Audio
+              Multi-Audio
             </span>
 
             <!-- Quality & Drive Badges -->
@@ -1801,7 +1801,7 @@ const DetailPage = {
 
           <!-- Codec Compatibility Warning Card -->
           <div class="codec-warning-card" v-if="codecInfo.hasWarning && !store.profile?.is_kids">
-            <div class="codec-warning-icon">⚠️</div>
+            <div class="codec-warning-icon"><i class="ph-bold ph-warning"></i></div>
             <div class="codec-warning-content">
               <div class="codec-warning-title">
                 Codec Compatibility Notice
@@ -1846,7 +1846,7 @@ const DetailPage = {
                       loading="lazy"
                       @error="e => e.target.style.display='none'"
                     >
-                    <div v-else class="cast-portrait-placeholder">🎭</div>
+                    <div v-else class="cast-portrait-placeholder"><i class="ph-bold ph-user"></i></div>
                   </div>
                   <div class="cast-info-wrap">
                     <div class="cast-name" :title="member.name">{{ member.name }}</div>
@@ -1977,7 +1977,7 @@ const DetailPage = {
                   </div>
                   <!-- Missing / Unmounted Overlay Badge -->
                   <div class="episode-thumb-overlay" v-else style="opacity:1;background:rgba(10,10,15,0.65)">
-                    <span class="missing-badge">{{ ep.is_mounted === false ? '🔌 Unmounted' : '⚠️ Not Downloaded' }}</span>
+                    <span class="missing-badge">{{ ep.is_mounted === false ? 'Unmounted' : 'Not Downloaded' }}</span>
                   </div>
                   <!-- Red watch progress bar -->
                   <div v-if="calcProgressPercent(ep) > 0" class="episode-thumb-progress">
@@ -2078,7 +2078,7 @@ const DetailPage = {
     </div>
 
     <div v-else class="empty-state" style="padding-top:calc(var(--nav-height) + 4rem);min-height:80vh">
-      <div class="empty-icon">⚠️</div>
+      <div class="empty-icon"><i class="ph-bold ph-warning"></i></div>
       <div class="empty-title">Title Not Found</div>
       <div class="empty-subtitle" style="margin-bottom:1.5rem">Could not load details for this media item.</div>
       <button class="btn btn-primary" @click="router.back()">Go Back</button>
@@ -2176,7 +2176,7 @@ const DetailPage = {
         }
         const loadedMedia = await API.get(url);
         if (store.profile?.is_kids && loadedMedia && !isKidSafeItem(loadedMedia)) {
-          addToast("🧒 Kids Safe Mode: This title is restricted.", "warning");
+          addToast("Kids Safe Mode: This title is restricted.", "warning");
           media.value = null;
           router.replace("/");
           return;
@@ -2547,8 +2547,8 @@ const SettingsPage = {
         <div class="settings-title" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px">
           <i class="ph ph-gear" style="color:var(--accent)"></i>
           <span>Application Settings</span>
-          <span v-if="store.profile?.is_admin" class="admin-profile-badge" style="font-size:0.75rem;padding:3px 10px;margin-left:8px">👑 Administrator Mode</span>
-          <span v-else class="teen-profile-badge" style="font-size:0.75rem;padding:3px 10px;margin-left:8px">👤 Personal Preferences</span>
+          <span v-if="store.profile?.is_admin" class="admin-profile-badge" style="font-size:0.75rem;padding:3px 10px;margin-left:8px">Administrator Mode</span>
+          <span v-else class="teen-profile-badge" style="font-size:0.75rem;padding:3px 10px;margin-left:8px">Personal Preferences</span>
         </div>
       </div>
 
@@ -2992,9 +2992,9 @@ const SettingsPage = {
                 <div class="settings-desc">Choose preferred browser for launching media streaming. Microsoft Edge is recommended for native 4K HEVC and Dolby AC-3 decoding.</div>
               </div>
               <select v-model="form.browser" class="form-input" style="width:280px" id="setting-browser-select">
-                <option value="edge">🌐 Microsoft Edge (Recommended)</option>
-                <option value="chrome">🌐 Google Chrome</option>
-                <option value="system">💻 System Default Browser</option>
+                <option value="edge">Microsoft Edge (Recommended)</option>
+                <option value="chrome">Google Chrome</option>
+                <option value="system">System Default Browser</option>
               </select>
             </div>
 
@@ -3216,7 +3216,7 @@ const SettingsPage = {
             </div>
 
             <div v-else-if="unmatchedList.length === 0" style="padding:1.5rem;text-align:center;background:rgba(255,255,255,0.02);border-radius:12px;border:1px dashed rgba(255,255,255,0.1)">
-              <div style="font-size:1.5rem;margin-bottom:4px">🎉</div>
+              <div style="font-size:1.5rem;margin-bottom:4px;color:var(--accent)"><i class="ph-bold ph-confetti"></i></div>
               <div style="font-weight:700;color:var(--text-primary)">All Library Media Matched!</div>
               <div style="font-size:0.8rem;color:var(--text-muted)">There are currently no unmatched items in your library.</div>
             </div>
@@ -3459,7 +3459,7 @@ const SettingsPage = {
                 <div class="settings-label-container">
                   <div class="settings-label" style="display:flex;align-items:center;gap:8px">
                     <span>{{ kp.avatar }} {{ kp.name }}</span>
-                    <span style="font-size:0.75rem;background:rgba(253,203,110,0.15);color:#fdcb6e;padding:2px 8px;border-radius:12px;font-weight:700">🧒 Kids Profile</span>
+                    <span style="font-size:0.75rem;background:rgba(253,203,110,0.15);color:#fdcb6e;padding:2px 8px;border-radius:12px;font-weight:700">Kids Profile</span>
                   </div>
                   <div class="settings-desc">Set daily watch limits and evening bedtime curfew for {{ kp.name }}. Changes save automatically when you select a value.</div>
                 </div>
@@ -3640,7 +3640,7 @@ const SettingsPage = {
             <div class="shortcuts-modal-header" style="margin-bottom:1rem;border-bottom-color:rgba(229,9,20,0.3)">
               <div class="shortcuts-header-title" style="color:var(--accent)">
                 <i class="ph ph-warning-octagon" style="font-size:1.6rem"></i>
-                <span>⚠️ Fresh Start Warning</span>
+                <span>Fresh Start Warning</span>
               </div>
               <button class="shortcuts-close-btn" @click="showResetModal = false">
                 <i class="ph ph-x"></i>
@@ -3832,7 +3832,7 @@ const SettingsPage = {
       try {
         await API.post("/api/settings", form.value);
         initialFormJson.value = JSON.stringify(form.value);
-        addToast("Settings saved successfully ✓", "success");
+        addToast("Settings saved successfully", "success");
         return true;
       } catch (e) {
         addToast("Failed to save settings", "error");
@@ -4053,7 +4053,7 @@ const SettingsPage = {
 
     onMounted(() => {
       if (store.profile?.is_kids) {
-        addToast("Settings is locked in Kids Mode 🔒", "warning");
+        addToast("Settings is locked in Kids Mode", "warning");
         router.push("/");
         return;
       }
@@ -4108,7 +4108,7 @@ const SettingsPage = {
       }
       form.value.media_paths[cat].push(val);
       newPaths.value[cat] = "";
-      addToast(`Added path to ${cat} ✓`, "success");
+      addToast(`Added path to ${cat}`, "success");
       await validatePaths();
     }
 
@@ -4312,7 +4312,7 @@ const SettingsPage = {
           allProfiles.value[idx] = { ...allProfiles.value[idx], ...updated };
           allProfiles.value = [...allProfiles.value]; // trigger reactivity
         }
-        addToast(`Screen time settings saved for ${payload.name} ✓`, "success");
+        addToast(`Screen time settings saved for ${payload.name}`, "success");
       } catch (e) {
         addToast(`Failed to save screen time settings: ${e.message}`, "error");
       }
@@ -4442,7 +4442,7 @@ const SettingsPage = {
 
     onMounted(() => {
       if (store.profile?.is_kids) {
-        addToast("Settings is locked in Kids Mode 🔒", "warning");
+        addToast("Settings is locked in Kids Mode", "warning");
         router.push("/");
         return;
       }
@@ -4686,7 +4686,7 @@ const ShortcutsModal = {
           <div class="shortcuts-bento-grid">
             <!-- Player Shortcuts -->
             <div class="shortcuts-group">
-              <div class="shortcuts-group-title">🎬 Video Player</div>
+              <div class="shortcuts-group-title">Video Player</div>
               <div class="shortcut-item">
                 <span class="shortcut-desc">Play / Pause</span>
                 <div class="kbd-group"><kbd class="shortcut-kbd">Space</kbd> <kbd class="shortcut-kbd">K</kbd></div>
@@ -4719,7 +4719,7 @@ const ShortcutsModal = {
 
             <!-- Navigation & Global -->
             <div class="shortcuts-group">
-              <div class="shortcuts-group-title">🌐 Navigation & Global</div>
+              <div class="shortcuts-group-title">Navigation & Global</div>
               <div class="shortcut-item">
                 <span class="shortcut-desc">Quick Search</span>
                 <kbd class="shortcut-kbd">/</kbd>
@@ -4842,7 +4842,7 @@ const PlayerPage = {
         <transition name="fade">
           <div v-if="showUnlockHint" class="child-lock-hint-pill" @click.stop="toggleChildLock">
             <i class="ph-fill ph-lock-key"></i>
-            <span>Screen Locked • Click to Unlock 🔓</span>
+            <span>Screen Locked • Click to Unlock</span>
           </div>
         </transition>
       </div>
@@ -5021,7 +5021,7 @@ const PlayerPage = {
 
               <!-- Volume -->
               <div class="volume-group" style="position:relative">
-                <div v-if="volume > 1.0" class="volume-boost-badge">{{ Math.round(volume * 100) }}% ⚡</div>
+                <div v-if="volume > 1.0" class="volume-boost-badge">{{ Math.round(volume * 100) }}%</div>
                 <button class="ctrl-btn" @click="toggleMute" :title="isMuted ? 'Unmute (M)' : 'Mute (M)'" id="ctrl-volume">
                   <i :class="isMuted || volume === 0 ? 'ph-fill ph-speaker-x' : volume < 0.5 ? 'ph-fill ph-speaker-low' : 'ph-fill ph-speaker-high'"></i>
                 </button>
@@ -5170,7 +5170,7 @@ const PlayerPage = {
                 </div>
               </div>
 
-              <!-- Video Quality Resolution Menu (Gear Icon ⚙️) — always shown for Skip Markers, quality section only for movies with duplicates -->
+              <!-- Video Quality Resolution Menu (Gear Icon) — always shown for Skip Markers, quality section only for movies with duplicates -->
               <div style="position:relative">
                 <button class="ctrl-btn" @click="showQualityMenu = !showQualityMenu; showSpeedMenu = false; showSubMenu = false; showAudioMenu = false" title="Player Options & Quality" id="ctrl-quality" style="font-size:0.85rem;font-weight:700">
                   <i class="ph ph-gear-six" style="font-size:1.35rem"></i>
@@ -5318,7 +5318,7 @@ const PlayerPage = {
               :alt="media?.title"
               class="resume-thumb-img"
             />
-            <div v-else class="resume-thumb-placeholder">🎬</div>
+            <div v-else class="resume-thumb-placeholder"><i class="ph-bold ph-film-strip"></i></div>
             <!-- Progress Line on Thumbnail -->
             <div class="resume-thumb-progress" v-if="duration > 0">
               <div class="resume-thumb-progress-fill" :style="{ width: (resumeTime / duration * 100) + '%' }"></div>
@@ -5490,7 +5490,7 @@ const PlayerPage = {
 
       <!-- Playback Error Overlay -->
       <div v-if="playerError" class="empty-state" style="position:fixed;inset:0;background:rgba(10,10,15,0.95);z-index:300;padding:2rem">
-        <div class="empty-icon">⚠️</div>
+        <div class="empty-icon"><i class="ph-bold ph-warning"></i></div>
         <div class="empty-title">Playback Issue</div>
         <div class="empty-subtitle" style="max-width:480px;margin-bottom:1.5rem">
           {{ playerError }}
@@ -6417,10 +6417,10 @@ const PlayerPage = {
         const scale = currentDist / (touchGestureState.initialPinchDist || 1);
         if (scale > 1.25 && aspectRatioFit.value !== "cover") {
           aspectRatioFit.value = "cover";
-          addToast("Zoom to Fill (Cover) 🔍", "info");
+          addToast("Zoom to Fill (Cover)", "info");
         } else if (scale < 0.85 && aspectRatioFit.value !== "contain") {
           aspectRatioFit.value = "contain";
-          addToast("Original Fit (Contain) 📺", "info");
+          addToast("Original Fit (Contain)", "info");
         }
         return;
       }
@@ -6673,8 +6673,8 @@ const PlayerPage = {
       if (!ach) return;
       playAchievementSound();
       playerAch.value = {
-        icon: ach.icon || "🏆",
-        title: store.profile?.is_kids ? `⭐ Badge Unlocked: ${ach.title}` : (ach.title || "Achievement Unlocked!"),
+        icon: ach.icon || "ph-trophy",
+        title: store.profile?.is_kids ? `Badge Unlocked: ${ach.title}` : (ach.title || "Achievement Unlocked!"),
         isKids: !!store.profile?.is_kids
       };
       if (playerAchTimer) clearTimeout(playerAchTimer);
@@ -7226,7 +7226,7 @@ const PlayerPage = {
       if (!videoRef.value) return;
       videoRef.value.addEventListener("enterpictureinpicture", () => {
         isPipActive.value = true;
-        addToast("Entered Picture-in-Picture 📺", "info");
+        addToast("Entered Picture-in-Picture", "info");
         unlockAchievementSilently("pip_master");
       });
       videoRef.value.addEventListener("leavepictureinpicture", () => {
@@ -7327,7 +7327,7 @@ const PlayerPage = {
       try {
         const r = await API.post(`/api/media/${mediaId}/download-subtitles`, {});
         if (r.added > 0) {
-          addToast(`📺 ${r.message} — reloading subtitles`, "success", 5000);
+          addToast(`${r.message} — reloading subtitles`, "success", 5000);
           const fresh = await API.get(`/api/media/${mediaId}`);
           subtitles.value = fresh?.subtitles || [];
           if (subtitles.value.length) selectSub(0);
@@ -7554,7 +7554,7 @@ const PlayerPage = {
         }
         store.queue = [curr, ...rest];
         store.queueIndex = 0;
-        addToast("Queue shuffled 🔀", "info");
+        addToast("Queue shuffled", "info");
       }
     }
 
@@ -7931,7 +7931,7 @@ const PlayerPage = {
       }
       API.post("/api/achievements/unlock", { achievement_id: "fullscreen_pro" }).then((res) => {
         if (res && res.unlocked) {
-          addToast(`🏆 Achievement Unlocked: ${res.unlocked.icon} ${res.unlocked.title}!`, "success");
+          addToast(`Achievement Unlocked: ${res.unlocked.icon} ${res.unlocked.title}!`, "success");
         }
       }).catch(() => {});
     }
@@ -8406,7 +8406,7 @@ const BrowsePage = {
             style="margin-left:8px"
             title="Toggle hiding media from unmounted drives"
           >
-            {{ hideUnmounted ? '👁️ Unmounted Hidden' : '👁️ Show Unmounted' }}
+            {{ hideUnmounted ? 'Unmounted Hidden' : 'Show Unmounted' }}
           </button>
         </div>
       </div>
@@ -8416,7 +8416,7 @@ const BrowsePage = {
       </div>
 
       <div v-else-if="filteredItems.length === 0" class="empty-state">
-        <div class="empty-icon">🎬</div>
+        <div class="empty-icon"><i class="ph-bold ph-film-strip"></i></div>
         <div class="empty-title">No titles found</div>
         <div class="empty-subtitle">Add media to your folders or reconnect unmounted storage drives.</div>
       </div>
@@ -8489,9 +8489,9 @@ const BrowsePage = {
 
     const types = [
       { label: "All", value: "" },
-      { label: "🎬 Movies", value: "movie" },
-      { label: "📺 Series", value: "series" },
-      { label: "🎌 Anime", value: "anime" },
+      { label: "Movies", value: "movie" },
+      { label: "Series", value: "series" },
+      { label: "Anime", value: "anime" },
     ];
 
     const pageTitle = computed(() => {
@@ -8713,12 +8713,12 @@ const CollectionsPage = {
       </div>
 
       <div v-if="!store.profile" class="empty-state">
-        <div class="empty-icon">👤</div>
+        <div class="empty-icon"><i class="ph-bold ph-user"></i></div>
         <div class="empty-title">Select a profile first</div>
       </div>
 
       <div v-else-if="collections.length === 0" class="empty-state">
-        <div class="empty-icon">📚</div>
+        <div class="empty-icon"><i class="ph-bold ph-books"></i></div>
         <div class="empty-title">No collections yet</div>
         <div class="empty-subtitle">Create a collection to group your favourite titles or add titles to auto-generate cinematic universes.</div>
         <button v-if="!store.profile?.is_kids" class="btn btn-primary" style="margin-top:1rem" @click="showCreate = true" id="create-first-col-btn">
@@ -8727,7 +8727,7 @@ const CollectionsPage = {
       </div>
 
       <div v-else-if="filteredCollections.length === 0" class="empty-state">
-        <div class="empty-icon">🔍</div>
+        <div class="empty-icon"><i class="ph-bold ph-magnifying-glass"></i></div>
         <div class="empty-title">No matching collections</div>
         <div class="empty-subtitle">Try selecting a different filter tab.</div>
       </div>
@@ -8762,7 +8762,7 @@ const CollectionsPage = {
               <span v-if="col.universe" class="universe-card-badge" style="margin-left:6px">
                 <i class="ph ph-sparkle"></i> Universe
               </span>
-              <span v-else-if="col.smart" class="skip-src-badge" style="margin-left:6px">✨ Smart</span>
+              <span v-else-if="col.smart" class="skip-src-badge" style="margin-left:6px">Smart</span>
             </div>
             <div class="collection-count">{{ col.items ? col.items.length : 0 }} title{{ !col.items || col.items.length !== 1 ? 's' : '' }}</div>
           </div>
@@ -9055,7 +9055,7 @@ const PlaylistsPage = {
       </div>
 
       <div v-if="!store.profile" class="empty-state">
-        <div class="empty-icon">👤</div>
+        <div class="empty-icon"><i class="ph-bold ph-user"></i></div>
         <div class="empty-title">Select a profile first</div>
       </div>
 
@@ -9064,7 +9064,7 @@ const PlaylistsPage = {
       </div>
 
       <div v-else-if="playlists.length === 0" class="empty-state">
-        <div class="empty-icon">📋</div>
+        <div class="empty-icon"><i class="ph-bold ph-clipboard-text"></i></div>
         <div class="empty-title">No playlists created yet</div>
         <div class="empty-subtitle">Create custom playlists to marathon movies, anime arcs, or cartoon episodes in seamless sequence.</div>
         <button class="btn btn-primary" style="margin-top:1rem" @click="showCreate = true" id="create-first-playlist-btn">
@@ -9156,7 +9156,7 @@ const PlaylistsPage = {
         showCreate.value = false;
         newName.value = "";
         newDesc.value = "";
-        addToast("Playlist created! 📋", "success");
+        addToast("Playlist created!", "success");
         if (pl && pl.id) {
           router.push(`/playlists/${pl.id}`);
         } else {
@@ -9269,7 +9269,7 @@ const PlaylistDetailPage = {
         <!-- Playlist Items List -->
         <div class="playlist-items-container">
           <div v-if="!playlist.items || playlist.items.length === 0" class="empty-state" style="padding:3rem 1rem">
-            <div class="empty-icon">📋</div>
+            <div class="empty-icon"><i class="ph-bold ph-clipboard-text"></i></div>
             <div class="empty-title">This playlist is empty</div>
             <div class="empty-subtitle">Add movies, anime, or episodes by clicking "+ Add to Playlist" on any media card or detail page.</div>
           </div>
@@ -9518,12 +9518,12 @@ const FavoritesPage = {
       </div>
 
       <div v-if="!store.profile" class="empty-state">
-        <div class="empty-icon">👤</div>
+        <div class="empty-icon"><i class="ph-bold ph-user"></i></div>
         <div class="empty-title">Select a profile first</div>
       </div>
 
       <div v-else-if="items.length === 0" class="empty-state">
-        <div class="empty-icon">❤️</div>
+        <div class="empty-icon"><i class="ph-bold ph-heart"></i></div>
         <div class="empty-title">Nothing saved yet</div>
         <div class="empty-subtitle">Heart any title to add it to your watchlist.</div>
       </div>
@@ -9588,6 +9588,7 @@ const ProfilesPage = {
             v-for="(profile, pIndex) in profiles"
             :key="profile.id"
             class="netflix-profile-card"
+            :class="{ 'is-in-use': profile.in_use && viewMode === 'select' }"
             @click="onProfileClick(profile)"
             :id="'profile-' + profile.id"
           >
@@ -9599,7 +9600,12 @@ const ProfilesPage = {
               }"
             >
               <img v-if="profile.custom_avatar_url" :src="profile.custom_avatar_url" class="netflix-avatar-img" :alt="profile.name" />
-              <span v-else>{{ profile.avatar || '🎬' }}</span>
+              <span v-else>{{ profile.avatar || 'ph-film-strip' }}</span>
+
+              <!-- PIN Lock Indicator in Select Mode -->
+              <div v-if="profile.has_pin && viewMode === 'select'" class="netflix-avatar-lock-badge" title="PIN Protected">
+                <i class="ph-bold ph-lock-key"></i>
+              </div>
 
               <!-- Edit Pencil Overlay in Manage Mode -->
               <div v-if="viewMode === 'manage'" class="netflix-avatar-edit-overlay">
@@ -9614,9 +9620,14 @@ const ProfilesPage = {
             </div>
 
             <!-- Profile Badges -->
-            <div v-if="profile.is_admin" class="admin-profile-badge">👑 Admin</div>
-            <div v-else-if="profile.is_kids" class="kids-profile-badge">🧒 Kids</div>
-            <div v-else-if="profile.maturity_rating === 'Teens'" class="teen-profile-badge">🛡️ Teens</div>
+            <div v-if="profile.is_admin" class="admin-profile-badge">Admin</div>
+            <div v-else-if="profile.is_kids" class="kids-profile-badge">Kids</div>
+            <div v-else-if="profile.maturity_rating === 'Teens'" class="teen-profile-badge">Teens</div>
+
+            <!-- Active Presence In-Use Badge -->
+            <div v-if="profile.in_use && viewMode === 'select'" class="profile-in-use-badge" :title="'Active on ' + (profile.active_device || 'another screen')">
+              <span class="profile-in-use-dot"></span> In Use • {{ profile.active_device || 'Another Screen' }}
+            </div>
 
             <!-- Manage Mode Reordering Controls (Admin Only) -->
             <div v-if="viewMode === 'manage' && profiles.length > 1 && (store.profile?.is_admin || !store.profile)" class="netflix-profile-reorder-bar" @click.stop>
@@ -9765,7 +9776,7 @@ const ProfilesPage = {
             <!-- Kids Screen Time Controls -->
             <template v-if="editProfile.is_kids">
               <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">⏰ Daily Watch Limit</div>
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Daily Watch Limit</div>
                 <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Automatically lock Kids Mode after watching this amount today.</div>
                 <select v-model.number="editProfile.daily_limit_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
                   <option :value="0">No Limit (Unlimited)</option>
@@ -9779,7 +9790,7 @@ const ProfilesPage = {
               </div>
 
               <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🌙 Bedtime Curfew</div>
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Bedtime Curfew</div>
                 <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Locks Kids Mode at this time in the evening.</div>
                 <select v-model="editProfile.bedtime_curfew" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
                   <option value="">Off (No Bedtime Curfew)</option>
@@ -9798,7 +9809,7 @@ const ProfilesPage = {
             <template v-else>
               <!-- Maturity Level Selector (Admin Only) -->
               <div v-if="store.profile?.is_admin || !store.profile" style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🛡️ Maturity Rating Filter</div>
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Maturity Rating Filter</div>
                 <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Select the highest rating category permitted for this profile.</div>
                 <div class="maturity-pill-selector">
                   <div
@@ -9822,7 +9833,7 @@ const ProfilesPage = {
 
               <!-- Blocked Genres Exclusions (Admin Only) -->
               <div v-if="store.profile?.is_admin || !store.profile" style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🚫 Excluded Genres</div>
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Excluded Genres</div>
                 <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Click to block specific genres from appearing in this profile's library.</div>
                 <div class="genre-chip-selector">
                   <div
@@ -9840,7 +9851,7 @@ const ProfilesPage = {
 
               <!-- Language & Playback Defaults -->
               <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🌐 Playback Language Defaults</div>
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Playback Language Defaults</div>
                 <div style="font-size:0.85rem;color:#808080;margin-bottom:10px">Automatically select preferred audio and subtitle tracks on playback.</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                   <div>
@@ -9890,7 +9901,7 @@ const ProfilesPage = {
                 <label class="netflix-checkbox-label">
                   <input type="checkbox" v-model="editProfile.is_admin">
                   <div>
-                    <div class="netflix-checkbox-title">👑 Administrator Privileges</div>
+                    <div class="netflix-checkbox-title">Administrator Privileges</div>
                     <div class="netflix-checkbox-desc">Allow full access to system settings, media deletion, and profile management.</div>
                   </div>
                 </label>
@@ -10023,7 +10034,7 @@ const ProfilesPage = {
             <!-- Kids Controls -->
             <template v-if="newProfile.is_kids">
               <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">⏰ Daily Watch Limit</div>
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Daily Watch Limit</div>
                 <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Automatically lock Kids Mode after watching this amount today.</div>
                 <select v-model.number="newProfile.daily_limit_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
                   <option :value="0">No Limit (Unlimited)</option>
@@ -10037,7 +10048,7 @@ const ProfilesPage = {
               </div>
 
               <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🌙 Bedtime Curfew</div>
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Bedtime Curfew</div>
                 <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Locks Kids Mode at this time in the evening.</div>
                 <select v-model="newProfile.bedtime_curfew" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
                   <option value="">Off (No Bedtime Curfew)</option>
@@ -10056,7 +10067,7 @@ const ProfilesPage = {
             <template v-else>
               <!-- Maturity Level Selector -->
               <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🛡️ Maturity Rating Filter</div>
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Maturity Rating Filter</div>
                 <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Select the highest rating category permitted for this profile.</div>
                 <div class="maturity-pill-selector">
                   <div
@@ -10080,7 +10091,7 @@ const ProfilesPage = {
 
               <!-- Blocked Genres Exclusions -->
               <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🚫 Excluded Genres</div>
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Excluded Genres</div>
                 <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Click to block specific genres from appearing in this profile's library.</div>
                 <div class="genre-chip-selector">
                   <div
@@ -10098,7 +10109,7 @@ const ProfilesPage = {
 
               <!-- Language & Playback Defaults -->
               <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">🌐 Playback Language Defaults</div>
+                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Playback Language Defaults</div>
                 <div style="font-size:0.85rem;color:#808080;margin-bottom:10px">Automatically select preferred audio and subtitle tracks on playback.</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                   <div>
@@ -10148,7 +10159,7 @@ const ProfilesPage = {
                 <label class="netflix-checkbox-label">
                   <input type="checkbox" v-model="newProfile.is_admin">
                   <div>
-                    <div class="netflix-checkbox-title">👑 Administrator Privileges</div>
+                    <div class="netflix-checkbox-title">Administrator Privileges</div>
                     <div class="netflix-checkbox-desc">Allow full access to system settings, media deletion, and profile management.</div>
                   </div>
                 </label>
@@ -10234,7 +10245,7 @@ const ProfilesPage = {
       <!-- Parental Math Challenge Gate Modal -->
       <div class="modal-backdrop" v-if="mathGateTarget" @click.self="mathGateTarget = null" style="background:rgba(0,0,0,0.88)">
         <div class="modal parental-gate-modal" style="text-align:center;max-width:380px;border-radius:22px;padding:2rem 1.5rem">
-          <div class="parental-gate-icon">🛡️</div>
+          <div class="parental-gate-icon"><i class="ph-bold ph-shield"></i></div>
           <h3 style="font-size:1.35rem;font-weight:700;margin:0.5rem 0">Parental Exit Gate</h3>
           <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.2rem">
             Please solve the math puzzle to switch to <strong>{{ mathGateTarget?.name }}</strong>:
@@ -10262,7 +10273,7 @@ const ProfilesPage = {
       <!-- Admin PIN Verification Modal -->
       <div class="modal-backdrop" v-if="adminPinModalTarget" @click.self="adminPinModalTarget = false" style="background:rgba(0,0,0,0.88);z-index:999">
         <div class="modal" style="background:#181818;border:1px solid rgba(229,9,20,0.4);text-align:center;max-width:380px;border-radius:20px;padding:2rem 1.5rem">
-          <div style="font-size:2.2rem;margin-bottom:0.25rem">👑</div>
+          <div style="font-size:2.2rem;margin-bottom:0.25rem;color:#ffd700"><i class="ph-bold ph-crown"></i></div>
           <h3 style="font-size:1.35rem;font-weight:700;margin-bottom:0.35rem">Administrator Verification</h3>
           <p style="font-size:0.85rem;color:#a0a0a0;margin-bottom:1.25rem">Enter Admin PIN to manage profile</p>
           <div class="pin-display" style="justify-content:center;gap:12px;margin-bottom:1.5rem">
@@ -10283,6 +10294,22 @@ const ProfilesPage = {
           <button class="btn btn-ghost btn-full" style="margin-top:1.25rem;border-radius:12px" @click="adminPinModalTarget = false">Cancel</button>
         </div>
       </div>
+
+      <!-- Take Over Session Confirmation Modal -->
+      <div class="modal-backdrop" v-if="takeoverTarget" @click.self="takeoverTarget = null" style="background:rgba(0,0,0,0.88);z-index:9999">
+        <div class="session-evicted-card" @click.stop style="max-width:380px;margin:auto">
+          <div style="font-size:2.8rem;margin-bottom:8px"><i class="ph-bold ph-television"></i></div>
+          <h3 style="font-size:1.35rem;font-weight:800;color:#fff;margin:0 0 6px">Take Over Session?</h3>
+          <p style="font-size:0.88rem;color:var(--text-secondary);line-height:1.45;margin:0 0 20px">
+            <strong>{{ takeoverTarget?.name }}</strong> is currently active on <span style="color:#4ade80;font-weight:600">{{ takeoverTarget?.active_device || 'another screen' }}</span>.<br><br>
+            Would you like to switch this session to this screen?
+          </p>
+          <div style="display:flex;gap:10px;justify-content:center">
+            <button class="btn btn-ghost" style="flex:1;height:42px;border-radius:12px;font-weight:700" @click="takeoverTarget = null">Cancel</button>
+            <button class="btn btn-primary" style="flex:1;height:42px;border-radius:12px;font-weight:700" @click="confirmTakeover">Take Over</button>
+          </div>
+        </div>
+      </div>
     </div>
   `,
   setup() {
@@ -10291,6 +10318,7 @@ const ProfilesPage = {
     const profiles = ref([]);
     const viewMode = ref("select"); // 'select' | 'manage' | 'edit' | 'create'
     const pinTarget = ref(null);
+    const takeoverTarget = ref(null);
     const pin = ref("");
     const pinError = ref("");
     const mathGateTarget = ref(null);
@@ -10310,7 +10338,7 @@ const ProfilesPage = {
     const editTarget = ref(null);
     const editProfile = reactive({
       name: "",
-      avatar: "🎬",
+      avatar: "ph-film-strip",
       color: "#e50914",
       theme: "crimson",
       is_kids: false,
@@ -10327,12 +10355,12 @@ const ProfilesPage = {
       bedtime_curfew: "",
     });
 
-    const avatars = ["🎬", "🎭", "🍿", "🎮", "🚀", "🐱", "🐶", "🦊", "🎵", "🌟", "🔥", "💫"];
+    const avatars = ["ph-film-strip", "ph-mask-happy", "ph-popcorn", "ph-game-controller", "ph-rocket", "ph-star", "ph-sparkle", "ph-fire", "ph-crown", "ph-lightning", "ph-music-notes", "ph-trophy"];
     const colors = ["#e50914", "#6c5ce7", "#0984e3", "#00b894", "#fdcb6e", "#e17055", "#fd79a8", "#a29bfe"];
 
     const newProfile = reactive({
       name: "",
-      avatar: "🎬",
+      avatar: "ph-film-strip",
       color: "#e50914",
       theme: "crimson",
       pin: "",
@@ -10432,7 +10460,7 @@ const ProfilesPage = {
         const res = await resp.json();
         if (resp.ok && res.custom_avatar_url) {
           editProfile.custom_avatar_url = res.custom_avatar_url;
-          addToast("Profile avatar uploaded ✓", "success");
+          addToast("Profile avatar uploaded", "success");
         } else {
           addToast(res.error || "Upload failed", "error");
         }
@@ -10540,7 +10568,7 @@ const ProfilesPage = {
     function openEditView(profile) {
       editTarget.value = profile;
       editProfile.name = profile.name;
-      editProfile.avatar = profile.avatar || "🎬";
+      editProfile.avatar = profile.avatar || "ph-film-strip";
       editProfile.color = profile.color || "#e50914";
       editProfile.theme = profile.theme || "crimson";
       editProfile.is_kids = !!profile.is_kids;
@@ -10563,7 +10591,7 @@ const ProfilesPage = {
       requireAdminAuth((validPin) => {
         currentAdminPin.value = validPin;
         newProfile.name = "";
-        newProfile.avatar = "🎬";
+        newProfile.avatar = "ph-film-strip";
         newProfile.color = "#e50914";
         newProfile.theme = "crimson";
         newProfile.pin = "";
@@ -10648,7 +10676,7 @@ const ProfilesPage = {
 
         viewMode.value = "manage";
         editTarget.value = null;
-        addToast("Profile updated ✓", "success");
+        addToast("Profile updated", "success");
       } catch (e) {
         addToast(e.message || "Failed to update profile", "error");
       }
@@ -10716,26 +10744,60 @@ const ProfilesPage = {
         pinTarget.value = profile;
         pin.value = "";
         pinError.value = "";
+      } else if (profile.in_use) {
+        takeoverTarget.value = profile;
       } else {
-        authProfile(profile, "");
+        authProfile(profile, "", false);
       }
     }
 
-    async function authProfile(profile, enteredPin) {
+    function confirmTakeover() {
+      const target = takeoverTarget.value;
+      takeoverTarget.value = null;
+      if (!target) return;
+      if (target.has_pin) {
+        pinTarget.value = target;
+        pin.value = "";
+        pinError.value = "";
+      } else {
+        authProfile(target, "", true);
+      }
+    }
+
+    async function authProfile(profile, enteredPin, forceTakeover = false) {
+      let clientSessionId = sessionStorage.getItem("cs_session_id");
+      if (!clientSessionId) {
+        clientSessionId = "sess_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        sessionStorage.setItem("cs_session_id", clientSessionId);
+      }
+      const deviceName = (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ? "iPhone / iPad" : /android/.test(navigator.userAgent.toLowerCase()) ? "Android Device" : /macintosh|mac os x/.test(navigator.userAgent.toLowerCase()) ? "Mac" : "Windows PC");
+
       try {
         const res = await API.post("/api/profiles/auth", {
           profile_id: profile.id,
           pin: enteredPin,
+          force_takeover: forceTakeover,
+          session_id: clientSessionId,
+          device_name: deviceName,
         });
         if (res.ok) {
           store.profile = res.profile;
           pinTarget.value = null;
+          takeoverTarget.value = null;
           router.push("/");
           // Active login — start the library scan (once per session)
           startLibraryScan();
         }
       } catch (e) {
-        if (enteredPin === "") {
+        if (e.status === "in_use" || (e.message && e.message.includes("currently active"))) {
+          if (profile.has_pin) {
+            pinTarget.value = profile;
+            pinError.value = "Enter PIN to take over session";
+          } else {
+            pinTarget.value = null;
+            takeoverTarget.value = profile;
+          }
+        } else if (enteredPin === "" && profile.has_pin) {
           pinTarget.value = profile;
         } else {
           pinError.value = e.message || "Incorrect PIN";
@@ -10754,7 +10816,7 @@ const ProfilesPage = {
       if (pin.value.length >= 4) return;
       pin.value += key.toString();
       if (pin.value.length === 4) {
-        authProfile(pinTarget.value, pin.value);
+        authProfile(pinTarget.value, pin.value, true);
       }
     }
 
@@ -10793,7 +10855,7 @@ const ProfilesPage = {
         newProfile.pin = "";
         newProfile.is_kids = false;
         if (newProfile.is_kids) unlockAchievement("kids_creator");
-        addToast(newProfile.is_kids ? "Kids profile created 🧒" : "Profile created", "success");
+        addToast(newProfile.is_kids ? "Kids profile created" : "Profile created", "success");
       } catch (e) {
         addToast(e.message || "Failed to create profile", "error");
       }
@@ -10834,6 +10896,11 @@ const ProfilesPage = {
         } else if (e.key === "Escape") {
           e.preventDefault();
           deletePinTarget.value = null;
+        }
+      } else if (takeoverTarget.value) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          takeoverTarget.value = null;
         }
       }
     }
@@ -10957,7 +11024,7 @@ const SetupPage = {
             id="setup-submit-btn"
           >
             <span v-if="creating" class="loading-spinner-sm"></span>
-            <span v-else>Complete Setup & Start Streaming 🚀</span>
+            <span v-else>Complete Setup & Start Streaming</span>
           </button>
         </form>
       </div>
@@ -10966,11 +11033,11 @@ const SetupPage = {
   setup() {
     const router = VueRouter.useRouter();
     const name = ref("");
-    const avatar = ref("🎬");
+    const avatar = ref("ph-film-strip");
     const pin = ref("");
     const creating = ref(false);
 
-    const avatars = [{ icon: "🎬" }, { icon: "🍿" }, { icon: "🐉" }, { icon: "🚀" }, { icon: "👑" }, { icon: "🔥" }, { icon: "⚡" }, { icon: "🎭" }];
+    const avatars = [{ icon: "ph-film-strip" }, { icon: "ph-popcorn" }, { icon: "ph-sparkle" }, { icon: "ph-rocket" }, { icon: "ph-crown" }, { icon: "ph-fire" }, { icon: "ph-lightning" }, { icon: "ph-mask-happy" }];
 
     async function submitSetup() {
       if (!name.value.trim() || creating.value) return;
@@ -11150,23 +11217,23 @@ const SearchPage = {
         <!-- Empty Results State (Double-Bezel Card) -->
         <div v-else-if="!loading && searched && results.length === 0" class="search-empty-card">
           <div class="search-empty-inner">
-            <div class="search-empty-icon">🔍</div>
+            <div class="search-empty-icon"><i class="ph-bold ph-magnifying-glass"></i></div>
             <h2 class="search-empty-title">No Media Found</h2>
             <div class="search-empty-subtitle">
               No matching titles found<span v-if="query"> for "<strong style="color:var(--text-primary)">{{ query }}</strong>"</span>. Try searching for an actor, release year, multi-audio tracks, or choosing another genre filter.
             </div>
             <div class="search-suggestions" v-if="store.profile?.is_kids">
-              <span class="suggestion-tag" @click="quickSearch('Animation')">🎨 Animation</span>
-              <span class="suggestion-tag" @click="quickSearch('Fantasy')">🪄 Magic</span>
-              <span class="suggestion-tag" @click="quickSearch('Family')">🐾 Animals & Family</span>
-              <span class="suggestion-tag" @click="quickSearch('Comedy')">😄 Comedy</span>
+              <span class="suggestion-tag" @click="quickSearch('Animation')">Animation</span>
+              <span class="suggestion-tag" @click="quickSearch('Fantasy')">Magic</span>
+              <span class="suggestion-tag" @click="quickSearch('Family')">Animals & Family</span>
+              <span class="suggestion-tag" @click="quickSearch('Comedy')">Comedy</span>
             </div>
             <div class="search-suggestions" v-else>
-              <span class="suggestion-tag" @click="quickSearch('Multi Audio')">🌐 Multi Audio</span>
-              <span class="suggestion-tag" @click="quickSearch('x265')">⚡ HEVC / x265</span>
-              <span class="suggestion-tag" @click="quickSearch('1080p')">📺 1080p Quality</span>
-              <span class="suggestion-tag" @click="quickSearch('Action')">🔥 Action</span>
-              <span class="suggestion-tag" @click="quickSearch('2026')">📅 2026</span>
+              <span class="suggestion-tag" @click="quickSearch('Multi Audio')">Multi Audio</span>
+              <span class="suggestion-tag" @click="quickSearch('x265')">HEVC / x265</span>
+              <span class="suggestion-tag" @click="quickSearch('1080p')">1080p Quality</span>
+              <span class="suggestion-tag" @click="quickSearch('Action')">Action</span>
+              <span class="suggestion-tag" @click="quickSearch('2026')">2026</span>
             </div>
           </div>
         </div>
@@ -11336,7 +11403,7 @@ const StatsPage = {
         <div>
           <h1 style="font-size:2rem;font-weight:800;display:flex;align-items:center;gap:10px">
             <i :class="store.profile?.is_kids ? 'ph ph-star' : 'ph ph-chart-bar'" :style="{ color: store.profile?.is_kids ? '#fdcb6e' : 'var(--accent)' }"></i>
-            <span>{{ store.profile?.is_kids ? '🌟 Kids Stats & Trophy Case' : 'Watch Stats & Insights' }}</span>
+            <span>{{ store.profile?.is_kids ? 'Kids Stats & Trophy Case' : 'Watch Stats & Insights' }}</span>
           </h1>
           <p style="color:var(--text-secondary);margin-top:4px">{{ store.profile?.is_kids ? 'Viewing badges and cartoon adventures for ' : 'Viewing analytics and watch activity for ' }}<strong>{{ store.profile?.name }}</strong></p>
         </div>
@@ -11394,7 +11461,7 @@ const StatsPage = {
           <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem">
             <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px">
               <i :class="store.profile?.is_kids ? 'ph ph-calendar' : 'ph ph-chart-line-up'" :style="{ color: store.profile?.is_kids ? '#fdcb6e' : 'var(--accent)' }"></i>
-              <span>{{ store.profile?.is_kids ? '📅 7-Day Cartoon Time' : '7-Day Watch Activity (Minutes)' }}</span>
+              <span>{{ store.profile?.is_kids ? '7-Day Cartoon Time' : '7-Day Watch Activity (Minutes)' }}</span>
             </h3>
             <div class="stats-activity-chart">
               <div
@@ -11422,19 +11489,19 @@ const StatsPage = {
             </h3>
             <div class="tech-res-grid">
               <div class="tech-res-card" :class="{ 'has-items': stats.technical_stats?.resolutions?.['4K'] > 0 }">
-                <div class="tech-res-val" style="color:#a855f7">💎 {{ stats.technical_stats?.resolutions?.['4K'] || 0 }}</div>
+                <div class="tech-res-val" style="color:#a855f7">{{ stats.technical_stats?.resolutions?.['4K'] || 0 }}</div>
                 <div class="tech-res-label">4K Ultra HD</div>
               </div>
               <div class="tech-res-card" :class="{ 'has-items': stats.technical_stats?.resolutions?.['1080p'] > 0 }">
-                <div class="tech-res-val" style="color:#38bdf8">🎬 {{ stats.technical_stats?.resolutions?.['1080p'] || 0 }}</div>
+                <div class="tech-res-val" style="color:#38bdf8">{{ stats.technical_stats?.resolutions?.['1080p'] || 0 }}</div>
                 <div class="tech-res-label">1080p Full HD</div>
               </div>
               <div class="tech-res-card" :class="{ 'has-items': stats.technical_stats?.resolutions?.['720p'] > 0 }">
-                <div class="tech-res-val" style="color:#f59e0b">📺 {{ stats.technical_stats?.resolutions?.['720p'] || 0 }}</div>
+                <div class="tech-res-val" style="color:#f59e0b">{{ stats.technical_stats?.resolutions?.['720p'] || 0 }}</div>
                 <div class="tech-res-label">720p HD</div>
               </div>
               <div class="tech-res-card" :class="{ 'has-items': stats.technical_stats?.resolutions?.['SD'] > 0 }">
-                <div class="tech-res-val" style="color:var(--text-muted)">📼 {{ stats.technical_stats?.resolutions?.['SD'] || 0 }}</div>
+                <div class="tech-res-val" style="color:var(--text-muted)">{{ stats.technical_stats?.resolutions?.['SD'] || 0 }}</div>
                 <div class="tech-res-label">Standard (SD)</div>
               </div>
             </div>
@@ -11445,7 +11512,7 @@ const StatsPage = {
         <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem;margin-bottom:2.5rem">
           <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px">
             <i :class="store.profile?.is_kids ? 'ph ph-balloon' : 'ph ph-tag'" :style="{ color: store.profile?.is_kids ? '#fdcb6e' : 'var(--accent)' }"></i>
-            <span>{{ store.profile?.is_kids ? '🎈 Favorite Cartoon Categories' : 'Favorite Genres Distribution' }}</span>
+            <span>{{ store.profile?.is_kids ? 'Favorite Cartoon Categories' : 'Favorite Genres Distribution' }}</span>
           </h3>
           <div v-if="stats.top_genres && stats.top_genres.length" style="display:flex;flex-direction:column;gap:1rem">
             <div v-for="g in stats.top_genres" :key="g.genre">
@@ -11468,7 +11535,7 @@ const StatsPage = {
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;flex-wrap:wrap;gap:10px">
             <h3 style="font-size:1.15rem;font-weight:800;display:flex;align-items:center;gap:10px">
               <i class="ph ph-trophy" style="color:#f59e0b;font-size:1.35rem"></i>
-              <span>{{ store.profile?.is_kids ? '🌟 Kids Badges & Trophy Case' : 'Achievements & Badges Trophy Case' }}</span>
+              <span>{{ store.profile?.is_kids ? 'Kids Badges & Trophy Case' : 'Achievements & Badges Trophy Case' }}</span>
             </h3>
             <span style="font-size:0.9rem;font-weight:700;color:var(--accent)" v-if="stats.achievements">
               {{ unlockedCount }} / {{ totalCount }} Unlocked ({{ completionPercent }}%)
@@ -11568,7 +11635,7 @@ const StatsPage = {
                   :class="['rarity-' + (ach.rarity || 'bronze').toLowerCase(), { unlocked: ach.unlocked }]"
                 >
                   <div class="achievement-icon-wrapper">
-                    {{ ach.unlocked ? ach.icon : '🔒' }}
+                    <i :class="'ph-bold ' + (ach.unlocked ? (ach.icon.startsWith('ph-') ? ach.icon : 'ph-trophy') : 'ph-lock')"></i>
                   </div>
                   <div class="achievement-info">
                     <div class="achievement-header">
@@ -11598,7 +11665,7 @@ const StatsPage = {
               :class="['rarity-' + (ach.rarity || 'bronze').toLowerCase(), { unlocked: ach.unlocked }]"
             >
               <div class="achievement-icon-wrapper">
-                {{ ach.unlocked ? ach.icon : '🔒' }}
+                <i :class="'ph-bold ' + (ach.unlocked ? (ach.icon.startsWith('ph-') ? ach.icon : 'ph-trophy') : 'ph-lock')"></i>
               </div>
               <div class="achievement-info">
                 <div class="achievement-header">
@@ -11627,7 +11694,7 @@ const StatsPage = {
           <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <span style="display:flex;align-items:center;gap:8px">
               <i class="ph ph-history" style="color:var(--accent)"></i>
-              <span>{{ store.profile?.is_kids ? '🎬 Recent Cartoons & Movies' : 'Recent Watch History' }}</span>
+              <span>{{ store.profile?.is_kids ? 'Recent Cartoons & Movies' : 'Recent Watch History' }}</span>
             </span>
             <span style="font-size:0.75rem;font-weight:600;color:var(--text-muted)">Consolidated Titles</span>
           </h3>
@@ -11667,7 +11734,7 @@ const StatsPage = {
                     {{ item.ep_count }} eps watched
                   </span>
                   <span style="font-size:0.85rem;font-weight:700;color:var(--accent)">
-                    {{ item.completed ? 'Completed ✓' : formatTimeSpent(item.position) }}
+                    {{ item.completed ? 'Completed' : formatTimeSpent(item.position) }}
                   </span>
                 </div>
                 <div style="font-size:0.75rem;color:var(--text-muted);margin-top:3px">
@@ -11691,10 +11758,10 @@ const StatsPage = {
     const groupBy = ref("badge");
 
     const BADGE_TIERS = [
-      { key: "Platinum", name: "Platinum Badges", icon: "💎", color: "#a855f7" },
-      { key: "Gold", name: "Gold Badges", icon: "🥇", color: "#ffd700" },
-      { key: "Silver", name: "Silver Badges", icon: "🥈", color: "#c0c0c0" },
-      { key: "Bronze", name: "Bronze Badges", icon: "🥉", color: "#cd7f32" },
+      { key: "Platinum", name: "Platinum Badges", icon: "ph-diamond", color: "#a855f7" },
+      { key: "Gold", name: "Gold Badges", icon: "ph-trophy", color: "#ffd700" },
+      { key: "Silver", name: "Silver Badges", icon: "ph-medal", color: "#c0c0c0" },
+      { key: "Bronze", name: "Bronze Badges", icon: "ph-medal", color: "#cd7f32" },
     ];
 
     const categories = computed(() => {
@@ -11756,7 +11823,7 @@ const StatsPage = {
           return {
             key: cat,
             name: cat,
-            icon: "📁",
+            icon: "ph-folder",
             color: "var(--accent)",
             items,
             unlockedCount: unlocked,
@@ -11858,18 +11925,18 @@ const AboutPage = {
         <div class="about-hero-badge">
           <img src="/static/img/favicon.png" alt="CapsStream" class="about-hero-logo">
           <span>CapsStream v{{ sysInfo?.version || '2.0.0.0' }}</span>
-          <span v-if="sysInfo?.is_dev" class="about-dev-badge" title="Local DEV flag active">🛠️ DEV BUILD</span>
+          <span v-if="sysInfo?.is_dev" class="about-dev-badge" title="Local DEV flag active">DEV BUILD</span>
         </div>
         <h1 class="about-hero-title">Stream Everything You Own.</h1>
         <p class="about-hero-subtitle">
           CapsStream is your personal streaming platform for movies and TV shows. Built for self-hosting, it delivers a clean, Netflix-inspired experience with fast browsing, rich metadata, watch history, continue watching, and seamless playback.
         </p>
         <div class="about-hero-tags">
-          <span class="about-tag">🎬 4K HEVC Ready</span>
-          <span class="about-tag">⚡ AniSkip & FFprobe</span>
-          <span class="about-tag">🔒 Kids & Multi-Profile</span>
-          <span class="about-tag">🏆 Trophy Case</span>
-          <span class="about-tag">📁 Multi-Drive Scanner</span>
+          <span class="about-tag">4K HEVC Ready</span>
+          <span class="about-tag">AniSkip & FFprobe</span>
+          <span class="about-tag">Kids & Multi-Profile</span>
+          <span class="about-tag">Trophy Case</span>
+          <span class="about-tag">Multi-Drive Scanner</span>
         </div>
       </div>
 
@@ -11988,7 +12055,7 @@ const AboutPage = {
               <div class="diag-item">
                 <div class="diag-label">ENVIRONMENT</div>
                 <div class="diag-val" :style="{ color: sysInfo.is_dev ? '#fbbf24' : '#10b981' }">
-                  {{ sysInfo.is_dev ? '🛠️ Development' : '🚀 Production' }}
+                  {{ sysInfo.is_dev ? 'Development' : 'Production' }}
                 </div>
                 <div class="diag-sub">{{ sysInfo.is_dev ? 'Local DEV flag active' : 'Standard release build' }}</div>
               </div>
@@ -12186,12 +12253,12 @@ const AboutPage = {
           <span>Built With Modern Open Technologies</span>
         </div>
         <div class="tech-stack-row">
-          <div class="tech-badge"><span>⚡ Vue.js 3</span></div>
-          <div class="tech-badge"><span>🐍 Python Flask</span></div>
-          <div class="tech-badge"><span>🗄️ SQLite3</span></div>
-          <div class="tech-badge"><span>🎞️ FFmpeg & FFprobe</span></div>
-          <div class="tech-badge"><span>✨ Phosphor Icons</span></div>
-          <div class="tech-badge"><span>🎬 TMDb API</span></div>
+          <div class="tech-badge"><span>Vue.js 3</span></div>
+          <div class="tech-badge"><span>Python Flask</span></div>
+          <div class="tech-badge"><span>SQLite3</span></div>
+          <div class="tech-badge"><span>FFmpeg & FFprobe</span></div>
+          <div class="tech-badge"><span>Phosphor Icons</span></div>
+          <div class="tech-badge"><span>TMDb API</span></div>
           <a href="https://github.com/Unknownplanet40/" target="_blank" rel="noopener noreferrer" class="tech-badge" style="text-decoration:none;color:var(--text-primary)">
             <i class="ph ph-github-logo" style="margin-right:4px"></i><span>GitHub @Unknownplanet40</span>
           </a>
@@ -12213,7 +12280,7 @@ const AboutPage = {
               :alt="sysInfo?.github_profile?.name || 'Creator Avatar'"
               class="creator-avatar-img"
             />
-            <span v-else>👨‍💻</span>
+            <span v-else><i class="ph-bold ph-code"></i></span>
           </div>
           <div class="creator-info">
             <div class="creator-name-row">
@@ -12238,10 +12305,10 @@ const AboutPage = {
             </div>
 
             <div class="creator-badges-row">
-              <span class="creator-stat-pill">📦 <strong>{{ sysInfo?.github_profile?.public_repos || 20 }}</strong> Public Repos</span>
-              <span class="creator-stat-pill">👥 <strong>{{ sysInfo?.github_profile?.followers || 13 }}</strong> Followers</span>
-              <span class="creator-stat-pill">👤 <strong>{{ sysInfo?.github_profile?.following || 8 }}</strong> Following</span>
-              <span class="creator-stat-pill">📅 Member since <strong>{{ sysInfo?.github_profile?.created_year || '2019' }}</strong></span>
+              <span class="creator-stat-pill"><strong>{{ sysInfo?.github_profile?.public_repos || 20 }}</strong> Public Repos</span>
+              <span class="creator-stat-pill"><strong>{{ sysInfo?.github_profile?.followers || 13 }}</strong> Followers</span>
+              <span class="creator-stat-pill"><strong>{{ sysInfo?.github_profile?.following || 8 }}</strong> Following</span>
+              <span class="creator-stat-pill">Member since <strong>{{ sysInfo?.github_profile?.created_year || '2019' }}</strong></span>
             </div>
           </div>
         </div>
@@ -12281,7 +12348,7 @@ const AboutPage = {
       } catch (e) {
         if (store.serverOnline !== false) {
           store.serverOnline = false;
-          addToast("⚠️ Server Disconnected — CapsStream backend is unreachable or offline.", "error", 6000);
+          addToast("Server Disconnected — CapsStream backend is unreachable or offline.", "error", 6000);
         }
       } finally {
         loadingSysInfo.value = false;
@@ -12550,7 +12617,7 @@ const ScanProgressWidget = {
         <div class="scan-widget-pill-text">
           <i :class="phaseIcon" :style="{ animation: store.scanRunning ? 'spin 1s linear infinite' : 'none' }"></i>
           <span v-if="store.scanRunning">{{ phaseLabel }} · {{ store.scanPercent }}% ({{ store.scanCount || 0 }}{{ store.scanTotal ? '/' + store.scanTotal : '' }})</span>
-          <span v-else style="color:var(--success)">✅ Scan Complete!</span>
+          <span v-else style="color:var(--success)">Scan Complete!</span>
         </div>
         <button class="scan-widget-btn" title="Expand Widget" id="scan-widget-expand-btn">
           <i class="ph ph-caret-up"></i>
@@ -12601,7 +12668,7 @@ const ScanProgressWidget = {
             </div>
             <div class="scan-item-match" v-if="store.scanItem.matched_title">
               <i class="ph ph-check-circle"></i>
-              Matched: {{ store.scanItem.matched_title }}<template v-if="store.scanItem.year"> ({{ store.scanItem.year }})</template><template v-if="store.scanItem.rating"> · ★ {{ Number(store.scanItem.rating).toFixed(1) }}</template>
+              Matched: {{ store.scanItem.matched_title }}<template v-if="store.scanItem.year"> ({{ store.scanItem.year }})</template><template v-if="store.scanItem.rating"> · <i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ Number(store.scanItem.rating).toFixed(1) }}</template>
             </div>
             <div class="scan-item-match pending" v-else>
               <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite"></i> Searching TMDb...
@@ -12780,34 +12847,34 @@ const App = {
 
             <!-- Kids Mode Badge -->
             <div v-if="store.profile?.is_kids" class="kids-mode-nav-badge" id="nav-kids-badge">
-              🧒 Kids
+              Kids
             </div>
 
             <!-- Profile -->
             <div class="nav-profile" @click.stop="toggleProfileMenu" id="nav-profile" data-tooltip="Profile Menu"
               :style="{ background: store.profile?.color ? store.profile.color + '33' : 'var(--bg-card)', borderColor: store.profile?.color ? store.profile.color + '88' : 'transparent' }">
               <img v-if="store.profile?.custom_avatar_url" :src="store.profile.custom_avatar_url" class="nav-profile-avatar-img" :alt="store.profile?.name" />
-              <span v-else>{{ store.profile?.avatar || '👤' }}</span>
+              <span v-else>{{ store.profile?.avatar || 'ph-user' }}</span>
               <div class="profile-dropdown" v-if="showProfileMenu" @click.stop>
                 <div v-if="store?.profile" class="profile-dropdown-item" style="font-weight:600;color:var(--text-primary);cursor:default" @click.stop>
                   <img v-if="store.profile?.custom_avatar_url" :src="store.profile.custom_avatar_url" class="dropdown-profile-avatar-img" />
                   <span v-else>{{ store.profile?.avatar }}</span>
                   <span style="margin-left:6px">{{ store.profile?.name }}</span>
-                  <span v-if="store.profile?.is_admin" class="admin-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">👑 Admin</span>
-                  <span v-else-if="store.profile?.is_kids" class="kids-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">🧒 Kids</span>
-                  <span v-else-if="store.profile?.maturity_rating === 'Teens'" class="teen-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">🛡️ Teens</span>
+                  <span v-if="store.profile?.is_admin" class="admin-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">Admin</span>
+                  <span v-else-if="store.profile?.is_kids" class="kids-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">Kids</span>
+                  <span v-else-if="store.profile?.maturity_rating === 'Teens'" class="teen-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">Teens</span>
                 </div>
                 <div class="profile-dropdown-divider" v-if="store?.profile"></div>
-                <div class="profile-dropdown-item" @click.stop="goFavorites" id="dd-watchlist">❤️ Watchlist</div>
-                <div class="profile-dropdown-item" @click.stop="goPlaylists" id="dd-playlists">📋 Playlists</div>
-                <div class="profile-dropdown-item" @click.stop="goCollections" id="dd-collections">📚 Collections</div>
-                <div class="profile-dropdown-item" @click.stop="goStats" id="dd-stats">📊 Watch Stats</div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="dd-settings">⚙️ Settings</div>
-                <div class="profile-dropdown-item" @click.stop="goAbout" id="dd-about">ℹ️ About CapsStream</div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="editCurrentProfile" id="dd-edit-profile">✏️ Edit Profile</div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="switchProfile" id="dd-switch">👤 Switch Profile</div>
+                <div class="profile-dropdown-item" @click.stop="goFavorites" id="dd-watchlist">Watchlist</div>
+                <div class="profile-dropdown-item" @click.stop="goPlaylists" id="dd-playlists">Playlists</div>
+                <div class="profile-dropdown-item" @click.stop="goCollections" id="dd-collections">Collections</div>
+                <div class="profile-dropdown-item" @click.stop="goStats" id="dd-stats">Watch Stats</div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="dd-settings">Settings</div>
+                <div class="profile-dropdown-item" @click.stop="goAbout" id="dd-about">About CapsStream</div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="editCurrentProfile" id="dd-edit-profile">Edit Profile</div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="switchProfile" id="dd-switch">Switch Profile</div>
                 <div class="profile-dropdown-divider"></div>
-                <div class="profile-dropdown-item danger" @click.stop="logout" v-if="store.profile" id="dd-logout">🚪 Sign Out</div>
+                <div class="profile-dropdown-item danger" @click.stop="logout" v-if="store.profile" id="dd-logout">Sign Out</div>
               </div>
             </div>
           </div>
@@ -12924,7 +12991,7 @@ const App = {
         >
           <div class="achievement-toast-inner">
             <div class="achievement-toast-icon-wrap">
-              <span class="achievement-toast-icon">{{ ach.icon || '🏆' }}</span>
+              <span class="achievement-toast-icon"><i :class="'ph-bold ' + (ach.icon && ach.icon.startsWith('ph-') ? ach.icon : 'ph-trophy')"></i></span>
             </div>
             <div class="achievement-toast-body">
               <div class="achievement-toast-tag">
@@ -12949,7 +13016,7 @@ const App = {
       <!-- Bedtime Celebration Overlay -->
       <div v-if="store.bedtimeActive" class="bedtime-overlay" @click.stop>
         <div class="bedtime-card" @click.stop>
-          <div class="bedtime-moon">🌙 ✨ 💤</div>
+          <div class="bedtime-moon"><i class="ph-bold ph-moon"></i></div>
           <h2 style="font-size:1.8rem;font-weight:900;color:#fed330;margin-bottom:0.75rem">
             {{ store.bedtimeReason === 'daily_limit' ? 'Daily Cartoon Time Limit Reached!' : 'Bedtime for Tonight!' }}
           </h2>
@@ -12958,10 +13025,10 @@ const App = {
           </p>
           <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
             <button class="btn btn-primary" style="border-radius:16px;padding:12px 28px;font-size:0.95rem;font-weight:800;background:linear-gradient(135deg,#ff4757,#ff6b81)" @click="handleBedtimeGoodnight">
-              Goodnight! 🌟
+              Goodnight!
             </button>
             <button class="btn btn-secondary" style="border-radius:16px;padding:12px 24px;font-size:0.95rem;font-weight:700" @click="handleBedtimeUnlock">
-              🛡️ Parent Unlock (+30m)
+              Parent Unlock (+30m)
             </button>
           </div>
         </div>
@@ -12970,7 +13037,7 @@ const App = {
       <!-- Parental Math Challenge Exit Gate Modal (Global from Kids Mode) -->
       <div class="modal-backdrop" v-if="appMathGateShow" @click.self="appMathGateShow = false" style="z-index:9999999;background:rgba(0,0,0,0.88)">
         <div class="modal parental-gate-modal" style="text-align:center;max-width:380px;border-radius:22px;padding:2rem 1.5rem">
-          <div class="parental-gate-icon">🛡️</div>
+          <div class="parental-gate-icon"><i class="ph-bold ph-shield"></i></div>
           <h3 style="font-size:1.35rem;font-weight:700;margin:0.5rem 0">Parental Exit Gate</h3>
           <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.2rem">
             Please solve the math puzzle to exit Kids Mode:
@@ -13063,7 +13130,7 @@ const App = {
               <span v-if="contextMenuState.item.year" class="context-menu-meta-tag">{{ contextMenuState.item.year }}</span>
               <span v-if="contextMenuState.item.type" class="badge" style="text-transform:capitalize;font-size:0.65rem">{{ contextMenuState.item.type }}</span>
               <span v-if="contextMenuState.item.duration" class="context-menu-meta-tag">{{ formatDuration(contextMenuState.item.duration) }}</span>
-              <span v-if="contextMenuState.item.rating" class="context-menu-rating" style="color:var(--gold);font-weight:700">★ {{ formatRating(contextMenuState.item.rating) }}</span>
+              <span v-if="contextMenuState.item.rating" class="context-menu-rating" style="color:var(--gold);font-weight:700"><i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ formatRating(contextMenuState.item.rating) }}</span>
             </div>
             <div v-if="contextMenuState.item.genres" class="context-menu-genres" :title="contextMenuState.item.genres">
               {{ formatGenres(contextMenuState.item.genres, 3) }}
@@ -13348,7 +13415,7 @@ const App = {
                 <div class="step-desc">Scroll down and tap <strong>"Add to Home Screen"</strong> <i class="ph ph-plus-square" style="font-size:1.2rem;vertical-align:middle;color:#4ade80"></i>.</div>
               </div>
             </div>
-            <button class="btn btn-primary" style="width:100%;margin-top:16px;height:44px;border-radius:12px;font-weight:700" @click="showIosInstallModal = false">Got it! 🚀</button>
+            <button class="btn btn-primary" style="width:100%;margin-top:16px;height:44px;border-radius:12px;font-weight:700" @click="showIosInstallModal = false">Got it!</button>
           </div>
         </div>
       </transition>
@@ -13390,7 +13457,23 @@ const App = {
                 <div class="step-desc">Tap <strong>Relaunch Chrome</strong>, then return here and tap <strong>Install App</strong>!</div>
               </div>
             </div>
-            <button class="btn btn-primary" style="width:100%;margin-top:14px;height:42px;border-radius:12px;font-weight:700" @click="showAndroidInstallModal = false">Got it! 🚀</button>
+            <button class="btn btn-primary" style="width:100%;margin-top:14px;height:42px;border-radius:12px;font-weight:700" @click="showAndroidInstallModal = false">Got it!</button>
+          </div>
+        </div>
+      </transition>
+
+      <!-- Global Session Evicted Modal -->
+      <transition name="fade">
+        <div v-if="showSessionEvictedModal" class="session-evicted-backdrop">
+          <div class="session-evicted-card">
+            <div style="font-size:3.2rem;margin-bottom:12px;color:var(--accent)"><i class="ph-bold ph-lightning"></i></div>
+            <h2 style="font-size:1.45rem;font-weight:800;color:#fff;margin:0 0 8px">Session Transferred</h2>
+            <p style="font-size:0.9rem;color:var(--text-secondary);line-height:1.5;margin:0 0 24px">
+              This profile was opened on another screen or device.
+            </p>
+            <button class="btn btn-primary" style="width:100%;height:46px;border-radius:12px;font-weight:800" @click="handleEvictedReturn">
+              Return to Profile Selection
+            </button>
           </div>
         </div>
       </transition>
@@ -13404,6 +13487,49 @@ const App = {
     const showProfileMenu = ref(false);
     const showShortcuts = ref(false);
     const appLoading = ref(true);
+
+    // Profile presence heartbeat watchdog & session eviction detection
+    const showSessionEvictedModal = ref(false);
+    let profileHeartbeatTimer = null;
+
+    async function sendProfileHeartbeat() {
+      if (!store.profile || !store.profile.id) return;
+      const sessionId = sessionStorage.getItem("cs_session_id") || "";
+      const deviceName = (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ? "iPhone / iPad" : /android/.test(navigator.userAgent.toLowerCase()) ? "Android Device" : /macintosh|mac os x/.test(navigator.userAgent.toLowerCase()) ? "Mac" : "Windows PC");
+      try {
+        const res = await API.post("/api/profiles/heartbeat", {
+          session_id: sessionId,
+          device_name: deviceName,
+        });
+        if (res && res.evicted) {
+          handleSessionEvicted();
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    }
+
+    function handleSessionEvicted() {
+      if (profileHeartbeatTimer) {
+        clearInterval(profileHeartbeatTimer);
+        profileHeartbeatTimer = null;
+      }
+      showSessionEvictedModal.value = true;
+    }
+
+    function handleEvictedReturn() {
+      showSessionEvictedModal.value = false;
+      store.profile = null;
+      router.push("/profiles");
+    }
+
+    function handleWindowUnload() {
+      const sessionId = sessionStorage.getItem("cs_session_id");
+      if (sessionId && navigator.sendBeacon) {
+        const blob = new Blob([JSON.stringify({ session_id: sessionId, profile_id: store.profile?.id })], { type: "application/json" });
+        navigator.sendBeacon("/api/profiles/release", blob);
+      }
+    }
 
     watch(
       () => store.profile,
@@ -13464,7 +13590,7 @@ const App = {
         promptEvt.prompt();
         promptEvt.userChoice.then((choiceResult) => {
           if (choiceResult.outcome === "accepted") {
-            addToast("Installing CapsStream App... 🎉", "success");
+            addToast("Installing CapsStream App...", "success");
           }
           deferredPrompt.value = null;
           window.__deferredPwaPrompt = null;
@@ -13475,13 +13601,13 @@ const App = {
       } else if (isAndroid.value && !isStandalone.value) {
         showAndroidInstallModal.value = true;
       } else {
-        addToast("In your browser address bar or menu (⋮), select 'Install CapsStream' 📲", "info", 6000);
+        addToast("In your browser address bar or menu (⋮), select 'Install CapsStream'", "info", 6000);
       }
     }
 
     async function forceHardRefresh() {
       showProfileMenu.value = false;
-      addToast("Clearing cache and reloading... 🔄", "info");
+      addToast("Clearing cache and reloading...", "info");
       try {
         if ("caches" in window) {
           const keys = await caches.keys();
@@ -13509,7 +13635,7 @@ const App = {
         if (sessionStorage.getItem("cs_server_restarted") === "1") {
           sessionStorage.removeItem("cs_server_restarted");
           addToast(
-            `✅ Server restarted successfully${store.sysInfo?.version ? " — v" + store.sysInfo.version : ""}`,
+            `Server restarted successfully${store.sysInfo?.version ? " — v" + store.sysInfo.version : ""}`,
             "success",
             5000
           );
@@ -13783,7 +13909,7 @@ const App = {
         store.bedtimeActive = false;
         store.dailyLimitExtended = true;
         store.bedtimeDismissedForToday = true;
-        addToast("Parent Unlock Verified! +30 minutes of cartoon time granted 🛡️", "success", 5000);
+        addToast("Parent Unlock Verified! +30 minutes of cartoon time granted", "success", 5000);
       });
     }
 
@@ -13803,7 +13929,7 @@ const App = {
 
           if (diff === 5 && !store.bedtimeWarned) {
             store.bedtimeWarned = true;
-            addToast("⏰ 5 minutes of cartoon time left before bedtime! 🌙", "warning", 7000);
+            addToast("5 minutes of cartoon time left before bedtime!", "warning", 7000);
           }
 
           if (currentMinutes >= curfewMinutes && currentMinutes < curfewMinutes + 360) {
@@ -13827,7 +13953,7 @@ const App = {
 
           if (remainingMins === 5 && !store.dailyLimitWarned) {
             store.dailyLimitWarned = true;
-            addToast("⏰ 5 minutes of cartoon time remaining for today! 🌟", "warning", 7000);
+            addToast("5 minutes of cartoon time remaining for today!", "warning", 7000);
           }
 
           if (todayMins >= store.profile.daily_limit_minutes) {
@@ -13977,17 +14103,20 @@ const App = {
         deferredPrompt.value = null;
         isInstallable.value = false;
         isPwaInstalled.value = true;
-        addToast("CapsStream App installed successfully! 🎉", "success");
+        addToast("CapsStream App installed successfully!", "success");
       });
 
       // Service Worker Live Update Notification
       window.addEventListener("capsstream:sw-updated", () => {
-        addToast("New CapsStream version available • Tap to reload 🔄", "info", 12000, () => {
+        addToast("New CapsStream version available • Tap to reload", "info", 12000, () => {
           window.location.reload();
         });
       });
 
       startScreenTimeWatchdog();
+
+      window.addEventListener("beforeunload", handleWindowUnload);
+      profileHeartbeatTimer = setInterval(sendProfileHeartbeat, 15000);
 
       // Background server health checker (detects server shutdown or disconnection)
       async function checkServerHealth() {
@@ -13996,7 +14125,7 @@ const App = {
           if (res.ok) {
             if (store.serverOnline === false) {
               store.serverOnline = true;
-              addToast("Server Reconnected ✅", "success", 4000);
+              addToast("Server Reconnected", "success", 4000);
             }
           } else {
             if (store.serverOnline !== false) {
@@ -14026,11 +14155,12 @@ const App = {
 
     onUnmounted(() => {
       clearInterval(serverHealthTimer);
+      if (profileHeartbeatTimer) clearInterval(profileHeartbeatTimer);
+      window.removeEventListener("beforeunload", handleWindowUnload);
       window.removeEventListener("click", handleOutsideClick);
       window.removeEventListener("mouseover", handleTooltipMouseOver);
       window.removeEventListener("keydown", handleGlobalKeyDown);
       clearInterval(scanPollTimer);
-      if (serverHealthTimer) clearInterval(serverHealthTimer);
     });
 
     function editCurrentProfile() {
@@ -14106,7 +14236,7 @@ const App = {
         const res = await API.post("/api/favorites/toggle", { media_id: idToFav });
         item.is_favorite = res.is_favorite;
         contextMenuState.isFavorite = res.is_favorite;
-        addToast(res.is_favorite ? "Added to Watchlist ❤️" : "Removed from Watchlist", "info");
+        addToast(res.is_favorite ? "Added to Watchlist" : "Removed from Watchlist", "info");
       } catch (e) {
         addToast("Failed to update watchlist", "error");
       }
@@ -14137,7 +14267,7 @@ const App = {
       if (!item || !item.id) return;
       try {
         await API.post("/api/progress/mark-watched", { media_id: item.id });
-        addToast(`✅ Marked "${item.title}" as watched`, "success");
+        addToast(`Marked "${item.title}" as watched`, "success");
         if (route.path === "/") {
           location.reload();
         }
@@ -14164,7 +14294,7 @@ const App = {
           media_id: item.id,
           title: item.title,
         });
-        addToast(`🗑️ Removed "${label}" from the library (${r.removed ?? 0} entries)`, "success");
+        addToast(`Removed "${label}" from the library (${r.removed ?? 0} entries)`, "success");
         if (route.path === "/") {
           location.reload();
         }
@@ -14225,7 +14355,7 @@ const App = {
       } else {
         store.queue.push(item);
         store.queueIndex = 0;
-        addToast(`Added "${item.title}" to queue 📋`, "success");
+        addToast(`Added "${item.title}" to queue`, "success");
       }
     }
 
@@ -14236,7 +14366,7 @@ const App = {
       if (!store.queue) store.queue = [];
       store.queue.push(item);
       if (store.queueIndex < 0) store.queueIndex = 0;
-      addToast(`Added "${item.title}" to queue 📋`, "success");
+      addToast(`Added "${item.title}" to queue`, "success");
     }
 
     // ─── Global Collection Picker Helpers ──────────────────────
@@ -14264,7 +14394,7 @@ const App = {
           await API.post(`/api/collections/${col.id}/items`, { media_id: mediaId });
           if (!col.items) col.items = [];
           col.items.push({ id: mediaId, tmdb_id: collectionPickerState.item.tmdb_id });
-          addToast(`Added to "${col.name}" ✓`, "success");
+          addToast(`Added to "${col.name}"`, "success");
         }
       } catch (e) {
         addToast("Failed to update collection", "error");
@@ -14331,6 +14461,8 @@ const App = {
       editCurrentProfile,
       switchProfile,
       logout,
+      showSessionEvictedModal,
+      handleEvictedReturn,
       handleBedtimeGoodnight,
       handleBedtimeUnlock,
       triggerScan,

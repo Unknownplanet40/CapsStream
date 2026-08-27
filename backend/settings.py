@@ -248,7 +248,7 @@ def test_api_key(provider, api_key):
             with urllib.request.urlopen(req, timeout=5) as res:
                 data = json.loads(res.read().decode("utf-8"))
                 if data.get("success") is True:
-                    return True, "TMDB API key valid ✓"
+                    return True, "TMDB API key valid"
                 return False, data.get("status_message", "Invalid TMDB API key")
         except urllib.error.HTTPError as e:
             try:

@@ -7,6 +7,7 @@
   <title>Offline • CapsStream</title>
   <link rel="icon" type="image/png" href="/static/img/favicon.png">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
   <style>
     :root {
       --bg-primary: #050508;
@@ -175,7 +176,7 @@
   <div class="offline-card">
     <div class="offline-icon-wrap">
       <div class="offline-icon-pulse"></div>
-      <div class="offline-icon">📡</div>
+      <div class="offline-icon" style="color:var(--accent);display:flex;align-items:center;justify-content:center"><i class="ph ph-broadcast" style="font-size:2.2rem"></i></div>
     </div>
     <h1 class="offline-title">Server Unreachable</h1>
     <p class="offline-msg">
@@ -186,7 +187,8 @@
       <span id="status-text">Reconnecting automatically...</span>
     </div>
     <button class="retry-btn" onclick="checkAndReload()">
-      <span>Retry Now 🔄</span>
+      <i class="ph ph-arrows-clockwise" style="font-size:1.2rem"></i>
+      <span>Retry Now</span>
     </button>
   </div>
 
