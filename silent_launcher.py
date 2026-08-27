@@ -277,7 +277,29 @@ def find_browser_exe(choice):
 
 
 def launch_app_window(cfg, url):
-    """Open the tracked app-mode browser window. Returns the Popen or None."""
+    """Open the tracked app-mode browser window or installed PWA. Returns the Popen or None."""
+    # Check for installed Desktop PWA first
+    try:
+        from backend.settings import find_installed_pwa
+        pwa = find_installed_pwa()
+        if pwa:
+            creationflags = 0x08000000 if os.name == "nt" else 0
+            if pwa["type"] == "shortcut":
+                log(f"Launching installed PWA shortcut: {pwa['name']}")
+                os.startfile(pwa["path"])
+                return None
+            elif pwa["type"] == "app_id":
+                exe = find_browser_exe(pwa["browser"])
+                if exe:
+                    log(f"Launching installed {pwa['browser'].title()} PWA (app-id: {pwa['app_id']})")
+                    return subprocess.Popen(
+                        [exe, f"--profile-directory={pwa.get('profile', 'Default')}",
+                         f"--app-id={pwa['app_id']}", "--start-maximized"],
+                        creationflags=creationflags,
+                    )
+    except Exception as e:
+        log(f"PWA detection notice: {e}")
+
     choice = str(cfg.get("browser", "edge")).lower().strip()
     exe = find_browser_exe(choice)
     if not exe:

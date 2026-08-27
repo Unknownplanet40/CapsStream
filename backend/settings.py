@@ -336,8 +336,75 @@ def validate_media_paths(paths_list):
     return results
 
 
+def find_installed_pwa():
+    """
+    Search for an installed CapsStream Desktop PWA (Edge or Chrome Web Application).
+    Returns a dict with launch information if found, otherwise None.
+    """
+    if os.name != "nt":
+        return None
+
+    appdata = os.environ.get("APPDATA", "")
+    localappdata = os.environ.get("LOCALAPPDATA", "")
+    userprofile = os.environ.get("USERPROFILE", "")
+
+    # 1. Search for PWA shortcuts in Start Menu and Desktop locations
+    search_dirs = [
+        os.path.join(appdata, r"Microsoft\Windows\Start Menu\Programs\Edge Apps"),
+        os.path.join(appdata, r"Microsoft\Windows\Start Menu\Programs\Chrome Apps"),
+        os.path.join(appdata, r"Microsoft\Windows\Start Menu\Programs\Apps"),
+        os.path.join(appdata, r"Microsoft\Windows\Start Menu\Programs"),
+        os.path.join(userprofile, "Desktop"),
+        os.path.join(userprofile, r"OneDrive\Desktop"),
+    ]
+
+    for sdir in search_dirs:
+        if not os.path.exists(sdir):
+            continue
+        try:
+            for root, _, files in os.walk(sdir):
+                for f in files:
+                    if f.lower().endswith(".lnk") and "capsstream" in f.lower():
+                        lnk_path = os.path.join(root, f)
+                        return {"type": "shortcut", "path": lnk_path, "name": f}
+        except Exception:
+            pass
+
+    # 2. Search Chromium Web Applications manifest directories for CapsStream
+    browser_web_apps = [
+        ("edge", os.path.join(localappdata, r"Microsoft\Edge\User Data")),
+        ("chrome", os.path.join(localappdata, r"Google\Chrome\User Data")),
+    ]
+
+    for browser_name, user_data_root in browser_web_apps:
+        if not os.path.exists(user_data_root):
+            continue
+        try:
+            for prof in os.listdir(user_data_root):
+                web_apps_dir = os.path.join(user_data_root, prof, "Web Applications")
+                if not os.path.isdir(web_apps_dir):
+                    continue
+                for item in os.listdir(web_apps_dir):
+                    if item.startswith("_crx_"):
+                        app_id = item.replace("_crx_", "").strip("_")
+                        app_folder = os.path.join(web_apps_dir, item)
+                        if os.path.isdir(app_folder):
+                            for subfile in os.listdir(app_folder):
+                                if "capsstream" in subfile.lower():
+                                    return {
+                                        "type": "app_id",
+                                        "browser": browser_name,
+                                        "app_id": app_id,
+                                        "profile": prof,
+                                    }
+        except Exception:
+            pass
+
+    return None
+
+
 def is_browser_already_open(url):
-    """Check if a standalone browser process (Edge/Chrome/Brave/Opera) is already open visiting the app URL."""
+    """Check if a standalone browser process (Edge/Chrome/Brave/Opera) or PWA is already open visiting the app URL."""
     if os.name != "nt":
         return False
 
@@ -376,21 +443,25 @@ def is_browser_already_open(url):
                         if GetModuleBaseNameW(hProcess, None, p_buff, 260):
                             pname = p_buff.value
                         CloseHandle(hProcess)
-                    windows.append((pname.lower(), buff.value))
+                    windows.append((hwnd, pname.lower(), buff.value))
             return True
 
         WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
         EnumWindows(WNDENUMPROC(foreach_window), 0)
 
-        for pname, title in windows:
+        for hwnd, pname, title in windows:
             # Strictly restrict detection to actual browser processes
             if any(b in pname for b in ["msedge", "chrome", "brave", "opera", "vivaldi"]):
                 t_lower = title.lower()
-                # STRICT: the window title must contain the FULL app URL
-                # (e.g. "127.0.0.1:8000"). Loose matches like the word
-                # "capsstream" or a bare "localhost" caused false positives
-                # that suppressed launching.
-                if url_clean in t_lower or url_full in t_lower:
+                # Check for matching URL or CapsStream standalone/PWA window title
+                if url_clean in t_lower or url_full in t_lower or ("capsstream" in t_lower and ("8000" in t_lower or "media" in t_lower or "caps" in t_lower)):
+                    try:
+                        # Bring existing window to foreground
+                        SW_RESTORE = 9
+                        ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+                        ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    except Exception:
+                        pass
                     return True
     except Exception:
         pass
@@ -410,11 +481,7 @@ def is_browser_already_open(url):
             l = line.lower()
             if "python" in l or "cmd.exe" in l or "powershell" in l:
                 continue
-            # STRICT: require the exact --app flag for THIS URL. Edge keeps
-            # background processes (with their original command lines) alive
-            # after the window is closed — a bare host match caused false
-            # positives that suppressed launching.
-            if ("msedge" in l or "chrome" in l or "brave" in l) and target in l:
+            if ("msedge" in l or "chrome" in l or "brave" in l) and (target in l or "--app-id=" in l and "capsstream" in l):
                 return True
     except Exception:
         pass
@@ -423,7 +490,7 @@ def is_browser_already_open(url):
 
 
 def launch_browser():
-    """Launch the application URL in the browser specified by config.json (defaults to Microsoft Edge)."""
+    """Launch the application URL in the installed PWA or preferred browser window (defaults to Microsoft Edge)."""
     import subprocess
     import webbrowser
 
@@ -441,10 +508,27 @@ def launch_browser():
     display_host = "127.0.0.1" if host == "0.0.0.0" else host
     url = f"{proto}://{display_host}:{port}"
 
-    # Guard: Check if standalone browser window is already open for this URL
+    # Guard: Check if standalone browser window / PWA is already open for this URL
     if is_browser_already_open(url):
-        print(f"[Launcher] Standalone browser window is already open ({url}). Reusing existing window for server auto-reconnect.")
+        print(f"[Launcher] CapsStream window is already open ({url}). Reusing existing window for server auto-reconnect.")
         return
+
+    # Check for installed Desktop PWA
+    pwa = find_installed_pwa()
+    if pwa:
+        try:
+            if pwa["type"] == "shortcut":
+                os.startfile(pwa["path"])
+                print(f"[Launcher] Opened installed Desktop PWA shortcut ({pwa['name']})")
+                return
+            elif pwa["type"] == "app_id":
+                exe_name = "msedge.exe" if pwa["browser"] == "edge" else "chrome.exe"
+                cmd = f'start {exe_name} --profile-directory="{pwa.get("profile", "Default")}" --app-id={pwa["app_id"]} --start-maximized'
+                subprocess.Popen(cmd, shell=True, creationflags=CREATE_NO_WINDOW)
+                print(f"[Launcher] Opened installed {pwa['browser'].title()} PWA (app-id: {pwa['app_id']})")
+                return
+        except Exception as e:
+            print(f"[Launcher] Notice: could not launch PWA directly ({e}), falling back to standalone window.")
 
     edge_paths = [
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
