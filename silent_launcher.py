@@ -276,12 +276,77 @@ def find_browser_exe(choice):
     return None
 
 
+def is_capsstream_window_visible(url, browser_proc=None):
+    """Check if any visible browser window or PWA window is displaying CapsStream for the target port."""
+    if os.name != "nt":
+        return False
+    try:
+        import urllib.parse
+        parsed = urllib.parse.urlparse(url)
+        target_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        port_str = f":{target_port}"
+        url_clean = f"{parsed.hostname}{port_str}".lower()
+        url_alt = f"localhost{port_str}".lower()
+        
+        user32 = ctypes.windll.user32
+        psapi = ctypes.windll.psapi
+        kernel32 = ctypes.windll.kernel32
+
+        GetWindowTextW = user32.GetWindowTextW
+        GetWindowTextLengthW = user32.GetWindowTextLengthW
+        IsWindowVisible = user32.IsWindowVisible
+        GetWindowThreadProcessId = user32.GetWindowThreadProcessId
+        OpenProcess = kernel32.OpenProcess
+        CloseHandle = kernel32.CloseHandle
+        GetModuleBaseNameW = psapi.GetModuleBaseNameW
+
+        PROCESS_QUERY_INFORMATION = 0x0400
+        PROCESS_VM_READ = 0x0010
+
+        found = [False]
+
+        def foreach_window(hwnd, lParam):
+            if IsWindowVisible(hwnd):
+                length = GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    GetWindowTextW(hwnd, buff, length + 1)
+                    title = buff.value.lower()
+
+                    pid = ctypes.c_ulong()
+                    GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                    
+                    if browser_proc is not None and browser_proc.poll() is None and pid.value == browser_proc.pid:
+                        found[0] = True
+                        return False
+
+                    pname = ""
+                    hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid.value)
+                    if hProcess:
+                        p_buff = ctypes.create_unicode_buffer(260)
+                        if GetModuleBaseNameW(hProcess, None, p_buff, 260):
+                            pname = p_buff.value.lower()
+                        CloseHandle(hProcess)
+
+                    if any(b in pname for b in ["msedge", "chrome", "brave", "opera", "vivaldi"]):
+                        if url_clean in title or url_alt in title or (port_str in title and "capsstream" in title):
+                            found[0] = True
+                            return False
+            return True
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
+        user32.EnumWindows(WNDENUMPROC(foreach_window), 0)
+        return found[0]
+    except Exception:
+        return False
+
+
 def launch_app_window(cfg, url):
     """Open the tracked app-mode browser window or installed PWA. Returns the Popen or None."""
-    # Check for installed Desktop PWA first
+    # Check for installed Desktop PWA for THIS specific URL/port
     try:
         from backend.settings import find_installed_pwa
-        pwa = find_installed_pwa()
+        pwa = find_installed_pwa(url)
         if pwa:
             creationflags = 0x08000000 if os.name == "nt" else 0
             if pwa["type"] == "shortcut":
@@ -297,6 +362,8 @@ def launch_app_window(cfg, url):
                          f"--app-id={pwa['app_id']}", "--start-maximized"],
                         creationflags=creationflags,
                     )
+        if pwa:
+            return None
     except Exception as e:
         log(f"PWA detection notice: {e}")
 
@@ -308,7 +375,7 @@ def launch_app_window(cfg, url):
         return None
 
     os.makedirs(APP_PROFILE_DIR, exist_ok=True)
-    log(f"Launching app window: {os.path.basename(exe)}")
+    log(f"Launching standalone app window for {url} ({os.path.basename(exe)})")
     creationflags = 0x08000000 if os.name == "nt" else 0
     return subprocess.Popen(
         [exe, f"--app={url}", "--user-data-dir=" + APP_PROFILE_DIR,
@@ -380,66 +447,41 @@ def main():
         log("Launcher exiting (server keeps running; stop it via Task Manager or start.bat)")
         return
 
-    browser = launch_app_window(cfg, url)
-    if browser is None:
-        log("No tracked browser window — launcher exiting")
-        send_toast("CapsStream is running", f"Serving at {url}")
-        return
-
+    browser_proc = launch_app_window(cfg, url)
     send_toast("CapsStream is running", f"Serving at {url}")
-    log(f"App window open (PID {browser.pid}) — monitoring until it closes")
+    log(f"CapsStream window launched for {url} — monitoring window visibility until closed")
 
-    # Edge/Chrome "background mode" keeps the browser process alive after
-    # the last window closes — process-exit polling alone would never fire
-    # and orphan the server. So also track window visibility: when the
-    # tracked browser has no visible window for a few seconds, treat the
-    # app as closed (and take the background browser down with it).
-    def browser_window_visible(pid):
-        user32 = ctypes.windll.user32
-        found = [False]
-        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
-
-        def cb(hwnd, lParam):
-            if user32.IsWindowVisible(hwnd):
-                pid_ref = ctypes.c_ulong()
-                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid_ref))
-                if pid_ref.value == pid:
-                    found[0] = True
-                    return False
-            return True
-
-        user32.EnumWindows(WNDENUMPROC(cb), 0)
-        return found[0]
+    # Initial grace period for window to render and be visible
+    start_wait = time.time()
+    while time.time() - start_wait < 10:
+        if is_capsstream_window_visible(url, browser_proc):
+            log("CapsStream window active — entered monitoring loop")
+            break
+        time.sleep(0.5)
 
     no_window_since = None
     try:
         while True:
-            # Browser closed by the user → shut the whole stack down
-            if browser.poll() is not None:
-                log("App window closed — shutting down server")
-                if server is not None:
-                    kill_tree(server.pid)
-                send_toast("CapsStream stopped", "Server shut down cleanly")
-                break
             # Server died on its own → nothing to manage anymore
             if server is not None and server.poll() is not None:
                 log("Server process exited on its own — launcher exiting")
                 send_toast("CapsStream server exited", "The server process stopped unexpectedly. Check logs/ for details.")
                 break
-            # Background-mode guard: process alive but the app window is gone
-            if not browser_window_visible(browser.pid):
+
+            # Check if any CapsStream window (PWA or standalone) matching this URL is currently open
+            if not is_capsstream_window_visible(url, browser_proc):
                 if no_window_since is None:
                     no_window_since = time.time()
-                elif time.time() - no_window_since > 8:
-                    log("Browser window gone (background mode) — shutting down browser and server")
-                    kill_tree(browser.pid)
+                elif time.time() - no_window_since > 5:
+                    log(f"CapsStream window for {url} closed by user — shutting down server")
                     if server is not None:
                         kill_tree(server.pid)
                     send_toast("CapsStream stopped", "Server shut down cleanly")
                     break
             else:
                 no_window_since = None
-            time.sleep(2)
+
+            time.sleep(1.5)
     finally:
         log("Launcher exiting")
 

@@ -336,69 +336,89 @@ def validate_media_paths(paths_list):
     return results
 
 
-def find_installed_pwa():
+def find_installed_pwa(target_url=None):
     """
-    Search for an installed CapsStream Desktop PWA (Edge or Chrome Web Application).
-    Returns a dict with launch information if found, otherwise None.
+    Search for an installed CapsStream Desktop PWA (Edge or Chrome Web Application)
+    matching the target URL/port. Returns launch information dict if found, otherwise None.
     """
     if os.name != "nt":
         return None
 
-    appdata = os.environ.get("APPDATA", "")
-    localappdata = os.environ.get("LOCALAPPDATA", "")
-    userprofile = os.environ.get("USERPROFILE", "")
-
-    # 1. Search for PWA shortcuts in Start Menu and Desktop locations
-    search_dirs = [
-        os.path.join(appdata, r"Microsoft\Windows\Start Menu\Programs\Edge Apps"),
-        os.path.join(appdata, r"Microsoft\Windows\Start Menu\Programs\Chrome Apps"),
-        os.path.join(appdata, r"Microsoft\Windows\Start Menu\Programs\Apps"),
-        os.path.join(appdata, r"Microsoft\Windows\Start Menu\Programs"),
-        os.path.join(userprofile, "Desktop"),
-        os.path.join(userprofile, r"OneDrive\Desktop"),
-    ]
-
-    for sdir in search_dirs:
-        if not os.path.exists(sdir):
-            continue
+    import urllib.parse
+    target_port = None
+    if target_url:
         try:
-            for root, _, files in os.walk(sdir):
-                for f in files:
-                    if f.lower().endswith(".lnk") and "capsstream" in f.lower():
-                        lnk_path = os.path.join(root, f)
-                        return {"type": "shortcut", "path": lnk_path, "name": f}
+            parsed = urllib.parse.urlparse(target_url)
+            target_port = parsed.port or (443 if parsed.scheme == "https" else 80)
         except Exception:
             pass
 
-    # 2. Search Chromium Web Applications manifest directories for CapsStream
-    browser_web_apps = [
+    appdata = os.environ.get("APPDATA", "")
+    localappdata = os.environ.get("LOCALAPPDATA", "")
+
+    # Inspect Chromium Preferences to map App IDs to their actual installed start URLs
+    browser_user_data = [
         ("edge", os.path.join(localappdata, r"Microsoft\Edge\User Data")),
         ("chrome", os.path.join(localappdata, r"Google\Chrome\User Data")),
     ]
 
-    for browser_name, user_data_root in browser_web_apps:
+    installed_apps = {}  # app_id -> { browser, profile, name, url, port }
+    for browser_name, user_data_root in browser_user_data:
         if not os.path.exists(user_data_root):
             continue
         try:
             for prof in os.listdir(user_data_root):
-                web_apps_dir = os.path.join(user_data_root, prof, "Web Applications")
-                if not os.path.isdir(web_apps_dir):
+                pdir = os.path.join(user_data_root, prof)
+                pref_file = os.path.join(pdir, "Preferences")
+                if not os.path.isfile(pref_file):
                     continue
-                for item in os.listdir(web_apps_dir):
-                    if item.startswith("_crx_"):
-                        app_id = item.replace("_crx_", "").strip("_")
-                        app_folder = os.path.join(web_apps_dir, item)
-                        if os.path.isdir(app_folder):
-                            for subfile in os.listdir(app_folder):
-                                if "capsstream" in subfile.lower():
-                                    return {
-                                        "type": "app_id",
-                                        "browser": browser_name,
-                                        "app_id": app_id,
-                                        "profile": prof,
-                                    }
+                try:
+                    with open(pref_file, "r", encoding="utf-8", errors="ignore") as f:
+                        pref_data = json.load(f)
+                    ext_settings = pref_data.get("extensions", {}).get("settings", {})
+                    for app_id, app_info in ext_settings.items():
+                        manifest = app_info.get("manifest", {})
+                        app_name = (manifest.get("name") or "").strip()
+                        app_url = (manifest.get("app", {}).get("launch", {}).get("web_url") or manifest.get("start_url") or "").strip()
+                        if "capsstream" in app_name.lower() or "capsstream" in app_url.lower():
+                            port = None
+                            try:
+                                port = urllib.parse.urlparse(app_url).port
+                            except Exception:
+                                pass
+                            installed_apps[app_id] = {
+                                "browser": browser_name,
+                                "profile": prof,
+                                "name": app_name,
+                                "url": app_url,
+                                "port": port,
+                            }
+                except Exception:
+                    pass
         except Exception:
             pass
+
+    # Match installed PWA strictly against target port / URL
+    for app_id, info in installed_apps.items():
+        if target_port is not None:
+            if info.get("port") == target_port or (target_url and target_url.lower() in (info.get("url") or "").lower()):
+                return {
+                    "type": "app_id",
+                    "browser": info["browser"],
+                    "app_id": app_id,
+                    "profile": info["profile"],
+                    "name": info["name"],
+                    "url": info["url"],
+                }
+        elif not target_url:
+            return {
+                "type": "app_id",
+                "browser": info["browser"],
+                "app_id": app_id,
+                "profile": info["profile"],
+                "name": info["name"],
+                "url": info["url"],
+            }
 
     return None
 
@@ -407,6 +427,19 @@ def is_browser_already_open(url):
     """Check if a standalone browser process (Edge/Chrome/Brave/Opera) or PWA is already open visiting the app URL."""
     if os.name != "nt":
         return False
+
+    import urllib.parse
+    try:
+        parsed = urllib.parse.urlparse(url)
+        target_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        port_str = f":{target_port}"
+        url_clean = f"{parsed.hostname}{port_str}".lower()
+    except Exception:
+        target_port = 8000
+        port_str = ":8000"
+        url_clean = "127.0.0.1:8000"
+
+    url_full = url.lower()
 
     # 1. Inspect visible windows owned strictly by web browser processes (msedge, chrome, etc.)
     try:
@@ -422,9 +455,6 @@ def is_browser_already_open(url):
 
         PROCESS_QUERY_INFORMATION = 0x0400
         PROCESS_VM_READ = 0x0010
-
-        url_clean = url.replace("http://", "").replace("https://", "").lower()
-        url_full = url.lower()
 
         windows = []
         def foreach_window(hwnd, lParam):
@@ -443,18 +473,18 @@ def is_browser_already_open(url):
                         if GetModuleBaseNameW(hProcess, None, p_buff, 260):
                             pname = p_buff.value
                         CloseHandle(hProcess)
-                    windows.append((hwnd, pname.lower(), buff.value))
+                    windows.append((hwnd, pname.lower(), buff.value, pid.value))
             return True
 
         WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
         EnumWindows(WNDENUMPROC(foreach_window), 0)
 
-        for hwnd, pname, title in windows:
+        for hwnd, pname, title, pid_val in windows:
             # Strictly restrict detection to actual browser processes
             if any(b in pname for b in ["msedge", "chrome", "brave", "opera", "vivaldi"]):
                 t_lower = title.lower()
-                # Check for matching URL or CapsStream standalone/PWA window title
-                if url_clean in t_lower or url_full in t_lower or ("capsstream" in t_lower and ("8000" in t_lower or "media" in t_lower or "caps" in t_lower)):
+                # Check for matching URL or port-specific CapsStream window
+                if url_clean in t_lower or url_full in t_lower or (port_str in t_lower and "capsstream" in t_lower):
                     try:
                         # Bring existing window to foreground
                         SW_RESTORE = 9
@@ -466,7 +496,7 @@ def is_browser_already_open(url):
     except Exception:
         pass
 
-    # 2. Commandline Inspection Fallback
+    # 2. Commandline Inspection Fallback (strictly checking target URL / port)
     try:
         import subprocess
         out = subprocess.check_output(
@@ -481,7 +511,7 @@ def is_browser_already_open(url):
             l = line.lower()
             if "python" in l or "cmd.exe" in l or "powershell" in l:
                 continue
-            if ("msedge" in l or "chrome" in l or "brave" in l) and (target in l or "--app-id=" in l and "capsstream" in l):
+            if ("msedge" in l or "chrome" in l or "brave" in l) and target in l:
                 return True
     except Exception:
         pass
@@ -513,8 +543,8 @@ def launch_browser():
         print(f"[Launcher] CapsStream window is already open ({url}). Reusing existing window for server auto-reconnect.")
         return
 
-    # Check for installed Desktop PWA
-    pwa = find_installed_pwa()
+    # Check for installed Desktop PWA for this URL
+    pwa = find_installed_pwa(url)
     if pwa:
         try:
             if pwa["type"] == "shortcut":
