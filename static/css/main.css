@@ -974,10 +974,10 @@ ol {
   border-color: #ffffff;
 }
 
-.netflix-avatar-lock-badge {
+.netflix-avatar-lock-badge,
+.netflix-avatar-admin-badge {
   position: absolute;
   top: 8px;
-  right: 8px;
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -995,7 +995,16 @@ ol {
   z-index: 3;
 }
 
-.netflix-profile-card:hover .netflix-avatar-lock-badge {
+.netflix-avatar-lock-badge {
+  right: 8px;
+}
+
+.netflix-avatar-admin-badge {
+  left: 8px;
+}
+
+.netflix-profile-card:hover .netflix-avatar-lock-badge,
+.netflix-profile-card:hover .netflix-avatar-admin-badge {
   transform: scale(1.12);
   background: rgba(0, 0, 0, 0.9);
   border-color: #ffd700;
@@ -1632,7 +1641,48 @@ ol {
   inset: 0;
   background-size: cover;
   background-position: center top;
-  transition: opacity var(--transition-slow);
+  transition: opacity 1s ease;
+}
+
+.hero-backdrop.dimmed {
+  opacity: 0;
+}
+
+.hero-video-wrap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 1;
+}
+
+.hero-video-wrap.fade-in {
+  opacity: 1;
+}
+
+.hero-video-element {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 25%;
+  border: none;
+  pointer-events: none;
+}
+
+.hero-video-frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(1.35);
+  width: 100%;
+  height: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  border: none;
+  pointer-events: none;
 }
 
 .hero-backdrop-img {
@@ -1650,13 +1700,17 @@ ol {
 .hero-gradient {
   position: absolute;
   inset: 0;
+  z-index: 2;
+  pointer-events: none;
   background:
-    linear-gradient(to right, rgba(10, 10, 15, 0.95) 0%, rgba(10, 10, 15, 0.7) 40%, rgba(10, 10, 15, 0.2) 70%, transparent 100%), linear-gradient(to top, var(--bg-primary) 0%, transparent 40%);
+    linear-gradient(to right, rgba(8, 8, 12, 0.96) 0%, rgba(8, 8, 12, 0.82) 34%, rgba(8, 8, 12, 0.35) 65%, transparent 100%),
+    linear-gradient(to top, var(--bg-primary) 0%, rgba(8, 8, 12, 0.6) 22%, transparent 50%),
+    radial-gradient(ellipse at bottom left, rgba(8, 8, 12, 0.75) 0%, transparent 70%);
 }
 
 .hero-content {
   position: relative;
-  z-index: 2;
+  z-index: 3;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -1687,7 +1741,7 @@ ol {
   line-height: 1.1;
   letter-spacing: -1px;
   margin-bottom: var(--space-md);
-  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.8);
 }
 
 .hero-logo-img {
@@ -1720,6 +1774,7 @@ ol {
   font-size: 0.875rem;
   color: var(--text-secondary);
   flex-wrap: wrap;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
 }
 
 .detail-meta {
@@ -1760,12 +1815,74 @@ ol {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  max-width: 580px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
 }
 
 .hero-actions {
   display: flex;
   gap: var(--space-md);
   flex-wrap: wrap;
+}
+
+.hero-media-controls {
+  position: absolute;
+  right: var(--space-xl);
+  bottom: calc(var(--space-2xl) + 16px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  z-index: 4;
+}
+
+.hero-control-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.hero-control-btn:hover {
+  transform: scale(1.12);
+  background: rgba(0, 0, 0, 0.85);
+  border-color: #fff;
+}
+
+.hero-maturity-badge {
+  background: rgba(40, 40, 40, 0.65);
+  border-left: 3.5px solid #e50914;
+  padding: 4px 12px 4px 9px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #fff;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-radius: 0 4px 4px 0;
+  display: flex;
+  align-items: center;
+}
+
+.hero-tag-pill {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #e5e5e5;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .hero-indicators {
@@ -1995,6 +2112,256 @@ main::-webkit-scrollbar {
     0 20px 50px rgba(0, 0, 0, 0.85),
     0 0 30px rgba(229, 9, 20, 0.18);
   z-index: 10;
+}
+
+.media-card.has-popout {
+  overflow: visible !important;
+  z-index: 150 !important;
+  transform: none !important;
+}
+
+.netflix-popout-preview {
+  position: absolute;
+  top: -42px;
+  width: 310px;
+  max-width: 88vw;
+  background: #161622;
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+  z-index: 250;
+  pointer-events: auto;
+}
+
+/* Center alignment */
+.netflix-popout-preview.align-center {
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  animation: netflixPopoutFadeAnim 0.18s ease-out forwards;
+}
+
+/* Left edge alignment (keeps card inside viewport) */
+.netflix-popout-preview.align-left {
+  left: 0;
+  right: auto;
+  transform: none;
+  animation: netflixPopoutFadeAnim 0.18s ease-out forwards;
+}
+
+/* Right edge alignment (keeps card inside viewport) */
+.netflix-popout-preview.align-right {
+  left: auto;
+  right: 0;
+  transform: none;
+  animation: netflixPopoutFadeAnim 0.18s ease-out forwards;
+}
+
+@keyframes netflixPopoutFadeAnim {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.popout-media-box {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16/9;
+  background: #0a0a10;
+  overflow: hidden;
+}
+
+.popout-poster-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  display: block;
+}
+
+.popout-video,
+.popout-trailer-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+.popout-video.is-playing,
+.popout-trailer-frame.is-playing {
+  opacity: 1;
+}
+
+.popout-video-gradient {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 45%;
+  background: linear-gradient(to top, #161622, transparent);
+  pointer-events: none;
+}
+
+.popout-sound-btn {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  z-index: 3;
+}
+
+.popout-sound-btn:hover {
+  transform: scale(1.1);
+  background: rgba(0, 0, 0, 0.9);
+  border-color: #fff;
+}
+
+.popout-info-box {
+  padding: 12px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #161622;
+}
+
+.popout-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.popout-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+}
+
+.popout-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.popout-circle-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.popout-circle-btn:hover {
+  transform: scale(1.12);
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.popout-play-btn {
+  background: #fff;
+  border-color: #fff;
+  color: #000;
+}
+
+.popout-play-btn:hover {
+  background: #e6e6e6;
+  border-color: #e6e6e6;
+  color: #000;
+  transform: scale(1.12);
+}
+
+.popout-circle-btn.active {
+  background: var(--accent, #e50914);
+  border-color: var(--accent, #e50914);
+  color: #fff;
+}
+
+.popout-more-btn {
+  margin-left: auto;
+}
+
+.popout-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.popout-match-badge {
+  color: #46d369;
+  font-weight: 700;
+}
+
+.popout-pill-badge {
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  color: #d2d2d2;
+}
+
+.popout-duration-text {
+  color: #a3a3a3;
+}
+
+.popout-quality-pill {
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  color: #e5e5e5;
+  font-weight: 800;
+}
+
+.popout-genres-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: #a3a3a3;
+}
+
+.popout-genre-tag {
+  color: #e5e5e5;
+}
+
+.popout-dot {
+  margin-left: 4px;
+  color: #666;
 }
 
 .card-poster {

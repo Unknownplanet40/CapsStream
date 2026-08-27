@@ -988,9 +988,10 @@ const MediaCard = {
   emits: ["click", "remove-continue"],
   template: `
     <div class="media-card"
-         :class="{ 'continue-card': isContinue, 'is-unmounted': cardItem.is_mounted === false }"
-         @mouseenter="showTooltip = true"
-         @mouseleave="showTooltip = false"
+         ref="cardRootRef"
+         :class="{ 'continue-card': isContinue, 'is-unmounted': cardItem.is_mounted === false, 'has-popout': isPopoutActive }"
+         @mouseenter="onMouseEnter"
+         @mouseleave="onMouseLeave"
          @click="$emit('click', cardItem)"
          @contextmenu.prevent="openCardMenu($event)"
          :id="'card-' + (cardItem.id || 'card')">
@@ -1049,7 +1050,7 @@ const MediaCard = {
           <div class="card-progress-fill" :style="{ width: calcProgressPercent(cardItem) + '%' }"></div>
         </div>
 
-        <div class="card-overlay">
+        <div class="card-overlay" v-if="!isPopoutActive">
           <div class="card-play-btn">
             <i class="ph-fill ph-play" style="color:white;font-size:1rem;margin-left:2px"></i>
           </div>
@@ -1066,12 +1067,116 @@ const MediaCard = {
           </div>
         </div>
       </div>
+
+      <!-- Netflix-Style Hover Preview Popout -->
+      <div v-if="isPopoutActive" class="netflix-popout-preview" :class="popoutAlignClass" @click.stop>
+        <div class="popout-media-box">
+          <!-- High-res Backdrop/Poster Base Layer -->
+          <img
+            :src="backdropSrc"
+            class="popout-poster-img"
+            :alt="cardItem.title"
+            @error="handlePopoutImgError"
+          />
+
+          <!-- Official TMDB Trailer Frame (Primary) -->
+          <iframe
+            v-if="trailerEmbedUrl"
+            :src="trailerEmbedUrl"
+            class="popout-trailer-frame"
+            :class="{ 'is-playing': isVideoPlaying }"
+            frameborder="0"
+            allow="autoplay; encrypted-media"
+            @load="onIframeLoaded"
+          ></iframe>
+
+          <!-- Video Stream Overlay (Fallback for local files) -->
+          <video
+            v-else-if="previewVideoUrl"
+            :src="previewVideoUrl"
+            class="popout-video"
+            :class="{ 'is-playing': isVideoPlaying }"
+            autoplay
+            loop
+            playsinline
+            :muted="isMuted"
+            @playing="isVideoPlaying = true"
+            @canplay="isVideoPlaying = true"
+            @error="onVideoError"
+          ></video>
+
+          <div class="popout-video-gradient"></div>
+
+          <button
+            v-if="previewVideoUrl && isVideoPlaying && !trailerEmbedUrl"
+            class="popout-sound-btn"
+            @click.stop="isMuted = !isMuted"
+            :title="isMuted ? 'Unmute Audio' : 'Mute Audio'"
+          >
+            <i :class="isMuted ? 'ph-bold ph-speaker-simple-slash' : 'ph-bold ph-speaker-simple-high'"></i>
+          </button>
+        </div>
+
+        <div class="popout-info-box">
+          <div class="popout-title">{{ cardItem.title }}</div>
+          <div class="popout-actions-row">
+            <div class="popout-actions-left">
+              <button class="popout-circle-btn popout-play-btn" @click.stop="quickPlay" title="Play">
+                <i class="ph-fill ph-play"></i>
+              </button>
+              <button
+                class="popout-circle-btn"
+                :class="{ active: isFavorite }"
+                @click.stop="toggleFavorite"
+                :title="isFavorite ? 'Remove from Watchlist' : 'Add to Watchlist'"
+              >
+                <i :class="isFavorite ? 'ph-bold ph-check' : 'ph-bold ph-plus'"></i>
+              </button>
+              <button
+                class="popout-circle-btn"
+                :class="{ active: isLiked }"
+                @click.stop="toggleLike"
+                :title="isLiked ? 'Liked' : 'Like title'"
+              >
+                <i :class="isLiked ? 'ph-fill ph-thumbs-up' : 'ph-bold ph-thumbs-up'"></i>
+              </button>
+            </div>
+            <button class="popout-circle-btn popout-more-btn" @click.stop="openDetail" title="More Info">
+              <i class="ph-bold ph-caret-down"></i>
+            </button>
+          </div>
+
+          <div class="popout-meta-row">
+            <span class="popout-match-badge">{{ matchScore }}% Match</span>
+            <span class="popout-pill-badge">{{ maturityRating }}</span>
+            <span class="popout-duration-text">{{ durationOrEpisodes }}</span>
+            <span class="popout-quality-pill">HD</span>
+          </div>
+
+          <div class="popout-genres-row" v-if="genreList.length">
+            <span v-for="(g, gi) in genreList" :key="gi" class="popout-genre-tag">
+              {{ g }}<span v-if="gi < genreList.length - 1" class="popout-dot">•</span>
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
   `,
-  setup(props) {
+  setup(props, { emit }) {
+    const cardRootRef = ref(null);
+    const popoutAlignClass = ref("align-center");
     const showTooltip = ref(false);
     const imgError = ref(false);
+    const popoutImgError = ref(false);
     const cardItem = computed(() => props.item || props.media || {});
+    const isPopoutActive = ref(false);
+    const trailerEmbedUrl = ref(null);
+    const previewVideoUrl = ref(null);
+    const isVideoPlaying = ref(false);
+    const isMuted = ref(true);
+    const isLiked = ref(false);
+    const isFavorite = ref(false);
+    let hoverTimer = null;
 
     const posterSrc = computed(() => {
       if (imgError.value) return null;
@@ -1083,15 +1188,210 @@ const MediaCard = {
       return null;
     });
 
+    const backdropSrc = computed(() => {
+      if (popoutImgError.value) return posterSrc.value;
+      const item = cardItem.value;
+      if (item.backdrop_path) return imgUrl(item.backdrop_path);
+      if (item.still_path) return imgUrl(item.still_path);
+      return posterSrc.value;
+    });
+
+    const matchScore = computed(() => {
+      const r = cardItem.value.rating;
+      if (r) return Math.min(99, Math.round(r * 10 + 8));
+      return 96;
+    });
+
+    const maturityRating = computed(() => {
+      const item = cardItem.value;
+      if (item.is_kids) return "TV-Y7";
+      if (item.rating >= 8) return "TV-MA";
+      if (item.rating >= 6.5) return "TV-14";
+      return "PG-13";
+    });
+
+    const durationOrEpisodes = computed(() => {
+      const item = cardItem.value;
+      if (item.type === "series" || item.type === "anime") {
+        if (item.episode_count) return `${item.episode_count} Episodes`;
+        return "Series";
+      }
+      if (item.duration) {
+        const h = Math.floor(item.duration / 60);
+        const m = item.duration % 60;
+        return h > 0 ? `${h}h ${m}m` : `${m}m`;
+      }
+      return "Movie";
+    });
+
+    const genreList = computed(() => {
+      const item = cardItem.value;
+      if (!item.genres) return [];
+      return item.genres.split(",").map(g => g.trim()).slice(0, 3);
+    });
+
     function handleImgError() {
       imgError.value = true;
+    }
+
+    function handlePopoutImgError() {
+      popoutImgError.value = true;
+    }
+
+    function onIframeLoaded() {
+      setTimeout(() => {
+        isVideoPlaying.value = true;
+      }, 400);
+    }
+
+    function onVideoError() {
+      isVideoPlaying.value = false;
+      previewVideoUrl.value = null;
     }
 
     function openCardMenu(e) {
       openGlobalContextMenu(e, cardItem.value);
     }
 
-    return { cardItem, posterSrc, handleImgError, openCardMenu, imgUrl, formatRating, calcProgressPercent, calcTimeLeft, showTooltip };
+    function updatePopoutAlignment() {
+      if (!cardRootRef.value) return;
+      const rect = cardRootRef.value.getBoundingClientRect();
+      const popoutWidth = 310;
+      const margin = 24;
+
+      const cardCenter = rect.left + rect.width / 2;
+      const popoutLeft = cardCenter - popoutWidth / 2;
+      const popoutRight = cardCenter + popoutWidth / 2;
+
+      if (popoutLeft < margin) {
+        popoutAlignClass.value = "align-left";
+      } else if (popoutRight > window.innerWidth - margin) {
+        popoutAlignClass.value = "align-right";
+      } else {
+        popoutAlignClass.value = "align-center";
+      }
+    }
+
+    function onMouseEnter() {
+      showTooltip.value = true;
+      if (window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches && !props.isContinue) {
+        clearTimeout(hoverTimer);
+        hoverTimer = setTimeout(async () => {
+          updatePopoutAlignment();
+          isPopoutActive.value = true;
+          isVideoPlaying.value = false;
+          const item = cardItem.value;
+          const id = item.id || item.tmdb_id;
+
+          // Attempt TMDB trailer first
+          if (id) {
+            try {
+              const res = await API.get(`/api/media/${id}/trailer`);
+              if (res && res.embed_url) {
+                let url = res.embed_url;
+                const sep = url.includes("?") ? "&" : "?";
+                trailerEmbedUrl.value = `${url}${sep}autoplay=1&mute=1&controls=0&loop=1&playlist=${res.key || ""}`;
+                return;
+              }
+            } catch (e) {}
+          }
+
+          // Fallback to local video stream if available
+          if (item.id && item.type === "movie") {
+            previewVideoUrl.value = `/api/stream/${item.id}?start=90&transcode=1`;
+          }
+        }, 320);
+      }
+    }
+
+    function onMouseLeave() {
+      showTooltip.value = false;
+      clearTimeout(hoverTimer);
+      isPopoutActive.value = false;
+      isVideoPlaying.value = false;
+      trailerEmbedUrl.value = null;
+      previewVideoUrl.value = null;
+    }
+
+    function quickPlay() {
+      const item = cardItem.value;
+      if (item.is_mounted === false) {
+        addToast("Source drive not mounted. Please connect drive to watch this title.", "error");
+        return;
+      }
+      if (item.id) {
+        window.location.hash = `#/watch/${item.id}`;
+      } else {
+        emit("click", item);
+      }
+    }
+
+    async function toggleFavorite() {
+      const item = cardItem.value;
+      const idToFav = item.id || item.tmdb_id;
+      if (!idToFav) return;
+      try {
+        const res = await API.post("/api/favorites/toggle", { media_id: idToFav });
+        isFavorite.value = res.is_favorite;
+        item.is_favorite = res.is_favorite;
+        addToast(res.is_favorite ? "Added to Watchlist" : "Removed from Watchlist", "info");
+      } catch (e) {
+        addToast("Failed to update watchlist", "error");
+      }
+    }
+
+    function toggleLike() {
+      isLiked.value = !isLiked.value;
+      addToast(isLiked.value ? "Added to your favorites!" : "Removed from favorites", "info");
+    }
+
+    function openDetail() {
+      const item = cardItem.value;
+      if (item.type === "movie" && item.id) {
+        window.location.hash = `#/title/movie/${item.id}`;
+      } else if (item.tmdb_id) {
+        window.location.hash = `#/title/${item.type || "series"}/${item.tmdb_id}`;
+      } else if (item.id) {
+        window.location.hash = `#/title/${item.type || "series"}/${item.id}`;
+      } else {
+        emit("click", item);
+      }
+    }
+
+    return {
+      cardRootRef,
+      popoutAlignClass,
+      cardItem,
+      posterSrc,
+      backdropSrc,
+      handleImgError,
+      handlePopoutImgError,
+      onIframeLoaded,
+      onVideoError,
+      openCardMenu,
+      imgUrl,
+      formatRating,
+      calcProgressPercent,
+      calcTimeLeft,
+      showTooltip,
+      isPopoutActive,
+      trailerEmbedUrl,
+      previewVideoUrl,
+      isVideoPlaying,
+      isMuted,
+      isLiked,
+      isFavorite,
+      matchScore,
+      maturityRating,
+      durationOrEpisodes,
+      genreList,
+      onMouseEnter,
+      onMouseLeave,
+      quickPlay,
+      toggleFavorite,
+      toggleLike,
+      openDetail
+    };
   },
 };
 
@@ -1231,10 +1531,33 @@ const HeroBanner = {
   props: ["items"],
   emits: ["play", "detail", "trailer"],
   template: `
-    <div class="hero" v-if="current">
+    <div class="hero" v-if="current" @mouseenter="isHeroHovered = true" @mouseleave="isHeroHovered = false">
       <div class="hero-backdrop-container">
+        <!-- Ambient Video Trailer Layer -->
+        <div v-if="videoPreviewActive && videoPreviewUrl" class="hero-video-wrap" :class="{ 'fade-in': videoLoaded }">
+          <iframe
+            v-if="isIframeTrailer"
+            :src="videoPreviewUrl"
+            class="hero-video-frame"
+            frameborder="0"
+            allow="autoplay; encrypted-media"
+            @load="videoLoaded = true"
+          ></iframe>
+          <video
+            v-else
+            :src="videoPreviewUrl"
+            class="hero-video-element"
+            autoplay
+            loop
+            playsinline
+            :muted="isMuted"
+            @canplay="videoLoaded = true"
+            @ended="onVideoEnded"
+          ></video>
+        </div>
+
         <transition name="banner-slide">
-          <div :key="currentIdx" class="hero-backdrop">
+          <div :key="currentIdx" class="hero-backdrop" :class="{ 'dimmed': videoPreviewActive && videoLoaded }">
             <img
               v-if="current.backdrop_path"
               :src="imgUrl(current.backdrop_path)"
@@ -1261,6 +1584,7 @@ const HeroBanner = {
           <span v-if="current.year">{{ current.year }}</span>
           <span v-if="current.rating" class="hero-rating"><i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ formatRating(current.rating) }}</span>
           <span v-if="current.genres">{{ current.genres.split(',').slice(0,3).join(' · ') }}</span>
+          <span class="hero-tag-pill" v-if="current.quality || current.video_codec">{{ (current.quality || 'HD').toUpperCase() }}</span>
         </div>
         <p class="hero-overview">{{ current.overview }}</p>
         <div class="hero-actions">
@@ -1278,13 +1602,37 @@ const HeroBanner = {
           </button>
         </div>
       </div>
+
+      <!-- Hero Video Controls & Maturity Badge -->
+      <div class="hero-media-controls" v-if="current">
+        <button
+          v-if="videoPreviewActive && videoPreviewUrl"
+          class="hero-control-btn"
+          @click.stop="toggleMute"
+          :title="isMuted ? 'Unmute Audio' : 'Mute Audio'"
+        >
+          <i :class="isMuted ? 'ph-bold ph-speaker-simple-slash' : 'ph-bold ph-speaker-simple-high'"></i>
+        </button>
+        <button
+          v-if="videoEnded"
+          class="hero-control-btn"
+          @click.stop="replayVideo"
+          title="Replay Video"
+        >
+          <i class="ph-bold ph-arrow-counter-clockwise"></i>
+        </button>
+        <div class="hero-maturity-badge">
+          <span>{{ current.is_kids ? 'TV-Y7' : (current.rating >= 8 ? 'TV-MA' : current.rating >= 6.5 ? 'TV-14' : 'PG-13') }}</span>
+        </div>
+      </div>
+
       <div class="hero-indicators" v-if="items && items.length > 1">
         <div
           v-for="(item, i) in (items || []).slice(0, 6)"
           :key="i"
           class="hero-indicator"
           :class="{ active: i === currentIdx }"
-          @click="currentIdx = i"
+          @click="selectSlide(i)"
         ></div>
       </div>
     </div>
@@ -1292,19 +1640,182 @@ const HeroBanner = {
   setup(props) {
     const currentIdx = ref(0);
     const current = computed(() => (props.items && props.items.length) ? props.items[currentIdx.value] : null);
-    let timer = null;
+    const isHeroHovered = ref(false);
+    const videoPreviewActive = ref(false);
+    const videoPreviewUrl = ref(null);
+    const isIframeTrailer = ref(false);
+    const videoLoaded = ref(false);
+    const videoEnded = ref(false);
+    const isMuted = ref(true);
+    let slideTimer = null;
+    let previewTimer = null;
 
-    onMounted(() => {
-      timer = setInterval(() => {
-        if (props.items && props.items.length > 1) {
+    function pauseSlideTimer() {
+      if (slideTimer) {
+        clearInterval(slideTimer);
+        slideTimer = null;
+      }
+    }
+
+    function startSlideTimer(delay = 8500) {
+      pauseSlideTimer();
+      if (!videoPreviewActive.value) {
+        slideTimer = setInterval(() => {
+          if (props.items && props.items.length > 1 && !isHeroHovered.value && !videoPreviewActive.value) {
+            currentIdx.value = (currentIdx.value + 1) % Math.min(props.items.length, 6);
+            resetPreview();
+            schedulePreview();
+          }
+        }, delay);
+      }
+    }
+
+    function selectSlide(idx) {
+      currentIdx.value = idx;
+      resetPreview();
+      startSlideTimer();
+      schedulePreview();
+    }
+
+    function toggleMute() {
+      isMuted.value = !isMuted.value;
+      const vid = document.querySelector('.hero-video-element');
+      if (vid) {
+        vid.muted = isMuted.value;
+      }
+      const iframe = document.querySelector('.hero-video-frame');
+      if (iframe && iframe.contentWindow) {
+        const cmd = isMuted.value ? 'mute' : 'unMute';
+        iframe.contentWindow.postMessage(JSON.stringify({
+          event: 'command',
+          func: cmd,
+          args: []
+        }), '*');
+      }
+    }
+
+    function onVideoEnded() {
+      videoEnded.value = true;
+      // When trailer finishes, wait 4 seconds then advance to next hero slide
+      setTimeout(() => {
+        if (props.items && props.items.length > 1 && videoEnded.value) {
           currentIdx.value = (currentIdx.value + 1) % Math.min(props.items.length, 6);
+          resetPreview();
+          schedulePreview();
         }
-      }, 7000);
+      }, 4000);
+    }
+
+    function replayVideo() {
+      videoEnded.value = false;
+      pauseSlideTimer();
+      const vid = document.querySelector('.hero-video-element');
+      if (vid) {
+        vid.currentTime = 0;
+        vid.play();
+      }
+    }
+
+    const isScrolledPastHero = ref(false);
+
+    function handleScroll() {
+      const scrollPos = window.scrollY || document.documentElement.scrollTop || 0;
+      const heroThreshold = 220;
+
+      if (scrollPos > heroThreshold) {
+        if (!isScrolledPastHero.value) {
+          isScrolledPastHero.value = true;
+          resetPreview(); // Stop trailer video immediately
+          startSlideTimer(); // Resume carousel cycling
+        }
+      } else {
+        if (isScrolledPastHero.value) {
+          isScrolledPastHero.value = false;
+          schedulePreview(); // User is back at top, schedule trailer
+        }
+      }
+    }
+
+    async function loadVideoPreview() {
+      if (isScrolledPastHero.value) return;
+      const item = current.value;
+      if (!item) return;
+      if (store.profile?.is_kids) return;
+      try {
+        if (item.id && item.type === "movie") {
+          videoPreviewUrl.value = `/api/stream/${item.id}?start=60&transcode=1`;
+          isIframeTrailer.value = false;
+          videoPreviewActive.value = true;
+          pauseSlideTimer(); // Stop carousel cycling while trailer plays!
+          return;
+        }
+        const id = item.id || item.tmdb_id;
+        const res = await API.get(`/api/media/${id}/trailer`);
+        if (res && res.embed_url) {
+          let url = res.embed_url;
+          const sep = url.includes('?') ? '&' : '?';
+          url += `${sep}autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&showinfo=0&fs=0&playsinline=1&enablejsapi=1&loop=1&playlist=${res.key || ''}`;
+          videoPreviewUrl.value = url;
+          isIframeTrailer.value = true;
+          videoPreviewActive.value = true;
+          pauseSlideTimer(); // Stop carousel cycling while trailer plays!
+        }
+      } catch (e) {
+        // Stay on high-res backdrop
+      }
+    }
+
+    function schedulePreview() {
+      clearTimeout(previewTimer);
+      if (isScrolledPastHero.value) return;
+      previewTimer = setTimeout(() => {
+        loadVideoPreview();
+      }, 2200);
+    }
+
+    function resetPreview() {
+      clearTimeout(previewTimer);
+      videoPreviewActive.value = false;
+      videoPreviewUrl.value = null;
+      videoLoaded.value = false;
+      videoEnded.value = false;
+    }
+
+    watch(() => currentIdx.value, () => {
+      resetPreview();
+      schedulePreview();
     });
 
-    onUnmounted(() => clearInterval(timer));
+    onMounted(() => {
+      window.addEventListener("scroll", handleScroll, { passive: true });
+      startSlideTimer();
+      schedulePreview();
+    });
 
-    return { currentIdx, current, imgUrl, formatRating, store };
+    onUnmounted(() => {
+      window.removeEventListener("scroll", handleScroll);
+      clearInterval(slideTimer);
+      clearTimeout(previewTimer);
+    });
+
+    return {
+      currentIdx,
+      current,
+      imgUrl,
+      formatRating,
+      store,
+      isHeroHovered,
+      videoPreviewActive,
+      videoPreviewUrl,
+      isIframeTrailer,
+      videoLoaded,
+      videoEnded,
+      isMuted,
+      toggleMute,
+      onVideoEnded,
+      replayVideo,
+      selectSlide
+    };
   },
 };
 
@@ -9602,6 +10113,11 @@ const ProfilesPage = {
               <img v-if="profile.custom_avatar_url" :src="profile.custom_avatar_url" class="netflix-avatar-img" :alt="profile.name" />
               <span v-else>{{ profile.avatar || 'ph-film-strip' }}</span>
 
+              <!-- Admin Badge in Avatar -->
+              <div v-if="profile.is_admin" class="netflix-avatar-admin-badge" title="Administrator">
+                <i class="ph-bold ph-crown"></i>
+              </div>
+
               <!-- PIN Lock Indicator in Select Mode -->
               <div v-if="profile.has_pin && viewMode === 'select'" class="netflix-avatar-lock-badge" title="PIN Protected">
                 <i class="ph-bold ph-lock-key"></i>
@@ -9620,8 +10136,7 @@ const ProfilesPage = {
             </div>
 
             <!-- Profile Badges -->
-            <div v-if="profile.is_admin" class="admin-profile-badge">Admin</div>
-            <div v-else-if="profile.is_kids" class="kids-profile-badge">Kids</div>
+            <div v-if="profile.is_kids" class="kids-profile-badge">Kids</div>
             <div v-else-if="profile.maturity_rating === 'Teens'" class="teen-profile-badge">Teens</div>
 
             <!-- Active Presence In-Use Badge -->
