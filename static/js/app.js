@@ -6556,17 +6556,18 @@ const PlayerPage = {
       return Math.max(0, t - (streamState.transcode ? streamState.streamStart : 0));
     }
     function playerToContent(t) {
-      return (streamState.transcode ? streamState.streamStart : 0) + t;
+      return (streamState.transcode ? (streamState.streamStart || 0) : 0) + (Number(t) || 0);
     }
     function currentContentTime() {
       const v = videoRef.value;
-      return currentTime.value || (v ? v.currentTime || 0 : 0);
+      const raw = (v && isFinite(v.currentTime) ? v.currentTime : 0) || (isFinite(currentTime.value) ? currentTime.value : 0);
+      return playerToContent(raw);
     }
 
     // ── Stream swap: the ONLY way playback source changes ──────────
     let reloadToken = 0;
 
-    function buildStreamUrl(mediaId) {
+    function buildStreamUrl(mediaId, bustCache = false) {
       if (!streamState.transcode) {
         return `/api/stream/${mediaId}`;
       }
@@ -6577,10 +6578,13 @@ const PlayerPage = {
       if (streamState.streamStart > 0) {
         url += `&start=${Number(streamState.streamStart).toFixed(3)}`;
       }
+      if (bustCache) {
+        url += `&_t=${Date.now()}`;
+      }
       return url;
     }
 
-    function swapStream(atContentTime) {
+    function swapStream(atContentTime, forceReload = false) {
       const v = videoRef.value;
       if (!v) return;
       const token = ++reloadToken;
@@ -6620,11 +6624,14 @@ const PlayerPage = {
       v.addEventListener("loadedmetadata", onMeta, { once: true });
 
       // Append media fragment #t=... so the browser requests the target byte-range directly on initial probe
-      const wantBase = buildStreamUrl(streamState.mediaId);
-      const want = wantBase + (playerPos > 0 && !streamState.transcode ? `#t=${playerPos.toFixed(3)}` : '');
-      const absWantBase = new URL(wantBase, location.origin).href;
+      const isTranscode = !!streamState.transcode;
+      const wantBase = buildStreamUrl(streamState.mediaId, isTranscode && (forceReload || !!v.error));
+      const want = wantBase + (playerPos > 0 && !isTranscode ? `#t=${playerPos.toFixed(3)}` : '');
+      const absWantBase = new URL(wantBase.split('&_t=')[0], location.origin).href;
 
-      if (!v.src.startsWith(absWantBase)) {
+      const needsFullReload = forceReload || !!v.error || isTranscode || !v.src || !v.src.startsWith(absWantBase);
+
+      if (needsFullReload) {
         currentTime.value = playerPos;
         v.src = want;
         try {
@@ -7139,7 +7146,7 @@ const PlayerPage = {
         .catch(() => { compatInfo.value = { available: false }; });
     }
 
-    async function enableCompatPlayback() {
+    async function enableCompatPlayback(force = false) {
       if (!media.value) return;
       suppressResume = true;
       isBuffering.value = true;
@@ -7149,7 +7156,7 @@ const PlayerPage = {
       if (token !== reloadToken) return;   // superseded
       streamState.transcode = true;
       streamState.streamStart = startAt;
-      swapStream(0);
+      swapStream(0, force);
     }
 
     function disableCompatPlayback() {
@@ -8868,6 +8875,9 @@ const PlayerPage = {
       }
     }
 
+    let consecutiveErrorCount = 0;
+    let lastErrorTimestamp = 0;
+
     function onVideoError(e) {
       const v = videoRef.value;
       if (!v || !v.currentSrc || v.currentSrc.endsWith('/stream/') || v.currentSrc.endsWith('/null') || v.currentSrc.endsWith('/undefined')) {
@@ -8879,6 +8889,26 @@ const PlayerPage = {
       }
       if (v.currentSrc && v.currentSrc.includes('/api/stream/')) {
         console.error("[HTML5 Player Error]", e, "code:", v.error.code, "msg:", v.error.message);
+
+        const now = Date.now();
+        if (now - lastErrorTimestamp < 3500) {
+          consecutiveErrorCount++;
+        } else {
+          consecutiveErrorCount = 1;
+        }
+        lastErrorTimestamp = now;
+
+        // If we have failed repeatedly (>= 3 times within 3.5s), stop auto-reconnecting
+        // to prevent UI freezing / infinite log spam, and display the error with manual recovery options.
+        if (consecutiveErrorCount >= 3) {
+          console.warn("[HTML5 Player] Multiple consecutive playback errors encountered. Halting auto-retry loop.");
+          const p = (media.value?.file_path || "").toLowerCase();
+          const isHeavy4k = p.includes("2160") || p.includes("4k") || p.includes("uhd");
+          playerError.value = isHeavy4k
+            ? "Playback failed — 4K/HEVC content needs hardware acceleration or converted playback. Click 'Play Converted' or 'Resume' below."
+            : "The stream encountered an issue (decode failure or disconnected pipeline). Click 'Play Converted' or 'Resume Playback' to continue.";
+          return;
+        }
         
         // If native HTML5 direct playback encountered a decode error (code 3) or unsupported source (code 4),
         // automatically fallback to converted transcode mode (1080p H.264/AAC)
@@ -8886,7 +8916,7 @@ const PlayerPage = {
           console.warn("[HTML5 Player] Video decode failed natively (code " + v.error.code + "). Automatically switching to converted compatibility stream...");
           addToast("Video decode issue detected — switching to converted playback...", "info");
           playerError.value = null;
-          enableCompatPlayback();
+          enableCompatPlayback(true);
           return;
         }
 
@@ -8894,7 +8924,7 @@ const PlayerPage = {
         if (streamState.transcode && (v.error.code === 3 || v.error.code === 4)) {
           console.warn("[HTML5 Player] Converted stream hiccup — reconnecting at keyframe...");
           playerError.value = null;
-          enableCompatPlayback();
+          enableCompatPlayback(true);
           return;
         }
 
@@ -8916,8 +8946,9 @@ const PlayerPage = {
       if (!v) return;
       recovering.value = true;
       playerError.value = null;
+      consecutiveErrorCount = 0;
       try {
-        await enableCompatPlayback();
+        await enableCompatPlayback(true);
       } catch (e) {
         console.warn("[Player] Recovery failed:", e);
         playerError.value = "Could not reconnect to the stream. Try refreshing or relaunching the server.";

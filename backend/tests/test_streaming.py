@@ -78,6 +78,43 @@ class TestVideoStreaming(unittest.TestCase):
                 stream_file(self.video_path)
             self.assertEqual(ctx.exception.code, 416)
 
+    def test_convert_cmd_builder_with_audio_and_yuv420p(self):
+        """Verify _build_convert_cmd ensures yuv420p pixel format and audio mapping."""
+        from backend.streamer import _build_convert_cmd
+        cmd = _build_convert_cmd(
+            file_path=self.video_path,
+            audio_track_index=0,
+            effective_start=12.5,
+            max_height=1080,
+            encoder_name="libx264",
+            has_audio=True,
+        )
+        self.assertIn("-pix_fmt", cmd)
+        self.assertIn("yuv420p", cmd)
+        self.assertIn("-ss", cmd)
+        self.assertIn("12.500", cmd)
+        self.assertIn("-map", cmd)
+        self.assertIn("0:V:0?", cmd)
+        self.assertIn("0:a:0?", cmd)
+        self.assertIn("-c:a", cmd)
+        self.assertIn("aac", cmd)
+
+    def test_convert_cmd_builder_without_audio(self):
+        """Verify _build_convert_cmd uses -an when media has no audio tracks."""
+        from backend.streamer import _build_convert_cmd
+        cmd = _build_convert_cmd(
+            file_path=self.video_path,
+            audio_track_index=0,
+            effective_start=0.0,
+            max_height=0,
+            encoder_name="libx264",
+            has_audio=False,
+        )
+        self.assertIn("-an", cmd)
+        self.assertNotIn("0:a:0?", cmd)
+        self.assertIn("-pix_fmt", cmd)
+        self.assertIn("yuv420p", cmd)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -130,12 +130,15 @@ def stream_file(file_path):
     # No Range header → serve the whole file
     if not range_header:
         def generate_full():
-            with open(file_path, "rb") as f:
-                while True:
-                    chunk = f.read(1024 * 1024)  # 1 MB chunks
-                    if not chunk:
-                        break
-                    yield chunk
+            try:
+                with open(file_path, "rb") as f:
+                    while True:
+                        chunk = f.read(1024 * 1024)  # 1 MB chunks
+                        if not chunk:
+                            break
+                        yield chunk
+            except (GeneratorExit, ConnectionResetError, BrokenPipeError, OSError):
+                pass
 
         headers["Content-Length"] = str(file_size)
         return Response(generate_full(), status=200, headers=headers)
@@ -172,16 +175,19 @@ def stream_file(file_path):
     chunk_size = 2 * 1024 * 1024  # 2 MB buffer for high throughput zero-stutter streaming
 
     def generate_range():
-        with open(file_path, "rb") as f:
-            f.seek(start)
-            remaining = length
-            while remaining > 0:
-                to_read = min(chunk_size, remaining)
-                data = f.read(to_read)
-                if not data:
-                    break
-                remaining -= len(data)
-                yield data
+        try:
+            with open(file_path, "rb") as f:
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    to_read = min(chunk_size, remaining)
+                    data = f.read(to_read)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+        except (GeneratorExit, ConnectionResetError, BrokenPipeError, OSError):
+            pass
 
     headers.update({
         "Content-Length": str(length),
@@ -270,46 +276,21 @@ def describe_hw_encoder(force=False):
         return result
 
 
-def stream_video_convert(file_path, audio_track_index, start_time=0.0, max_height=0):
-    """
-    Full real-time conversion of the video to widely-supported H.264/AAC MP4,
-    using hardware acceleration when available (QSV/NVENC/MF). Intended for
-    codecs the browser struggles with (e.g. 4K 10-bit HEVC) so playback stays
-    smooth without pegging the CPU.
-    """
-    if not os.path.isfile(file_path):
-        abort(404, description=f"File not found: {file_path}")
-
-    caps = describe_hw_encoder()
-    if not caps.get("available"):
-        abort(503, description="No usable video encoder found")
-
-    from backend.audio_probe import probe_audio_tracks
-    tracks = probe_audio_tracks(file_path)
-    if audio_track_index < 0 or audio_track_index >= len(tracks):
-        audio_track_index = 0
-
+def _build_convert_cmd(file_path, audio_track_index, effective_start, max_height, encoder_name, has_audio):
     ff = _ffmpeg_bin()
-
-    # Keyframe-align the cut point so A/V start together (see find_keyframe_before)
-    effective_start = find_keyframe_before(file_path, float(start_time or 0))
-
-    cmd = [ff, "-hide_banner", "-loglevel", "error"]
+    cmd = [ff, "-hide_banner", "-loglevel", "warning"]
     if effective_start > 0:
         cmd.extend(["-ss", f"{effective_start:.3f}"])
-    # Cap input analysis on huge MKVs — big TTFB win on 4K files
-    cmd.extend(["-probesize", "5M", "-analyzeduration", "5M"])
+    cmd.extend(["-probesize", "10M", "-analyzeduration", "10M"])
     cmd.extend(["-i", file_path])
-    cmd.extend([
-        "-map", "0:v:0",
-        "-map", f"0:a:{audio_track_index}",
-    ])
+    cmd.extend(["-map", "0:V:0?"])
 
-    encoder = caps["encoder"]
-    extra = next((o for n, o, _ in _HW_CANDIDATES if n == encoder), [])
-    cmd.extend(["-c:v", encoder, *extra])
+    if has_audio:
+        cmd.extend(["-map", f"0:a:{audio_track_index}?"])
+    else:
+        cmd.extend(["-an"])
 
-    # Downscale only when actually needed (probed height is cached)
+    vf_filters = []
     if max_height and max_height > 0:
         try:
             from backend.video_probe import probe_video_resolution
@@ -317,18 +298,62 @@ def stream_video_convert(file_path, audio_track_index, start_time=0.0, max_heigh
         except Exception:
             src_h = 0
         if src_h > max_height:
-            cmd.extend(["-vf", f"scale=-2:{int(max_height)}"])
+            vf_filters.append(f"scale=-2:{int(max_height)}:flags=fast_bilinear")
+
+    # Always ensure 8-bit yuv420p for maximum browser and player compatibility
+    vf_filters.append("format=yuv420p")
+    cmd.extend(["-vf", ",".join(vf_filters)])
+
+    extra = next((o for n, o, _ in _HW_CANDIDATES if n == encoder_name), ["-preset", "veryfast", "-crf", "23"])
+    cmd.extend(["-c:v", encoder_name, *extra])
+    cmd.extend(["-pix_fmt", "yuv420p"])
+
+    if has_audio:
+        cmd.extend([
+            "-c:a", "aac",
+            "-ac", "2",
+            "-b:a", "192k",
+            "-af", "aresample=async=1",
+        ])
 
     cmd.extend([
-        "-c:a", "aac",
-        "-ac", "2",
-        "-b:a", "192k",
-        "-af", "aresample=async=1",
         "-avoid_negative_ts", "make_zero",
         "-movflags", "frag_keyframe+empty_moov+default_base_moof",
         "-f", "mp4",
         "pipe:1",
     ])
+    return cmd
+
+
+def stream_video_convert(file_path, audio_track_index, start_time=0.0, max_height=0):
+    """
+    Full real-time conversion of the video to widely-supported H.264/AAC MP4,
+    using hardware acceleration when available (QSV/NVENC/MF) with transparent
+    fallback to libx264. Intended for codecs the browser struggles with
+    (e.g. 4K 10-bit HEVC, MKV containers) so playback stays smooth without pipeline errors.
+    """
+    if not os.path.isfile(file_path):
+        abort(404, description=f"File not found: {file_path}")
+
+    caps = describe_hw_encoder()
+    primary_encoder = caps.get("encoder") or "libx264"
+
+    from backend.audio_probe import probe_audio_tracks
+    tracks = probe_audio_tracks(file_path)
+    has_audio = len(tracks) > 0
+    if has_audio and (audio_track_index < 0 or audio_track_index >= len(tracks)):
+        audio_track_index = 0
+
+    effective_start = find_keyframe_before(file_path, float(start_time or 0))
+
+    cmd = _build_convert_cmd(
+        file_path=file_path,
+        audio_track_index=audio_track_index,
+        effective_start=effective_start,
+        max_height=max_height,
+        encoder_name=primary_encoder,
+        has_audio=has_audio,
+    )
 
     key = ("convert", os.path.abspath(file_path))
     with _TRANSCODE_LOCK:
@@ -340,21 +365,63 @@ def stream_video_convert(file_path, audio_track_index, start_time=0.0, max_heigh
             pass
 
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=CREATE_NO_WINDOW,
+            bufsize=1024 * 1024,
+        )
+        with _TRANSCODE_LOCK:
+            _ACTIVE_TRANSCODES[key] = proc
 
         def generate():
+            current_proc = proc
+            current_encoder = primary_encoder
             try:
-                while True:
-                    chunk = proc.stdout.read(65536)
-                    if not chunk:
-                        break
+                # Read initial chunk to verify transcode process started cleanly
+                chunk = current_proc.stdout.read(65536)
+                if not chunk and current_proc.poll() is not None and current_encoder != "libx264":
+                    err_msg = ""
+                    try:
+                        err_msg = current_proc.stderr.read().decode("utf-8", errors="replace")
+                    except Exception:
+                        pass
+                    print(f"[Streamer] Primary encoder ({current_encoder}) failed: {err_msg[:200].strip()}. Falling back to libx264...")
+                    
+                    fallback_cmd = _build_convert_cmd(
+                        file_path=file_path,
+                        audio_track_index=audio_track_index,
+                        effective_start=effective_start,
+                        max_height=max_height,
+                        encoder_name="libx264",
+                        has_audio=has_audio,
+                    )
+                    current_proc = subprocess.Popen(
+                        fallback_cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        creationflags=CREATE_NO_WINDOW,
+                        bufsize=1024 * 1024,
+                    )
+                    with _TRANSCODE_LOCK:
+                        _ACTIVE_TRANSCODES[key] = current_proc
+                    chunk = current_proc.stdout.read(65536)
+
+                while chunk:
                     yield chunk
+                    chunk = current_proc.stdout.read(65536)
+            except (GeneratorExit, ConnectionResetError, BrokenPipeError, OSError):
+                pass
             finally:
                 try:
-                    if proc.poll() is None:
-                        proc.kill()
+                    if current_proc.poll() is None:
+                        current_proc.kill()
                 except Exception:
                     pass
+                with _TRANSCODE_LOCK:
+                    if _ACTIVE_TRANSCODES.get(key) is current_proc:
+                        _ACTIVE_TRANSCODES.pop(key, None)
 
         return Response(generate(), mimetype="video/mp4", headers={
             "Cache-Control": "no-cache",
@@ -364,7 +431,8 @@ def stream_video_convert(file_path, audio_track_index, start_time=0.0, max_heigh
             "Access-Control-Allow-Headers": "*",
             "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
         })
-    except Exception:
+    except Exception as e:
+        print(f"[Streamer] Convert stream launch error: {e}")
         return stream_file(file_path)
 
 
@@ -425,6 +493,8 @@ def stream_audio_only(file_path, track_index, start_time=0.0):
                     if not chunk:
                         break
                     yield chunk
+            except (GeneratorExit, ConnectionResetError, BrokenPipeError, OSError):
+                pass
             finally:
                 try:
                     if proc.poll() is None:
@@ -478,7 +548,7 @@ def stream_transcoded(file_path, audio_track_index=0, start_time=0.0):
     if not os.path.exists(ffmpeg_bin):
         return stream_file(file_path)
 
-    cmd = [ffmpeg_bin, "-hide_banner", "-loglevel", "error"]
+    cmd = [ffmpeg_bin, "-hide_banner", "-loglevel", "warning"]
 
     # Align the seek to the actual video keyframe so audio and video start
     # at the same instant (see find_keyframe_before).
@@ -489,8 +559,8 @@ def stream_transcoded(file_path, audio_track_index=0, start_time=0.0):
 
     cmd.extend([
         "-i", file_path,
-        "-map", "0:v:0",
-        "-map", f"0:a:{audio_track_index}",
+        "-map", "0:V:0?",
+        "-map", f"0:a:{audio_track_index}?",
         "-c:v", "copy",
         "-c:a", "aac",
         "-ac", "2",
@@ -526,6 +596,8 @@ def stream_transcoded(file_path, audio_track_index=0, start_time=0.0):
                     if not chunk:
                         break
                     yield chunk
+            except (GeneratorExit, ConnectionResetError, BrokenPipeError, OSError):
+                pass
             finally:
                 try:
                     if proc.poll() is None:
