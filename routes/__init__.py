@@ -60,6 +60,14 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
         "library.api_get_progress",
         "library.api_delete_progress",
         "library.api_mark_watched",
+        "serve_metadata_image",
+        "serve_avatar_image",
+        "favicon",
+        "index",
+        "service_worker",
+        "web_manifest",
+        "offline_page",
+        "serve_offline_page",
     ]
     for view_name in exempt_views:
         if view_name in app.view_functions:

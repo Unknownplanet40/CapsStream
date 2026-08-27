@@ -206,6 +206,7 @@ _HW_CANDIDATES = [
     ("h264_qsv",   ["-preset", "medium", "-global_quality", "23"], True),
     ("h264_nvenc", ["-preset", "p4", "-rc", "vbr", "-cq", "24", "-b:v", "0"], True),
     ("h264_mf",    [], True),
+    ("libx264",    ["-preset", "veryfast", "-crf", "23"], False),
 ]
 
 
@@ -258,14 +259,10 @@ def describe_hw_encoder(force=False):
                 for name, extra, is_hw in _HW_CANDIDATES:
                     if name not in encoders_text:
                         continue
-                    if is_hw and not _encoder_selftest(name, extra):
+                    if not _encoder_selftest(name, extra):
                         continue
                     result = {"available": True, "encoder": name, "hardware": is_hw}
                     break
-                else:
-                    # Software fallback always available in full ffmpeg builds
-                    if "libx264" in encoders_text:
-                        result = {"available": True, "encoder": "libx264", "hardware": False}
             except Exception as e:
                 print(f"[Streamer] Encoder probe failed: {e}")
 

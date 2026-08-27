@@ -256,6 +256,7 @@ _BOOT_TS = int(time.time())
 
 
 @app.route("/")
+@limiter.exempt
 def index():
     resp = make_response(render_template("index.html", version=get_app_version(), t=_BOOT_TS))
     resp.headers["Cache-Control"] = "no-cache"
@@ -263,11 +264,13 @@ def index():
 
 
 @app.route("/.well-known/appspecific/com.chrome.devtools.json")
+@limiter.exempt
 def chrome_devtools_json():
     return jsonify({})
 
 
 @app.route("/sw.js")
+@limiter.exempt
 def service_worker():
     resp = make_response(send_from_directory(os.path.join(BASE_DIR, "static"), "sw.js"))
     resp.headers["Content-Type"] = "application/javascript"
@@ -278,6 +281,7 @@ def service_worker():
 
 @app.route("/manifest.webmanifest")
 @app.route("/manifest.json")
+@limiter.exempt
 def web_manifest():
     manifest_path = os.path.join(BASE_DIR, "static", "manifest.webmanifest")
     if not os.path.isfile(manifest_path):
@@ -302,6 +306,7 @@ def web_manifest():
 
 
 @app.route("/offline.html")
+@limiter.exempt
 def offline_page():
     resp = make_response(render_template("offline.html"))
     resp.headers["Cache-Control"] = "no-cache"
@@ -309,6 +314,7 @@ def offline_page():
 
 
 @app.route("/favicon.ico")
+@limiter.exempt
 def favicon():
     fav_path = os.path.join(BASE_DIR, "static", "img", "favicon.png")
     if os.path.exists(fav_path):
@@ -317,6 +323,7 @@ def favicon():
 
 
 @app.route("/offline-page")
+@limiter.exempt
 def serve_offline_page():
     return send_from_directory(app.static_folder, "offline.html")
 
@@ -347,6 +354,7 @@ def _download_image_background(size, tmdb_file, filename, img_dir, img_path):
 
 
 @app.route("/metadata/images/<path:filename>")
+@limiter.exempt
 def serve_metadata_image(filename):
     img_dir = os.path.join(BASE_DIR, "data", "metadata", "images")
     img_path = os.path.join(img_dir, filename)
@@ -382,6 +390,7 @@ def serve_metadata_image(filename):
 
 
 @app.route("/metadata/avatars/<path:filename>")
+@limiter.exempt
 def serve_avatar_image(filename):
     avatars_dir = os.path.join(BASE_DIR, "data", "avatars")
     os.makedirs(avatars_dir, exist_ok=True)

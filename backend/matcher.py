@@ -285,7 +285,7 @@ def get_media_trailer(tmdb_id, media_type="movie"):
         return {
             "key": key,
             "title": name,
-            "embed_url": f"https://www.youtube-nocookie.com/embed/{key}?autoplay=1&rel=0"
+            "embed_url": f"https://www.youtube.com/embed/{key}?autoplay=1&rel=0"
         }
     return None
 

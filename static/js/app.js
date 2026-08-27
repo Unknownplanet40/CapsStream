@@ -1662,6 +1662,7 @@ const HeroBanner = {
     let ytPollInterval = null;
     let lastKnownCurrentTime = 0;
     let lastKnownDuration = 0;
+    let durationTimerSet = false;
 
     function pauseSlideTimer() {
       if (slideTimer) {
@@ -1721,10 +1722,10 @@ const HeroBanner = {
       if (videoEnded.value) return;
       videoEnded.value = true;
       cleanupTrailerTimers();
-      // Advance to next hero banner seamlessly
+      // Seamlessly advance to next hero banner slide
       setTimeout(() => {
         advanceToNextSlide();
-      }, 700);
+      }, 500);
     }
 
     function handleWindowMessage(e) {
@@ -1733,36 +1734,56 @@ const HeroBanner = {
         if (typeof data === "string") {
           try {
             data = JSON.parse(data);
-          } catch (_) {}
+          } catch (_) {
+            return;
+          }
         }
-        if (data && typeof data === "object") {
-          // 1. YouTube onStateChange ended (state 0)
-          if (data.event === "onStateChange" && (data.info === 0 || data.data === 0)) {
+        if (!data || typeof data !== "object") return;
+
+        // 1. YouTube onStateChange event (state 0 = ENDED)
+        if (data.event === "onStateChange") {
+          const state = data.info !== undefined ? data.info : data.data;
+          if (state === 0) {
             onVideoEnded();
             return;
           }
-          // 2. YouTube infoDelivery playerState ended (state 0)
-          if (data.event === "infoDelivery" && data.info) {
-            if (data.info.playerState === 0) {
-              onVideoEnded();
-              return;
-            }
-            if (typeof data.info.currentTime === "number") {
-              lastKnownCurrentTime = data.info.currentTime;
-            }
-            if (typeof data.info.duration === "number") {
-              lastKnownDuration = data.info.duration;
-            }
-            if (lastKnownDuration > 3 && lastKnownCurrentTime >= lastKnownDuration - 0.75) {
-              onVideoEnded();
-              return;
-            }
-          }
-          // 3. Response to getPlayerState / status poll
-          if (data.info === 0 || data.data === 0 || data.playerState === 0) {
+        }
+
+        // 2. YouTube infoDelivery event
+        if (data.event === "infoDelivery" && data.info) {
+          if (data.info.playerState === 0) {
             onVideoEnded();
             return;
           }
+          if (typeof data.info.currentTime === "number") {
+            lastKnownCurrentTime = data.info.currentTime;
+          }
+          if (typeof data.info.duration === "number" && data.info.duration > 0) {
+            lastKnownDuration = data.info.duration;
+            if (!durationTimerSet && lastKnownDuration > 0 && lastKnownDuration < 300) {
+              durationTimerSet = true;
+              if (maxTrailerTimer) clearTimeout(maxTrailerTimer);
+              maxTrailerTimer = setTimeout(() => {
+                if (videoPreviewActive.value && !videoEnded.value) {
+                  onVideoEnded();
+                }
+              }, (lastKnownDuration + 1.5) * 1000);
+            }
+          }
+          if (lastKnownDuration > 3 && lastKnownCurrentTime >= lastKnownDuration - 0.75) {
+            onVideoEnded();
+            return;
+          }
+        }
+
+        // 3. Response to getPlayerState / status poll
+        if (data.playerState === 0 || (data.info === 0 && data.event !== "listening")) {
+          onVideoEnded();
+          return;
+        }
+        if (data.info && typeof data.info === "object" && data.info.playerState === 0) {
+          onVideoEnded();
+          return;
         }
       } catch (err) {}
     }
@@ -1784,6 +1805,13 @@ const HeroBanner = {
           event: 'command',
           func: cmd,
           args: []
+        }), '*');
+
+        // Listen for player state changes
+        iframe.contentWindow.postMessage(JSON.stringify({
+          event: 'command',
+          func: 'addEventListener',
+          args: ['onStateChange']
         }), '*');
 
         // Active state poll to ensure trailer end is never missed
@@ -1812,7 +1840,7 @@ const HeroBanner = {
               args: []
             }), '*');
           }
-        }, 1500);
+        }, 1000);
       }
     }
 
@@ -1842,35 +1870,57 @@ const HeroBanner = {
       if (!item) return;
       if (store.profile?.is_kids) return;
       try {
-        if (item.id && item.type === "movie") {
-          videoPreviewUrl.value = `/api/stream/${item.id}?start=60&transcode=1`;
-          isIframeTrailer.value = false;
-          videoPreviewActive.value = true;
-          pauseSlideTimer(); // Stop carousel cycling while trailer plays!
-          return;
-        }
         const id = item.id || item.tmdb_id;
-        const res = await API.get(`/api/media/${id}/trailer`);
-        if (res && res.embed_url) {
-          let url = res.embed_url;
-          const sep = url.includes('?') ? '&' : '?';
-          const muteParam = isMuted.value ? 'mute=1' : 'mute=0';
+        let trailerData = null;
+        if (id) {
+          try {
+            trailerData = await API.get(`/api/media/${id}/trailer`);
+          } catch (_) {}
+        }
+
+        if (trailerData && (trailerData.embed_url || trailerData.key)) {
+          let key = trailerData.key;
+          if (!key && trailerData.embed_url) {
+            const m = trailerData.embed_url.match(/embed\/([^?&]+)/);
+            if (m) key = m[1];
+          }
           let origin = window.location.origin;
           if (!origin || origin === 'null') {
             origin = window.location.protocol + '//' + window.location.host;
           }
-          url += `${sep}autoplay=1&${muteParam}&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&showinfo=0&fs=0&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(origin)}`;
-          videoPreviewUrl.value = url;
+          const muteParam = isMuted.value ? 'mute=1' : 'mute=0';
+          const embedBase = key ? `https://www.youtube.com/embed/${key}` : (trailerData.embed_url.split('?')[0] || trailerData.embed_url);
+          const sep = embedBase.includes('?') ? '&' : '?';
+
+          videoPreviewUrl.value = `${embedBase}${sep}autoplay=1&${muteParam}&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&showinfo=0&fs=0&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(origin)}&widgetid=1`;
           isIframeTrailer.value = true;
           videoPreviewActive.value = true;
           pauseSlideTimer(); // Stop carousel cycling while trailer plays!
           cleanupTrailerTimers();
-          // Fallback cap to prevent hanging if YouTube player completely stalls
+          
+          durationTimerSet = false;
+          // Initial safety fallback timer (65s default until duration is detected)
           maxTrailerTimer = setTimeout(() => {
             if (videoPreviewActive.value && !videoEnded.value) {
               onVideoEnded();
             }
-          }, 180000);
+          }, 65000);
+          return;
+        }
+
+        // Fallback: If no official TMDB trailer is available and it's a local movie, play a 25-second preview clip
+        if (item.id && item.type === "movie") {
+          videoPreviewUrl.value = `/api/stream/${item.id}?start=60&transcode=1`;
+          isIframeTrailer.value = false;
+          videoPreviewActive.value = true;
+          pauseSlideTimer(); // Stop carousel cycling while clip plays!
+          cleanupTrailerTimers();
+          maxTrailerTimer = setTimeout(() => {
+            if (videoPreviewActive.value && !videoEnded.value) {
+              onVideoEnded();
+            }
+          }, 25000);
+          return;
         }
       } catch (e) {
         // Stay on high-res backdrop
@@ -1890,6 +1940,7 @@ const HeroBanner = {
       cleanupTrailerTimers();
       lastKnownCurrentTime = 0;
       lastKnownDuration = 0;
+      durationTimerSet = false;
       videoPreviewActive.value = false;
       videoPreviewUrl.value = null;
       videoLoaded.value = false;
@@ -6385,8 +6436,12 @@ const PlayerPage = {
         <div class="empty-subtitle" style="max-width:480px;margin-bottom:1.5rem">
           {{ playerError }}
         </div>
-        <div style="display:flex;gap:12px;justify-content:center">
-          <button class="btn btn-primary" @click="recoverFromError" :disabled="recovering">
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+          <button v-if="!streamState.transcode" class="btn btn-primary" @click="enableCompatPlayback">
+            <i class="ph ph-lightning" style="margin-right:6px"></i>
+            Play Converted (1080p)
+          </button>
+          <button class="btn" :class="streamState.transcode ? 'btn-primary' : 'btn-secondary'" @click="recoverFromError" :disabled="recovering">
             <i :class="recovering ? 'ph ph-circle-notch' : 'ph ph-arrow-counter-clockwise'" :style="recovering ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
             {{ recovering ? 'Recovering…' : 'Resume Playback' }}
           </button>
@@ -8698,11 +8753,21 @@ const PlayerPage = {
       }
       if (v.currentSrc && v.currentSrc.includes('/api/stream/')) {
         console.error("[HTML5 Player Error]", e, "code:", v.error.code, "msg:", v.error.message);
+        
+        // If native HTML5 direct playback encountered a decode error (code 3) or unsupported source (code 4),
+        // automatically fallback to converted transcode mode (1080p H.264/AAC)
+        if (!streamState.transcode && (v.error.code === 3 || v.error.code === 4)) {
+          console.warn("[HTML5 Player] Video decode failed natively (code " + v.error.code + "). Automatically switching to converted compatibility stream...");
+          addToast("Video decode error detected — switching to converted playback...", "info");
+          enableCompatPlayback();
+          return;
+        }
+
         const p = (media.value?.file_path || "").toLowerCase();
         const isHeavy4k = p.includes("2160") || p.includes("4k") || p.includes("uhd");
         playerError.value = isHeavy4k
-          ? "Playback failed — 4K/HEVC content needs hardware acceleration or a compatible browser (Edge recommended). Try another quality source or enable HW acceleration."
-          : "The stream was interrupted (connection dropped or the server stopped sending data). Use Resume Playback to reconnect from where you left off.";
+          ? "Playback failed — 4K/HEVC content needs hardware acceleration or a compatible browser (Edge recommended). Try converted playback below."
+          : "The stream encountered an issue (decode failure or connection dropped). Use Play Converted (1080p) or Resume Playback to continue.";
       }
     }
 
@@ -8715,6 +8780,10 @@ const PlayerPage = {
     async function recoverFromError() {
       const v = videoRef.value;
       if (!v) return;
+      if (!streamState.transcode && v.error && (v.error.code === 3 || v.error.code === 4)) {
+        enableCompatPlayback();
+        return;
+      }
       recovering.value = true;
       try {
         const resumeAt = isFinite(v.currentTime) ? v.currentTime : 0;
