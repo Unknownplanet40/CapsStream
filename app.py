@@ -8,6 +8,19 @@ Or double-click start.bat
 import os
 import re
 import sys
+
+# Ensure UTF-8 output encoding on Windows so emojis/unicode never crash stdout
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import json
 import shutil
 import hashlib
@@ -540,6 +553,31 @@ def chrome_devtools_json():
     return jsonify({})
 
 
+@app.route("/sw.js")
+def service_worker():
+    resp = make_response(send_from_directory(os.path.join(BASE_DIR, "static"), "sw.js"))
+    resp.headers["Content-Type"] = "application/javascript"
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Service-Worker-Allowed"] = "/"
+    return resp
+
+
+@app.route("/manifest.webmanifest")
+@app.route("/manifest.json")
+def web_manifest():
+    resp = make_response(send_from_directory(os.path.join(BASE_DIR, "static"), "manifest.webmanifest"))
+    resp.headers["Content-Type"] = "application/manifest+json"
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
+
+@app.route("/offline.html")
+def offline_page():
+    resp = make_response(render_template("offline.html"))
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 # ─── Static Media (images) ────────────────────────────────────────────────────
 
 # Post-scan the UI can request hundreds of posters at once. Without limits,
@@ -548,71 +586,59 @@ def chrome_devtools_json():
 # network fetches are capped, and total queued requests are capped.
 _IMAGE_INFLIGHT_LOCK = threading.Lock()
 _IMAGE_INFLIGHT = set()                               # filenames downloading now
-_IMAGE_DOWNLOAD_SEM = threading.BoundedSemaphore(4)   # max parallel TMDb fetches
-_IMAGE_WAITER_SEM = threading.BoundedSemaphore(16)    # max queued requests
+_IMAGE_DOWNLOAD_SEM = threading.BoundedSemaphore(4)   # max parallel TMDb background fetches
+
+
+def _download_image_background(size, tmdb_file, filename, img_dir, img_path):
+    try:
+        with _IMAGE_DOWNLOAD_SEM:
+            url = f"https://image.tmdb.org/t/p/{size}/{tmdb_file}"
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                os.makedirs(img_dir, exist_ok=True)
+                with open(img_path, "wb") as f:
+                    f.write(r.content)
+    except Exception as e:
+        print(f"[Image Server] Background download failed for {filename}: {e}")
+    finally:
+        with _IMAGE_INFLIGHT_LOCK:
+            _IMAGE_INFLIGHT.discard(filename)
+
 
 @app.route("/metadata/images/<path:filename>")
 def serve_metadata_image(filename):
     img_dir = os.path.join(BASE_DIR, "data", "metadata", "images")
     img_path = os.path.join(img_dir, filename)
 
-    if not os.path.isfile(img_path):
-        parts = filename.split("_", 1)
-        if len(parts) == 2 and _IMAGE_WAITER_SEM.acquire(blocking=False):
-            size, tmdb_file = parts[0], parts[1]
-            is_owner = False
-            try:
-                # Collapse duplicate concurrent requests into one download
-                while True:
-                    with _IMAGE_INFLIGHT_LOCK:
-                        if filename not in _IMAGE_INFLIGHT:
-                            _IMAGE_INFLIGHT.add(filename)
-                            is_owner = True
-                            break
-                    time.sleep(0.2)
-                    if os.path.isfile(img_path):
-                        break
+    if os.path.isfile(img_path):
+        resp = send_file(img_path, conditional=True)
+        resp.headers["Cache-Control"] = "public, max-age=604800"
+        return resp
 
-                with _IMAGE_DOWNLOAD_SEM:
-                    deadline = time.time() + 20
-                    while not os.path.isfile(img_path) and time.time() < deadline:
-                        if is_owner:
-                            try:
-                                url = f"https://image.tmdb.org/t/p/{size}/{tmdb_file}"
-                                r = requests.get(url, timeout=10)
-                                if r.status_code == 200:
-                                    os.makedirs(img_dir, exist_ok=True)
-                                    with open(img_path, "wb") as f:
-                                        f.write(r.content)
-                            except Exception as e:
-                                print(f"[Image Server] On-demand download failed for {filename}: {e}")
-                            break
-                        time.sleep(0.25)
-            finally:
-                if is_owner:
-                    with _IMAGE_INFLIGHT_LOCK:
-                        _IMAGE_INFLIGHT.discard(filename)
-                _IMAGE_WAITER_SEM.release()
+    # If missing from disk, queue an asynchronous background download without blocking Flask threads
+    parts = filename.split("_", 1)
+    if len(parts) == 2:
+        size, tmdb_file = parts[0], parts[1]
+        should_spawn = False
+        with _IMAGE_INFLIGHT_LOCK:
+            if filename not in _IMAGE_INFLIGHT:
+                _IMAGE_INFLIGHT.add(filename)
+                should_spawn = True
+        if should_spawn:
+            threading.Thread(
+                target=_download_image_background,
+                args=(size, tmdb_file, filename, img_dir, img_path),
+                daemon=True,
+                name=f"img-dl-{filename[:20]}"
+            ).start()
 
-        if os.path.isfile(img_path):
-            resp = send_file(img_path, conditional=True)
-            resp.headers["Cache-Control"] = "public, max-age=604800"
-            return resp
-
-        # Fallback inline SVG placeholder — no-store so a transient failure
-        # (download queue full / TMDb down) is retried on the next view
-        svg = """<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">
-          <rect width="300" height="450" fill="#181824"/>
-          <text x="50%" y="48%" dominant-baseline="middle" text-anchor="middle" fill="#666" font-size="48">🎬</text>
-          <text x="50%" y="58%" dominant-baseline="middle" text-anchor="middle" fill="#888" font-family="sans-serif" font-size="14">No Poster Available</text>
-        </svg>"""
-        return Response(svg, mimetype="image/svg+xml", headers={"Cache-Control": "no-store"})
-
-    resp = send_file(img_path, conditional=True)
-    # Posters/backdrops rarely change — cache aggressively so large libraries
-    # don't re-fetch thousands of images after a scan or page reload
-    resp.headers["Cache-Control"] = "public, max-age=604800"
-    return resp
+    # Return instant fallback SVG so the HTTP worker thread is freed immediately
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">
+      <rect width="300" height="450" fill="#181824"/>
+      <text x="50%" y="48%" dominant-baseline="middle" text-anchor="middle" fill="#666" font-size="48">🎬</text>
+      <text x="50%" y="58%" dominant-baseline="middle" text-anchor="middle" fill="#888" font-family="sans-serif" font-size="14">Loading...</text>
+    </svg>"""
+    return Response(svg, mimetype="image/svg+xml", headers={"Cache-Control": "public, max-age=5"})
 
 
 @app.route("/metadata/avatars/<path:filename>")
@@ -988,6 +1014,11 @@ def api_test_api_key():
     key = data.get("key", "")
     ok, message = test_api_key(provider, key)
     return jsonify({"ok": ok, "message": message})
+
+
+@app.route("/api/health", methods=["GET"])
+def api_health():
+    return jsonify({"status": "ok"})
 
 
 @app.route("/api/system/cache", methods=["GET"])
@@ -3398,9 +3429,61 @@ def _ensure_single_instance(host, port):
     else:
         print(f"\n  ❌ ERROR: Port {port} is already in use by another program (pid {owner}).")
         if cmdline:
-            print(f"     Command line: {cmdline[:200]}")
+                print(f"     Command line: {cmdline[:200]}")
         print(f"     CapsStream cannot start. Free the port or change 'port' in config.json.\n")
         sys.exit(1)
+
+
+def _generate_self_signed_cert(cert_path, key_path, host="127.0.0.1"):
+    try:
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.primitives import serialization
+        import datetime, ipaddress
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        subject = issuer = x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, "CapsStream"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "CapsStream Local Server"),
+        ])
+        san_list = [x509.DNSName("localhost")]
+        try:
+            san_list.append(x509.IPAddress(ipaddress.ip_address(host)))
+        except ValueError:
+            san_list.append(x509.DNSName(host))
+
+        cert = x509.CertificateBuilder().subject_name(
+            subject
+        ).issuer_name(
+            issuer
+        ).public_key(
+            key.public_key()
+        ).serial_number(
+            x509.random_serial_number()
+        ).not_valid_before(
+            datetime.datetime.now(datetime.timezone.utc)
+        ).not_valid_after(
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650)
+        ).add_extension(
+            x509.SubjectAlternativeName(san_list),
+            critical=False,
+        ).sign(key, hashes.SHA256())
+
+        os.makedirs(os.path.dirname(cert_path), exist_ok=True)
+        with open(key_path, "wb") as f:
+            f.write(key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.TraditionalOpenSSL,
+                encryption_algorithm=serialization.NoEncryption(),
+            ))
+        with open(cert_path, "wb") as f:
+            f.write(cert.public_bytes(serialization.Encoding.PEM))
+        return True
+    except Exception as e:
+        print(f"  [!] SSL certificate auto-generation failed: {e}")
+        return False
 
 
 if __name__ == "__main__":
@@ -3447,18 +3530,29 @@ if __name__ == "__main__":
 
     if host not in ("127.0.0.1", "localhost", "::1"):
         print(
-            "\n  ⚠️  WARNING: The server is bound to a non-localhost address — "
-            "anyone on your network can access CapsStream without authenticating.\n"
-            "  Set host back to '127.0.0.1' in config.json unless you intentionally "
-            "want to share your library."
+            f"\n  [!] WARNING: The server is bound to a non-localhost address ({host}) -- "
+            "anyone on your local network can access CapsStream.\n"
+            "      Set host back to '127.0.0.1' in config.json if you want to restrict access to this PC."
         )
 
     # Library scanning is intentionally NOT started here.
     # The scan waits until the user logs into a profile (frontend triggers POST /api/scan after login).
 
+    # SSL / HTTPS support
+    use_ssl = cfg.get("ssl", False)
+    ssl_context = None
+    if use_ssl:
+        ssl_dir = os.path.join(BASE_DIR, "data", "ssl")
+        cert_path = os.path.join(ssl_dir, "cert.pem")
+        key_path = os.path.join(ssl_dir, "key.pem")
+        if not (os.path.exists(cert_path) and os.path.exists(key_path)):
+            _generate_self_signed_cert(cert_path, key_path, host)
+        ssl_context = (cert_path, key_path)
+
+    proto = "https" if ssl_context else "http"
     print(f"\n  ==========================================================")
-    print(f"   CapsStream Server running at: http://{host}:{port}")
+    print(f"   CapsStream Server running at: {proto}://{host}:{port}")
     print(f"   TO STOP THE SERVER: Press Ctrl+C in this window")
     print(f"  ==========================================================\n")
 
-    app.run(host=host, port=port, debug=False, threaded=True)
+    app.run(host=host, port=port, debug=False, threaded=True, ssl_context=ssl_context)

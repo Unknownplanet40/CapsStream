@@ -1,0 +1,60 @@
+{
+  "name": "CapsStream",
+  "short_name": "CapsStream",
+  "description": "Your personal cinematic streaming library.",
+  "start_url": "/",
+  "id": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#050508",
+  "theme_color": "#050508",
+  "lang": "en",
+  "dir": "ltr",
+  "prefer_related_applications": false,
+  "categories": ["entertainment", "video", "multimedia"],
+  "icons": [
+    {
+      "src": "/static/img/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/img/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/img/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Movies",
+      "short_name": "Movies",
+      "description": "Browse Movie Collection",
+      "url": "/#/movies",
+      "icons": [{ "src": "/static/img/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Series",
+      "short_name": "Series",
+      "description": "Browse TV Shows & Series",
+      "url": "/#/series",
+      "icons": [{ "src": "/static/img/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Playlists",
+      "short_name": "Playlists",
+      "description": "View Playlists",
+      "url": "/#/playlists",
+      "icons": [{ "src": "/static/img/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}

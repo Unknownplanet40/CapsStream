@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="msapplication-tap-highlight" content="no">
+  <meta name="theme-color" content="#050508">
   <meta name="description" content="CapsStream — Your personal cinematic streaming library. Watch local media with a Netflix-style interface.">
   <title>CapsStream</title>
 
@@ -11,10 +17,28 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
 
-  <!-- Favicon -->
+  <!-- PWA Web App Manifest -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="apple-mobile-web-app-title" content="CapsStream">
+
+  <!-- Early PWA Install Prompt Capture -->
+  <script>
+    window.__deferredPwaPrompt = null;
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      window.__deferredPwaPrompt = e;
+      window.dispatchEvent(new CustomEvent('capsstream:pwa-installable'));
+    });
+  </script>
+
+  <!-- Favicon & PWA Icons -->
   <link rel="icon" type="image/png" href="/static/img/favicon.png">
   <link rel="shortcut icon" href="/static/img/favicon.png">
-  <link rel="apple-touch-icon" href="/static/img/favicon.png">
+  <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="/static/img/icon-192.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="/static/img/icon-512.png">
 
   <!-- Icons (Phosphor) -->
   <script src="https://unpkg.com/@phosphor-icons/web"></script>
@@ -203,5 +227,29 @@
 
   <!-- Vue App -->
   <script src="/static/js/app.js?v={{ version }}&t={{ t }}"></script>
+
+  <!-- PWA Service Worker Registration & Live Update Dispatcher -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+          .then(function (reg) {
+            reg.addEventListener('updatefound', function () {
+              var newWorker = reg.installing;
+              if (newWorker) {
+                newWorker.addEventListener('statechange', function () {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    window.dispatchEvent(new CustomEvent('capsstream:sw-updated', { detail: reg }));
+                  }
+                });
+              }
+            });
+          })
+          .catch(function (err) {
+            console.warn('[PWA] ServiceWorker registration skipped/failed:', err);
+          });
+      });
+    }
+  </script>
 </body>
 </html>

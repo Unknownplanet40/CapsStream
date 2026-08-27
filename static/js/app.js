@@ -338,8 +338,6 @@ function handleServerOffline() {
   }
 }
 
-setInterval(checkServerHealth, 6000);
-
 function addToast(message, type = "info", duration = 3000) {
   const id = Date.now() + Math.random();
   store.toasts.push({ id, message, type });
@@ -1020,31 +1018,32 @@ const MediaCard = {
           <i class="ph ph-hard-drive"></i> Unmounted
         </div>
 
-        <span v-if="showBadge !== false && cardItem.is_mounted !== false && cardItem.type !== 'anime'" class="card-badge" :class="cardItem.type">
+        <span v-if="showBadge !== false && !isContinue && cardItem.is_mounted !== false && cardItem.type !== 'anime'" class="card-badge" :class="cardItem.type">
           {{ cardItem.type === 'series' ? '📺 Series' : '🎬 Movie' }}
         </span>
 
-        <span v-if="isContinue && calcTimeLeft(cardItem)" class="card-badge" style="right:var(--space-sm);left:auto;background:rgba(10,10,15,0.85);border:1px solid var(--border-strong)">
+        <span v-if="isContinue && calcTimeLeft(cardItem)" class="continue-time-badge">
           {{ calcTimeLeft(cardItem) }}
         </span>
 
-        <!-- 3-Dots Context Menu Button -->
-        <button
-          class="card-menu-btn"
-          @click.stop="openCardMenu($event)"
-          title="More options"
-          :id="'menu-btn-' + (cardItem.id || 'card')"
-        >
-          <i class="ph-bold ph-dots-three-vertical"></i>
-        </button>
-
-        <button v-if="isContinue"
-                class="card-remove-btn"
-                @click.stop="$emit('remove-continue', cardItem)"
-                title="Remove from Continue Watching"
-                :id="'remove-btn-' + (cardItem.id || '')">
-          <i class="ph ph-x"></i>
-        </button>
+        <!-- Top Right Actions: 3-Dots Menu & Remove Button -->
+        <div class="card-top-actions">
+          <button
+            class="card-menu-btn"
+            @click.stop="openCardMenu($event)"
+            title="More options"
+            :id="'menu-btn-' + (cardItem.id || 'card')"
+          >
+            <i class="ph-bold ph-dots-three-vertical"></i>
+          </button>
+          <button v-if="isContinue"
+                  class="card-remove-btn"
+                  @click.stop="$emit('remove-continue', cardItem)"
+                  title="Remove from Continue Watching"
+                  :id="'remove-btn-' + (cardItem.id || '')">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
 
         <div v-if="calcProgressPercent(cardItem) > 0" class="card-progress">
           <div class="card-progress-fill" :style="{ width: calcProgressPercent(cardItem) + '%' }"></div>
@@ -1703,8 +1702,8 @@ const DetailPage = {
 
       <!-- Body -->
       <div class="detail-body">
-        <!-- Poster -->
-        <div>
+        <!-- Poster (Desktop / Tablet) -->
+        <div class="detail-poster-wrap">
           <img
             v-if="media.poster_path"
             :src="imgUrl(media.poster_path)"
@@ -1767,31 +1766,37 @@ const DetailPage = {
           <p class="detail-overview">{{ media.overview }}</p>
 
           <!-- Actions -->
-          <div class="detail-actions" style="display:flex;align-items:center;gap:1.25rem;flex-wrap:wrap;margin-top:1.75rem;margin-bottom:2rem">
-            <button class="btn btn-primary btn-lg" @click="playMedia" id="detail-play-btn">
+          <div class="detail-actions">
+            <button class="btn btn-primary btn-lg detail-play-btn" @click="playMedia" id="detail-play-btn">
+              <i class="ph-fill ph-play"></i>
               <span>{{ resumeLabel }}</span>
-              <div class="btn-icon-wrapper">
-                <i class="ph-fill ph-play" style="font-size:0.9rem"></i>
-              </div>
             </button>
-            <button v-if="!store.profile?.is_kids" class="btn btn-secondary btn-lg" @click="watchTrailer" id="detail-trailer-btn" title="Trailer">
-              <i class="ph ph-film-strip" style="font-size:1.15rem"></i>
-            </button>
-            <button class="btn btn-secondary btn-lg" @click="toggleFav" id="detail-fav-btn" :title="media.is_favorite ? 'Remove from Watchlist' : 'Add to Watchlist'">
-              <i :class="media.is_favorite ? 'ph-fill ph-heart' : 'ph ph-heart'" style="font-size:1.15rem" :style="{ color: media.is_favorite ? 'var(--accent)' : 'inherit' }"></i>
-            </button>
-            <button class="btn btn-secondary btn-lg" @click="openAddToPlaylist(media)" id="detail-playlist-btn" title="Add to Playlist or Queue">
-              <i class="ph ph-queue" style="font-size:1.15rem"></i>
-            </button>
-            <button v-if="!store.profile?.is_kids" class="btn btn-ghost btn-lg" @click="showCollectionModal = true" id="detail-collection-btn" title="Add to List">
-              <i class="ph ph-plus-circle" style="font-size:1.15rem"></i>
-            </button>
-            <button v-if="!store.profile?.is_kids" class="btn btn-ghost btn-lg" @click="openFixMatchModal" id="detail-fix-match-btn" title="Fix Match">
-              <i class="ph ph-wrench" style="font-size:1.15rem"></i>
-            </button>
-            <button v-if="!store.profile?.is_kids" class="btn btn-ghost btn-lg" @click="recacheInfo" :disabled="recaching" id="detail-recache-btn" :title="recaching ? 'Re-caching...' : 'Re-cache'">
-              <i :class="recaching ? 'ph ph-circle-notch' : 'ph ph-database'" :style="{ animation: recaching ? 'spin 1s linear infinite' : 'none', fontSize: '1.15rem' }"></i>
-            </button>
+            <div class="detail-quick-actions">
+              <button v-if="!store.profile?.is_kids" class="detail-action-circle" @click="watchTrailer" id="detail-trailer-btn" title="Trailer">
+                <div class="detail-action-icon"><i class="ph ph-film-strip"></i></div>
+                <span class="detail-action-label">Trailer</span>
+              </button>
+              <button class="detail-action-circle" @click="toggleFav" id="detail-fav-btn" :title="media.is_favorite ? 'Remove from Watchlist' : 'Add to Watchlist'">
+                <div class="detail-action-icon"><i :class="media.is_favorite ? 'ph-fill ph-heart' : 'ph ph-heart'" :style="{ color: media.is_favorite ? 'var(--accent)' : 'inherit' }"></i></div>
+                <span class="detail-action-label">Watchlist</span>
+              </button>
+              <button class="detail-action-circle" @click="openAddToPlaylist(media)" id="detail-playlist-btn" title="Add to Playlist or Queue">
+                <div class="detail-action-icon"><i class="ph ph-queue"></i></div>
+                <span class="detail-action-label">Playlist</span>
+              </button>
+              <button v-if="!store.profile?.is_kids" class="detail-action-circle" @click="showCollectionModal = true" id="detail-collection-btn" title="Add to List">
+                <div class="detail-action-icon"><i class="ph ph-plus-circle"></i></div>
+                <span class="detail-action-label">Collection</span>
+              </button>
+              <button v-if="!store.profile?.is_kids" class="detail-action-circle" @click="openFixMatchModal" id="detail-fix-match-btn" title="Fix Match">
+                <div class="detail-action-icon"><i class="ph ph-wrench"></i></div>
+                <span class="detail-action-label">Match</span>
+              </button>
+              <button v-if="!store.profile?.is_kids" class="detail-action-circle" @click="recacheInfo" :disabled="recaching" id="detail-recache-btn" :title="recaching ? 'Re-caching...' : 'Re-cache'">
+                <div class="detail-action-icon"><i :class="recaching ? 'ph ph-circle-notch' : 'ph ph-database'" :style="{ animation: recaching ? 'spin 1s linear infinite' : 'none' }"></i></div>
+                <span class="detail-action-label">Re-cache</span>
+              </button>
+            </div>
           </div>
 
           <!-- Codec Compatibility Warning Card -->
@@ -2102,8 +2107,8 @@ const DetailPage = {
 
     const resumeLabel = computed(() => {
       const p = media.value?.progress;
-      if (p && p.position > 30) return "▶ Resume";
-      return "▶ Play";
+      if (p && p.position > 30) return "Resume";
+      return "Play";
     });
 
     const codecInfo = computed(() => {
@@ -4744,15 +4749,29 @@ const ShortcutsModal = {
 const PlayerPage = {
   components: { ShortcutsModal },
   template: `
-    <div class="custom-player-wrapper" @mousemove="showControls" @click="handleContainerClick" @dblclick="toggleFullscreen">
+    <div
+      class="custom-player-wrapper"
+      @mousemove="showControls"
+      @touchstart="onPlayerTouchStart"
+      @touchmove="onPlayerTouchMove"
+      @touchend="onPlayerTouchEnd"
+      @touchcancel="onPlayerTouchCancel"
+      @click="handleContainerClick"
+      @dblclick="handleContainerDblClick"
+    >
       <!-- Shortcuts Modal -->
       <shortcuts-modal v-if="showShortcuts" @close="showShortcuts = false" />
       <!-- Native Video Surface -->
       <video
         ref="videoRef"
         class="custom-player-video"
+        :class="'fit-' + (aspectRatioFit || 'contain')"
+        :style="{ filter: 'brightness(' + (brightnessLevel / 100) + ')' }"
         crossorigin="anonymous"
         playsinline
+        webkit-playsinline="true"
+        x5-playsinline="true"
+        x5-video-player-type="h5-page"
         @timeupdate="onTimeUpdate"
         @loadedmetadata="onLoadedMetadata"
         @ended="onEnded"
@@ -4839,6 +4858,25 @@ const PlayerPage = {
         </div>
       </transition>
 
+      <!-- Brightness Swipe HUD (Left side gesture) -->
+      <transition name="fade">
+        <div v-if="brightnessHUD" class="player-hud-pill">
+          <i class="ph-fill ph-sun player-hud-icon"></i>
+          <div class="player-hud-bar">
+            <div class="player-hud-fill" :style="{ width: brightnessLevel + '%' }"></div>
+          </div>
+          <span class="player-hud-value">{{ brightnessLevel }}%</span>
+        </div>
+      </transition>
+
+      <!-- Double-Tap Seek Ripples (Left & Right +/-10s) -->
+      <div v-if="doubleTapRipple" class="player-doubletap-ripple" :class="doubleTapRipple.side">
+        <div class="ripple-badge">
+          <i :class="doubleTapRipple.side === 'right' ? 'ph-bold ph-arrow-clockwise' : 'ph-bold ph-arrow-counter-clockwise'"></i>
+          <span>{{ doubleTapRipple.side === 'right' ? '+10s' : '-10s' }}</span>
+        </div>
+      </div>
+
       <!-- Seek OSD (direction flash) -->
       <transition name="fade">
         <div v-if="seekOSD" class="player-seek-osd" :class="seekOSD.dir">
@@ -4856,7 +4894,7 @@ const PlayerPage = {
       <div v-if="showResumeModal" class="resume-backdrop-blocker" @click.stop.prevent></div>
 
       <!-- Controls Overlay -->
-      <div class="custom-player-controls" :class="{ hidden: controlsHidden && !showResumeModal }" @click.stop>
+      <div class="custom-player-controls" :class="{ hidden: controlsHidden && !showResumeModal }" @touchstart="showControls" @mousemove="showControls" @click.stop="showControls">
         <!-- Top Bar (Always Clickable) -->
         <div class="custom-player-top" style="z-index: 220; position: relative; pointer-events: auto;">
           <div style="display:flex;align-items:center;gap:8px">
@@ -5205,6 +5243,11 @@ const PlayerPage = {
                 id="ctrl-pip"
               >
                 <i :class="isPipActive ? 'ph-fill ph-screencast' : 'ph ph-screencast'"></i>
+              </button>
+
+              <!-- Aspect Ratio (Contain / Cover / Fill) -->
+              <button class="ctrl-btn" @click="cycleAspectRatio" :title="'Aspect Ratio (' + aspectRatioFit + ')'" id="ctrl-aspect-ratio">
+                <i :class="aspectRatioFit === 'cover' ? 'ph ph-arrows-out-cardinal' : aspectRatioFit === 'fill' ? 'ph ph-frame-corners' : 'ph ph-corners-out'"></i>
               </button>
 
               <!-- Fullscreen -->
@@ -6204,14 +6247,17 @@ const PlayerPage = {
     function showControls() {
       controlsHidden.value = false;
       clearTimeout(hideTimer);
+      // Never auto-hide if a settings/selection submenu or modal is open
+      if (showSubMenu.value || showAudioMenu.value || showQualityMenu.value || showSpeedMenu.value || showOnlineSubModal.value || showResumeModal.value) {
+        return;
+      }
       if (videoRef.value && !videoRef.value.paused) {
         hideTimer = setTimeout(() => {
+          if (showSubMenu.value || showAudioMenu.value || showQualityMenu.value || showSpeedMenu.value || showOnlineSubModal.value || showResumeModal.value) {
+            return;
+          }
           controlsHidden.value = true;
-          showSpeedMenu.value = false;
-          showSubMenu.value = false;
-          showAudioMenu.value = false;
-          showQualityMenu.value = false;
-        }, 3500);
+        }, 4500);
       }
     }
 
@@ -6306,9 +6352,183 @@ const PlayerPage = {
       }
     }
 
+    const doubleTapRipple = ref(null);
+    let doubleTapTimer = null;
+    const brightnessHUD = ref(false);
+    let brightnessTimer = null;
+    const brightnessLevel = ref(100);
+    const aspectRatioFit = ref("contain");
+
+    function cycleAspectRatio() {
+      const modes = ["contain", "cover", "fill"];
+      const idx = modes.indexOf(aspectRatioFit.value);
+      aspectRatioFit.value = modes[(idx + 1) % modes.length];
+      addToast(`Aspect Ratio: ${aspectRatioFit.value.toUpperCase()}`, "info");
+    }
+
+    function triggerDoubleTapRipple(side) {
+      if (doubleTapTimer) clearTimeout(doubleTapTimer);
+      doubleTapRipple.value = { side };
+      doubleTapTimer = setTimeout(() => {
+        doubleTapRipple.value = null;
+      }, 450);
+    }
+
+    let touchGestureState = {
+      startX: 0,
+      startY: 0,
+      startTime: 0,
+      lastY: 0,
+      mode: null, // 'brightness' | 'volume' | 'pinch' | null
+      startVal: 0,
+      initialPinchDist: 0,
+    };
+
+    function getTouchDist(t1, t2) {
+      return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+    }
+
+    function onPlayerTouchStart(e) {
+      lastTouchTime = Date.now();
+      if (e.target.closest(".custom-player-controls") || e.target.closest(".shortcuts-modal-card")) {
+        showControls();
+        return;
+      }
+      if (e.touches && e.touches.length === 2) {
+        touchGestureState.mode = "pinch";
+        touchGestureState.initialPinchDist = getTouchDist(e.touches[0], e.touches[1]);
+        return;
+      }
+      if (e.touches && e.touches.length === 1) {
+        const t = e.touches[0];
+        const rect = e.currentTarget.getBoundingClientRect();
+        touchGestureState.startX = t.clientX - rect.left;
+        touchGestureState.startY = t.clientY - rect.top;
+        touchGestureState.lastY = t.clientY;
+        touchGestureState.startTime = Date.now();
+        touchGestureState.mode = null;
+      }
+    }
+
+    function onPlayerTouchMove(e) {
+      if (e.target.closest(".custom-player-controls") || e.target.closest(".shortcuts-modal-card")) return;
+      if (e.touches && e.touches.length === 2 && touchGestureState.mode === "pinch") {
+        const currentDist = getTouchDist(e.touches[0], e.touches[1]);
+        const scale = currentDist / (touchGestureState.initialPinchDist || 1);
+        if (scale > 1.25 && aspectRatioFit.value !== "cover") {
+          aspectRatioFit.value = "cover";
+          addToast("Zoom to Fill (Cover) 🔍", "info");
+        } else if (scale < 0.85 && aspectRatioFit.value !== "contain") {
+          aspectRatioFit.value = "contain";
+          addToast("Original Fit (Contain) 📺", "info");
+        }
+        return;
+      }
+
+      if (e.touches && e.touches.length === 1) {
+        const t = e.touches[0];
+        const rect = e.currentTarget.getBoundingClientRect();
+        const deltaX = (t.clientX - rect.left) - touchGestureState.startX;
+        const deltaY = (t.clientY - rect.top) - touchGestureState.startY;
+
+        // If vertical swipe > 20px and not yet decided
+        if (!touchGestureState.mode && Math.abs(deltaY) > 20 && Math.abs(deltaY) > Math.abs(deltaX)) {
+          const isLeft = touchGestureState.startX < rect.width * 0.45;
+          const isRight = touchGestureState.startX > rect.width * 0.55;
+          if (isLeft) {
+            touchGestureState.mode = "brightness";
+            touchGestureState.startVal = brightnessLevel.value;
+          } else if (isRight) {
+            touchGestureState.mode = "volume";
+            touchGestureState.startVal = volume.value;
+          }
+        }
+
+        if (touchGestureState.mode === "brightness") {
+          const diffY = touchGestureState.startY - (t.clientY - rect.top);
+          const sensitivity = 0.45;
+          const next = Math.max(30, Math.min(150, Math.round(touchGestureState.startVal + diffY * sensitivity)));
+          brightnessLevel.value = next;
+          brightnessHUD.value = true;
+          if (brightnessTimer) clearTimeout(brightnessTimer);
+          brightnessTimer = setTimeout(() => { brightnessHUD.value = false; }, 1200);
+        } else if (touchGestureState.mode === "volume") {
+          const diffY = touchGestureState.startY - (t.clientY - rect.top);
+          const sensitivity = 0.005;
+          const nextVol = Math.max(0, Math.min(2.0, touchGestureState.startVal + diffY * sensitivity));
+          setVolume(nextVol);
+          showVolumeOSD();
+        }
+      }
+    }
+
+    let lastTapInfo = { time: 0, x: 0, y: 0 };
+    let lastTouchTime = 0;
+    let singleTapTimeout = null;
+
+    function onPlayerTouchEnd(e) {
+      if (e.target.closest(".custom-player-controls") || e.target.closest(".shortcuts-modal-card")) return;
+      lastTouchTime = Date.now();
+      if (touchGestureState.mode === "brightness" || touchGestureState.mode === "volume" || touchGestureState.mode === "pinch") {
+        touchGestureState.mode = null;
+        return;
+      }
+      const touch = e.changedTouches ? e.changedTouches[0] : null;
+      if (!touch) return;
+      const now = Date.now();
+      const delta = now - lastTapInfo.time;
+      const dist = Math.hypot(touch.clientX - lastTapInfo.x, touch.clientY - lastTapInfo.y);
+
+      if (delta < 320 && dist < 50) {
+        // Double tap gesture: Left 40% = -10s, Right 40% = +10s
+        if (e.cancelable) e.preventDefault();
+        clearTimeout(singleTapTimeout);
+        singleTapTimeout = null;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const touchX = touch.clientX - rect.left;
+        if (touchX < rect.width * 0.4) {
+          skip(-10);
+          triggerDoubleTapRipple("left");
+        } else if (touchX > rect.width * 0.6) {
+          skip(10);
+          triggerDoubleTapRipple("right");
+        }
+        lastTapInfo = { time: 0, x: 0, y: 0 };
+      } else {
+        lastTapInfo = { time: now, x: touch.clientX, y: touch.clientY };
+        clearTimeout(singleTapTimeout);
+        singleTapTimeout = setTimeout(() => {
+          // Single tap on mobile ONLY toggles controls, NEVER pauses video
+          if (controlsHidden.value) {
+            showControls();
+          } else {
+            controlsHidden.value = true;
+          }
+          singleTapTimeout = null;
+        }, 220);
+      }
+    }
+
+    function onPlayerTouchCancel() {
+      touchGestureState.mode = null;
+    }
+
     function handleContainerClick(e) {
       if (e.target.closest(".custom-player-controls")) return;
-      togglePlay();
+      // Prevent synthetic touch clicks from toggling play immediately after tap
+      if (Date.now() - lastTouchTime < 1000) return;
+      if (controlsHidden.value) {
+        showControls();
+      } else {
+        togglePlay();
+      }
+    }
+
+    function handleContainerDblClick(e) {
+      if (e.target.closest(".custom-player-controls")) return;
+      // Strictly ignore dblclick on touch interactions to prevent unfullscreen
+      if (Date.now() - lastTouchTime < 1500) return;
+      toggleFullscreen();
     }
 
     function skip(seconds) {
@@ -7630,14 +7850,83 @@ const PlayerPage = {
       }
     }
 
+    async function lockLandscapeOrientation() {
+      try {
+        if (screen.orientation && screen.orientation.lock) {
+          await screen.orientation.lock("landscape").catch(() => {});
+        } else if (screen.lockOrientation) {
+          screen.lockOrientation("landscape");
+        } else if (screen.mozLockOrientation) {
+          screen.mozLockOrientation("landscape");
+        } else if (screen.msLockOrientation) {
+          screen.msLockOrientation("landscape");
+        }
+      } catch (e) {}
+    }
+
+    function unlockOrientation() {
+      try {
+        if (screen.orientation && screen.orientation.unlock) {
+          screen.orientation.unlock();
+        } else if (screen.unlockOrientation) {
+          screen.unlockOrientation();
+        } else if (screen.mozUnlockOrientation) {
+          screen.mozUnlockOrientation();
+        } else if (screen.msUnlockOrientation) {
+          screen.msUnlockOrientation();
+        }
+      } catch (e) {}
+    }
+
+    function handleFullscreenChange() {
+      const isFull = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      isFullscreen.value = isFull;
+      if (isFull) {
+        lockLandscapeOrientation();
+      } else {
+        unlockOrientation();
+      }
+    }
+
     function toggleFullscreen() {
       if (!videoRef.value) return;
-      const container = videoRef.value.closest(".custom-player-wrapper") || videoRef.value;
-      if (!document.fullscreenElement) {
-        if (container.requestFullscreen) container.requestFullscreen();
+      const v = videoRef.value;
+      const container = v.closest(".custom-player-wrapper") || v;
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+      // On iOS Safari, standard container.requestFullscreen() fails on phones; webkitEnterFullscreen gives native landscape player
+      if (isIOS && v.webkitEnterFullscreen && !v.webkitDisplayingFullscreen) {
+        try {
+          v.webkitEnterFullscreen();
+          isFullscreen.value = true;
+          return;
+        } catch (e) {}
+      }
+
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        const req = container.requestFullscreen || container.webkitRequestFullscreen || container.mozRequestFullScreen || container.msRequestFullscreen;
+        if (req) {
+          const p = req.call(container);
+          if (p && p.then) {
+            p.then(() => {
+              lockLandscapeOrientation();
+            }).catch(() => {
+              if (v.requestFullscreen) v.requestFullscreen().then(lockLandscapeOrientation).catch(() => {});
+              else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen();
+            });
+          } else {
+            lockLandscapeOrientation();
+          }
+        } else if (v.webkitEnterFullscreen) {
+          v.webkitEnterFullscreen();
+        }
         isFullscreen.value = true;
       } else {
-        if (document.exitFullscreen) document.exitFullscreen();
+        const exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+        if (exit) {
+          exit.call(document);
+        }
+        unlockOrientation();
         isFullscreen.value = false;
       }
       API.post("/api/achievements/unlock", { achievement_id: "fullscreen_pro" }).then((res) => {
@@ -7847,9 +8136,25 @@ const PlayerPage = {
       }
     }
 
-    onMounted(initPlayer);
+    onMounted(() => {
+      initPlayer();
+      document.addEventListener("fullscreenchange", handleFullscreenChange);
+      document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+      if (videoRef.value) {
+        videoRef.value.addEventListener("webkitbeginfullscreen", () => {
+          isFullscreen.value = true;
+        });
+        videoRef.value.addEventListener("webkitendfullscreen", () => {
+          isFullscreen.value = false;
+          unlockOrientation();
+        });
+      }
+    });
 
     onUnmounted(() => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      unlockOrientation();
       cancelAutoAdvance();
       saveProgressNow();
       detachRemoteAudio();
@@ -7997,6 +8302,7 @@ const PlayerPage = {
       formatSecToTime,
       togglePlay,
       handleContainerClick,
+      handleContainerDblClick,
       skip,
       toggleMute,
       onVolumeInput,
@@ -8048,6 +8354,16 @@ const PlayerPage = {
       playQueueItem,
       moveQueueItem,
       removeQueueItem,
+      onPlayerTouchStart,
+      onPlayerTouchMove,
+      onPlayerTouchEnd,
+      onPlayerTouchCancel,
+      handleContainerClick,
+      doubleTapRipple,
+      brightnessHUD,
+      brightnessLevel,
+      aspectRatioFit,
+      cycleAspectRatio,
     };
   },
 };
@@ -12451,8 +12767,8 @@ const App = {
               <i class="ph ph-keyboard" style="font-size:1.1rem"></i>
             </div>
 
-            <!-- Scan button (hidden for Kids profiles) -->
-            <div v-if="!store.profile?.is_kids" class="nav-search-btn" @click="triggerScan" id="nav-scan" data-tooltip="Refresh Library" style="position:relative">
+            <!-- Scan button (Admin only) -->
+            <div v-if="store.profile?.is_admin || !store.profile" class="nav-search-btn" @click="triggerScan" id="nav-scan" data-tooltip="Refresh Library" style="position:relative">
               <i class="ph ph-arrows-clockwise" style="font-size:1.1rem" :style="{ animation: store.scanRunning ? 'spin 1s linear infinite' : 'none' }"></i>
               <div class="scan-badge" v-if="store.scanRunning"></div>
             </div>
@@ -12498,11 +12814,11 @@ const App = {
         </div>
       </nav>
 
-      <!-- Update-available banner -->
+      <!-- Update-available banner (Admin only) -->
       <transition name="fade">
         <div
           class="update-banner"
-          v-if="store.updateInfo?.status === 'available' && !updateBannerDismissed && showNav && !store.profile?.is_kids"
+          v-if="store.updateInfo?.status === 'available' && !updateBannerDismissed && showNav && (store.profile?.is_admin || !store.profile)"
         >
           <i class="ph ph-arrow-circle-up"></i>
           <span>
@@ -12515,11 +12831,12 @@ const App = {
         </div>
       </transition>
 
+      <!-- Remote exposed warning banner (Admin only) -->
       <transition name="fade">
         <div
           class="update-banner"
           style="background:linear-gradient(90deg,#7a1f1f,#a12b2b)"
-          v-if="store.sysInfo?.remote_exposed && !remoteBannerDismissed && showNav && !store.profile?.is_kids"
+          v-if="store.sysInfo?.remote_exposed && !remoteBannerDismissed && showNav && (store.profile?.is_admin || !store.profile)"
         >
           <i class="ph ph-warning"></i>
           <span>
@@ -12532,10 +12849,42 @@ const App = {
         </div>
       </transition>
 
+      <!-- Global Server Offline / Disconnected Banner -->
+      <transition name="fade">
+        <div
+          class="update-banner"
+          style="background: linear-gradient(90deg, #7a1f1f, #a12b2b); z-index: 1000000; position: sticky; top: 0;"
+          v-if="store.serverOnline === false && showNav"
+        >
+          <i class="ph-fill ph-warning-octagon"></i>
+          <span>
+            <strong>Server Offline</strong> — CapsStream backend is unreachable. Reconnecting automatically...
+          </span>
+        </div>
+      </transition>
+
       <!-- Main content -->
       <main :style="{ paddingTop: showNav && isPlayerRoute && isDetailRoute ? 'var(--nav-height)' : '0' }">
         <router-view />
       </main>
+
+      <!-- Mobile Floating Glass Bottom Navigation Bar -->
+      <nav class="mobile-bottom-nav" :class="{ 'nav-hidden': isMobileNavHidden }" v-if="showNav && !isPlayerRoute && store.profile" id="mobile-bottom-nav">
+        <div
+          v-for="item in mobileNavItems"
+          :key="item.id"
+          class="mobile-nav-item"
+          :class="{ active: isNavActive(item) }"
+          @click="router.push(item.path)"
+          :id="'mobile-' + item.id"
+        >
+          <div class="mobile-nav-icon-wrap">
+            <i :class="item.icon"></i>
+            <span class="mobile-nav-glow" v-if="isNavActive(item)"></span>
+          </div>
+          <span class="mobile-nav-label">{{ item.name }}</span>
+        </div>
+      </nav>
 
       <!-- Toast container (Clean Single-Layer Glass Card) -->
       <div class="toast-container" id="toast-container">
@@ -12818,6 +13167,7 @@ const App = {
         @click.self="collectionPickerState.show = false"
       >
         <div class="shortcuts-modal-card" style="max-width:440px" @click.stop>
+          <div class="sheet-drag-handle"></div>
           <div class="shortcuts-modal-inner" style="text-align:left">
             <div class="shortcuts-modal-header" style="margin-bottom:1rem">
               <div class="shortcuts-header-title" style="color:var(--text-primary);display:flex;align-items:center;gap:10px">
@@ -12882,6 +13232,7 @@ const App = {
         @click.self="playlistPickerState.show = false"
       >
         <div class="shortcuts-modal-card" style="max-width:440px" @click.stop>
+          <div class="sheet-drag-handle"></div>
           <div class="shortcuts-modal-inner" style="text-align:left">
             <div class="shortcuts-modal-header" style="margin-bottom:1rem">
               <div class="shortcuts-header-title" style="color:var(--text-primary);display:flex;align-items:center;gap:10px">
@@ -12972,12 +13323,84 @@ const App = {
           ></iframe>
         </div>
       </div>
+
+      <!-- iOS PWA Install Guide Modal -->
+      <transition name="fade">
+        <div v-if="showIosInstallModal" class="ios-install-backdrop" @click="showIosInstallModal = false">
+          <div class="ios-install-modal" @click.stop>
+            <div class="ios-install-header">
+              <div class="ios-install-logo-wrap">
+                <img src="/static/img/favicon.png" alt="CapsStream" style="width:36px;height:36px;display:block">
+              </div>
+              <div style="text-align:left">
+                <h3 style="font-size:1.15rem;font-weight:800;color:#fff;margin:0 0 2px">Install CapsStream</h3>
+                <p style="font-size:0.8rem;color:var(--text-secondary);margin:0">Add to your iPhone / iPad Home Screen</p>
+              </div>
+              <button class="shortcuts-close-btn" style="position:static;margin-left:auto" @click="showIosInstallModal = false"><i class="ph ph-x"></i></button>
+            </div>
+            <div class="ios-install-steps">
+              <div class="ios-install-step">
+                <div class="step-num">1</div>
+                <div class="step-desc">Tap the <strong>Share</strong> button <i class="ph ph-export" style="font-size:1.2rem;vertical-align:middle;color:#38bdf8"></i> in Safari's bottom toolbar.</div>
+              </div>
+              <div class="ios-install-step">
+                <div class="step-num">2</div>
+                <div class="step-desc">Scroll down and tap <strong>"Add to Home Screen"</strong> <i class="ph ph-plus-square" style="font-size:1.2rem;vertical-align:middle;color:#4ade80"></i>.</div>
+              </div>
+            </div>
+            <button class="btn btn-primary" style="width:100%;margin-top:16px;height:44px;border-radius:12px;font-weight:700" @click="showIosInstallModal = false">Got it! 🚀</button>
+          </div>
+        </div>
+      </transition>
+
+      <!-- Android PWA Install Guide Modal -->
+      <transition name="fade">
+        <div v-if="showAndroidInstallModal" class="ios-install-backdrop" @click="showAndroidInstallModal = false">
+          <div class="ios-install-modal" @click.stop>
+            <div class="ios-install-header">
+              <div class="ios-install-logo-wrap">
+                <img src="/static/img/favicon.png" alt="CapsStream" style="width:36px;height:36px;display:block">
+              </div>
+              <div style="text-align:left">
+                <h3 style="font-size:1.15rem;font-weight:800;color:#fff;margin:0 0 2px">Android Standalone PWA</h3>
+                <p style="font-size:0.8rem;color:var(--text-secondary);margin:0">Enable 1-time local network PWA install</p>
+              </div>
+              <button class="shortcuts-close-btn" style="position:static;margin-left:auto" @click="showAndroidInstallModal = false"><i class="ph ph-x"></i></button>
+            </div>
+            <div class="ios-install-steps">
+              <div class="ios-install-step">
+                <div class="step-num">1</div>
+                <div class="step-desc">
+                  Open a new Chrome tab and go to:
+                  <div style="background:rgba(0,0,0,0.55);padding:4px 8px;border-radius:6px;margin-top:4px;font-family:monospace;color:#38bdf8;font-size:0.8rem;word-break:break-all">chrome://flags</div>
+                </div>
+              </div>
+              <div class="ios-install-step">
+                <div class="step-num">2</div>
+                <div class="step-desc">
+                  Search <strong>Insecure origins treated as secure</strong>, set to <strong>Enabled</strong>, and paste:
+                  <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">
+                    <div style="background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.15);padding:6px 8px;border-radius:6px;color:#f0f0f5;font-size:0.78rem;font-family:monospace;word-break:break-all;user-select:all">{{ currentOriginUrl }}</div>
+                    <button class="btn btn-secondary btn-sm" style="align-self:flex-start;padding:4px 10px;font-size:0.75rem" @click="copyOriginUrl"><i class="ph ph-copy"></i> Copy Address</button>
+                  </div>
+                </div>
+              </div>
+              <div class="ios-install-step">
+                <div class="step-num">3</div>
+                <div class="step-desc">Tap <strong>Relaunch Chrome</strong>, then return here and tap <strong>Install App</strong>!</div>
+              </div>
+            </div>
+            <button class="btn btn-primary" style="width:100%;margin-top:14px;height:42px;border-radius:12px;font-weight:700" @click="showAndroidInstallModal = false">Got it! 🚀</button>
+          </div>
+        </div>
+      </transition>
     </template>
   `,
   setup() {
     const route = VueRouter.useRoute();
     const router = VueRouter.useRouter();
     const navScrolled = ref(false);
+    const isMobileNavHidden = ref(false);
     const showProfileMenu = ref(false);
     const showShortcuts = ref(false);
     const appLoading = ref(true);
@@ -12996,6 +13419,84 @@ const App = {
 
     function selectTheme(themeId) {
       applyTheme(themeId, true);
+    }
+
+    // ─── PWA State & Installation ────────────────────────────────
+    const deferredPrompt = ref(window.__deferredPwaPrompt || null);
+    const isInstallable = ref(!!window.__deferredPwaPrompt);
+    const isPwaInstalled = ref(false);
+    const showIosInstallModal = ref(false);
+    const showAndroidInstallModal = ref(false);
+    const isStandalone = computed(() => {
+      return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+    });
+    const isIos = computed(() => {
+      return /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
+    });
+    const isAndroid = computed(() => {
+      return /android/.test(window.navigator.userAgent.toLowerCase());
+    });
+    const isMobileDevice = computed(() => {
+      return isIos.value || isAndroid.value || window.innerWidth < 768;
+    });
+    const currentOriginUrl = computed(() => window.location.origin);
+
+    function copyOriginUrl() {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(window.location.origin);
+        }
+      } catch (e) {}
+      addToast("Copied: " + window.location.origin, "success");
+    }
+
+    window.addEventListener("capsstream:pwa-installable", () => {
+      if (window.__deferredPwaPrompt) {
+        deferredPrompt.value = window.__deferredPwaPrompt;
+        isInstallable.value = true;
+      }
+    });
+
+    function triggerPwaInstall() {
+      showProfileMenu.value = false;
+      const promptEvt = deferredPrompt.value || window.__deferredPwaPrompt;
+      if (promptEvt) {
+        promptEvt.prompt();
+        promptEvt.userChoice.then((choiceResult) => {
+          if (choiceResult.outcome === "accepted") {
+            addToast("Installing CapsStream App... 🎉", "success");
+          }
+          deferredPrompt.value = null;
+          window.__deferredPwaPrompt = null;
+          isInstallable.value = false;
+        });
+      } else if (isIos.value && !isStandalone.value) {
+        showIosInstallModal.value = true;
+      } else if (isAndroid.value && !isStandalone.value) {
+        showAndroidInstallModal.value = true;
+      } else {
+        addToast("In your browser address bar or menu (⋮), select 'Install CapsStream' 📲", "info", 6000);
+      }
+    }
+
+    async function forceHardRefresh() {
+      showProfileMenu.value = false;
+      addToast("Clearing cache and reloading... 🔄", "info");
+      try {
+        if ("caches" in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+        }
+        if ("serviceWorker" in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const r of regs) {
+            await r.unregister();
+          }
+        }
+      } catch (e) {}
+      setTimeout(() => {
+        window.location.href = "/?t=" + Date.now();
+      }, 250);
     }
 
     // ─── Update banner state ─────────────────────────────────────
@@ -13101,6 +13602,25 @@ const App = {
         { name: "Playlists", path: "/playlists", id: "nav-playlists", isMatch: (r) => r.path.startsWith("/playlists") },
         { name: "Stats", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
         { name: "About", path: "/about", id: "nav-about", isMatch: (r) => r.path === "/about" },
+      ];
+    });
+
+    const mobileNavItems = computed(() => {
+      if (store.profile?.is_kids) {
+        return [
+          { name: "Home", path: "/", id: "nav-home", icon: "ph-fill ph-house", isMatch: (r) => r.path === "/" },
+          { name: "Cartoons", path: "/browse?type=series", id: "nav-series", icon: "ph-fill ph-television", isMatch: (r) => r.fullPath === "/browse?type=series" },
+          { name: "Movies", path: "/browse?type=movie", id: "nav-movies", icon: "ph-fill ph-film-strip", isMatch: (r) => r.fullPath === "/browse?type=movie" },
+          { name: "Anime", path: "/browse?type=anime", id: "nav-anime", icon: "ph-fill ph-sparkle", isMatch: (r) => r.fullPath === "/browse?type=anime" },
+          { name: "Watchlist", path: "/favorites", id: "nav-favorites", icon: "ph-fill ph-heart", isMatch: (r) => r.path === "/favorites" },
+        ];
+      }
+      return [
+        { name: "Home", path: "/", id: "nav-home", icon: "ph-fill ph-house", isMatch: (r) => r.path === "/" },
+        { name: "Movies", path: "/browse?type=movie", id: "nav-movies", icon: "ph-fill ph-film-strip", isMatch: (r) => r.fullPath === "/browse?type=movie" },
+        { name: "Series", path: "/browse?type=series", id: "nav-series", icon: "ph-fill ph-television", isMatch: (r) => r.fullPath === "/browse?type=series" },
+        { name: "Anime", path: "/browse?type=anime", id: "nav-anime", icon: "ph-fill ph-sparkle", isMatch: (r) => r.fullPath === "/browse?type=anime" },
+        { name: "Playlists", path: "/playlists", id: "nav-playlists", icon: "ph-fill ph-queue", isMatch: (r) => r.path.startsWith("/playlists") },
       ];
     });
 
@@ -13427,8 +13947,16 @@ const App = {
         appLoading.value = false;
       }
 
+      let lastScrollY = 0;
       window.addEventListener("scroll", () => {
-        navScrolled.value = window.scrollY > 20;
+        const sy = window.scrollY || document.documentElement.scrollTop;
+        navScrolled.value = sy > 20;
+        if (sy > 60 && sy > lastScrollY + 8) {
+          isMobileNavHidden.value = true;
+        } else if (sy < lastScrollY - 8 || sy < 30) {
+          isMobileNavHidden.value = false;
+        }
+        lastScrollY = Math.max(0, sy);
         if (contextMenuState.show) closeGlobalContextMenu();
       }, { passive: true });
 
@@ -13438,7 +13966,51 @@ const App = {
 
       window.addEventListener("click", handleOutsideClick);
 
+      // PWA Install Prompt & Lifecycle
+      window.addEventListener("beforeinstallprompt", (e) => {
+        e.preventDefault();
+        deferredPrompt.value = e;
+        isInstallable.value = true;
+      });
+
+      window.addEventListener("appinstalled", () => {
+        deferredPrompt.value = null;
+        isInstallable.value = false;
+        isPwaInstalled.value = true;
+        addToast("CapsStream App installed successfully! 🎉", "success");
+      });
+
+      // Service Worker Live Update Notification
+      window.addEventListener("capsstream:sw-updated", () => {
+        addToast("New CapsStream version available • Tap to reload 🔄", "info", 12000, () => {
+          window.location.reload();
+        });
+      });
+
       startScreenTimeWatchdog();
+
+      // Background server health checker (detects server shutdown or disconnection)
+      async function checkServerHealth() {
+        try {
+          const res = await fetch("/api/health", { cache: "no-store" });
+          if (res.ok) {
+            if (store.serverOnline === false) {
+              store.serverOnline = true;
+              addToast("Server Reconnected ✅", "success", 4000);
+            }
+          } else {
+            if (store.serverOnline !== false) {
+              store.serverOnline = false;
+            }
+          }
+        } catch (e) {
+          if (store.serverOnline !== false) {
+            store.serverOnline = false;
+          }
+        }
+      }
+
+      const serverHealthTimer = setInterval(checkServerHealth, 10000);
 
       // Poll if scan is running
       try {
@@ -13453,10 +14025,12 @@ const App = {
     });
 
     onUnmounted(() => {
+      clearInterval(serverHealthTimer);
       window.removeEventListener("click", handleOutsideClick);
       window.removeEventListener("mouseover", handleTooltipMouseOver);
       window.removeEventListener("keydown", handleGlobalKeyDown);
       clearInterval(scanPollTimer);
+      if (serverHealthTimer) clearInterval(serverHealthTimer);
     });
 
     function editCurrentProfile() {
@@ -13734,6 +14308,9 @@ const App = {
     return {
       store,
       route,
+      navItems,
+      mobileNavItems,
+      isNavActive,
       navScrolled,
       showProfileMenu,
       showShortcuts,
@@ -13810,9 +14387,20 @@ const App = {
       hoveredLinkIndex,
       pillStyle,
       isNavActive,
+      isMobileNavHidden,
       THEME_PRESETS,
       currentTheme,
       selectTheme,
+      isStandalone,
+      isIos,
+      isInstallable,
+      showIosInstallModal,
+      showAndroidInstallModal,
+      isMobileDevice,
+      currentOriginUrl,
+      copyOriginUrl,
+      triggerPwaInstall,
+      forceHardRefresh,
     };
   },
 };

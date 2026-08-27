@@ -153,14 +153,19 @@ def read_config():
 def server_url(cfg):
     host = (cfg.get("host") or "127.0.0.1").strip() or "127.0.0.1"
     port = int(cfg.get("port") or 8000)
+    proto = "https" if cfg.get("ssl", False) else "http"
     display_host = "127.0.0.1" if host == "0.0.0.0" else host
-    return f"http://{display_host}:{port}", display_host, port
+    return f"{proto}://{display_host}:{port}", display_host, port
 
 
 def server_responding(url):
     try:
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
         req = urllib.request.Request(url, headers={"User-Agent": "CapsStream-Launcher"})
-        with urllib.request.urlopen(req, timeout=2) as resp:
+        with urllib.request.urlopen(req, timeout=2, context=ctx) as resp:
             return resp.status < 500
     except urllib.error.HTTPError:
         return True  # server answered — it's up
@@ -234,9 +239,13 @@ def start_server(cfg):
     creationflags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
     log_handle = open(log_file, "a", encoding="utf-8")
     log("Spawning server process (pythonw app.py)")
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     proc = subprocess.Popen(
         [PYTHONW, APP_SCRIPT],
         cwd=ROOT,
+        env=env,
         stdout=log_handle,
         stderr=subprocess.STDOUT,
         creationflags=creationflags,

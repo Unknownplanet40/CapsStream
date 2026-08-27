@@ -437,8 +437,9 @@ def launch_browser():
     browser_choice = str(config.get("browser", "edge")).lower().strip()
     host = config.get("host", "127.0.0.1")
     port = config.get("port", 8000)
+    proto = "https" if config.get("ssl", False) else "http"
     display_host = "127.0.0.1" if host == "0.0.0.0" else host
-    url = f"http://{display_host}:{port}"
+    url = f"{proto}://{display_host}:{port}"
 
     # Guard: Check if standalone browser window is already open for this URL
     if is_browser_already_open(url):

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#050508">
+  <title>Offline • CapsStream</title>
+  <link rel="icon" type="image/png" href="/static/img/favicon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #050508;
+      --accent: #e50914;
+      --accent-glow: 0 0 30px rgba(229, 9, 20, 0.45);
+      --text-primary: #f0f0f5;
+      --text-secondary: #9090a0;
+      --text-muted: #555566;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .bg-ambient {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 50% 30%, rgba(229, 9, 20, 0.12) 0%, transparent 65%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .offline-card {
+      position: relative;
+      z-index: 1;
+      max-width: 440px;
+      width: 100%;
+      background: rgba(15, 15, 23, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-radius: 24px;
+      padding: 36px 28px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8), var(--accent-glow);
+      animation: floatIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes floatIn {
+      from { opacity: 0; transform: translateY(20px) scale(0.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .offline-icon-wrap {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: rgba(229, 9, 20, 0.15);
+      border: 1px solid rgba(229, 9, 20, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      box-shadow: 0 0 20px rgba(229, 9, 20, 0.3);
+      position: relative;
+    }
+
+    .offline-icon-pulse {
+      position: absolute;
+      inset: -6px;
+      border-radius: 50%;
+      border: 2px solid rgba(229, 9, 20, 0.4);
+      animation: pulseRing 2s infinite ease-out;
+    }
+
+    @keyframes pulseRing {
+      0% { transform: scale(0.85); opacity: 1; }
+      100% { transform: scale(1.3); opacity: 0; }
+    }
+
+    .offline-icon {
+      font-size: 2rem;
+    }
+
+    .offline-title {
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 10px;
+      color: #fff;
+    }
+
+    .offline-msg {
+      font-size: 0.92rem;
+      line-height: 1.5;
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+    }
+
+    .offline-status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 99px;
+      padding: 8px 16px;
+      margin-bottom: 24px;
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ffb703;
+      animation: blinkDot 1.4s infinite ease-in-out;
+    }
+
+    @keyframes blinkDot {
+      0%, 100% { opacity: 0.3; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1.1); }
+    }
+
+    .retry-btn {
+      width: 100%;
+      height: 48px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+      box-shadow: 0 4px 16px rgba(229, 9, 20, 0.4);
+    }
+
+    .retry-btn:hover {
+      background: #ff1e2b;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(229, 9, 20, 0.6);
+    }
+
+    .retry-btn:active {
+      transform: scale(0.98);
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-ambient"></div>
+  <div class="offline-card">
+    <div class="offline-icon-wrap">
+      <div class="offline-icon-pulse"></div>
+      <div class="offline-icon">📡</div>
+    </div>
+    <h1 class="offline-title">Server Unreachable</h1>
+    <p class="offline-msg">
+      CapsStream is currently offline. Please ensure your local backend server is running (<code style="color:#ff6b6b;font-weight:700">start.bat</code> or <code style="color:#ff6b6b;font-weight:700">python app.py</code>).
+    </p>
+    <div class="offline-status-bar">
+      <div class="status-dot"></div>
+      <span id="status-text">Reconnecting automatically...</span>
+    </div>
+    <button class="retry-btn" onclick="checkAndReload()">
+      <span>Retry Now 🔄</span>
+    </button>
+  </div>
+
+  <script>
+    async function checkAndReload() {
+      const btn = document.querySelector(".retry-btn");
+      const statusText = document.getElementById("status-text");
+      if (btn) btn.style.opacity = "0.7";
+      if (statusText) statusText.textContent = "Checking server connection...";
+      try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        if (res.ok) {
+          if (statusText) statusText.textContent = "Connected! Loading...";
+          window.location.href = "/";
+          return;
+        }
+      } catch (e) {
+        // Still offline
+      }
+      if (btn) btn.style.opacity = "1";
+      if (statusText) statusText.textContent = "Reconnecting automatically in 3s...";
+    }
+
+    // Auto-heartbeat every 3s
+    setInterval(checkAndReload, 3000);
+  </script>
+</body>
+</html>
