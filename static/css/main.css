@@ -13938,11 +13938,12 @@ h1, h2, h3,
   }
 }
 
-/* ─── Netflix / Disney+ Floating Right-Side Next Episode Card (Non-PiP) ─── */
+/* ─── Netflix / Disney+ Floating Top-Right Next Episode Card (Non-PiP) ─── */
 .next-ep-floating-card {
   position: absolute;
-  bottom: 5.5rem;
-  right: 2rem;
+  top: 3.5rem;
+  right: 2.5rem;
+  bottom: auto;
   width: 360px;
   max-width: calc(100vw - 3rem);
   background: rgba(12, 12, 18, 0.94);
@@ -14134,7 +14135,8 @@ h1, h2, h3,
 
 @media (max-width: 768px) {
   .next-ep-floating-card {
-    bottom: 5rem;
+    top: 1.5rem;
+    bottom: auto;
     right: 1rem;
     left: 1rem;
     width: auto;
