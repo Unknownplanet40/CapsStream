@@ -5884,7 +5884,7 @@ const PlayerPage = {
                   <div class="player-menu-section-item" style="padding:4px 12px 6px">
                     <div style="font-size:0.8rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
                       <span style="display:flex;align-items:center;gap:6px">
-                        <i class="ph ph-speaker-high" style="font-size:0.95rem"></i> Sound Mode
+                        <i class="ph ph-speaker-high" style="font-size:0.95rem"></i> Sound Enhancer
                       </span>
                       <span style="font-size:0.72rem;color:var(--accent);text-transform:capitalize;font-weight:700">{{ audioEnhancerMode }}</span>
                     </div>
