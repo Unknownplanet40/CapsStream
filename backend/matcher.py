@@ -290,14 +290,41 @@ def get_media_trailer(tmdb_id, media_type="movie"):
     return None
 
 
+def get_show_status(tmdb_id, media_type="series"):
+    if not tmdb_id:
+        return None
+    cached = _load_cache(media_type, tmdb_id)
+    if cached and cached.get("status"):
+        return cached["status"]
+
+    detail = _tmdb_get(f"tv/{tmdb_id}", {"language": "en-US"})
+    if not detail:
+        return None
+    status = detail.get("status")
+    if cached:
+        cached["status"] = status
+        _save_cache(media_type, tmdb_id, cached)
+    return status
+
+
 def _fetch_show_detail(tmdb_id, default_title="", year=None, media_type="series"):
     cached = _load_cache(media_type, tmdb_id)
     if cached:
+        updated = False
         if "logo_path" not in cached:
             detail = _tmdb_get(f"tv/{tmdb_id}", {"language": "en-US", "append_to_response": "images", "include_image_language": "en,null"})
             if detail:
                 cached["logo_path"] = _extract_logo(detail, media_type, tmdb_id)
-                _save_cache(media_type, tmdb_id, cached)
+                if not cached.get("status") and detail.get("status"):
+                    cached["status"] = detail.get("status")
+                updated = True
+        if "status" not in cached:
+            st = get_show_status(tmdb_id, media_type)
+            if st:
+                cached["status"] = st
+                updated = True
+        if updated:
+            _save_cache(media_type, tmdb_id, cached)
         return cached
 
     detail = _tmdb_get(f"tv/{tmdb_id}", {"language": "en-US", "append_to_response": "credits,videos,images", "include_image_language": "en,null"})
@@ -337,6 +364,7 @@ def _fetch_show_detail(tmdb_id, default_title="", year=None, media_type="series"
         "title":         detail.get("name", default_title),
         "original_title": detail.get("original_name"),
         "year":          show_year,
+        "status":        detail.get("status"),
         "overview":      detail.get("overview"),
         "tagline":        detail.get("tagline"),
         "genres":        genres,

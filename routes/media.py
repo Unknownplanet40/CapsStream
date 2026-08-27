@@ -445,6 +445,11 @@ def api_show_detail(tmdb_id):
     for f in ["season", "episode", "ep_title", "file_path", "file_size", "duration"]:
         show.pop(f, None)
 
+    show_tmdb_id = show.get("tmdb_id")
+    if not show.get("status") and show_tmdb_id:
+        from backend.matcher import get_show_status
+        show["status"] = get_show_status(show_tmdb_id, show.get("type", media_type))
+
     if show.get("cast_json"):
         try:
             show["cast"] = json.loads(show["cast_json"])

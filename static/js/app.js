@@ -2346,8 +2346,20 @@ const DetailPage = {
 
         <!-- Info -->
         <div class="detail-info">
-          <div class="detail-type-badge">
-            {{ media.type === 'anime' ? 'Anime' : media.type === 'series' ? 'Series' : 'Movie' }}
+          <div class="detail-badges-row">
+            <div class="detail-type-badge">
+              {{ media.type === 'anime' ? 'Anime' : media.type === 'series' ? 'Series' : 'Movie' }}
+            </div>
+            <!-- TV Show / Series Status Badge -->
+            <div
+              v-if="media.status && media.type !== 'movie'"
+              class="detail-status-badge"
+              :class="'status-' + getStatusSlug(media.status)"
+              :title="getStatusTooltip(media.status)"
+            >
+              <i :class="getStatusIcon(media.status)"></i>
+              <span>{{ media.status }}</span>
+            </div>
           </div>
 
           <div class="detail-title-container">
@@ -3111,12 +3123,51 @@ const DetailPage = {
       }
     }
 
+    function getStatusSlug(status) {
+      if (!status) return "unknown";
+      const s = status.toLowerCase();
+      if (s.includes("returning")) return "returning";
+      if (s.includes("ended")) return "ended";
+      if (s.includes("cancel")) return "canceled";
+      if (s.includes("production")) return "production";
+      if (s.includes("plan")) return "planned";
+      if (s.includes("pilot")) return "pilot";
+      return "info";
+    }
+
+    function getStatusIcon(status) {
+      if (!status) return "ph-bold ph-info";
+      const s = status.toLowerCase();
+      if (s.includes("returning")) return "ph-fill ph-broadcast";
+      if (s.includes("ended")) return "ph-bold ph-check-circle";
+      if (s.includes("cancel")) return "ph-bold ph-x-circle";
+      if (s.includes("production")) return "ph-bold ph-film-slate";
+      if (s.includes("plan")) return "ph-bold ph-calendar-plus";
+      if (s.includes("pilot")) return "ph-bold ph-paper-plane-tilt";
+      return "ph-bold ph-info";
+    }
+
+    function getStatusTooltip(status) {
+      if (!status) return "";
+      const s = status.toLowerCase();
+      if (s.includes("returning")) return "Returning Series: Shows actively airing with future seasons or episodes expected.";
+      if (s.includes("ended")) return "Ended: Shows that completed their run naturally.";
+      if (s.includes("cancel")) return "Canceled: Shows officially stopped or not returning for a new season.";
+      if (s.includes("production")) return "In Production: Shows currently being filmed or produced.";
+      if (s.includes("plan")) return "Planned: Shows announced or in early pre-production.";
+      if (s.includes("pilot")) return "Pilot: Shows that have only produced a pilot episode so far.";
+      return `Series Status: ${status}`;
+    }
+
     return {
       store,
       media,
       loading,
       activeSeason,
       sortedSeasons,
+      getStatusSlug,
+      getStatusIcon,
+      getStatusTooltip,
       getSeasonMeta,
       seasonTabsRef,
       scrollSeasonTabs,
@@ -5802,18 +5853,57 @@ const PlayerPage = {
                 </div>
               </div>
 
-              <!-- Video Quality Resolution Menu (Gear Icon) — always shown for Skip Markers, quality section only for movies with duplicates -->
+              <!-- Video Quality & Player Options Menu (Gear Icon) -->
               <div style="position:relative">
-                <button class="ctrl-btn" @click="showQualityMenu = !showQualityMenu; showSpeedMenu = false; showSubMenu = false; showAudioMenu = false" title="Player Options & Quality" id="ctrl-quality" style="font-size:0.85rem;font-weight:700">
+                <button class="ctrl-btn" :class="{ active: showQualityMenu }" @click="showQualityMenu = !showQualityMenu; showSpeedMenu = false; showSubMenu = false; showAudioMenu = false" title="Player Options & Quality" id="ctrl-quality" style="font-size:0.85rem;font-weight:700">
                   <i class="ph ph-gear-six" style="font-size:1.35rem"></i>
                 </button>
-                <div v-if="showQualityMenu" class="player-popup-menu" @click.stop style="min-width:210px">
-                  <div style="font-size:0.75rem;color:var(--text-muted);padding:6px 12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">
+                <div v-if="showQualityMenu" class="player-popup-menu" @click.stop style="min-width:220px">
+                  <div style="font-size:0.75rem;color:var(--text-muted);padding:6px 12px 4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">
                     Player Options
                   </div>
+
+                  <!-- Aspect Ratio Selector inside Player Options -->
+                  <div class="player-menu-section-item" style="padding:4px 12px 6px">
+                    <div style="font-size:0.8rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                      <span style="display:flex;align-items:center;gap:6px">
+                        <i class="ph ph-frame-corners" style="font-size:0.95rem"></i> Aspect Ratio
+                      </span>
+                      <span style="font-size:0.72rem;color:var(--accent);text-transform:capitalize;font-weight:700">{{ aspectRatioFit }}</span>
+                    </div>
+                    <div class="player-aspect-pills" style="display:flex;gap:4px">
+                      <button
+                        v-for="mode in ['contain', 'cover', 'fill']"
+                        :key="mode"
+                        class="player-aspect-pill"
+                        :class="{ active: aspectRatioFit === mode }"
+                        @click="aspectRatioFit = mode"
+                      >
+                        {{ mode.charAt(0).toUpperCase() + mode.slice(1) }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Picture-in-Picture Toggle inside Player Options -->
+                  <div
+                    v-if="isPipSupported"
+                    class="player-menu-item"
+                    :class="{ active: isPipActive }"
+                    @click="togglePip(); showQualityMenu = false"
+                    id="player-menu-pip"
+                    style="display:flex;align-items:center;justify-content:space-between"
+                  >
+                    <span style="display:flex;align-items:center;gap:8px">
+                      <i :class="isPipActive ? 'ph-fill ph-screencast' : 'ph ph-screencast'"></i> Picture-in-Picture (P)
+                    </span>
+                    <i v-if="isPipActive" class="ph-bold ph-check" style="color:var(--accent)"></i>
+                  </div>
+
+                  <!-- Edit Skip Markers -->
                   <div v-if="!store.profile?.is_kids" class="player-menu-item" @click="showSkipModal = true; showQualityMenu = false" id="player-menu-skip-markers">
                     <span>⏱️ Edit Skip Markers</span>
                   </div>
+
                   <!-- Video Quality: always visible; clickable only when an
                        alternative quality source actually exists -->
                   <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0"></div>
@@ -5877,23 +5967,6 @@ const PlayerPage = {
                   </span>
                 </button>
               </div>
-
-              <!-- Picture-in-Picture (PiP) -->
-              <button
-                v-if="isPipSupported"
-                class="ctrl-btn"
-                :class="{ active: isPipActive }"
-                @click="togglePip"
-                title="Picture-in-Picture (P)"
-                id="ctrl-pip"
-              >
-                <i :class="isPipActive ? 'ph-fill ph-screencast' : 'ph ph-screencast'"></i>
-              </button>
-
-              <!-- Aspect Ratio (Contain / Cover / Fill) -->
-              <button class="ctrl-btn" @click="cycleAspectRatio" :title="'Aspect Ratio (' + aspectRatioFit + ')'" id="ctrl-aspect-ratio">
-                <i :class="aspectRatioFit === 'cover' ? 'ph ph-arrows-out-cardinal' : aspectRatioFit === 'fill' ? 'ph ph-frame-corners' : 'ph ph-corners-out'"></i>
-              </button>
 
               <!-- Fullscreen -->
               <button class="ctrl-btn" @click="toggleFullscreen" title="Fullscreen (F)" id="ctrl-fullscreen">
