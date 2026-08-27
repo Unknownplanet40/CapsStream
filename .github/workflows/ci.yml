@@ -16,7 +16,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
       - name: Compile-check all Python sources
         run: |
-          python -m py_compile app.py backend/*.py
+          python -m py_compile app.py backend/*.py backend/db/*.py backend/tests/*.py
           echo "All Python files compile cleanly."
+
+      - name: Run Test Suite
+        run: |
+          python run_tests.py

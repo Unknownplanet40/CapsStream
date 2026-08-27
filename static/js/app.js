@@ -11608,7 +11608,7 @@ const StatsPage = {
               <!-- Group Header -->
               <div class="trophy-group-header" :class="'group-' + group.key.toLowerCase().replace(/[^a-z0-9]/g, '')">
                 <div class="trophy-group-title-wrap">
-                  <span class="trophy-group-icon">{{ group.icon }}</span>
+                  <span class="trophy-group-icon"><i :class="'ph-bold ' + (group.icon && group.icon.startsWith('ph-') ? group.icon : 'ph-folder')"></i></span>
                   <span class="trophy-group-title">{{ group.name }}</span>
                   <span class="trophy-group-badge-count">
                     {{ group.unlockedCount }} / {{ group.totalCount }} Unlocked
@@ -11635,7 +11635,7 @@ const StatsPage = {
                   :class="['rarity-' + (ach.rarity || 'bronze').toLowerCase(), { unlocked: ach.unlocked }]"
                 >
                   <div class="achievement-icon-wrapper">
-                    <i :class="'ph-bold ' + (ach.unlocked ? (ach.icon.startsWith('ph-') ? ach.icon : 'ph-trophy') : 'ph-lock')"></i>
+                    <i :class="'ph-bold ' + (ach.unlocked ? (ach.icon && ach.icon.startsWith('ph-') ? ach.icon : 'ph-trophy') : 'ph-lock')"></i>
                   </div>
                   <div class="achievement-info">
                     <div class="achievement-header">
@@ -11665,7 +11665,7 @@ const StatsPage = {
               :class="['rarity-' + (ach.rarity || 'bronze').toLowerCase(), { unlocked: ach.unlocked }]"
             >
               <div class="achievement-icon-wrapper">
-                <i :class="'ph-bold ' + (ach.unlocked ? (ach.icon.startsWith('ph-') ? ach.icon : 'ph-trophy') : 'ph-lock')"></i>
+                <i :class="'ph-bold ' + (ach.unlocked ? (ach.icon && ach.icon.startsWith('ph-') ? ach.icon : 'ph-trophy') : 'ph-lock')"></i>
               </div>
               <div class="achievement-info">
                 <div class="achievement-header">
@@ -13477,6 +13477,21 @@ const App = {
           </div>
         </div>
       </transition>
+
+      <!-- Global Floating Back to Top Button for All Pages -->
+      <transition name="fade-slide">
+        <button
+          v-if="showBackToTop && !isPlayerRoute"
+          class="back-to-top-btn"
+          @click="scrollToTop"
+          title="Back to Top"
+          aria-label="Back to Top"
+          id="global-back-to-top-btn"
+        >
+          <i class="ph-bold ph-arrow-up"></i>
+          <span class="back-to-top-label">Top</span>
+        </button>
+      </transition>
     </template>
   `,
   setup() {
@@ -13487,6 +13502,15 @@ const App = {
     const showProfileMenu = ref(false);
     const showShortcuts = ref(false);
     const appLoading = ref(true);
+    const showBackToTop = ref(false);
+
+    function handleScroll() {
+      showBackToTop.value = (window.scrollY || document.documentElement.scrollTop || 0) > 400;
+    }
+
+    function scrollToTop() {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
 
     // Profile presence heartbeat watchdog & session eviction detection
     const showSessionEvictedModal = ref(false);
@@ -14047,6 +14071,7 @@ const App = {
       window.addEventListener("touchstart", markActivity, { passive: true });
       window.addEventListener("mouseover", handleTooltipMouseOver);
       window.addEventListener("keydown", handleGlobalKeyDown);
+      window.addEventListener("scroll", handleScroll, { passive: true });
 
       try {
         // Restore a persisted session (survives page refresh) before anything else
@@ -14160,6 +14185,7 @@ const App = {
       window.removeEventListener("click", handleOutsideClick);
       window.removeEventListener("mouseover", handleTooltipMouseOver);
       window.removeEventListener("keydown", handleGlobalKeyDown);
+      window.removeEventListener("scroll", handleScroll);
       clearInterval(scanPollTimer);
     });
 
@@ -14533,6 +14559,9 @@ const App = {
       copyOriginUrl,
       triggerPwaInstall,
       forceHardRefresh,
+      showBackToTop,
+      scrollToTop,
+      isPlayerRoute,
     };
   },
 };

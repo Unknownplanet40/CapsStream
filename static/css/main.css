@@ -7121,8 +7121,8 @@ body.kids-mode-theme .suggestion-tag:hover {
 
 .achievements-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
-  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.15rem;
 }
 
 .achievement-card {
@@ -7133,9 +7133,11 @@ body.kids-mode-theme .suggestion-tag:hover {
   display: flex;
   align-items: flex-start;
   gap: 0.85rem;
-  transition: all 0.25s ease;
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;
+  min-height: 105px;
 }
 
 .achievement-card:hover {
@@ -7155,6 +7157,7 @@ body.kids-mode-theme .suggestion-tag:hover {
 .achievement-card.rarity-bronze.unlocked .achievement-icon-wrapper {
   background: rgba(205, 127, 50, 0.2);
   border-color: rgba(205, 127, 50, 0.5);
+  color: #cd7f32;
   filter: drop-shadow(0 2px 6px rgba(205, 127, 50, 0.3));
 }
 
@@ -7172,6 +7175,7 @@ body.kids-mode-theme .suggestion-tag:hover {
 .achievement-card.rarity-silver.unlocked .achievement-icon-wrapper {
   background: rgba(192, 192, 192, 0.22);
   border-color: rgba(192, 192, 192, 0.6);
+  color: #e2e8f0;
   filter: drop-shadow(0 2px 6px rgba(192, 192, 192, 0.35));
 }
 
@@ -7189,6 +7193,7 @@ body.kids-mode-theme .suggestion-tag:hover {
 .achievement-card.rarity-gold.unlocked .achievement-icon-wrapper {
   background: rgba(255, 215, 0, 0.25);
   border-color: rgba(255, 215, 0, 0.65);
+  color: #ffd700;
   filter: drop-shadow(0 2px 8px rgba(255, 215, 0, 0.4));
 }
 
@@ -7206,6 +7211,7 @@ body.kids-mode-theme .suggestion-tag:hover {
 .achievement-card.rarity-platinum.unlocked .achievement-icon-wrapper {
   background: rgba(168, 85, 247, 0.28);
   border-color: rgba(6, 182, 212, 0.7);
+  color: #c084fc;
   filter: drop-shadow(0 2px 10px rgba(168, 85, 247, 0.5));
 }
 
@@ -7217,13 +7223,16 @@ body.kids-mode-theme .suggestion-tag:hover {
   width: 44px;
   height: 44px;
   min-width: 44px;
+  min-height: 44px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.05);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.6rem;
+  font-size: 1.5rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+  color: var(--text-muted);
 }
 
 .achievement-info {
@@ -7235,17 +7244,20 @@ body.kids-mode-theme .suggestion-tag:hover {
 
 .achievement-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 5px;
+  flex-wrap: wrap;
 }
 
 .achievement-title {
   font-weight: 700;
-  font-size: 0.9rem;
-  color: var(--text-secondary);
+  font-size: 0.92rem;
+  color: var(--text-primary);
   line-height: 1.3;
+  word-break: break-word;
+  flex: 1 1 120px;
 }
 
 .achievement-badge-group {
@@ -7304,19 +7316,20 @@ body.kids-mode-theme .suggestion-tag:hover {
 }
 
 .achievement-desc {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   color: var(--text-muted);
   line-height: 1.35;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  word-break: break-word;
 }
 
 .achievement-unlocked-date {
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   margin-top: auto;
 }
 
@@ -12565,6 +12578,73 @@ h1, h2, h3,
   text-align: center;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.95), 0 0 30px rgba(229, 9, 20, 0.3);
   animation: slideUpModal 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ─── Floating Back to Top Button ───────────────────────────── */
+.back-to-top-btn {
+  position: fixed;
+  bottom: 2.25rem;
+  right: 2.25rem;
+  z-index: 999;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0.65rem 1.15rem;
+  border-radius: 999px;
+  background: rgba(18, 18, 28, 0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.65), 0 0 1px rgba(255, 255, 255, 0.2);
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+  user-select: none;
+}
+
+.back-to-top-btn i {
+  font-size: 1.1rem;
+  transition: transform 0.25s ease;
+}
+
+.back-to-top-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  transform: translateY(-4px) scale(1.05);
+  box-shadow: 0 12px 35px rgba(229, 9, 20, 0.45), 0 0 20px rgba(229, 9, 20, 0.35);
+}
+
+.back-to-top-btn:hover i {
+  transform: translateY(-2px);
+}
+
+.back-to-top-btn:active {
+  transform: translateY(-1px) scale(0.98);
+}
+
+/* Floating button entrance/exit animation */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.fade-slide-enter-from,
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(16px) scale(0.9);
+}
+
+@media (max-width: 768px) {
+  .back-to-top-btn {
+    bottom: 1.5rem;
+    right: 1.5rem;
+    padding: 0.6rem 0.95rem;
+  }
 }
 
 
