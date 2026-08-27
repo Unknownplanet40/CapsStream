@@ -9236,6 +9236,7 @@ const PlayerPage = {
       drawerSeasonsList,
       drawerEpisodesList,
       playEpisodeFromDrawer,
+      calcProgressPercent,
       isSeriesMedia,
       showQueueDrawer,
       toggleQueueDrawer,
