@@ -13,15 +13,15 @@ import json
 import threading
 import subprocess
 
-# Ensure UTF-8 output encoding on Windows so emojis/unicode never crash stdout
+# Ensure UTF-8 output encoding and line buffering on Windows so logs flush immediately and emojis/unicode never crash stdout
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     except Exception:
         pass
 if sys.stderr and hasattr(sys.stderr, "reconfigure"):
     try:
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     except Exception:
         pass
 

@@ -205,22 +205,31 @@ jobs:
         run: |
           NEW_VER="${{ needs.semantic-bump.outputs.new_version }}"
           ZIP="CapsStream-update-${NEW_VER}.zip"
+          # Package ENTIRE trees (not a hardcoded file list) so newly added
+          # files (icons, PWA assets, routes, new templates) are always included in updates.
           zip -r "$ZIP" \
             app.py \
-            backend \
-            silent_launcher.py \
-            -x "backend/__pycache__/*" "backend/**/__pycache__/*"
-          zip "$ZIP" \
-            static/js/app.js \
-            static/css/main.css \
-            static/img/favicon.png \
-            static/sfx/bell.wav \
-            templates/index.html \
             requirements.txt \
             start.bat \
             update.bat \
+            silent_launcher.py \
             "Start CapsStream Silent.vbs" \
-            VERSION
+            VERSION \
+            backend \
+            routes \
+            static \
+            templates \
+            -x "*__pycache__*" "*.pyc" "*.pyo"
+
+          # Gate: refuse to publish an incomplete package
+          for f in app.py VERSION backend routes static/js/app.js static/css/main.css static/img/icon-192.png static/img/icon-512.png templates/index.html; do
+            if ! unzip -l "$ZIP" | grep -q "$f"; then
+              echo "::error::Update zip is missing critical file: $f"
+              exit 1
+            fi
+          done
+
+          sha256sum "$ZIP" > sha256sums.txt
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
           unzip -l "$ZIP"
 
@@ -239,4 +248,6 @@ jobs:
 
             Auto-released via conventional commits.
           generate_release_notes: true
-          files: ${{ env.ZIP }}
+          files: |
+            ${{ env.ZIP }}
+            sha256sums.txt

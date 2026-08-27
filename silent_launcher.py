@@ -237,11 +237,12 @@ def start_server(cfg):
     """Spawn the Flask server under pythonw (no window). Returns the Popen."""
     log_file = os.path.join(LOG_DIR, f"capsstream_{datetime.now():%Y%m%d}.log")
     creationflags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
-    log_handle = open(log_file, "a", encoding="utf-8")
+    log_handle = open(log_file, "a", encoding="utf-8", buffering=1)
     log("Spawning server process (pythonw app.py)")
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
         [PYTHONW, APP_SCRIPT],
         cwd=ROOT,
@@ -277,7 +278,10 @@ def find_browser_exe(choice):
 
 
 def is_capsstream_window_visible(url, browser_proc=None):
-    """Check if any visible browser window or PWA window is displaying CapsStream for the target port."""
+    """
+    Check if any visible or minimized browser window or PWA window is displaying CapsStream.
+    Returns True if at least one CapsStream window exists (active or minimized).
+    """
     if os.name != "nt":
         return False
     try:
@@ -287,7 +291,7 @@ def is_capsstream_window_visible(url, browser_proc=None):
         port_str = f":{target_port}"
         url_clean = f"{parsed.hostname}{port_str}".lower()
         url_alt = f"localhost{port_str}".lower()
-        
+
         user32 = ctypes.windll.user32
         psapi = ctypes.windll.psapi
         kernel32 = ctypes.windll.kernel32
@@ -295,6 +299,7 @@ def is_capsstream_window_visible(url, browser_proc=None):
         GetWindowTextW = user32.GetWindowTextW
         GetWindowTextLengthW = user32.GetWindowTextLengthW
         IsWindowVisible = user32.IsWindowVisible
+        IsIconic = user32.IsIconic
         GetWindowThreadProcessId = user32.GetWindowThreadProcessId
         OpenProcess = kernel32.OpenProcess
         CloseHandle = kernel32.CloseHandle
@@ -305,17 +310,23 @@ def is_capsstream_window_visible(url, browser_proc=None):
 
         found = [False]
 
+        known_browsers = (
+            "msedge", "chrome", "brave", "opera", "vivaldi",
+            "firefox", "arc", "applicationframehost"
+        )
+
         def foreach_window(hwnd, lParam):
-            if IsWindowVisible(hwnd):
+            # Window must be visible or minimized (iconic)
+            if IsWindowVisible(hwnd) or IsIconic(hwnd):
                 length = GetWindowTextLengthW(hwnd)
                 if length > 0:
                     buff = ctypes.create_unicode_buffer(length + 1)
                     GetWindowTextW(hwnd, buff, length + 1)
-                    title = buff.value.lower()
+                    title = buff.value.strip().lower()
 
                     pid = ctypes.c_ulong()
                     GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                    
+
                     if browser_proc is not None and browser_proc.poll() is None and pid.value == browser_proc.pid:
                         found[0] = True
                         return False
@@ -328,8 +339,8 @@ def is_capsstream_window_visible(url, browser_proc=None):
                             pname = p_buff.value.lower()
                         CloseHandle(hProcess)
 
-                    if any(b in pname for b in ["msedge", "chrome", "brave", "opera", "vivaldi"]):
-                        if url_clean in title or url_alt in title or (port_str in title and "capsstream" in title):
+                    if any(b in pname for b in known_browsers):
+                        if "capsstream" in title or url_clean in title or url_alt in title or port_str in title:
                             found[0] = True
                             return False
             return True
@@ -337,7 +348,8 @@ def is_capsstream_window_visible(url, browser_proc=None):
         WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
         user32.EnumWindows(WNDENUMPROC(foreach_window), 0)
         return found[0]
-    except Exception:
+    except Exception as e:
+        log(f"Window detection notice: {e}")
         return False
 
 
@@ -403,6 +415,8 @@ def main():
     log("=" * 50)
     log("CapsStream silent launcher starting")
 
+    from_restart = "--restarted" in sys.argv or "--from-restart" in sys.argv or "--no-browser" in sys.argv
+
     if not os.path.isfile(PYTHONW):
         fail(f"pythonw.exe not found at:\n{PYTHONW}")
     if not os.path.isfile(APP_SCRIPT):
@@ -413,7 +427,7 @@ def main():
 
     pre_flight()
 
-    # Re-run safety: if a server is already up, just open a window and exit
+    # Re-run safety: if a server is already up, just attach to it
     already_up = server_responding(url)
     server = None
     if already_up:
@@ -447,17 +461,29 @@ def main():
         log("Launcher exiting (server keeps running; stop it via Task Manager or start.bat)")
         return
 
-    browser_proc = launch_app_window(cfg, url)
-    send_toast("CapsStream is running", f"Serving at {url}")
-    log(f"CapsStream window launched for {url} — monitoring window visibility until closed")
+    browser_proc = None
+    window_already_open = is_capsstream_window_visible(url)
 
-    # Initial grace period for window to render and be visible
+    if from_restart or window_already_open:
+        log(f"CapsStream window detected (from_restart={from_restart}, window_open={window_already_open}) — attaching to existing window")
+    else:
+        browser_proc = launch_app_window(cfg, url)
+        send_toast("CapsStream is running", f"Serving at {url}")
+        log(f"CapsStream window launched for {url} — monitoring window visibility until closed")
+
+    # Initial grace period for window to render / reload and be visible
     start_wait = time.time()
-    while time.time() - start_wait < 10:
+    grace_seconds = 12 if from_restart else 8
+    while time.time() - start_wait < grace_seconds:
         if is_capsstream_window_visible(url, browser_proc):
             log("CapsStream window active — entered monitoring loop")
             break
         time.sleep(0.5)
+    else:
+        # If launched from restart and no window was found after grace, launch browser as fallback
+        if from_restart and not is_capsstream_window_visible(url, browser_proc):
+            log("No existing window detected after restart grace period — launching app window")
+            browser_proc = launch_app_window(cfg, url)
 
     no_window_since = None
     try:
@@ -465,10 +491,9 @@ def main():
             # Server died on its own → nothing to manage anymore
             if server is not None and server.poll() is not None:
                 log("Server process exited on its own — launcher exiting")
-                send_toast("CapsStream server exited", "The server process stopped unexpectedly. Check logs/ for details.")
                 break
 
-            # Check if any CapsStream window (PWA or standalone) matching this URL is currently open
+            # Check if any CapsStream window (PWA or standalone or tab) matching this URL is currently open
             if not is_capsstream_window_visible(url, browser_proc):
                 if no_window_since is None:
                     no_window_since = time.time()

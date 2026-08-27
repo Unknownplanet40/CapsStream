@@ -12,6 +12,8 @@ data/**
 !data/templates
 data/templates/**
 !data/templates/fresh_capsstream.db
+backend/data/
+
 
 # ─── Media & large runtimes (user-provided, never committed) ─
 winpython/

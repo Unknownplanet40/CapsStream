@@ -352,15 +352,20 @@ import time
 pid = int(sys.argv[1])
 root = sys.argv[2]
 log_path = os.path.join(root, "data", "update_restart.log")
+today_log_name = time.strftime("capsstream_%Y%m%d.log")
+today_log_path = os.path.join(root, "logs", today_log_name)
 
 
 def log(msg):
-    try:
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(time.strftime("[%Y-%m-%d %H:%M:%S] ") + msg + "\\n")
-    except Exception:
-        pass
+    ts = time.strftime("[%Y-%m-%d %H:%M:%S] ")
+    line = ts + msg + "\\n"
+    for p in (log_path, today_log_path):
+        try:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
 
 
 def pid_alive(target):
@@ -405,27 +410,26 @@ if not os.path.isfile(python_exe):
     python_exe = sys.executable
 
 launcher_script = os.path.join(root, "silent_launcher.py")
-today_log_name = time.strftime("capsstream_%Y%m%d.log")
-today_log_path = os.path.join(root, "logs", today_log_name)
-try:
-    os.makedirs(os.path.join(root, "logs"), exist_ok=True)
-except Exception:
-    pass
 
 try:
     if os.path.isfile(launcher_script):
         subprocess.Popen(
-            [python_exe, launcher_script],
+            [python_exe, launcher_script, "--restarted"],
             cwd=root,
             stdin=subprocess.DEVNULL,
             close_fds=True,
         )
-        log("silent_launcher relaunched (logging to logs/ and window monitoring active)")
+        log("silent_launcher relaunched with --restarted (monitoring existing window and active log)")
     else:
         out = open(today_log_path, "a", encoding="utf-8")
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONUNBUFFERED"] = "1"
         subprocess.Popen(
             [python_exe, os.path.join(root, "app.py")],
             cwd=root,
+            env=env,
             stdout=out,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
