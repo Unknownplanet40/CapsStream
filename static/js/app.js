@@ -5615,58 +5615,14 @@ const PlayerPage = {
 
         <!-- Bottom Bar (Disabled when showResumeModal is true) -->
         <div class="custom-player-bottom" :class="{ 'resume-active-disabled': showResumeModal }">
-          <!-- Side-by-Side Row above Seekbar: Show Info (LEFT), Auto-Advance Countdown (RIGHT) -->
-          <div class="player-overlay-row" v-if="(showNextEp && isEnded) || (!isPlaying && media)">
-            <!-- Paused Media Info (LEFT SIDE: Logo/Title & Description, strictly when paused) -->
-            <div v-if="!isPlaying && media" class="player-paused-info">
+          <!-- Side-by-Side Row above Seekbar: Show Info (LEFT) strictly when paused -->
+          <div class="player-overlay-row" v-if="!isPlaying && media">
+            <div class="player-paused-info">
               <div class="player-paused-logo-container">
                 <img v-if="media.logo_path" :src="imgUrl(media.logo_path)" :alt="media.title" class="player-paused-logo" />
                 <h2 v-else class="player-paused-title">{{ media.title }}</h2>
               </div>
               <p v-if="media.overview" class="player-paused-overview">{{ media.overview }}</p>
-            </div>
-            <div v-else></div>
-
-            <!-- Next Episode Auto-Advance Card (RIGHT SIDE: Strictly when isEnded) -->
-            <div v-if="showNextEp && isEnded" class="next-ep-bottom-container">
-              <button class="btn-next-ep-bottom is-ended" @click="handleNextEpClick" id="player-next-btn">
-                <div class="next-ep-thumb">
-                  <img
-                    v-if="nextEp && (nextEp.still_path || nextEp.backdrop_path || media.backdrop_path)"
-                    :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || media.backdrop_path)"
-                    @error="e => e.target.style.display = 'none'"
-                  />
-                  <div v-else class="next-ep-thumb-fallback"><i class="ph ph-television"></i></div>
-                  <div class="next-ep-ring-wrapper">
-                    <svg class="next-ep-ring-svg" viewBox="0 0 36 36">
-                      <path
-                        class="next-ep-ring-bg"
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      />
-                      <path
-                        class="next-ep-ring-fill"
-                        :style="{ strokeDasharray: nextEpProgressPercent + ', 100' }"
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      />
-                    </svg>
-                    <span class="next-ep-countdown-text">{{ Math.ceil(nextEpCountdownSeconds) }}</span>
-                  </div>
-                </div>
-                <div class="next-ep-meta">
-                  <span class="next-ep-label">Up Next in {{ Math.ceil(nextEpCountdownSeconds) }}s</span>
-                  <span class="next-ep-title" :title="nextEp.ep_title || nextEp.title">
-                    {{ nextEp.ep_title || nextEp.title }}
-                  </span>
-                  <span class="next-ep-code" v-if="nextEp.season || nextEp.episode">
-                    S{{ (nextEp.season||1).toString().padStart(2,'0') }}E{{ (nextEp.episode||1).toString().padStart(2,'0') }}
-                  </span>
-                  <span class="next-ep-dur" v-if="nextEp.duration">{{ formatDuration(nextEp.duration) }}</span>
-                </div>
-              </button>
-
-              <button class="btn-next-ep-cancel" @click.stop="cancelAutoAdvance" title="Cancel Auto-Advance">
-                <i class="ph ph-x"></i>
-              </button>
             </div>
           </div>
 
@@ -6039,41 +5995,17 @@ const PlayerPage = {
         </div>
       </div>
 
-      <!-- Floating Skip Intro / Recap / Outro Pill Button -->
-      <div v-if="activeSkipAction" class="player-skip-container" @click.stop>
+      <!-- Floating Skip Intro / Recap Pill Button -->
+      <div v-if="activeSkipAction && !(showCreditsShrink && hasNextEp) && activeSkipAction.type !== 'Next'" class="player-skip-container" @click.stop>
         <button class="player-skip-btn" @click="executeSkipAction" id="player-skip-btn">
-          <!-- Next Episode: thumbnail + episode details -->
-          <template v-if="activeSkipAction.type === 'Next' && nextEp">
-            <div class="next-ep-thumb skip">
-              <img
-                v-if="nextEp.still_path || nextEp.backdrop_path || media.backdrop_path"
-                :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || media.backdrop_path)"
-                @error="e => e.target.style.display = 'none'"
-              />
-              <div v-else class="next-ep-thumb-fallback"><i class="ph ph-television"></i></div>
-              <span class="next-ep-dur" v-if="nextEp.duration">{{ formatDuration(nextEp.duration) }}</span>
-            </div>
-            <div class="player-skip-meta">
-              <span class="player-skip-label">Up Next</span>
-              <span class="player-skip-title">Next Episode</span>
-              <span class="player-skip-sub" v-if="nextEp.season || nextEp.episode">
-                S{{ (nextEp.season||1).toString().padStart(2,'0') }}E{{ (nextEp.episode||1).toString().padStart(2,'0') }}
-                <template v-if="nextEp.ep_title"> · {{ nextEp.ep_title }}</template>
-              </span>
-            </div>
-          </template>
-
-          <!-- Other segments: icon chip -->
-          <template v-else>
-            <div class="player-skip-icon">
-              <i class="ph ph-fast-forward"></i>
-            </div>
-            <div class="player-skip-meta">
-              <span class="player-skip-label">Skip</span>
-              <span class="player-skip-title">{{ activeSkipAction.type }}</span>
-              <span class="player-skip-sub">Jump to {{ formatSecToTime(activeSkipAction.end) }}</span>
-            </div>
-          </template>
+          <div class="player-skip-icon">
+            <i class="ph ph-fast-forward"></i>
+          </div>
+          <div class="player-skip-meta">
+            <span class="player-skip-label">Skip</span>
+            <span class="player-skip-title">{{ activeSkipAction.type }}</span>
+            <span class="player-skip-sub">Jump to {{ formatSecToTime(activeSkipAction.end) }}</span>
+          </div>
         </button>
       </div>
 
