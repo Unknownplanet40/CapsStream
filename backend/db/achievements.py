@@ -12,6 +12,7 @@ ACHIEVEMENTS = [
         "title": "First Steps",
         "icon": "ph-film-strip",
         "description": "Watch your first video title in CapsStream",
+        "hint": "Press play on any movie or TV episode in your library to start streaming.",
         "category": "Milestones",
         "rarity": "Bronze"
     },
@@ -20,6 +21,7 @@ ACHIEVEMENTS = [
         "title": "Marathon Runner",
         "icon": "ph-timer",
         "description": "Accumulate 5 hours of total watch time",
+        "hint": "Stream movies or episodes until your total watch time reaches 5 hours.",
         "category": "Milestones",
         "rarity": "Silver"
     },
@@ -28,6 +30,7 @@ ACHIEVEMENTS = [
         "title": "Binge Titan",
         "icon": "ph-trophy",
         "description": "Accumulate 24 hours of total watch time",
+        "hint": "Keep streaming your favorite series and films to reach 24 total hours of watch time.",
         "category": "Milestones",
         "rarity": "Gold"
     },
@@ -36,6 +39,7 @@ ACHIEVEMENTS = [
         "title": "100 Hour Club",
         "icon": "ph-hourglass-high",
         "description": "Accumulate 100 hours of total watch time",
+        "hint": "Accumulate 100 total hours of watch time across all library titles.",
         "category": "Milestones",
         "rarity": "Platinum"
     },
@@ -44,6 +48,7 @@ ACHIEVEMENTS = [
         "title": "Cinephile Legend",
         "icon": "ph-popcorn",
         "description": "Complete 5 or more movies or episodes",
+        "hint": "Watch 5 or more movies or episodes all the way to completion.",
         "category": "Milestones",
         "rarity": "Silver"
     },
@@ -52,6 +57,7 @@ ACHIEVEMENTS = [
         "title": "Master Completer",
         "icon": "ph-medal",
         "description": "Complete 20 or more titles or episodes",
+        "hint": "Complete 20 or more full movies or episodes to reach master status.",
         "category": "Milestones",
         "rarity": "Platinum"
     },
@@ -60,6 +66,7 @@ ACHIEVEMENTS = [
         "title": "Titan Completer",
         "icon": "ph-crown",
         "description": "Complete 50 or more titles or episodes",
+        "hint": "Complete 50 or more full movies or episodes to reach titan status.",
         "category": "Milestones",
         "rarity": "Platinum"
     },
@@ -68,6 +75,7 @@ ACHIEVEMENTS = [
         "title": "3-Day Streak",
         "icon": "ph-fire",
         "description": "Watch media 3 days in a row",
+        "hint": "Stream at least one title per day for 3 consecutive days.",
         "category": "Milestones",
         "rarity": "Bronze"
     },
@@ -76,6 +84,7 @@ ACHIEVEMENTS = [
         "title": "Weekly Streak",
         "icon": "ph-fire-simple",
         "description": "Watch media every day for a full week",
+        "hint": "Keep your daily viewing streak alive for a full 7-day week.",
         "category": "Milestones",
         "rarity": "Silver"
     },
@@ -84,6 +93,7 @@ ACHIEVEMENTS = [
         "title": "Monthly Legend",
         "icon": "ph-trophy",
         "description": "Watch media 30 days in a row",
+        "hint": "Stream media every single day for 30 consecutive days.",
         "category": "Milestones",
         "rarity": "Gold"
     },
@@ -92,6 +102,7 @@ ACHIEVEMENTS = [
         "title": "Ten Down",
         "icon": "ph-books",
         "description": "Watch at least 10 different library titles",
+        "hint": "Discover and watch at least 10 different library titles.",
         "category": "Milestones",
         "rarity": "Bronze"
     },
@@ -100,6 +111,7 @@ ACHIEVEMENTS = [
         "title": "Library Veteran",
         "icon": "ph-film-slate",
         "description": "Watch at least 50 different library titles",
+        "hint": "Explore and watch at least 50 different library titles.",
         "category": "Milestones",
         "rarity": "Gold"
     },
@@ -108,6 +120,7 @@ ACHIEVEMENTS = [
         "title": "Centurion Streamer",
         "icon": "ph-sparkle",
         "description": "Watch at least 100 different library titles",
+        "hint": "Stream at least 100 different titles across your entire media library.",
         "category": "Milestones",
         "rarity": "Platinum"
     },
@@ -116,6 +129,7 @@ ACHIEVEMENTS = [
         "title": "Quick Bite",
         "icon": "ph-lightning",
         "description": "Complete a short watch session (under 15m)",
+        "hint": "Watch a short video or clip under 15 minutes in length.",
         "category": "Milestones",
         "rarity": "Bronze"
     },
@@ -124,6 +138,7 @@ ACHIEVEMENTS = [
         "title": "Feature Length",
         "icon": "ph-film-strip",
         "description": "Watch a single session over 2 hours long",
+        "hint": "Enjoy a continuous streaming session lasting over 2 hours in one sitting.",
         "category": "Milestones",
         "rarity": "Silver"
     },
@@ -132,6 +147,7 @@ ACHIEVEMENTS = [
         "title": "Mega Marathon",
         "icon": "ph-trophy",
         "description": "Watch a single continuous session over 4 hours long",
+        "hint": "Host a continuous binge session running over 4 hours of uninterrupted playback.",
         "category": "Milestones",
         "rarity": "Gold"
     },
@@ -140,6 +156,7 @@ ACHIEVEMENTS = [
         "title": "Finish Line",
         "icon": "ph-check-circle",
         "description": "Complete your very first movie or show episode",
+        "hint": "Watch any movie or episode all the way through to the closing credits.",
         "category": "Milestones",
         "rarity": "Bronze"
     },
@@ -148,6 +165,7 @@ ACHIEVEMENTS = [
         "title": "Halfway Hero",
         "icon": "ph-medal",
         "description": "Reach 50% completion on a series",
+        "hint": "Reach 50% episode completion on any TV series or anime season.",
         "category": "Milestones",
         "rarity": "Silver"
     },
@@ -156,6 +174,7 @@ ACHIEVEMENTS = [
         "title": "Season Finale",
         "icon": "ph-medal",
         "description": "Watch the final episode of any TV season",
+        "hint": "Watch the final episode of any TV or anime season to the end.",
         "category": "Milestones",
         "rarity": "Silver"
     },
@@ -164,6 +183,7 @@ ACHIEVEMENTS = [
         "title": "Roll Credits",
         "icon": "ph-film-slate",
         "description": "Watch a movie all the way through to 100%",
+        "hint": "Watch a full-length movie through 100% of its duration.",
         "category": "Milestones",
         "rarity": "Bronze"
     },
@@ -172,6 +192,7 @@ ACHIEVEMENTS = [
         "title": "Night Owl",
         "icon": "ph-moon",
         "description": "Watch a title late at night (12 AM - 4 AM)",
+        "hint": "Stream a movie or episode late at night between 12:00 AM and 4:00 AM.",
         "category": "Viewing Habits",
         "rarity": "Silver"
     },
@@ -180,6 +201,7 @@ ACHIEVEMENTS = [
         "title": "Early Bird",
         "icon": "ph-sun",
         "description": "Watch a title early in the morning (5 AM - 8 AM)",
+        "hint": "Stream a title early in the morning between 5:00 AM and 8:00 AM.",
         "category": "Viewing Habits",
         "rarity": "Bronze"
     },
@@ -188,6 +210,7 @@ ACHIEVEMENTS = [
         "title": "Midnight Marauder",
         "icon": "ph-moon",
         "description": "Start playing video exactly at midnight",
+        "hint": "Start playing a video title around midnight (11:59 PM - 12:05 AM).",
         "category": "Viewing Habits",
         "rarity": "Silver"
     },
@@ -196,6 +219,7 @@ ACHIEVEMENTS = [
         "title": "Lunch Streamer",
         "icon": "ph-timer",
         "description": "Watch media during lunch hour (12 PM - 2 PM)",
+        "hint": "Watch media during lunch hours between 12:00 PM and 2:00 PM.",
         "category": "Viewing Habits",
         "rarity": "Bronze"
     },
@@ -204,6 +228,7 @@ ACHIEVEMENTS = [
         "title": "Prime Time",
         "icon": "ph-timer",
         "description": "Watch media during evening prime time (8 PM - 10 PM)",
+        "hint": "Stream your favorite titles during evening prime time (8:00 PM - 10:00 PM).",
         "category": "Viewing Habits",
         "rarity": "Bronze"
     },
@@ -212,6 +237,7 @@ ACHIEVEMENTS = [
         "title": "Weekend Warrior",
         "icon": "ph-calendar-check",
         "description": "Stream 5 or more titles during Saturday & Sunday",
+        "hint": "Stream 5 or more titles during a Saturday and Sunday weekend.",
         "category": "Viewing Habits",
         "rarity": "Silver"
     },
@@ -220,6 +246,7 @@ ACHIEVEMENTS = [
         "title": "Monday Cure",
         "icon": "ph-sun",
         "description": "Watch a movie or episode on a Monday",
+        "hint": "Kick off your week with a movie or episode on a Monday.",
         "category": "Viewing Habits",
         "rarity": "Bronze"
     },
@@ -228,6 +255,7 @@ ACHIEVEMENTS = [
         "title": "Friday Movie Night",
         "icon": "ph-film-strip",
         "description": "Stream a movie on Friday night",
+        "hint": "Relax with a movie or show on a Friday night.",
         "category": "Viewing Habits",
         "rarity": "Bronze"
     },
@@ -236,6 +264,7 @@ ACHIEVEMENTS = [
         "title": "Dawn Patrol",
         "icon": "ph-medal",
         "description": "Watch media right at sunrise",
+        "hint": "Watch a title right at sunrise in the early dawn hours.",
         "category": "Viewing Habits",
         "rarity": "Silver"
     },
@@ -244,6 +273,7 @@ ACHIEVEMENTS = [
         "title": "Afternoon Matinee",
         "icon": "ph-medal",
         "description": "Watch a movie between 2 PM and 5 PM",
+        "hint": "Enjoy an afternoon matinee movie between 2:00 PM and 5:00 PM.",
         "category": "Viewing Habits",
         "rarity": "Bronze"
     },
@@ -252,6 +282,7 @@ ACHIEVEMENTS = [
         "title": "Daily Ritual",
         "icon": "ph-medal",
         "description": "Watch at least one title every day for 5 days",
+        "hint": "Stream at least one title every day for 5 consecutive days.",
         "category": "Viewing Habits",
         "rarity": "Silver"
     },
@@ -260,6 +291,7 @@ ACHIEVEMENTS = [
         "title": "Binge Session",
         "icon": "ph-medal",
         "description": "Watch 3 consecutive episodes in one sitting",
+        "hint": "Watch 3 consecutive episodes of a series in one sitting.",
         "category": "Viewing Habits",
         "rarity": "Silver"
     },
@@ -268,6 +300,7 @@ ACHIEVEMENTS = [
         "title": "Triple Feature",
         "icon": "ph-trophy",
         "description": "Watch 3 full movies in a single day",
+        "hint": "Watch 3 full-length movies within a single day.",
         "category": "Viewing Habits",
         "rarity": "Gold"
     },
@@ -276,6 +309,7 @@ ACHIEVEMENTS = [
         "title": "All Nighter",
         "icon": "ph-moon",
         "description": "Stream continuously from 1 AM to 6 AM",
+        "hint": "Stream continuously through the late night from 1:00 AM to 6:00 AM.",
         "category": "Viewing Habits",
         "rarity": "Gold"
     },
@@ -284,6 +318,7 @@ ACHIEVEMENTS = [
         "title": "Tea Break",
         "icon": "ph-timer",
         "description": "Watch a short episode during afternoon tea time",
+        "hint": "Watch a short episode or video during afternoon tea time (3:00 PM - 5:00 PM).",
         "category": "Viewing Habits",
         "rarity": "Bronze"
     },
@@ -292,6 +327,7 @@ ACHIEVEMENTS = [
         "title": "Like Clockwork",
         "icon": "ph-timer",
         "description": "Stream at the exact same hour 3 days in a row",
+        "hint": "Stream media at the exact same hour of the day across 3 consecutive days.",
         "category": "Viewing Habits",
         "rarity": "Silver"
     },
@@ -300,6 +336,7 @@ ACHIEVEMENTS = [
         "title": "Holiday Binger",
         "icon": "ph-sun",
         "description": "Watch media during a weekend holiday",
+        "hint": "Stream media during a weekend or holiday season.",
         "category": "Viewing Habits",
         "rarity": "Silver"
     },
@@ -308,6 +345,7 @@ ACHIEVEMENTS = [
         "title": "Silent Watcher",
         "icon": "ph-timer",
         "description": "Watch media late night with muted or low volume",
+        "hint": "Watch media late at night with volume muted or set below 20%.",
         "category": "Viewing Habits",
         "rarity": "Bronze"
     },
@@ -316,6 +354,7 @@ ACHIEVEMENTS = [
         "title": "Season Marathoner",
         "icon": "ph-trophy",
         "description": "Finish an entire season of a show in under 48 hours",
+        "hint": "Finish an entire season of a TV show in under 48 hours.",
         "category": "Viewing Habits",
         "rarity": "Gold"
     },
@@ -324,6 +363,7 @@ ACHIEVEMENTS = [
         "title": "Non-Stop Streamer",
         "icon": "ph-diamond",
         "description": "Log watch activity for 14 straight days",
+        "hint": "Log watch activity across 14 straight consecutive days.",
         "category": "Viewing Habits",
         "rarity": "Platinum"
     },
@@ -332,6 +372,7 @@ ACHIEVEMENTS = [
         "title": "Speed Demon",
         "icon": "ph-lightning",
         "description": "Watch video content at accelerated speed (1.25x+)",
+        "hint": "Set playback speed to 1.25x or faster in player settings.",
         "category": "Player Master",
         "rarity": "Bronze"
     },
@@ -340,6 +381,7 @@ ACHIEVEMENTS = [
         "title": "Lightning Speed",
         "icon": "ph-trophy",
         "description": "Watch video at 2.0x maximum speed",
+        "hint": "Set playback speed to 2.0x maximum speed in player settings.",
         "category": "Player Master",
         "rarity": "Silver"
     },
@@ -348,6 +390,7 @@ ACHIEVEMENTS = [
         "title": "Detail Analyst",
         "icon": "ph-trophy",
         "description": "Watch video at 0.5x slow-motion playback speed",
+        "hint": "Set playback speed to 0.5x to inspect scenes in slow motion.",
         "category": "Player Master",
         "rarity": "Bronze"
     },
@@ -356,6 +399,7 @@ ACHIEVEMENTS = [
         "title": "Subtitle Connoisseur",
         "icon": "ph-trophy",
         "description": "Apply custom subtitles to your playback",
+        "hint": "Turn on or load custom subtitles during video playback.",
         "category": "Player Master",
         "rarity": "Bronze"
     },
@@ -364,6 +408,7 @@ ACHIEVEMENTS = [
         "title": "Subtitle Architect",
         "icon": "ph-trophy",
         "description": "Customize subtitle font size, text color, or box opacity",
+        "hint": "Customize subtitle styling (font size, color, or background) in player subtitle settings.",
         "category": "Player Master",
         "rarity": "Bronze"
     },
@@ -372,6 +417,7 @@ ACHIEVEMENTS = [
         "title": "Audio Specialist",
         "icon": "ph-trophy",
         "description": "Play media with multi-audio stream selection",
+        "hint": "Switch between available audio tracks or language dubs in the player menu.",
         "category": "Player Master",
         "rarity": "Silver"
     },
@@ -380,6 +426,7 @@ ACHIEVEMENTS = [
         "title": "Volume Overdrive",
         "icon": "ph-speaker-high",
         "description": "Boost audio volume past 100% up to 200% gain",
+        "hint": "Boost audio volume past 100% using the player volume overdrive slider.",
         "category": "Player Master",
         "rarity": "Silver"
     },
@@ -388,6 +435,7 @@ ACHIEVEMENTS = [
         "title": "Skip Master",
         "icon": "ph-trophy",
         "description": "Use Skip Intro or Skip Outro feature during playback",
+        "hint": "Click the Skip Intro or Skip Outro button when it appears during playback.",
         "category": "Player Master",
         "rarity": "Bronze"
     },
@@ -396,6 +444,7 @@ ACHIEVEMENTS = [
         "title": "Skip Champion",
         "icon": "ph-trophy",
         "description": "Use Skip Intro 10 or more times",
+        "hint": "Use the Skip Intro button 10 or more times during TV shows or anime.",
         "category": "Player Master",
         "rarity": "Silver"
     },
@@ -404,6 +453,7 @@ ACHIEVEMENTS = [
         "title": "Immersion Master",
         "icon": "ph-corners-out",
         "description": "Toggle fullscreen mode for cinematic playback",
+        "hint": "Click the fullscreen button or press \"F\" to expand video to full screen.",
         "category": "Player Master",
         "rarity": "Bronze"
     },
@@ -412,6 +462,7 @@ ACHIEVEMENTS = [
         "title": "Resume Master",
         "icon": "ph-trophy",
         "description": "Resume playback from where you previously left off",
+        "hint": "Resume playback of a previously paused movie or episode from Continue Watching.",
         "category": "Player Master",
         "rarity": "Bronze"
     },
@@ -420,6 +471,7 @@ ACHIEVEMENTS = [
         "title": "Resolution Switcher",
         "icon": "ph-gauge",
         "description": "Switch video quality streams mid-playback",
+        "hint": "Switch video quality or resolution streams from the player settings menu.",
         "category": "Player Master",
         "rarity": "Bronze"
     },
@@ -428,6 +480,7 @@ ACHIEVEMENTS = [
         "title": "HD Purist",
         "icon": "ph-trophy",
         "description": "Watch content in 1080p Full HD resolution",
+        "hint": "Stream a title in 1080p Full HD resolution.",
         "category": "Player Master",
         "rarity": "Silver"
     },
@@ -436,6 +489,7 @@ ACHIEVEMENTS = [
         "title": "4K Ultra HD King",
         "icon": "ph-trophy",
         "description": "Watch content in 4K Ultra HD resolution",
+        "hint": "Stream a title in pristine 4K Ultra HD resolution.",
         "category": "Player Master",
         "rarity": "Platinum"
     },
@@ -444,6 +498,7 @@ ACHIEVEMENTS = [
         "title": "Precision Seeker",
         "icon": "ph-trophy",
         "description": "Seek forward or backward using player controls",
+        "hint": "Seek forward or backward through video playback using player timeline or arrow keys.",
         "category": "Player Master",
         "rarity": "Bronze"
     },
@@ -452,6 +507,7 @@ ACHIEVEMENTS = [
         "title": "Keyboard Ninja",
         "icon": "ph-trophy",
         "description": "Use keyboard shortcuts to control video",
+        "hint": "Use keyboard shortcuts (Space, F, M, Arrow Keys) to control video playback.",
         "category": "Player Master",
         "rarity": "Silver"
     },
@@ -460,6 +516,7 @@ ACHIEVEMENTS = [
         "title": "Multitasker",
         "icon": "ph-trophy",
         "description": "Use Picture-in-Picture or pop-out window controls",
+        "hint": "Click the Picture-in-Picture icon to pop the video out into a floating window.",
         "category": "Player Master",
         "rarity": "Gold"
     },
@@ -468,6 +525,7 @@ ACHIEVEMENTS = [
         "title": "Stealth Mode",
         "icon": "ph-speaker-simple-slash",
         "description": "Mute and unmute playback using player controls",
+        "hint": "Click the speaker icon or press \"M\" to mute and unmute audio playback.",
         "category": "Player Master",
         "rarity": "Bronze"
     },
@@ -476,6 +534,7 @@ ACHIEVEMENTS = [
         "title": "Auto Advancer",
         "icon": "ph-trophy",
         "description": "Click Next Episode button to start subsequent episode",
+        "hint": "Click the Next Episode button to immediately start the next episode in a series.",
         "category": "Player Master",
         "rarity": "Bronze"
     },
@@ -484,6 +543,7 @@ ACHIEVEMENTS = [
         "title": "Player Grandmaster",
         "icon": "ph-trophy",
         "description": "Use all core player features (subtitles, audio, speed, quality)",
+        "hint": "Use all primary player features: adjust speed, toggle subtitles, select audio, and change quality.",
         "category": "Player Master",
         "rarity": "Platinum"
     },
@@ -492,6 +552,7 @@ ACHIEVEMENTS = [
         "title": "Movie Buff",
         "icon": "ph-film-strip",
         "description": "Watch 3 or more Movie titles",
+        "hint": "Watch 3 or more feature-length Movie titles in your library.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -500,6 +561,7 @@ ACHIEVEMENTS = [
         "title": "Series Addict",
         "icon": "ph-television",
         "description": "Watch 3 or more TV Series",
+        "hint": "Watch 3 or more TV Series or anime shows in your library.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -508,6 +570,7 @@ ACHIEVEMENTS = [
         "title": "Otaku Master",
         "icon": "ph-sparkle",
         "description": "Watch 3 or more Anime titles",
+        "hint": "Watch 3 or more Anime titles in your library.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -516,6 +579,7 @@ ACHIEVEMENTS = [
         "title": "Genre Explorer",
         "icon": "ph-compass",
         "description": "Watch titles across 3 or more distinct genres",
+        "hint": "Watch titles across 3 or more distinct genre categories.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -524,6 +588,7 @@ ACHIEVEMENTS = [
         "title": "Genre Virtuoso",
         "icon": "ph-palette",
         "description": "Watch titles across 8 or more distinct genres",
+        "hint": "Watch titles across 8 or more distinct genre categories.",
         "category": "Discovery",
         "rarity": "Gold"
     },
@@ -532,6 +597,7 @@ ACHIEVEMENTS = [
         "title": "Action Hero",
         "icon": "ph-sword",
         "description": "Watch 3 or more Action movies or series",
+        "hint": "Stream 3 or more high-octane Action movies or series.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -540,6 +606,7 @@ ACHIEVEMENTS = [
         "title": "Laugh Track",
         "icon": "ph-smiley",
         "description": "Watch 3 or more Comedy titles",
+        "hint": "Stream 3 or more hilarious Comedy titles.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -548,6 +615,7 @@ ACHIEVEMENTS = [
         "title": "Drama Enthusiast",
         "icon": "ph-mask-happy",
         "description": "Watch 3 or more Drama titles",
+        "hint": "Stream 3 or more gripping Drama titles.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -556,6 +624,7 @@ ACHIEVEMENTS = [
         "title": "Sci-Fi Voyager",
         "icon": "ph-rocket",
         "description": "Watch 3 or more Sci-Fi & Fantasy titles",
+        "hint": "Stream 3 or more futuristic Sci-Fi & Fantasy titles.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -564,6 +633,7 @@ ACHIEVEMENTS = [
         "title": "Thrill Seeker",
         "icon": "ph-ghost",
         "description": "Watch 3 or more Horror or Thriller titles",
+        "hint": "Stream 3 or more chilling Horror or Thriller titles.",
         "category": "Discovery",
         "rarity": "Silver"
     },
@@ -572,6 +642,7 @@ ACHIEVEMENTS = [
         "title": "Hopeless Romantic",
         "icon": "ph-heart",
         "description": "Watch 3 or more Romance titles",
+        "hint": "Stream 3 or more heartwarming Romance titles.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -580,6 +651,7 @@ ACHIEVEMENTS = [
         "title": "Knowledge Seeker",
         "icon": "ph-graduation-cap",
         "description": "Watch 2 or more Documentary titles",
+        "hint": "Stream 2 or more fascinating Documentary films or docuseries.",
         "category": "Discovery",
         "rarity": "Silver"
     },
@@ -588,6 +660,7 @@ ACHIEVEMENTS = [
         "title": "Toon Collector",
         "icon": "ph-paint-brush",
         "description": "Watch 3 or more Animated movies or shows",
+        "hint": "Stream 3 or more Animated movies or animated shows.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -596,6 +669,7 @@ ACHIEVEMENTS = [
         "title": "Master Detective",
         "icon": "ph-magnifying-glass",
         "description": "Watch 3 or more Crime or Mystery titles",
+        "hint": "Stream 3 or more suspenseful Crime or Mystery titles.",
         "category": "Discovery",
         "rarity": "Silver"
     },
@@ -604,6 +678,7 @@ ACHIEVEMENTS = [
         "title": "Realm Traveler",
         "icon": "ph-magic-wand",
         "description": "Watch 3 or more Fantasy titles",
+        "hint": "Stream 3 or more epic Fantasy titles.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -612,6 +687,7 @@ ACHIEVEMENTS = [
         "title": "Trailer Aficionado",
         "icon": "ph-medal",
         "description": "Watch an official YouTube movie or show trailer",
+        "hint": "Watch an official YouTube movie or TV trailer from any title details page.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -620,6 +696,7 @@ ACHIEVEMENTS = [
         "title": "IMDb Explorer",
         "icon": "ph-medal",
         "description": "Click an IMDb link to view external movie metadata",
+        "hint": "Click an external IMDb or TMDB link on any title details modal.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -628,6 +705,7 @@ ACHIEVEMENTS = [
         "title": "Search Master",
         "icon": "ph-trophy",
         "description": "Use the search bar to find specific titles",
+        "hint": "Use the search bar in the top navigation to search for any title, actor, or genre.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -636,6 +714,7 @@ ACHIEVEMENTS = [
         "title": "Filter Pro",
         "icon": "ph-medal",
         "description": "Filter media by genre or media type in the library",
+        "hint": "Filter your library by genre, release year, or media type on the Browse page.",
         "category": "Discovery",
         "rarity": "Bronze"
     },
@@ -644,6 +723,7 @@ ACHIEVEMENTS = [
         "title": "Omni Viewer",
         "icon": "ph-globe",
         "description": "Watch movies, series, and anime all on one profile",
+        "hint": "Stream at least one Movie, one TV Series, and one Anime title on this profile.",
         "category": "Discovery",
         "rarity": "Gold"
     },
@@ -652,6 +732,7 @@ ACHIEVEMENTS = [
         "title": "Master Curator",
         "icon": "ph-folder-star",
         "description": "Add 3 or more titles to Watchlist or Collections",
+        "hint": "Add 3 or more titles to your Watchlist or custom Collections.",
         "category": "Collector",
         "rarity": "Bronze"
     },
@@ -660,6 +741,7 @@ ACHIEVEMENTS = [
         "title": "Collection Architect",
         "icon": "ph-folder",
         "description": "Create 3 or more custom media Collections",
+        "hint": "Create 3 or more custom media Collections from the Collections tab.",
         "category": "Collector",
         "rarity": "Silver"
     },
@@ -668,6 +750,7 @@ ACHIEVEMENTS = [
         "title": "Collection Empire",
         "icon": "ph-archive",
         "description": "Create 10 or more custom media Collections",
+        "hint": "Organize your media into 10 or more custom Collections.",
         "category": "Collector",
         "rarity": "Gold"
     },
@@ -676,6 +759,7 @@ ACHIEVEMENTS = [
         "title": "Favorite Hoarder",
         "icon": "ph-heart",
         "description": "Add 10 or more items to your Favorites list",
+        "hint": "Add 10 or more items to your Favorites list by clicking the heart icon.",
         "category": "Collector",
         "rarity": "Silver"
     },
@@ -684,6 +768,7 @@ ACHIEVEMENTS = [
         "title": "Favorite Legend",
         "icon": "ph-diamond",
         "description": "Add 25 or more items to your Favorites list",
+        "hint": "Add 25 or more items to your Favorites list by clicking the heart icon.",
         "category": "Collector",
         "rarity": "Gold"
     },
@@ -692,6 +777,7 @@ ACHIEVEMENTS = [
         "title": "Trophy Collector",
         "icon": "ph-medal",
         "description": "Unlock 10 or more achievements in your Trophy Case",
+        "hint": "Unlock 10 or more achievement badges in your Trophy Case.",
         "category": "Collector",
         "rarity": "Bronze"
     },
@@ -700,6 +786,7 @@ ACHIEVEMENTS = [
         "title": "Trophy Specialist",
         "icon": "ph-trophy",
         "description": "Unlock 25 or more achievements in your Trophy Case",
+        "hint": "Unlock 25 or more achievement badges in your Trophy Case.",
         "category": "Collector",
         "rarity": "Silver"
     },
@@ -708,6 +795,7 @@ ACHIEVEMENTS = [
         "title": "Trophy Master",
         "icon": "ph-star",
         "description": "Unlock 50 or more achievements in your Trophy Case",
+        "hint": "Unlock 50 or more achievement badges in your Trophy Case.",
         "category": "Collector",
         "rarity": "Gold"
     },
@@ -716,6 +804,7 @@ ACHIEVEMENTS = [
         "title": "Trophy Legend",
         "icon": "ph-crown",
         "description": "Unlock 75 or more achievements in your Trophy Case",
+        "hint": "Unlock 75 or more achievement badges in your Trophy Case.",
         "category": "Collector",
         "rarity": "Platinum"
     },
@@ -724,6 +813,7 @@ ACHIEVEMENTS = [
         "title": "Grandmaster Completionist",
         "icon": "ph-diamond",
         "description": "Unlock all 100 achievements in your Trophy Case",
+        "hint": "Unlock all 100 achievements across your Trophy Case to reach completionist mastery!",
         "category": "Collector",
         "rarity": "Platinum"
     },
@@ -732,6 +822,7 @@ ACHIEVEMENTS = [
         "title": "Storage Saver",
         "icon": "ph-medal",
         "description": "Have over 10 GB of media mounted in your library",
+        "hint": "Mount and scan a media folder containing over 10 GB of video files.",
         "category": "Collector",
         "rarity": "Bronze"
     },
@@ -740,6 +831,7 @@ ACHIEVEMENTS = [
         "title": "Terabyte Hoarder",
         "icon": "ph-trophy",
         "description": "Have over 100 GB of media mounted in your library",
+        "hint": "Mount and scan a media library containing over 100 GB of total storage.",
         "category": "Collector",
         "rarity": "Gold"
     },
@@ -748,6 +840,7 @@ ACHIEVEMENTS = [
         "title": "Drive Mounter",
         "icon": "ph-medal",
         "description": "Mount external storage paths or drives to your library",
+        "hint": "Add an external drive or custom media directory in Server Settings.",
         "category": "Collector",
         "rarity": "Silver"
     },
@@ -756,6 +849,7 @@ ACHIEVEMENTS = [
         "title": "Multi-Drive Collector",
         "icon": "ph-trophy",
         "description": "Mount 3 or more distinct media folders or drives",
+        "hint": "Mount 3 or more distinct storage paths or media folders in Server Settings.",
         "category": "Collector",
         "rarity": "Gold"
     },
@@ -764,6 +858,7 @@ ACHIEVEMENTS = [
         "title": "HD Vault",
         "icon": "ph-medal",
         "description": "Have at least 10 HD or 4K titles in your media library",
+        "hint": "Have at least 10 HD or 4K video files scanned into your media library.",
         "category": "Collector",
         "rarity": "Silver"
     },
@@ -772,6 +867,7 @@ ACHIEVEMENTS = [
         "title": "Profile Stylist",
         "icon": "ph-user",
         "description": "Customize your avatar icon or theme color",
+        "hint": "Customize your profile with a personalized avatar icon, name, or theme accent color.",
         "category": "Collector",
         "rarity": "Bronze"
     },
@@ -780,6 +876,7 @@ ACHIEVEMENTS = [
         "title": "PIN Defender",
         "icon": "ph-shield-check",
         "description": "Secure your profile with a 4-digit security PIN",
+        "hint": "Protect your profile by setting a 4-digit security PIN in Profile Settings.",
         "category": "Collector",
         "rarity": "Bronze"
     },
@@ -788,6 +885,7 @@ ACHIEVEMENTS = [
         "title": "Family Guardian",
         "icon": "ph-baby",
         "description": "Create a Kids Safe Mode profile",
+        "hint": "Create a Kids Safe Mode profile from the Profile Switcher modal.",
         "category": "Collector",
         "rarity": "Bronze"
     },
@@ -796,6 +894,7 @@ ACHIEVEMENTS = [
         "title": "Library Scanner",
         "icon": "ph-trophy",
         "description": "Run a manual library disk scan from settings",
+        "hint": "Trigger a manual Library Scan from Settings or the Admin menu.",
         "category": "Collector",
         "rarity": "Bronze"
     },
@@ -804,6 +903,7 @@ ACHIEVEMENTS = [
         "title": "Dark Mode Aficionado",
         "icon": "ph-trophy",
         "description": "Explore CapsStream premium dark theme interface",
+        "hint": "Explore CapsStream with the sleek dark theme interface.",
         "category": "Collector",
         "rarity": "Bronze"
     }
@@ -817,6 +917,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Little Streamer",
         "icon": "ph-film-strip",
         "description": "Watch your very first cartoon or movie",
+        "hint": "Click play on any cartoon or animated show to start watching!",
         "category": "Little Milestones",
         "rarity": "Bronze"
     },
@@ -825,6 +926,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Storybook Finisher",
         "icon": "ph-flag-checkered",
         "description": "Watch a show or movie all the way to the end",
+        "hint": "Watch a cartoon episode or movie all the way to the closing credits.",
         "category": "Little Milestones",
         "rarity": "Bronze"
     },
@@ -833,6 +935,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Cartoon Explorer",
         "icon": "ph-timer",
         "description": "Enjoy 1 hour of fun streaming",
+        "hint": "Stream cartoons or animated movies for 1 hour total.",
         "category": "Little Milestones",
         "rarity": "Bronze"
     },
@@ -841,6 +944,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Adventure Fan",
         "icon": "ph-popcorn",
         "description": "Enjoy 3 hours of streaming fun",
+        "hint": "Stream cartoons or animated movies for 3 hours total.",
         "category": "Little Milestones",
         "rarity": "Silver"
     },
@@ -849,6 +953,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Super Streamer",
         "icon": "ph-sparkle",
         "description": "Reach 10 hours of total streaming",
+        "hint": "Reach 10 total hours of fun cartoon playtime.",
         "category": "Little Milestones",
         "rarity": "Gold"
     },
@@ -857,6 +962,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Mega Movie Star",
         "icon": "ph-rocket",
         "description": "Reach 25 hours of playtime",
+        "hint": "Reach 25 total hours of playtime watching your favorite shows.",
         "category": "Little Milestones",
         "rarity": "Platinum"
     },
@@ -865,6 +971,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Five Star Fun",
         "icon": "ph-star",
         "description": "Watch 5 different cartoons or movies",
+        "hint": "Watch 5 different cartoons, movies, or animated shows.",
         "category": "Little Milestones",
         "rarity": "Bronze"
     },
@@ -873,6 +980,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Show Collector",
         "icon": "ph-books",
         "description": "Watch 15 different cartoons or movies",
+        "hint": "Watch 15 different cartoons, movies, or animated shows.",
         "category": "Little Milestones",
         "rarity": "Silver"
     },
@@ -881,6 +989,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Library Champion",
         "icon": "ph-crown",
         "description": "Watch 30 different cartoons or movies",
+        "hint": "Watch 30 different cartoons, movies, or animated shows in your library.",
         "category": "Little Milestones",
         "rarity": "Gold"
     },
@@ -889,6 +998,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Weekend Fan",
         "icon": "ph-confetti",
         "description": "Watch shows 2 days in a row",
+        "hint": "Watch your favorite cartoons on 2 days in a row.",
         "category": "Little Milestones",
         "rarity": "Bronze"
     },
@@ -897,6 +1007,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Cartoon Streak",
         "icon": "ph-fire",
         "description": "Watch shows 3 days in a row",
+        "hint": "Watch your favorite cartoons on 3 days in a row.",
         "category": "Little Milestones",
         "rarity": "Silver"
     },
@@ -905,6 +1016,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "High Five Streak",
         "icon": "ph-hand-waving",
         "description": "Stream every day for 5 days",
+        "hint": "Stream your favorite cartoons 5 days in a row.",
         "category": "Little Milestones",
         "rarity": "Gold"
     },
@@ -913,6 +1025,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Weekly Champion",
         "icon": "ph-calendar",
         "description": "Stream every day for a full week",
+        "hint": "Stream your favorite cartoons every day for a full 7-day week.",
         "category": "Little Milestones",
         "rarity": "Platinum"
     },
@@ -921,6 +1034,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Quick Chuckles",
         "icon": "ph-lightning",
         "description": "Finish a short cartoon under 15 minutes",
+        "hint": "Finish a short cartoon episode under 15 minutes in length.",
         "category": "Little Milestones",
         "rarity": "Bronze"
     },
@@ -931,6 +1045,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Toon Lover",
         "icon": "ph-palette",
         "description": "Watch 3 or more Animated cartoons or shows",
+        "hint": "Watch 3 fun animated cartoons or animated movie adventures.",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
     },
@@ -939,6 +1054,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Family Fun",
         "icon": "ph-balloon",
         "description": "Watch 3 Family or Adventure movies",
+        "hint": "Watch 3 exciting Family or Adventure movies.",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
     },
@@ -947,6 +1063,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Giggle Box",
         "icon": "ph-smiley",
         "description": "Watch 3 funny Comedy shows",
+        "hint": "Watch 3 funny cartoon episodes that make you giggle.",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
     },
@@ -955,6 +1072,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Magic Kingdom",
         "icon": "ph-magic-wand",
         "description": "Watch 3 Fantasy or magical adventures",
+        "hint": "Watch 3 magical Fantasy or fairy tale adventures.",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
     },
@@ -963,6 +1081,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Space Explorer",
         "icon": "ph-rocket",
         "description": "Watch 3 Sci-Fi or space adventures",
+        "hint": "Watch 3 space or futuristic science fiction cartoons.",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
     },
@@ -971,6 +1090,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Curious Explorer",
         "icon": "ph-magnifying-glass",
         "description": "Watch shows from 3 different categories",
+        "hint": "Watch shows from 3 different category buttons (like Comedy, Adventure, Magic).",
         "category": "Cartoon Explorer",
         "rarity": "Silver"
     },
@@ -979,6 +1099,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Sneak Peek",
         "icon": "ph-popcorn",
         "description": "Watch an official video preview or trailer",
+        "hint": "Click the trailer preview button to watch a sneak peek of a cartoon.",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
     },
@@ -987,6 +1108,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Treasure Hunter",
         "icon": "ph-magnifying-glass",
         "description": "Search for your favorite cartoon or character",
+        "hint": "Type the name of your favorite show or character in the Search bar.",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
     },
@@ -995,6 +1117,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Bubble Popper",
         "icon": "ph-circles-three",
         "description": "Click a category bubble on the Kids Home page",
+        "hint": "Click on any category bubble at the top of the Kids Home page.",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
     },
@@ -1005,6 +1128,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Big Screen Magic",
         "icon": "ph-monitor",
         "description": "Play your video in full screen mode",
+        "hint": "Click the fullscreen button to make the cartoon fill your whole screen!",
         "category": "Fun Player",
         "rarity": "Bronze"
     },
@@ -1013,6 +1137,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Freeze Dance",
         "icon": "ph-play-pause",
         "description": "Pause and resume your show",
+        "hint": "Press the Pause button, then press Play to resume your show.",
         "category": "Fun Player",
         "rarity": "Bronze"
     },
@@ -1021,6 +1146,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Whisper Quiet",
         "icon": "ph-speaker-simple-slash",
         "description": "Adjust the volume to a quiet level or mute",
+        "hint": "Turn the volume down low or tap mute for quiet time.",
         "category": "Fun Player",
         "rarity": "Bronze"
     },
@@ -1029,6 +1155,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Party Volume",
         "icon": "ph-speaker-high",
         "description": "Turn up the volume for your favorite song or scene",
+        "hint": "Turn up the volume slider to enjoy your favorite cartoon theme song!",
         "category": "Fun Player",
         "rarity": "Bronze"
     },
@@ -1037,6 +1164,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Mini Magic Screen",
         "icon": "ph-browsers",
         "description": "Open the video in a mini pop-out window",
+        "hint": "Click the mini-player button to float your cartoon in a small corner window.",
         "category": "Fun Player",
         "rarity": "Silver"
     },
@@ -1045,6 +1173,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Next Adventure",
         "icon": "ph-skip-forward",
         "description": "Jump straight to the next episode",
+        "hint": "Click the Next Episode button to jump straight to the next cartoon adventure.",
         "category": "Fun Player",
         "rarity": "Bronze"
     },
@@ -1053,6 +1182,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Reading Helper",
         "icon": "ph-chat-circle",
         "description": "Turn on subtitles to read along with the characters",
+        "hint": "Turn on Subtitles from the player menu to read along as characters speak.",
         "category": "Fun Player",
         "rarity": "Bronze"
     },
@@ -1061,6 +1191,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Turbo Speed",
         "icon": "ph-lightning",
         "description": "Watch a scene in fast speed",
+        "hint": "Set video playback speed to fast in the player settings.",
         "category": "Fun Player",
         "rarity": "Bronze"
     },
@@ -1069,6 +1200,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Super Slow-Mo",
         "icon": "ph-timer",
         "description": "Watch a scene in slow motion",
+        "hint": "Set video playback speed to slow motion to see funny scenes in slow-mo!",
         "category": "Fun Player",
         "rarity": "Bronze"
     },
@@ -1077,6 +1209,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Time Rewind",
         "icon": "ph-rewind",
         "description": "Rewind to replay a favorite part",
+        "hint": "Click the rewind 10s button or timeline to watch a funny scene again.",
         "category": "Fun Player",
         "rarity": "Bronze"
     },
@@ -1087,6 +1220,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "First Favorite",
         "icon": "ph-heart",
         "description": "Add your very first favorite cartoon",
+        "hint": "Click the heart button on any cartoon to save your first favorite show.",
         "category": "Sticker Collector",
         "rarity": "Bronze"
     },
@@ -1095,6 +1229,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Sticker Collection",
         "icon": "ph-heart",
         "description": "Save 5 shows to your Favorites",
+        "hint": "Save 5 favorite cartoons to your Favorites list.",
         "category": "Sticker Collector",
         "rarity": "Silver"
     },
@@ -1103,6 +1238,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Super Treasure Box",
         "icon": "ph-diamond",
         "description": "Save 15 shows to your Favorites",
+        "hint": "Save 15 favorite cartoons to your Super Treasure Box.",
         "category": "Sticker Collector",
         "rarity": "Gold"
     },
@@ -1111,6 +1247,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Toy Box Creator",
         "icon": "ph-folder-star",
         "description": "Create a custom cartoon playlist or collection",
+        "hint": "Create your own cartoon collection or playlist from the Collections page.",
         "category": "Sticker Collector",
         "rarity": "Silver"
     },
@@ -1119,6 +1256,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Dress Up Time",
         "icon": "ph-mask-happy",
         "description": "Choose a fun avatar icon or favorite color",
+        "hint": "Change your profile avatar icon or pick your favorite color in Profile settings.",
         "category": "Sticker Collector",
         "rarity": "Bronze"
     },
@@ -1129,6 +1267,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Little Star",
         "icon": "ph-star",
         "description": "Unlock 5 badges in your Kids Trophy Case",
+        "hint": "Collect 5 trophy badges in your Kids Trophy Case.",
         "category": "Junior Champion",
         "rarity": "Bronze"
     },
@@ -1137,6 +1276,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Bronze Scout",
         "icon": "ph-medal",
         "description": "Unlock 10 badges in your Kids Trophy Case",
+        "hint": "Collect 10 trophy badges in your Kids Trophy Case.",
         "category": "Junior Champion",
         "rarity": "Bronze"
     },
@@ -1145,6 +1285,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Silver Champion",
         "icon": "ph-medal",
         "description": "Unlock 20 badges in your Kids Trophy Case",
+        "hint": "Collect 20 trophy badges in your Kids Trophy Case.",
         "category": "Junior Champion",
         "rarity": "Silver"
     },
@@ -1153,6 +1294,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Golden Superstar",
         "icon": "ph-trophy",
         "description": "Unlock 30 badges in your Kids Trophy Case",
+        "hint": "Collect 30 trophy badges in your Kids Trophy Case.",
         "category": "Junior Champion",
         "rarity": "Gold"
     },
@@ -1161,6 +1303,7 @@ KIDS_ACHIEVEMENTS = [
         "title": "Ultimate Legend",
         "icon": "ph-crown",
         "description": "Collect all badges in the Kids Trophy Case!",
+        "hint": "Collect all 43 trophy badges in the Kids Trophy Case to become the Ultimate Legend!",
         "category": "Junior Champion",
         "rarity": "Platinum"
     }
@@ -1996,6 +2139,7 @@ def get_profile_achievements(profile_id):
             "title": ach["title"],
             "icon": ach["icon"],
             "description": ach["description"],
+            "hint": ach.get("hint") or ach.get("description", ""),
             "category": ach.get("category", "General"),
             "rarity": ach.get("rarity", "Bronze"),
             "unlocked": is_unlocked,
