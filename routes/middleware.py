@@ -146,9 +146,15 @@ def is_admin():
     if admin_pin is None:
         admin_pin = request.args.get("admin_pin")
 
-    if admin_pin is not None:
+    if admin_pin is not None and str(admin_pin).strip() != "":
         ok, _, _ = verify_admin_pin(admin_pin)
         if ok:
+            return True
+
+    # If there are no admin profiles with a PIN set, open access is allowed when no profile is active
+    admins = get_admin_profiles()
+    if not admins or any(not a.get("has_pin") for a in admins):
+        if not current_profile():
             return True
 
     pid = current_profile()

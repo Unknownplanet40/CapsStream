@@ -799,6 +799,7 @@ function applyScanStatus(status) {
 // "Scan Library on Startup" setting unless forced (manual scan buttons).
 async function startLibraryScan(force = false) {
   if (!store.profile && !force) return false;
+  if (store.profile && !store.profile.is_admin && !force) return false;
   if (!force && (sessionScanStarted || store.scanRunning)) return false;
   if (!force) {
     try {
@@ -1108,9 +1109,9 @@ const MediaCard = {
           <div class="popout-video-gradient"></div>
 
           <button
-            v-if="previewVideoUrl && isVideoPlaying && !trailerEmbedUrl"
+            v-if="isVideoPlaying"
             class="popout-sound-btn"
-            @click.stop="isMuted = !isMuted"
+            @click.stop="toggleSound"
             :title="isMuted ? 'Unmute Audio' : 'Mute Audio'"
           >
             <i :class="isMuted ? 'ph-bold ph-speaker-simple-slash' : 'ph-bold ph-speaker-simple-high'"></i>
@@ -1126,17 +1127,17 @@ const MediaCard = {
               </button>
               <button
                 class="popout-circle-btn"
-                :class="{ active: isFavorite }"
+                :class="{ 'is-active': isFavorite }"
                 @click.stop="toggleFavorite"
-                :title="isFavorite ? 'Remove from Watchlist' : 'Add to Watchlist'"
+                :title="isFavorite ? 'In Watchlist' : 'Add to Watchlist'"
               >
                 <i :class="isFavorite ? 'ph-bold ph-check' : 'ph-bold ph-plus'"></i>
               </button>
               <button
                 class="popout-circle-btn"
-                :class="{ active: isLiked }"
+                :class="{ 'is-active': isLiked }"
                 @click.stop="toggleLike"
-                :title="isLiked ? 'Liked' : 'Like title'"
+                :title="isLiked ? 'Liked' : 'Like'"
               >
                 <i :class="isLiked ? 'ph-fill ph-thumbs-up' : 'ph-bold ph-thumbs-up'"></i>
               </button>
@@ -1249,6 +1250,23 @@ const MediaCard = {
       previewVideoUrl.value = null;
     }
 
+    function toggleSound() {
+      isMuted.value = !isMuted.value;
+      const vid = cardRootRef.value?.querySelector('.popout-video');
+      if (vid) {
+        vid.muted = isMuted.value;
+      }
+      const iframe = cardRootRef.value?.querySelector('.popout-trailer-frame');
+      if (iframe && iframe.contentWindow) {
+        const cmd = isMuted.value ? 'mute' : 'unMute';
+        iframe.contentWindow.postMessage(JSON.stringify({
+          event: 'command',
+          func: cmd,
+          args: []
+        }), '*');
+      }
+    }
+
     function openCardMenu(e) {
       openGlobalContextMenu(e, cardItem.value);
     }
@@ -1280,6 +1298,7 @@ const MediaCard = {
           updatePopoutAlignment();
           isPopoutActive.value = true;
           isVideoPlaying.value = false;
+          isMuted.value = true;
           const item = cardItem.value;
           const id = item.id || item.tmdb_id;
 
@@ -1290,7 +1309,7 @@ const MediaCard = {
               if (res && res.embed_url) {
                 let url = res.embed_url;
                 const sep = url.includes("?") ? "&" : "?";
-                trailerEmbedUrl.value = `${url}${sep}autoplay=1&mute=1&controls=0&loop=1&playlist=${res.key || ""}`;
+                trailerEmbedUrl.value = `${url}${sep}autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&showinfo=0&fs=0&playsinline=1&enablejsapi=1&loop=1&playlist=${res.key || ""}`;
                 return;
               }
             } catch (e) {}
@@ -1349,8 +1368,6 @@ const MediaCard = {
       const item = cardItem.value;
       if (item.type === "movie" && item.id) {
         window.location.hash = `#/title/movie/${item.id}`;
-      } else if (item.tmdb_id) {
-        window.location.hash = `#/title/${item.type || "series"}/${item.tmdb_id}`;
       } else if (item.id) {
         window.location.hash = `#/title/${item.type || "series"}/${item.id}`;
       } else {
@@ -1368,6 +1385,7 @@ const MediaCard = {
       handlePopoutImgError,
       onIframeLoaded,
       onVideoError,
+      toggleSound,
       openCardMenu,
       imgUrl,
       formatRating,
@@ -1541,14 +1559,13 @@ const HeroBanner = {
             class="hero-video-frame"
             frameborder="0"
             allow="autoplay; encrypted-media"
-            @load="videoLoaded = true"
+            @load="onIframeLoad"
           ></iframe>
           <video
             v-else
             :src="videoPreviewUrl"
             class="hero-video-element"
             autoplay
-            loop
             playsinline
             :muted="isMuted"
             @canplay="videoLoaded = true"
@@ -1613,14 +1630,6 @@ const HeroBanner = {
         >
           <i :class="isMuted ? 'ph-bold ph-speaker-simple-slash' : 'ph-bold ph-speaker-simple-high'"></i>
         </button>
-        <button
-          v-if="videoEnded"
-          class="hero-control-btn"
-          @click.stop="replayVideo"
-          title="Replay Video"
-        >
-          <i class="ph-bold ph-arrow-counter-clockwise"></i>
-        </button>
         <div class="hero-maturity-badge">
           <span>{{ current.is_kids ? 'TV-Y7' : (current.rating >= 8 ? 'TV-MA' : current.rating >= 6.5 ? 'TV-14' : 'PG-13') }}</span>
         </div>
@@ -1649,6 +1658,10 @@ const HeroBanner = {
     const isMuted = ref(true);
     let slideTimer = null;
     let previewTimer = null;
+    let maxTrailerTimer = null;
+    let ytPollInterval = null;
+    let lastKnownCurrentTime = 0;
+    let lastKnownDuration = 0;
 
     function pauseSlideTimer() {
       if (slideTimer) {
@@ -1657,24 +1670,34 @@ const HeroBanner = {
       }
     }
 
+    function cleanupTrailerTimers() {
+      if (ytPollInterval) {
+        clearInterval(ytPollInterval);
+        ytPollInterval = null;
+      }
+      if (maxTrailerTimer) {
+        clearTimeout(maxTrailerTimer);
+        maxTrailerTimer = null;
+      }
+    }
+
+    function advanceToNextSlide() {
+      if (props.items && props.items.length > 1) {
+        currentIdx.value = (currentIdx.value + 1) % Math.min(props.items.length, 6);
+      }
+    }
+
     function startSlideTimer(delay = 8500) {
       pauseSlideTimer();
-      if (!videoPreviewActive.value) {
-        slideTimer = setInterval(() => {
-          if (props.items && props.items.length > 1 && !isHeroHovered.value && !videoPreviewActive.value) {
-            currentIdx.value = (currentIdx.value + 1) % Math.min(props.items.length, 6);
-            resetPreview();
-            schedulePreview();
-          }
-        }, delay);
-      }
+      slideTimer = setInterval(() => {
+        if (props.items && props.items.length > 1 && !isHeroHovered.value && !videoPreviewActive.value) {
+          advanceToNextSlide();
+        }
+      }, delay);
     }
 
     function selectSlide(idx) {
       currentIdx.value = idx;
-      resetPreview();
-      startSlideTimer();
-      schedulePreview();
     }
 
     function toggleMute() {
@@ -1695,24 +1718,101 @@ const HeroBanner = {
     }
 
     function onVideoEnded() {
+      if (videoEnded.value) return;
       videoEnded.value = true;
-      // When trailer finishes, wait 4 seconds then advance to next hero slide
+      cleanupTrailerTimers();
+      // Advance to next hero banner seamlessly
       setTimeout(() => {
-        if (props.items && props.items.length > 1 && videoEnded.value) {
-          currentIdx.value = (currentIdx.value + 1) % Math.min(props.items.length, 6);
-          resetPreview();
-          schedulePreview();
-        }
-      }, 4000);
+        advanceToNextSlide();
+      }, 700);
     }
 
-    function replayVideo() {
-      videoEnded.value = false;
-      pauseSlideTimer();
-      const vid = document.querySelector('.hero-video-element');
-      if (vid) {
-        vid.currentTime = 0;
-        vid.play();
+    function handleWindowMessage(e) {
+      try {
+        let data = e.data;
+        if (typeof data === "string") {
+          try {
+            data = JSON.parse(data);
+          } catch (_) {}
+        }
+        if (data && typeof data === "object") {
+          // 1. YouTube onStateChange ended (state 0)
+          if (data.event === "onStateChange" && (data.info === 0 || data.data === 0)) {
+            onVideoEnded();
+            return;
+          }
+          // 2. YouTube infoDelivery playerState ended (state 0)
+          if (data.event === "infoDelivery" && data.info) {
+            if (data.info.playerState === 0) {
+              onVideoEnded();
+              return;
+            }
+            if (typeof data.info.currentTime === "number") {
+              lastKnownCurrentTime = data.info.currentTime;
+            }
+            if (typeof data.info.duration === "number") {
+              lastKnownDuration = data.info.duration;
+            }
+            if (lastKnownDuration > 3 && lastKnownCurrentTime >= lastKnownDuration - 0.75) {
+              onVideoEnded();
+              return;
+            }
+          }
+          // 3. Response to getPlayerState / status poll
+          if (data.info === 0 || data.data === 0 || data.playerState === 0) {
+            onVideoEnded();
+            return;
+          }
+        }
+      } catch (err) {}
+    }
+
+    function onIframeLoad() {
+      videoLoaded.value = true;
+      const iframe = document.querySelector('.hero-video-frame');
+      if (iframe && iframe.contentWindow) {
+        // Send initial listening handshake so YouTube sends postMessages
+        iframe.contentWindow.postMessage(JSON.stringify({
+          event: 'listening',
+          id: 1,
+          channel: 'widget'
+        }), '*');
+
+        // Apply audio mute preference
+        const cmd = isMuted.value ? 'mute' : 'unMute';
+        iframe.contentWindow.postMessage(JSON.stringify({
+          event: 'command',
+          func: cmd,
+          args: []
+        }), '*');
+
+        // Active state poll to ensure trailer end is never missed
+        if (ytPollInterval) clearInterval(ytPollInterval);
+        ytPollInterval = setInterval(() => {
+          if (!videoPreviewActive.value || !isIframeTrailer.value || videoEnded.value) {
+            clearInterval(ytPollInterval);
+            ytPollInterval = null;
+            return;
+          }
+          const frame = document.querySelector('.hero-video-frame');
+          if (frame && frame.contentWindow) {
+            frame.contentWindow.postMessage(JSON.stringify({
+              event: 'command',
+              func: 'getPlayerState',
+              args: []
+            }), '*');
+            frame.contentWindow.postMessage(JSON.stringify({
+              event: 'command',
+              func: 'getCurrentTime',
+              args: []
+            }), '*');
+            frame.contentWindow.postMessage(JSON.stringify({
+              event: 'command',
+              func: 'getDuration',
+              args: []
+            }), '*');
+          }
+        }, 1500);
       }
     }
 
@@ -1754,11 +1854,23 @@ const HeroBanner = {
         if (res && res.embed_url) {
           let url = res.embed_url;
           const sep = url.includes('?') ? '&' : '?';
-          url += `${sep}autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&showinfo=0&fs=0&playsinline=1&enablejsapi=1&loop=1&playlist=${res.key || ''}`;
+          const muteParam = isMuted.value ? 'mute=1' : 'mute=0';
+          let origin = window.location.origin;
+          if (!origin || origin === 'null') {
+            origin = window.location.protocol + '//' + window.location.host;
+          }
+          url += `${sep}autoplay=1&${muteParam}&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&showinfo=0&fs=0&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(origin)}`;
           videoPreviewUrl.value = url;
           isIframeTrailer.value = true;
           videoPreviewActive.value = true;
           pauseSlideTimer(); // Stop carousel cycling while trailer plays!
+          cleanupTrailerTimers();
+          // Fallback cap to prevent hanging if YouTube player completely stalls
+          maxTrailerTimer = setTimeout(() => {
+            if (videoPreviewActive.value && !videoEnded.value) {
+              onVideoEnded();
+            }
+          }, 180000);
         }
       } catch (e) {
         // Stay on high-res backdrop
@@ -1775,26 +1887,34 @@ const HeroBanner = {
 
     function resetPreview() {
       clearTimeout(previewTimer);
+      cleanupTrailerTimers();
+      lastKnownCurrentTime = 0;
+      lastKnownDuration = 0;
       videoPreviewActive.value = false;
       videoPreviewUrl.value = null;
       videoLoaded.value = false;
       videoEnded.value = false;
+      // User's audio mute/unmute preference is preserved across slides
     }
 
     watch(() => currentIdx.value, () => {
       resetPreview();
+      startSlideTimer();
       schedulePreview();
     });
 
     onMounted(() => {
       window.addEventListener("scroll", handleScroll, { passive: true });
+      window.addEventListener("message", handleWindowMessage);
       startSlideTimer();
       schedulePreview();
     });
 
     onUnmounted(() => {
       window.removeEventListener("scroll", handleScroll);
-      clearInterval(slideTimer);
+      window.removeEventListener("message", handleWindowMessage);
+      cleanupTrailerTimers();
+      pauseSlideTimer();
       clearTimeout(previewTimer);
     });
 
@@ -1813,7 +1933,7 @@ const HeroBanner = {
       isMuted,
       toggleMute,
       onVideoEnded,
-      replayVideo,
+      onIframeLoad,
       selectSlide
     };
   },
@@ -5312,8 +5432,7 @@ const PlayerPage = {
       <!-- Minimal Achievement Pill (left side, never covers controls) -->
       <transition name="fade">
         <div v-if="playerAch" class="player-achv-pill" :class="{ 'kids-achv-pill': playerAch.isKids }" :style="{ bottom: controlsHidden ? '40px' : '120px' }">
-          <span v-if="playerAch.icon" style="font-size:1.15rem;margin-right:2px">{{ playerAch.icon }}</span>
-          <i v-else class="ph-fill ph-trophy"></i>
+          <i :class="'ph-bold ' + (playerAch.icon && playerAch.icon.startsWith('ph-') ? playerAch.icon : 'ph-trophy')" style="font-size:1.15rem;margin-right:6px"></i>
           <span>{{ playerAch.title }}</span>
         </div>
       </transition>
@@ -9016,20 +9135,10 @@ const BrowsePage = {
     async function load() {
       loading.value = true;
       try {
-        const genre = route.query.genre;
         const type = activeType.value;
-        let data;
-        if (genre) {
-          const q = new URLSearchParams();
-          q.set("q", genre);
-          if (type) q.set("type", type);
-          q.set("genre", genre);
-          data = await API.get(`/api/search?${q}`);
-        } else {
-          const url = type ? `/api/library?type=${type}` : "/api/library";
-          data = await API.get(url);
-        }
-        items.value = kidsFilter(data);
+        const url = type ? `/api/library?type=${type}` : "/api/library";
+        const data = await API.get(url);
+        items.value = kidsFilter(data || []);
       } catch (e) {
         addToast("Failed to load library", "error");
       } finally {
@@ -9041,20 +9150,23 @@ const BrowsePage = {
       activeType.value = t;
       currentPage.value = 1;
       if (t) unlockAchievement("filter_pro");
-      if (t) {
-        router.push({ path: "/browse", query: { type: t } });
-      } else {
-        router.push({ path: "/browse" });
-      }
+      const q = {};
+      if (t) q.type = t;
+      if (selectedGenre.value) q.genre = selectedGenre.value;
+      router.push({ path: "/browse", query: q });
     }
 
     // ─── Genre filter (client-side over the loaded library) ─────
     const genres = ref([]);
-    const selectedGenre = ref("");
+    const selectedGenre = ref(route.query.genre || "");
 
     function onGenreChange() {
       currentPage.value = 1;
       if (selectedGenre.value) unlockAchievement("filter_pro");
+      const q = {};
+      if (activeType.value) q.type = activeType.value;
+      if (selectedGenre.value) q.genre = selectedGenre.value;
+      router.push({ path: "/browse", query: q });
     }
 
     function handleClick(item) {
@@ -9075,9 +9187,12 @@ const BrowsePage = {
     });
 
     onMounted(() => {
+      if (route.query.type) activeType.value = route.query.type;
+      if (route.query.genre) selectedGenre.value = route.query.genre;
       load();
       API.get("/api/genres").then((g) => { genres.value = g || []; }).catch(() => {});
     });
+
     watch(
       () => route.query.type,
       (newType) => {
@@ -9086,10 +9201,14 @@ const BrowsePage = {
         load();
       },
     );
-    watch(() => route.query.genre, () => {
-      currentPage.value = 1;
-      load();
-    });
+
+    watch(
+      () => route.query.genre,
+      (newGenre) => {
+        selectedGenre.value = newGenre || "";
+        currentPage.value = 1;
+      },
+    );
     watch(
       () => store.scanRunning,
       (running, prev) => {
@@ -10111,7 +10230,8 @@ const ProfilesPage = {
               }"
             >
               <img v-if="profile.custom_avatar_url" :src="profile.custom_avatar_url" class="netflix-avatar-img" :alt="profile.name" />
-              <span v-else>{{ profile.avatar || 'ph-film-strip' }}</span>
+              <i v-else-if="profile.avatar && profile.avatar.startsWith('ph-')" :class="'ph-bold ' + profile.avatar" style="font-size:3.2rem"></i>
+              <span v-else style="font-size:3.2rem">{{ profile.avatar || '🎬' }}</span>
 
               <!-- Admin Badge in Avatar -->
               <div v-if="profile.is_admin" class="netflix-avatar-admin-badge" title="Administrator">
@@ -10145,7 +10265,7 @@ const ProfilesPage = {
             </div>
 
             <!-- Manage Mode Reordering Controls (Admin Only) -->
-            <div v-if="viewMode === 'manage' && profiles.length > 1 && (store.profile?.is_admin || !store.profile)" class="netflix-profile-reorder-bar" @click.stop>
+            <div v-if="viewMode === 'manage' && profiles.length > 1 && isAdminUnlocked" class="netflix-profile-reorder-bar" @click.stop>
               <button
                 class="netflix-reorder-btn"
                 :disabled="pIndex === 0"
@@ -10167,7 +10287,7 @@ const ProfilesPage = {
 
           <!-- Add Profile Card (Admin Only) -->
           <div
-            v-if="profiles.length < 8 && (store.profile?.is_admin || !store.profile)"
+            v-if="profiles.length < 8 && isAdminUnlocked"
             class="netflix-profile-card netflix-add-card"
             @click="openCreateView"
             id="add-profile-btn"
@@ -10216,7 +10336,8 @@ const ProfilesPage = {
               }"
             >
               <img v-if="editProfile.custom_avatar_url" :src="editProfile.custom_avatar_url" class="netflix-avatar-img" style="border-radius:4px" />
-              <span v-else>{{ editProfile.avatar }}</span>
+              <i v-else-if="editProfile.avatar && editProfile.avatar.startsWith('ph-')" :class="'ph-bold ' + editProfile.avatar" style="font-size:3.5rem"></i>
+              <span v-else style="font-size:3.5rem">{{ editProfile.avatar || '🎬' }}</span>
             </div>
 
             <!-- Custom Avatar Upload Controls -->
@@ -10230,7 +10351,7 @@ const ProfilesPage = {
               </button>
             </div>
 
-            <!-- Avatar Choices Grid (Emojis) -->
+            <!-- Avatar Choices Grid (Icons) -->
             <div style="margin-top:14px;max-width:140px">
               <div style="font-size:0.75rem;color:#808080;margin-bottom:6px;font-weight:600">ICON</div>
               <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
@@ -10241,7 +10362,8 @@ const ProfilesPage = {
                   style="cursor:pointer;font-size:1.3rem;padding:4px;border-radius:4px;text-align:center;transition:background 0.2s"
                   :style="editProfile.avatar === a && !editProfile.custom_avatar_url ? { background: 'rgba(255,255,255,0.2)' } : {}"
                 >
-                  {{ a }}
+                  <i v-if="a.startsWith('ph-')" :class="'ph-bold ' + a"></i>
+                  <span v-else>{{ a }}</span>
                 </div>
               </div>
             </div>
@@ -10278,7 +10400,7 @@ const ProfilesPage = {
             </div>
 
             <!-- Kids Setting (Admin Only) -->
-            <div v-if="store.profile?.is_admin || !store.profile" style="border-top:1px solid #282828;padding-top:18px">
+            <div v-if="isAdminUnlocked" style="border-top:1px solid #282828;padding-top:18px">
               <label class="netflix-checkbox-label">
                 <input type="checkbox" v-model="editProfile.is_kids" id="edit-kids-mode-switch">
                 <div>
@@ -10323,7 +10445,7 @@ const ProfilesPage = {
             <!-- Adult & Teen Settings -->
             <template v-else>
               <!-- Maturity Level Selector (Admin Only) -->
-              <div v-if="store.profile?.is_admin || !store.profile" style="border-top:1px solid #282828;padding-top:18px">
+              <div v-if="isAdminUnlocked" style="border-top:1px solid #282828;padding-top:18px">
                 <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Maturity Rating Filter</div>
                 <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Select the highest rating category permitted for this profile.</div>
                 <div class="maturity-pill-selector">
@@ -10347,7 +10469,7 @@ const ProfilesPage = {
               </div>
 
               <!-- Blocked Genres Exclusions (Admin Only) -->
-              <div v-if="store.profile?.is_admin || !store.profile" style="border-top:1px solid #282828;padding-top:18px">
+              <div v-if="isAdminUnlocked" style="border-top:1px solid #282828;padding-top:18px">
                 <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Excluded Genres</div>
                 <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Click to block specific genres from appearing in this profile's library.</div>
                 <div class="genre-chip-selector">
@@ -10411,8 +10533,8 @@ const ProfilesPage = {
                 </select>
               </div>
 
-              <!-- Admin Privileges Toggle (if active user is Admin) -->
-              <div v-if="store.profile?.is_admin" style="border-top:1px solid #282828;padding-top:18px">
+              <!-- Admin Privileges Toggle (if Admin Unlocked) -->
+              <div v-if="isAdminUnlocked" style="border-top:1px solid #282828;padding-top:18px">
                 <label class="netflix-checkbox-label">
                   <input type="checkbox" v-model="editProfile.is_admin">
                   <div>
@@ -10455,11 +10577,11 @@ const ProfilesPage = {
           <button class="netflix-btn-white" @click="saveEditProfile" id="save-edit-profile-btn">
             Save
           </button>
-          <button class="netflix-btn-ghost" @click="viewMode = 'manage'">
+          <button class="netflix-btn-ghost" @click="exitEditView" id="cancel-edit-profile-btn">
             Cancel
           </button>
           <button
-            v-if="profiles.length > 1 && (store.profile?.is_admin || !store.profile)"
+            v-if="profiles.length > 1 && isAdminUnlocked"
             class="netflix-btn-danger"
             @click="confirmDeleteProfile(editTarget)"
             id="delete-profile-btn"
@@ -10485,7 +10607,8 @@ const ProfilesPage = {
                 border: '3px solid ' + newProfile.color
               }"
             >
-              <span>{{ newProfile.avatar }}</span>
+              <i v-if="newProfile.avatar && newProfile.avatar.startsWith('ph-')" :class="'ph-bold ' + newProfile.avatar" style="font-size:3.5rem"></i>
+              <span v-else style="font-size:3.5rem">{{ newProfile.avatar || '🎬' }}</span>
             </div>
 
             <!-- Avatar Choices Grid -->
@@ -10499,7 +10622,8 @@ const ProfilesPage = {
                   style="cursor:pointer;font-size:1.3rem;padding:4px;border-radius:4px;text-align:center;transition:background 0.2s"
                   :style="newProfile.avatar === a ? { background: 'rgba(255,255,255,0.2)' } : {}"
                 >
-                  {{ a }}
+                  <i v-if="a.startsWith('ph-')" :class="'ph-bold ' + a"></i>
+                  <span v-else>{{ a }}</span>
                 </div>
               </div>
             </div>
@@ -10906,6 +11030,19 @@ const ProfilesPage = {
     const adminPinCallback = ref(null);
     const currentAdminPin = ref("");
 
+    const isAdminUnlocked = computed(() => {
+      return !!(store.profile?.is_admin || !store.profile || currentAdminPin.value);
+    });
+
+    function exitEditView() {
+      editTarget.value = null;
+      if (route.query.edit_id && store.profile) {
+        router.push("/");
+      } else {
+        viewMode.value = "manage";
+      }
+    }
+
     async function requireAdminAuth(actionCallback) {
       if (store.profile?.is_admin) {
         currentAdminPin.value = "";
@@ -11178,8 +11315,6 @@ const ProfilesPage = {
           admin_pin: currentAdminPin.value,
         });
 
-        currentAdminPin.value = "";
-
         const idx = profiles.value.findIndex((p) => p.id === editTarget.value.id);
         if (idx !== -1) {
           profiles.value[idx] = { ...profiles.value[idx], ...res };
@@ -11189,9 +11324,8 @@ const ProfilesPage = {
           store.profile = { ...store.profile, ...res };
         }
 
-        viewMode.value = "manage";
-        editTarget.value = null;
         addToast("Profile updated", "success");
+        exitEditView();
       } catch (e) {
         addToast(e.message || "Failed to update profile", "error");
       }
@@ -11470,6 +11604,8 @@ const ProfilesPage = {
       selectProfile,
       handlePinKey,
       createProfile,
+      isAdminUnlocked,
+      exitEditView,
     };
   },
 };
@@ -12063,6 +12199,33 @@ const StatsPage = {
               <div class="trophy-progress-fill" :style="{ width: completionPercent + '%' }"></div>
             </div>
           </div>
+          <div v-if="recentUnlocks && recentUnlocks.length" class="recent-unlocks-section">
+            <div class="recent-unlocks-title">
+              <i class="ph-fill ph-sparkle" style="color:#f59e0b"></i>
+              <span>Recent Unlocks &amp; Highlights</span>
+            </div>
+            <div class="recent-unlocks-carousel" @wheel.passive="handleCarouselWheel">
+              <div
+                v-for="ach in recentUnlocks"
+                :key="'recent-' + ach.id"
+                class="recent-unlock-card"
+                :class="'rarity-' + (ach.rarity || 'bronze').toLowerCase()"
+                @click="openAchievementModal(ach)"
+                title="Click to view details & progress"
+              >
+                <div class="recent-unlock-icon">
+                  <i :class="'ph-bold ' + (ach.icon && ach.icon.startsWith('ph-') ? ach.icon : 'ph-trophy')"></i>
+                </div>
+                <div class="recent-unlock-details">
+                  <div class="recent-unlock-name">{{ ach.title }}</div>
+                  <div class="recent-unlock-meta">
+                    <span class="rarity-badge" :class="(ach.rarity || 'bronze').toLowerCase()">{{ ach.rarity || 'Bronze' }}</span>
+                    <span class="recent-unlock-date"><i class="ph ph-calendar-blank"></i> {{ ach.unlocked_at }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
 
           <!-- Controls Row: Category Filter Tabs & Group By Selector -->
           <div class="trophy-controls-row" v-if="stats.achievements">
@@ -12119,9 +12282,15 @@ const StatsPage = {
               v-for="group in groupedAchievements"
               :key="group.key"
               class="trophy-group-section"
+              :class="{ 'is-collapsed': collapsedGroups[group.key] }"
             >
-              <!-- Group Header -->
-              <div class="trophy-group-header" :class="'group-' + group.key.toLowerCase().replace(/[^a-z0-9]/g, '')">
+              <!-- Group Header (Clickable Collapsible) -->
+              <div
+                class="trophy-group-header"
+                :class="'group-' + group.key.toLowerCase().replace(/[^a-z0-9]/g, '')"
+                @click="toggleGroup(group.key)"
+                title="Click to collapse / expand"
+              >
                 <div class="trophy-group-title-wrap">
                   <span class="trophy-group-icon"><i :class="'ph-bold ' + (group.icon && group.icon.startsWith('ph-') ? group.icon : 'ph-folder')"></i></span>
                   <span class="trophy-group-title">{{ group.name }}</span>
@@ -12138,36 +12307,50 @@ const StatsPage = {
                     ></div>
                   </div>
                   <span class="trophy-group-percent">{{ group.percent }}%</span>
+                  <i
+                    class="ph-bold ph-caret-down trophy-group-chevron"
+                    :class="{ 'is-collapsed': collapsedGroups[group.key] }"
+                  ></i>
                 </div>
               </div>
 
               <!-- Group Grid -->
-              <div class="achievements-grid">
-                <div
-                  v-for="ach in group.items"
-                  :key="ach.id"
-                  class="achievement-card"
-                  :class="['rarity-' + (ach.rarity || 'bronze').toLowerCase(), { unlocked: ach.unlocked }]"
-                >
-                  <div class="achievement-icon-wrapper">
-                    <i :class="'ph-bold ' + (ach.unlocked ? (ach.icon && ach.icon.startsWith('ph-') ? ach.icon : 'ph-trophy') : 'ph-lock')"></i>
-                  </div>
-                  <div class="achievement-info">
-                    <div class="achievement-header">
-                      <span class="achievement-title">{{ ach.title }}</span>
-                      <div class="achievement-badge-group">
-                        <span class="rarity-badge" :class="(ach.rarity || 'bronze').toLowerCase()">{{ ach.rarity || 'Bronze' }}</span>
-                        <span v-if="ach.unlocked" class="achievement-badge">UNLOCKED</span>
-                        <span v-else class="achievement-badge locked">LOCKED</span>
-                      </div>
+              <transition name="trophy-collapse">
+                <div v-show="!collapsedGroups[group.key]" class="achievements-grid">
+                  <div
+                    v-for="ach in group.items"
+                    :key="ach.id"
+                    class="achievement-card"
+                    :class="['rarity-' + (ach.rarity || 'bronze').toLowerCase(), { unlocked: ach.unlocked }]"
+                    @click="openAchievementModal(ach)"
+                    title="Click for full requirements & progress"
+                  >
+                    <div class="achievement-icon-wrapper">
+                      <i :class="'ph-bold ' + (ach.unlocked ? (ach.icon && ach.icon.startsWith('ph-') ? ach.icon : 'ph-trophy') : 'ph-lock')"></i>
                     </div>
-                    <div class="achievement-desc">{{ ach.description }}</div>
-                    <div v-if="ach.unlocked && ach.unlocked_at" class="achievement-unlocked-date">
-                      <i class="ph ph-check-circle" style="color:#10b981"></i> {{ ach.unlocked_at }}
+                    <div class="achievement-info">
+                      <div class="achievement-header">
+                        <span class="achievement-title">{{ ach.title }}</span>
+                        <div class="achievement-badge-group">
+                          <span class="rarity-badge" :class="(ach.rarity || 'bronze').toLowerCase()">{{ ach.rarity || 'Bronze' }}</span>
+                          <span v-if="ach.unlocked" class="achievement-badge">UNLOCKED</span>
+                          <span v-else class="achievement-badge locked">LOCKED</span>
+                        </div>
+                      </div>
+                      <div class="achievement-desc">{{ ach.description }}</div>
+                      <div v-if="ach.unlocked && ach.unlocked_at" class="achievement-unlocked-date">
+                        <i class="ph ph-check-circle" style="color:#10b981"></i> {{ ach.unlocked_at }}
+                      </div>
+                      <div v-else-if="ach.progress_label" class="achievement-mini-progress">
+                        <div class="mini-progress-bar">
+                          <div class="mini-progress-fill" :style="{ width: ach.progress_percent + '%' }"></div>
+                        </div>
+                        <span class="mini-progress-text">{{ ach.progress_label }}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              </transition>
             </div>
           </div>
 
@@ -12178,6 +12361,8 @@ const StatsPage = {
               :key="ach.id"
               class="achievement-card"
               :class="['rarity-' + (ach.rarity || 'bronze').toLowerCase(), { unlocked: ach.unlocked }]"
+              @click="openAchievementModal(ach)"
+              title="Click for full requirements & progress"
             >
               <div class="achievement-icon-wrapper">
                 <i :class="'ph-bold ' + (ach.unlocked ? (ach.icon && ach.icon.startsWith('ph-') ? ach.icon : 'ph-trophy') : 'ph-lock')"></i>
@@ -12194,6 +12379,12 @@ const StatsPage = {
                 <div class="achievement-desc">{{ ach.description }}</div>
                 <div v-if="ach.unlocked && ach.unlocked_at" class="achievement-unlocked-date">
                   <i class="ph ph-check-circle" style="color:#10b981"></i> {{ ach.unlocked_at }}
+                </div>
+                <div v-else-if="ach.progress_label" class="achievement-mini-progress">
+                  <div class="mini-progress-bar">
+                    <div class="mini-progress-fill" :style="{ width: ach.progress_percent + '%' }"></div>
+                  </div>
+                  <span class="mini-progress-text">{{ ach.progress_label }}</span>
                 </div>
               </div>
             </div>
@@ -12262,6 +12453,95 @@ const StatsPage = {
             No watch history recorded yet. Start watching a title!
           </div>
         </div>
+
+        <!-- Achievement Detail Modal -->
+        <transition name="fade">
+          <div
+            v-if="selectedAchievement"
+            class="modal-backdrop achievement-modal-backdrop"
+            @click.self="closeAchievementModal"
+          >
+            <div
+              class="achievement-modal-card"
+              :class="'tier-' + (selectedAchievement.rarity || 'bronze').toLowerCase()"
+              @click.stop
+            >
+              <!-- Ambient Halo Glow -->
+              <div class="achievement-modal-glow"></div>
+
+              <!-- Close Button -->
+              <button class="modal-close-btn" @click="closeAchievementModal" title="Close (Esc)">
+                <i class="ph-bold ph-x"></i>
+              </button>
+
+              <!-- Modal Showcase -->
+              <div class="achievement-modal-icon-showcase">
+                <div class="achievement-modal-icon-wrap" :class="[{ unlocked: selectedAchievement.unlocked }]">
+                  <i :class="'ph-bold ' + (selectedAchievement.unlocked ? (selectedAchievement.icon && selectedAchievement.icon.startsWith('ph-') ? selectedAchievement.icon : 'ph-trophy') : 'ph-lock')"></i>
+                </div>
+                <div class="achievement-modal-badges">
+                  <span class="rarity-badge" :class="(selectedAchievement.rarity || 'bronze').toLowerCase()">
+                    {{ selectedAchievement.rarity || 'Bronze' }} Tier
+                  </span>
+                  <span class="achievement-category-pill">
+                    {{ selectedAchievement.category }}
+                  </span>
+                  <span v-if="selectedAchievement.unlocked" class="achievement-badge unlocked-pill">
+                    <i class="ph-bold ph-check"></i> UNLOCKED
+                  </span>
+                  <span v-else class="achievement-badge locked-pill">
+                    <i class="ph-bold ph-lock"></i> LOCKED
+                  </span>
+                </div>
+              </div>
+
+              <!-- Modal Content -->
+              <div class="achievement-modal-body">
+                <h2 class="achievement-modal-title">{{ selectedAchievement.title }}</h2>
+                <p class="achievement-modal-desc">{{ selectedAchievement.description }}</p>
+
+                <!-- Progress Tracking Box (Only shown for locked/in-progress achievements) -->
+                <div v-if="!selectedAchievement.unlocked" class="achievement-modal-progress-box">
+                  <div class="achievement-modal-progress-header">
+                    <span class="progress-title">Trophy Progress</span>
+                    <span class="progress-ratio">{{ selectedAchievement.progress_label || 'In Progress' }} ({{ selectedAchievement.progress_percent || 0 }}%)</span>
+                  </div>
+                  <div class="achievement-modal-progress-bar">
+                    <div
+                      class="achievement-modal-progress-fill"
+                      :style="{ width: (selectedAchievement.progress_percent || 0) + '%' }"
+                    ></div>
+                  </div>
+                </div>
+
+                <!-- Unlocked Date or Hint -->
+                <div v-if="selectedAchievement.unlocked && selectedAchievement.unlocked_at" class="achievement-modal-unlocked-info">
+                  <i class="ph-fill ph-check-circle" style="color:#10b981"></i>
+                  <span>Achieved on <strong>{{ selectedAchievement.unlocked_at }}</strong></span>
+                </div>
+                <div v-else class="achievement-modal-hint-info">
+                  <i class="ph-fill ph-lightbulb" style="color:#f59e0b"></i>
+                  <span>Watch matching titles in your library to make progress toward this trophy!</span>
+                </div>
+              </div>
+
+              <!-- Modal Actions -->
+              <div class="achievement-modal-footer">
+                <button
+                  v-if="selectedAchievement.browse_url"
+                  class="btn btn-primary btn-browse-achievement"
+                  @click="browseForAchievement(selectedAchievement)"
+                >
+                  <i class="ph-bold ph-play-circle" style="margin-right:6px"></i>
+                  {{ selectedAchievement.browse_label || 'Browse Matching Titles' }}
+                </button>
+                <button class="btn btn-secondary" @click="closeAchievementModal">
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </transition>
       </template>
     </div>
   `,
@@ -12271,6 +12551,11 @@ const StatsPage = {
     const loading = ref(true);
     const activeCategory = ref("All");
     const groupBy = ref("badge");
+    const collapsedGroups = reactive({});
+
+    function toggleGroup(key) {
+      collapsedGroups[key] = !collapsedGroups[key];
+    }
 
     const BADGE_TIERS = [
       { key: "Platinum", name: "Platinum Badges", icon: "ph-diamond", color: "#a855f7" },
@@ -12351,6 +12636,39 @@ const StatsPage = {
       return [];
     });
 
+    const recentUnlocks = computed(() => {
+      if (!stats.value?.achievements) return [];
+      const unlocked = stats.value.achievements.filter(a => a.unlocked);
+      return [...unlocked].sort((a, b) => {
+        const da = a.unlocked_at || "";
+        const db = b.unlocked_at || "";
+        return db.localeCompare(da);
+      }).slice(0, 6);
+    });
+
+    const selectedAchievement = ref(null);
+
+    function openAchievementModal(ach) {
+      selectedAchievement.value = ach;
+    }
+
+    function closeAchievementModal() {
+      selectedAchievement.value = null;
+    }
+
+    function browseForAchievement(ach) {
+      closeAchievementModal();
+      if (ach && ach.browse_url) {
+        router.push(ach.browse_url);
+      }
+    }
+
+    function handleKeydown(e) {
+      if (e.key === "Escape" && selectedAchievement.value) {
+        closeAchievementModal();
+      }
+    }
+
     const maxWeeklyMinutes = computed(() => {
       if (!stats.value?.weekly_activity?.length) return 60;
       const maxVal = Math.max(...stats.value.weekly_activity.map(d => d.minutes || 0));
@@ -12368,7 +12686,14 @@ const StatsPage = {
       }
     }
 
-    onMounted(loadStats);
+    onMounted(() => {
+      loadStats();
+      window.addEventListener("keydown", handleKeydown);
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener("keydown", handleKeydown);
+    });
 
     function formatTimeSpent(seconds) {
       if (!seconds || isNaN(seconds)) return "0m";
@@ -12404,6 +12729,12 @@ const StatsPage = {
       }
     }
 
+    function handleCarouselWheel(e) {
+      if (e.deltaY !== 0) {
+        e.currentTarget.scrollLeft += e.deltaY;
+      }
+    }
+
     return {
       store,
       stats,
@@ -12416,12 +12747,20 @@ const StatsPage = {
       completionPercent,
       filteredAchievements,
       groupedAchievements,
+      recentUnlocks,
+      selectedAchievement,
+      openAchievementModal,
+      closeAchievementModal,
+      browseForAchievement,
+      handleCarouselWheel,
       maxWeeklyMinutes,
       formatTimeSpent,
       calcGenrePercent,
       formatDate,
       openMedia,
       imgUrl,
+      collapsedGroups,
+      toggleGroup,
     };
   },
 };
@@ -13369,27 +13708,56 @@ const App = {
             <div class="nav-profile" @click.stop="toggleProfileMenu" id="nav-profile" data-tooltip="Profile Menu"
               :style="{ background: store.profile?.color ? store.profile.color + '33' : 'var(--bg-card)', borderColor: store.profile?.color ? store.profile.color + '88' : 'transparent' }">
               <img v-if="store.profile?.custom_avatar_url" :src="store.profile.custom_avatar_url" class="nav-profile-avatar-img" :alt="store.profile?.name" />
-              <span v-else>{{ store.profile?.avatar || 'ph-user' }}</span>
+              <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar"></i>
+              <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
               <div class="profile-dropdown" v-if="showProfileMenu" @click.stop>
                 <div v-if="store?.profile" class="profile-dropdown-item" style="font-weight:600;color:var(--text-primary);cursor:default" @click.stop>
                   <img v-if="store.profile?.custom_avatar_url" :src="store.profile.custom_avatar_url" class="dropdown-profile-avatar-img" />
-                  <span v-else>{{ store.profile?.avatar }}</span>
-                  <span style="margin-left:6px">{{ store.profile?.name }}</span>
+                  <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar" style="font-size:1.15rem"></i>
+                  <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
+                  <span style="margin-left:6px;font-weight:700">{{ store.profile?.name }}</span>
                   <span v-if="store.profile?.is_admin" class="admin-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">Admin</span>
                   <span v-else-if="store.profile?.is_kids" class="kids-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">Kids</span>
                   <span v-else-if="store.profile?.maturity_rating === 'Teens'" class="teen-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">Teens</span>
                 </div>
                 <div class="profile-dropdown-divider" v-if="store?.profile"></div>
-                <div class="profile-dropdown-item" @click.stop="goFavorites" id="dd-watchlist">Watchlist</div>
-                <div class="profile-dropdown-item" @click.stop="goPlaylists" id="dd-playlists">Playlists</div>
-                <div class="profile-dropdown-item" @click.stop="goCollections" id="dd-collections">Collections</div>
-                <div class="profile-dropdown-item" @click.stop="goStats" id="dd-stats">Watch Stats</div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="dd-settings">Settings</div>
-                <div class="profile-dropdown-item" @click.stop="goAbout" id="dd-about">About CapsStream</div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="editCurrentProfile" id="dd-edit-profile">Edit Profile</div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="switchProfile" id="dd-switch">Switch Profile</div>
+                <div class="profile-dropdown-item" @click.stop="goFavorites" id="dd-watchlist">
+                  <i class="ph-bold ph-bookmark-simple" style="font-size:1.1rem;color:var(--accent)"></i>
+                  <span>Watchlist</span>
+                </div>
+                <div class="profile-dropdown-item" @click.stop="goPlaylists" id="dd-playlists">
+                  <i class="ph-bold ph-queue" style="font-size:1.1rem;color:#38bdf8"></i>
+                  <span>Playlists</span>
+                </div>
+                <div class="profile-dropdown-item" @click.stop="goCollections" id="dd-collections">
+                  <i class="ph-bold ph-squares-four" style="font-size:1.1rem;color:#a78bfa"></i>
+                  <span>Collections</span>
+                </div>
+                <div class="profile-dropdown-item" @click.stop="goStats" id="dd-stats">
+                  <i class="ph-bold ph-chart-bar" style="font-size:1.1rem;color:#f59e0b"></i>
+                  <span>Watch Stats</span>
+                </div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="dd-settings">
+                  <i class="ph-bold ph-gear-six" style="font-size:1.1rem;color:#94a3b8"></i>
+                  <span>Settings</span>
+                </div>
+                <div class="profile-dropdown-item" @click.stop="goAbout" id="dd-about">
+                  <i class="ph-bold ph-info" style="font-size:1.1rem;color:#38bdf8"></i>
+                  <span>About CapsStream</span>
+                </div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="editCurrentProfile" id="dd-edit-profile">
+                  <i class="ph-bold ph-pencil-simple" style="font-size:1.1rem;color:#4ade80"></i>
+                  <span>Edit Profile</span>
+                </div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="switchProfile" id="dd-switch">
+                  <i class="ph-bold ph-arrows-left-right" style="font-size:1.1rem;color:#f472b6"></i>
+                  <span>Switch Profile</span>
+                </div>
                 <div class="profile-dropdown-divider"></div>
-                <div class="profile-dropdown-item danger" @click.stop="logout" v-if="store.profile" id="dd-logout">Sign Out</div>
+                <div class="profile-dropdown-item danger" @click.stop="logout" v-if="store.profile" id="dd-logout">
+                  <i class="ph-bold ph-sign-out" style="font-size:1.1rem"></i>
+                  <span>Sign Out</span>
+                </div>
               </div>
             </div>
           </div>

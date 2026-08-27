@@ -34,7 +34,7 @@ ACHIEVEMENTS = [
     {
         "id": "century_watcher",
         "title": "100 Hour Club",
-        "icon": "ph-hourglass",
+        "icon": "ph-hourglass-high",
         "description": "Accumulate 100 hours of total watch time",
         "category": "Milestones",
         "rarity": "Platinum"
@@ -162,7 +162,7 @@ ACHIEVEMENTS = [
     {
         "id": "credits_roll",
         "title": "Roll Credits",
-        "icon": "ph-clapperboard",
+        "icon": "ph-film-slate",
         "description": "Watch a movie all the way through to 100%",
         "category": "Milestones",
         "rarity": "Bronze"
@@ -466,7 +466,7 @@ ACHIEVEMENTS = [
     {
         "id": "mute_master",
         "title": "Stealth Mode",
-        "icon": "ph-speaker-slash",
+        "icon": "ph-speaker-simple-slash",
         "description": "Mute and unmute playback using player controls",
         "category": "Player Master",
         "rarity": "Bronze"
@@ -594,7 +594,7 @@ ACHIEVEMENTS = [
     {
         "id": "crime_detective",
         "title": "Master Detective",
-        "icon": "ph-detective",
+        "icon": "ph-magnifying-glass",
         "description": "Watch 3 or more Crime or Mystery titles",
         "category": "Discovery",
         "rarity": "Silver"
@@ -602,7 +602,7 @@ ACHIEVEMENTS = [
     {
         "id": "fantasy_realm",
         "title": "Realm Traveler",
-        "icon": "ph-wand",
+        "icon": "ph-magic-wand",
         "description": "Watch 3 or more Fantasy titles",
         "category": "Discovery",
         "rarity": "Bronze"
@@ -903,7 +903,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_streak_5",
         "title": "High Five Streak",
-        "icon": "ph-hand-palm",
+        "icon": "ph-hand-waving",
         "description": "Stream every day for 5 days",
         "category": "Little Milestones",
         "rarity": "Gold"
@@ -953,7 +953,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_fantasy_magic",
         "title": "Magic Kingdom",
-        "icon": "ph-wand",
+        "icon": "ph-magic-wand",
         "description": "Watch 3 Fantasy or magical adventures",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
@@ -993,7 +993,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_bubble_explorer",
         "title": "Bubble Popper",
-        "icon": "ph-circles-three-plus",
+        "icon": "ph-circles-three",
         "description": "Click a category bubble on the Kids Home page",
         "category": "Cartoon Explorer",
         "rarity": "Bronze"
@@ -1019,7 +1019,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_volume_whisper",
         "title": "Whisper Quiet",
-        "icon": "ph-speaker-slash",
+        "icon": "ph-speaker-simple-slash",
         "description": "Adjust the volume to a quiet level or mute",
         "category": "Fun Player",
         "rarity": "Bronze"
@@ -1035,7 +1035,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_pip_hero",
         "title": "Mini Magic Screen",
-        "icon": "ph-picture-in-picture",
+        "icon": "ph-browsers",
         "description": "Open the video in a mini pop-out window",
         "category": "Fun Player",
         "rarity": "Silver"
@@ -1067,7 +1067,7 @@ KIDS_ACHIEVEMENTS = [
     {
         "id": "kids_speed_slowmo",
         "title": "Super Slow-Mo",
-        "icon": "ph-hare",
+        "icon": "ph-timer",
         "description": "Watch a scene in slow motion",
         "category": "Fun Player",
         "rarity": "Bronze"
@@ -1640,9 +1640,77 @@ def get_profile_achievements(profile_id):
         "SELECT achievement_id, unlocked_at FROM achievements WHERE profile_id=?",
         (profile_id,)
     ).fetchall()
+
+    # Progress stats calculations
+    stats_total = conn.execute("""
+        SELECT SUM(position) as total_seconds, COUNT(*) as total_items, SUM(CASE WHEN completed=1 THEN 1 ELSE 0 END) as completed_items
+        FROM watch_progress WHERE profile_id=?
+    """, (profile_id,)).fetchone()
+    total_seconds = stats_total["total_seconds"] or 0
+    total_items = stats_total["total_items"] or 0
+    completed_items = stats_total["completed_items"] or 0
+    total_hours = round(total_seconds / 3600.0, 1)
+
+    fav_cnt = conn.execute("SELECT COUNT(*) as c FROM favorites WHERE profile_id=?", (profile_id,)).fetchone()["c"]
+    col_cnt = conn.execute("SELECT COUNT(*) as c FROM collections WHERE profile_id=?", (profile_id,)).fetchone()["c"]
+
+    # Streaks
+    date_rows = conn.execute("""
+        SELECT DISTINCT date(updated_at) as d FROM watch_progress
+        WHERE profile_id=? AND updated_at IS NOT NULL ORDER BY d ASC
+    """, (profile_id,)).fetchall()
+    unique_dates = [r["d"] for r in date_rows if r["d"]]
+    
+    # Calculate consecutive streak
+    streak_count = 0
+    if unique_dates:
+        ds = set(unique_dates)
+        today = datetime.now().date()
+        check_date = today if today.strftime("%Y-%m-%d") in ds else today - timedelta(days=1)
+        while check_date.strftime("%Y-%m-%d") in ds:
+            streak_count += 1
+            check_date -= timedelta(days=1)
+        streak_count = max(streak_count, min(len(unique_dates), 1))
+
+    # Genre counts
+    genre_rows = conn.execute("""
+        SELECT m.genres, COUNT(*) as c FROM watch_progress wp
+        JOIN media m ON m.id = wp.media_id
+        WHERE wp.profile_id=? AND m.genres IS NOT NULL
+        GROUP BY m.genres
+    """, (profile_id,)).fetchall()
+    genre_counts = {}
+    for gr in genre_rows:
+        for g in (gr["genres"] or "").split(","):
+            g = g.strip()
+            if g:
+                genre_counts[g] = genre_counts.get(g, 0) + gr["c"]
+
+    # Type counts
+    type_rows = conn.execute("""
+        SELECT m.type, COUNT(*) as cnt FROM watch_progress wp
+        JOIN media m ON m.id = wp.media_id
+        WHERE wp.profile_id=?
+        GROUP BY m.type
+    """, (profile_id,)).fetchall()
+    type_counts = {r["type"]: r["cnt"] for r in type_rows}
+
+    # Time of day sessions
+    hour_rows = conn.execute("""
+        SELECT strftime('%H', updated_at) as hr, COUNT(*) as c
+        FROM watch_progress WHERE profile_id=? AND updated_at IS NOT NULL
+        GROUP BY hr
+    """, (profile_id,)).fetchall()
+    hour_counts = {int(r["hr"]): r["c"] for r in hour_rows if r["hr"] is not None}
+    night_sessions = sum(hour_counts.get(h, 0) for h in (0, 1, 2, 3, 4, 23))
+    morning_sessions = sum(hour_counts.get(h, 0) for h in (5, 6, 7, 8))
+    afternoon_sessions = sum(hour_counts.get(h, 0) for h in (12, 13, 14, 15, 16, 17))
+    prime_sessions = sum(hour_counts.get(h, 0) for h in (18, 19, 20, 21, 22))
+
     conn.close()
 
     unlocked_map = {r["achievement_id"]: r["unlocked_at"] for r in unlocked_rows}
+    num_unlocked = len(unlocked_map)
 
     results = []
     for ach in active_catalog:
@@ -1651,11 +1719,277 @@ def get_profile_achievements(profile_id):
         unlocked_at_str = None
         if is_unlocked and unlocked_map[aid]:
             try:
-                from datetime import datetime
                 dt = datetime.strptime(str(unlocked_map[aid]).split(".")[0], "%Y-%m-%d %H:%M:%S")
-                unlocked_at_str = dt.strftime("%b %d")
+                unlocked_at_str = dt.strftime("%b %d, %Y")
             except Exception:
                 unlocked_at_str = "Unlocked"
+
+        # Calculate progress metrics & browse recommendation
+        cur_prog = 0
+        tgt_prog = 1
+        prog_label = "In Progress"
+        browse_url = "/"
+        browse_label = "Browse Library"
+
+        # Milestones & Watch Time
+        if aid in ("first_watch", "kids_first_watch"):
+            tgt_prog, cur_prog = 1, min(1, total_items)
+            prog_label = f"{cur_prog} / 1 title"
+            browse_url, browse_label = "/browse?type=movie", "Browse Movies"
+        elif aid == "marathoner":
+            tgt_prog, cur_prog = 5.0, min(5.0, total_hours)
+            prog_label = f"{cur_prog} / 5.0 hrs"
+            browse_url, browse_label = "/browse?type=movie", "Watch Movies"
+        elif aid == "binge_master":
+            tgt_prog, cur_prog = 24.0, min(24.0, total_hours)
+            prog_label = f"{cur_prog} / 24.0 hrs"
+            browse_url, browse_label = "/browse?type=series", "Binge Series"
+        elif aid == "century_watcher":
+            tgt_prog, cur_prog = 100.0, min(100.0, total_hours)
+            prog_label = f"{cur_prog} / 100.0 hrs"
+            browse_url, browse_label = "/browse", "Browse Library"
+        elif aid == "kids_time_1h":
+            tgt_prog, cur_prog = 1.0, min(1.0, total_hours)
+            prog_label = f"{cur_prog} / 1.0 hr"
+            browse_url, browse_label = "/browse?type=series", "Watch Cartoons"
+        elif aid == "kids_time_3h":
+            tgt_prog, cur_prog = 3.0, min(3.0, total_hours)
+            prog_label = f"{cur_prog} / 3.0 hrs"
+            browse_url, browse_label = "/browse?type=series", "Watch Cartoons"
+        elif aid == "kids_time_10h":
+            tgt_prog, cur_prog = 10.0, min(10.0, total_hours)
+            prog_label = f"{cur_prog} / 10.0 hrs"
+            browse_url, browse_label = "/browse?type=series", "Watch Shows"
+        elif aid == "kids_time_25h":
+            tgt_prog, cur_prog = 25.0, min(25.0, total_hours)
+            prog_label = f"{cur_prog} / 25.0 hrs"
+            browse_url, browse_label = "/browse?type=movie", "Watch Movies"
+
+        # Completions
+        elif aid in ("first_finish", "kids_first_finish"):
+            tgt_prog, cur_prog = 1, min(1, completed_items)
+            prog_label = f"{cur_prog} / 1 completed"
+            browse_url, browse_label = "/browse?type=movie", "Finish a Title"
+        elif aid == "cinephile":
+            tgt_prog, cur_prog = 5, min(5, completed_items)
+            prog_label = f"{cur_prog} / 5 completed"
+            browse_url, browse_label = "/browse?type=movie", "Watch Movies"
+        elif aid == "master_completer":
+            tgt_prog, cur_prog = 20, min(20, completed_items)
+            prog_label = f"{cur_prog} / 20 completed"
+            browse_url, browse_label = "/browse?type=series", "Complete Shows"
+        elif aid == "titan_completer":
+            tgt_prog, cur_prog = 50, min(50, completed_items)
+            prog_label = f"{cur_prog} / 50 completed"
+            browse_url, browse_label = "/browse", "Browse All"
+
+        # Streaks
+        elif aid in ("streak_3", "kids_streak_3"):
+            tgt_prog, cur_prog = 3, min(3, streak_count)
+            prog_label = f"{cur_prog} / 3 day streak"
+            browse_url, browse_label = "/browse", "Watch Today"
+        elif aid == "kids_streak_2":
+            tgt_prog, cur_prog = 2, min(2, streak_count)
+            prog_label = f"{cur_prog} / 2 day streak"
+            browse_url, browse_label = "/browse?type=series", "Watch Today"
+        elif aid == "kids_streak_5":
+            tgt_prog, cur_prog = 5, min(5, streak_count)
+            prog_label = f"{cur_prog} / 5 day streak"
+            browse_url, browse_label = "/browse?type=series", "Keep Streak"
+        elif aid in ("streak_7", "kids_streak_7"):
+            tgt_prog, cur_prog = 7, min(7, streak_count)
+            prog_label = f"{cur_prog} / 7 day streak"
+            browse_url, browse_label = "/browse", "Watch Today"
+        elif aid == "streak_30":
+            tgt_prog, cur_prog = 30, min(30, streak_count)
+            prog_label = f"{cur_prog} / 30 day streak"
+            browse_url, browse_label = "/browse", "Keep Streak"
+
+        # Titles Count
+        elif aid in ("ten_titles", "kids_titles_5"):
+            tgt = 5 if is_kids else 10
+            tgt_prog, cur_prog = tgt, min(tgt, total_items)
+            prog_label = f"{cur_prog} / {tgt} titles"
+            browse_url, browse_label = "/browse?type=movie", "Discover Titles"
+        elif aid in ("fifty_titles", "kids_titles_15"):
+            tgt = 15 if is_kids else 50
+            tgt_prog, cur_prog = tgt, min(tgt, total_items)
+            prog_label = f"{cur_prog} / {tgt} titles"
+            browse_url, browse_label = "/browse?type=series", "Discover Titles"
+        elif aid in ("hundred_titles", "kids_titles_30"):
+            tgt = 30 if is_kids else 100
+            tgt_prog, cur_prog = tgt, min(tgt, total_items)
+            prog_label = f"{cur_prog} / {tgt} titles"
+            browse_url, browse_label = "/browse", "Explore Library"
+
+        # Favorites & Collections
+        elif aid in ("kids_fav_1",):
+            tgt_prog, cur_prog = 1, min(1, fav_cnt)
+            prog_label = f"{cur_prog} / 1 in Watchlist"
+            browse_url, browse_label = "/favorites", "Open Watchlist"
+        elif aid in ("fav_fanatic", "kids_fav_5", "fav_collector"):
+            tgt_prog, cur_prog = 5, min(5, fav_cnt)
+            prog_label = f"{cur_prog} / 5 in Watchlist"
+            browse_url, browse_label = "/favorites", "Open Watchlist"
+        elif aid in ("fav_legend", "kids_fav_15"):
+            tgt_prog, cur_prog = 15, min(15, fav_cnt)
+            prog_label = f"{cur_prog} / 15 in Watchlist"
+            browse_url, browse_label = "/favorites", "Open Watchlist"
+        elif aid in ("curator", "kids_collection_builder", "collections_three"):
+            tgt_prog, cur_prog = 1 if aid == "kids_collection_builder" else 3, min(3, col_cnt)
+            prog_label = f"{cur_prog} / {tgt_prog} Collections"
+            browse_url, browse_label = "/collections", "Open Collections"
+        elif aid == "collection_king":
+            tgt_prog, cur_prog = 5, min(5, col_cnt)
+            prog_label = f"{cur_prog} / 5 Collections"
+            browse_url, browse_label = "/collections", "Open Collections"
+        elif aid == "collection_empire":
+            tgt_prog, cur_prog = 10, min(10, col_cnt)
+            prog_label = f"{cur_prog} / 10 Collections"
+            browse_url, browse_label = "/collections", "Open Collections"
+
+        # Media Types
+        elif aid == "movie_buff":
+            cnt = type_counts.get("movie", 0)
+            tgt_prog, cur_prog = 10, min(10, cnt)
+            prog_label = f"{cur_prog} / 10 Movies"
+            browse_url, browse_label = "/browse?type=movie", "Browse Movies"
+        elif aid == "series_addict":
+            cnt = type_counts.get("series", 0)
+            tgt_prog, cur_prog = 10, min(10, cnt)
+            prog_label = f"{cur_prog} / 10 Series"
+            browse_url, browse_label = "/browse?type=series", "Browse Series"
+        elif aid in ("otaku", "anime_fan"):
+            cnt = type_counts.get("anime", 0)
+            tgt_prog, cur_prog = 5, min(5, cnt)
+            prog_label = f"{cur_prog} / 5 Anime"
+            browse_url, browse_label = "/browse?type=anime", "Explore Anime"
+
+        # Meta Trophy Unlock Counts
+        elif aid in ("kids_trophy_5", "trophy_collector"):
+            tgt_prog, cur_prog = 5, min(5, num_unlocked)
+            prog_label = f"{cur_prog} / 5 Trophies"
+            browse_url, browse_label = "/stats", "View Trophies"
+        elif aid in ("kids_trophy_10", "trophy_quarter"):
+            tgt = 10 if is_kids else 25
+            tgt_prog, cur_prog = tgt, min(tgt, num_unlocked)
+            prog_label = f"{cur_prog} / {tgt} Trophies"
+            browse_url, browse_label = "/stats", "View Trophies"
+        elif aid in ("kids_trophy_20", "trophy_half"):
+            tgt = 20 if is_kids else 50
+            tgt_prog, cur_prog = tgt, min(tgt, num_unlocked)
+            prog_label = f"{cur_prog} / {tgt} Trophies"
+            browse_url, browse_label = "/stats", "View Trophies"
+        elif aid in ("kids_trophy_30", "trophy_legend"):
+            tgt = 30 if is_kids else 75
+            tgt_prog, cur_prog = tgt, min(tgt, num_unlocked)
+            prog_label = f"{cur_prog} / {tgt} Trophies"
+            browse_url, browse_label = "/stats", "View Trophies"
+        elif aid in ("kids_trophy_all", "trophy_god"):
+            tgt = len(active_catalog)
+            tgt_prog, cur_prog = tgt, min(tgt, num_unlocked)
+            prog_label = f"{cur_prog} / {tgt} Trophies"
+            browse_url, browse_label = "/stats", "View Trophies"
+
+        # Viewing Habits (Time of day)
+        elif aid == "night_owl":
+            tgt_prog, cur_prog = 1, min(1, night_sessions)
+            prog_label = f"{cur_prog} / 1 Night Session"
+            browse_url, browse_label = "/browse", "Watch Tonight"
+        elif aid == "dawn_patrol" or aid == "early_bird":
+            tgt_prog, cur_prog = 1, min(1, morning_sessions)
+            prog_label = f"{cur_prog} / 1 Morning Session"
+            browse_url, browse_label = "/browse", "Morning Stream"
+        elif aid in ("afternoon_delight", "tea_time"):
+            tgt_prog, cur_prog = 1, min(1, afternoon_sessions)
+            prog_label = f"{cur_prog} / 1 Matinee Session"
+            browse_url, browse_label = "/browse", "Afternoon Movie"
+        elif aid == "primetime_viewer":
+            tgt_prog, cur_prog = 1, min(1, prime_sessions)
+            prog_label = f"{cur_prog} / 1 Prime Session"
+            browse_url, browse_label = "/browse", "Prime Time Stream"
+
+        # Genres
+        elif aid in ("explorer", "kids_genre_adventurer"):
+            cnt = len(genre_counts)
+            tgt = 3 if is_kids else 5
+            tgt_prog, cur_prog = tgt, min(tgt, cnt)
+            prog_label = f"{cur_prog} / {tgt} Genres"
+            browse_url, browse_label = "/browse", "Explore Genres"
+        elif aid == "genre_virtuoso":
+            cnt = len(genre_counts)
+            tgt_prog, cur_prog = 10, min(10, cnt)
+            prog_label = f"{cur_prog} / 10 Genres"
+            browse_url, browse_label = "/browse", "Explore Genres"
+        elif aid == "action_junkie":
+            cnt = genre_counts.get("Action", 0)
+            tgt_prog, cur_prog = 5, min(5, cnt)
+            prog_label = f"{cur_prog} / 5 Action"
+            browse_url, browse_label = "/browse?genre=Action", "Browse Action"
+        elif aid in ("comedy_lover", "kids_comedy_kid"):
+            cnt = genre_counts.get("Comedy", 0)
+            tgt_prog, cur_prog = 5, min(5, cnt)
+            prog_label = f"{cur_prog} / 5 Comedy"
+            browse_url, browse_label = "/browse?genre=Comedy", "Browse Comedy"
+        elif aid == "drama_queen":
+            cnt = genre_counts.get("Drama", 0)
+            tgt_prog, cur_prog = 5, min(5, cnt)
+            prog_label = f"{cur_prog} / 5 Drama"
+            browse_url, browse_label = "/browse?genre=Drama", "Browse Drama"
+        elif aid in ("sci_fi_fan", "kids_sci_fi_space"):
+            cnt = genre_counts.get("Sci-Fi", 0) + genre_counts.get("Science Fiction", 0)
+            tgt_prog, cur_prog = 5, min(5, cnt)
+            prog_label = f"{cur_prog} / 5 Sci-Fi"
+            browse_url, browse_label = "/browse?genre=Sci-Fi", "Browse Sci-Fi"
+        elif aid == "horror_seeker":
+            cnt = genre_counts.get("Horror", 0)
+            tgt_prog, cur_prog = 5, min(5, cnt)
+            prog_label = f"{cur_prog} / 5 Horror"
+            browse_url, browse_label = "/browse?genre=Horror", "Browse Horror"
+        elif aid == "romance_hopeless":
+            cnt = genre_counts.get("Romance", 0)
+            tgt_prog, cur_prog = 5, min(5, cnt)
+            prog_label = f"{cur_prog} / 5 Romance"
+            browse_url, browse_label = "/browse?genre=Romance", "Browse Romance"
+        elif aid in ("animation_fan", "kids_animation_fan"):
+            cnt = genre_counts.get("Animation", 0)
+            tgt_prog, cur_prog = 5, min(5, cnt)
+            prog_label = f"{cur_prog} / 5 Animation"
+            browse_url, browse_label = "/browse?genre=Animation", "Browse Animation"
+        elif aid in ("kids_family_time",):
+            cnt = genre_counts.get("Family", 0)
+            tgt_prog, cur_prog = 5, min(5, cnt)
+            prog_label = f"{cur_prog} / 5 Family"
+            browse_url, browse_label = "/browse?genre=Family", "Family Shows"
+        elif aid == "docu_fanatic":
+            cnt = genre_counts.get("Documentary", 0)
+            tgt_prog, cur_prog = 5, min(5, cnt)
+            prog_label = f"{cur_prog} / 5 Documentary"
+            browse_url, browse_label = "/browse?genre=Documentary", "Browse Documentaries"
+        elif aid == "crime_detective":
+            cnt = genre_counts.get("Crime", 0) + genre_counts.get("Mystery", 0)
+            tgt_prog, cur_prog = 5, min(5, cnt)
+            prog_label = f"{cur_prog} / 5 Crime"
+            browse_url, browse_label = "/browse?genre=Crime", "Browse Crime"
+        elif aid in ("fantasy_realm", "kids_fantasy_magic"):
+            cnt = genre_counts.get("Fantasy", 0) + genre_counts.get("Adventure", 0)
+            tgt_prog, cur_prog = 5, min(5, cnt)
+            prog_label = f"{cur_prog} / 5 Fantasy"
+            browse_url, browse_label = "/browse?genre=Fantasy", "Browse Fantasy"
+
+        # Default fallback
+        else:
+            if is_unlocked:
+                cur_prog, tgt_prog = 1, 1
+                prog_label = "Completed"
+            else:
+                cur_prog, tgt_prog = 0, 1
+                prog_label = "0 / 1 Goal"
+
+        if is_unlocked:
+            pct = 100
+        else:
+            pct = min(99, int((cur_prog / max(1, tgt_prog)) * 100)) if tgt_prog > 0 else 0
 
         results.append({
             "id": aid,
@@ -1665,7 +1999,13 @@ def get_profile_achievements(profile_id):
             "category": ach.get("category", "General"),
             "rarity": ach.get("rarity", "Bronze"),
             "unlocked": is_unlocked,
-            "unlocked_at": unlocked_at_str
+            "unlocked_at": unlocked_at_str,
+            "current_progress": cur_prog,
+            "target_progress": tgt_prog,
+            "progress_percent": pct,
+            "progress_label": prog_label,
+            "browse_url": browse_url,
+            "browse_label": browse_label,
         })
 
     return results
