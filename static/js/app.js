@@ -8692,8 +8692,12 @@ const PlayerPage = {
       if (!v || !v.currentSrc || v.currentSrc.endsWith('/stream/') || v.currentSrc.endsWith('/null') || v.currentSrc.endsWith('/undefined')) {
         return;
       }
-      if (v.error && v.error.code !== 0 && v.currentSrc && v.currentSrc.includes('/api/stream/')) {
-        console.error("[HTML5 Player Error]", e, v.error);
+      // MEDIA_ERR_ABORTED (code 1) occurs normally during stream resets and episode transitions
+      if (!v.error || v.error.code === 0 || v.error.code === 1) {
+        return;
+      }
+      if (v.currentSrc && v.currentSrc.includes('/api/stream/')) {
+        console.error("[HTML5 Player Error]", e, "code:", v.error.code, "msg:", v.error.message);
         const p = (media.value?.file_path || "").toLowerCase();
         const isHeavy4k = p.includes("2160") || p.includes("4k") || p.includes("uhd");
         playerError.value = isHeavy4k

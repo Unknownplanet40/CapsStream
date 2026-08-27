@@ -122,6 +122,9 @@ def stream_file(file_path):
         "Accept-Ranges": "bytes",
         "Content-Type":  mime_type,
         "Cache-Control": "no-cache",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
     }
 
     # No Range header → serve the whole file
@@ -360,6 +363,9 @@ def stream_video_convert(file_path, audio_track_index, start_time=0.0, max_heigh
             "Cache-Control": "no-cache",
             "Accept-Ranges": "none",
             "X-Content-Start": f"{effective_start:.3f}",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
         })
     except Exception:
         return stream_file(file_path)
@@ -435,6 +441,9 @@ def stream_audio_only(file_path, track_index, start_time=0.0):
         return Response(generate(), mimetype="audio/aac", headers={
             "Cache-Control": "no-cache",
             "Accept-Ranges": "none",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
         })
     except Exception:
         abort(500, description="Failed to start audio stream")
@@ -534,6 +543,9 @@ def stream_transcoded(file_path, audio_track_index=0, start_time=0.0):
             "Cache-Control": "no-cache",
             "Accept-Ranges": "none",
             "X-Content-Start": f"{effective_start:.3f}",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
         })
     except Exception as e:
         return stream_file(file_path)
