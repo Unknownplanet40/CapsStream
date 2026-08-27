@@ -100,7 +100,11 @@ def ratelimit_handler(e):
 
 # ─── Register Blueprints + Per-Route Limits ────────────────────────────────────
 
-from routes import register_blueprints
+try:
+    from backend.routes import register_blueprints
+except ImportError:
+    from routes import register_blueprints
+
 register_blueprints(app, limiter)
 
 # ─── Per-request DB connection teardown ────────────────────────────────────────
