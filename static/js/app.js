@@ -7569,19 +7569,44 @@ const PlayerPage = {
     let audioCtx = null;
     let gainNode = null;
     let audioSource = null;
+    let dialogueFilterNode = null;
+    let compressorNode = null;
 
-    function initAudioBoost() {
+    function initWebAudio() {
       if (audioCtx || !videoRef.value) return;
       try {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        audioCtx = new AudioContext();
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        audioCtx = new AudioContextClass();
         gainNode = audioCtx.createGain();
         audioSource = audioCtx.createMediaElementSource(videoRef.value);
-        audioSource.connect(gainNode);
+
+        dialogueFilterNode = audioCtx.createBiquadFilter();
+        dialogueFilterNode.type = "peaking";
+        dialogueFilterNode.frequency.setValueAtTime(2200, audioCtx.currentTime);
+        dialogueFilterNode.Q.setValueAtTime(1.2, audioCtx.currentTime);
+        dialogueFilterNode.gain.setValueAtTime(0, audioCtx.currentTime);
+
+        compressorNode = audioCtx.createDynamicsCompressor();
+        compressorNode.threshold.setValueAtTime(-24, audioCtx.currentTime);
+        compressorNode.knee.setValueAtTime(12, audioCtx.currentTime);
+        compressorNode.ratio.setValueAtTime(1, audioCtx.currentTime);
+        compressorNode.attack.setValueAtTime(0.003, audioCtx.currentTime);
+        compressorNode.release.setValueAtTime(0.25, audioCtx.currentTime);
+
+        audioSource.connect(dialogueFilterNode);
+        dialogueFilterNode.connect(compressorNode);
+        compressorNode.connect(gainNode);
         gainNode.connect(audioCtx.destination);
+
+        applyAudioEnhancer();
       } catch (e) {
-        console.log("AudioContext init notice:", e);
+        console.warn("AudioContext init notice:", e);
       }
+    }
+
+    function initAudioBoost() {
+      initWebAudio();
     }
 
     function onVolumeInput(e) {
@@ -8450,41 +8475,6 @@ const PlayerPage = {
 
     // ─── Web Audio API (Dialogue Boost & Night Mode) ─────────────
     const audioEnhancerMode = ref(localStorage.getItem("capsstream_audio_enhancer") || "off");
-    let audioCtx = null;
-    let audioSource = null;
-    let dialogueFilterNode = null;
-    let compressorNode = null;
-
-    function initWebAudio() {
-      if (!videoRef.value || audioCtx) return;
-      try {
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContextClass) return;
-        audioCtx = new AudioContextClass();
-        audioSource = audioCtx.createMediaElementSource(videoRef.value);
-
-        dialogueFilterNode = audioCtx.createBiquadFilter();
-        dialogueFilterNode.type = "peaking";
-        dialogueFilterNode.frequency.setValueAtTime(2200, audioCtx.currentTime);
-        dialogueFilterNode.Q.setValueAtTime(1.2, audioCtx.currentTime);
-        dialogueFilterNode.gain.setValueAtTime(0, audioCtx.currentTime);
-
-        compressorNode = audioCtx.createDynamicsCompressor();
-        compressorNode.threshold.setValueAtTime(-24, audioCtx.currentTime);
-        compressorNode.knee.setValueAtTime(12, audioCtx.currentTime);
-        compressorNode.ratio.setValueAtTime(1, audioCtx.currentTime);
-        compressorNode.attack.setValueAtTime(0.003, audioCtx.currentTime);
-        compressorNode.release.setValueAtTime(0.25, audioCtx.currentTime);
-
-        audioSource.connect(dialogueFilterNode);
-        dialogueFilterNode.connect(compressorNode);
-        compressorNode.connect(audioCtx.destination);
-
-        applyAudioEnhancer();
-      } catch (e) {
-        console.warn("[WebAudio] Init skipped:", e);
-      }
-    }
 
     function applyAudioEnhancer() {
       if (!audioCtx || !dialogueFilterNode || !compressorNode) return;
