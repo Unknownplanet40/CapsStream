@@ -83,19 +83,20 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024  # 2GB max upload
 # Static assets are cache-busted with ?v=<version> on every template reference.
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 12 * 3600
 
-# ─── Rate Limiter (flask-limiter, in-memory) ───────────────────────────────────
-
 limiter = Limiter(
     key_func=get_remote_address,
     app=app,
     storage_uri="memory://",
     default_limits=["60 per minute"],
-    # Return 429 JSON instead of HTML
-    on_breach=lambda request_limit: (
-        jsonify({"error": "Too many requests — please slow down.", "retry_after": request_limit.get_window_stats()[1]}),
-        429,
-    ),
 )
+
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify({
+        "error": "Too many requests — please slow down.",
+        "message": str(e.description if hasattr(e, "description") else e),
+    }), 429
 
 # ─── Register Blueprints + Per-Route Limits ────────────────────────────────────
 

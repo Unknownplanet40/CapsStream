@@ -45,8 +45,8 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
     # ── Search — 30 per minute ──────────────────────────────────────────────
     limiter.limit("30 per minute")(app.view_functions["media.api_search"])
 
-    # ── Streaming endpoints — Unlimited (explicitly exempt) ─────────────────
-    streaming_views = [
+    # ── Streaming & High-Frequency endpoints — Unlimited (exempt) ─────────
+    exempt_views = [
         "streaming.api_stream",
         "streaming.api_stream_start",
         "streaming.api_transcode_caps",
@@ -54,7 +54,9 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
         "streaming.api_embedded_subtitles",
         "streaming.api_media_thumbnails",
         "streaming.api_media_thumbnail_sheet",
+        "profiles.api_profile_heartbeat",
+        "social.api_unlock_custom_achievement",
     ]
-    for view_name in streaming_views:
+    for view_name in exempt_views:
         if view_name in app.view_functions:
             limiter.exempt(app.view_functions[view_name])
