@@ -8437,7 +8437,6 @@ const PlayerPage = {
         initWebAudio();
       }
       applyAudioEnhancer();
-      addToast(mode === "dialogue" ? "Sound: Dialogue Boost Enabled" : mode === "night" ? "Sound: Night Mode Enabled" : "Sound: Standard Audio", "info");
     }
 
     // ─── Inactivity Sleep Prompt (Netflix Style) ─────────────────
