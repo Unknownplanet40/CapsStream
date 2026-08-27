@@ -2614,16 +2614,6 @@ const DetailPage = {
                   <div v-if="calcProgressPercent(ep) > 0" class="episode-thumb-progress">
                     <div class="episode-thumb-progress-fill" :style="{ width: calcProgressPercent(ep) + '%' }"></div>
                   </div>
-                  <!-- Per-episode skip marker editor -->
-                  <button
-                    v-if="ep.id && !store.profile?.is_kids"
-                    class="episode-skip-btn"
-                    :class="{ 'has-markers': episodeHasMarkers(ep) }"
-                    @click.stop="openEpisodeSkipModal(ep)"
-                    :title="'Edit skip markers for S' + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0')"
-                  >
-                    <i class="ph ph-timer"></i>
-                  </button>
                 </div>
 
                 <!-- Episode Info & Summary -->
@@ -2634,8 +2624,20 @@ const DetailPage = {
                       <span class="episode-card-title">• {{ ep.ep_title || ep.title }}</span>
                       <span v-if="ep.is_local === false" class="missing-badge" style="margin-left:8px">Missing</span>
                     </div>
-                    <div class="episode-card-runtime" v-if="ep.duration">
-                      {{ formatDuration(ep.duration) }}
+                    <div class="episode-card-actions">
+                      <div class="episode-card-runtime" v-if="ep.duration">
+                        {{ formatDuration(ep.duration) }}
+                      </div>
+                      <!-- Per-episode skip marker editor -->
+                      <button
+                        v-if="ep.id && !store.profile?.is_kids"
+                        class="episode-skip-btn"
+                        :class="{ 'has-markers': episodeHasMarkers(ep) }"
+                        @click.stop="openEpisodeSkipModal(ep)"
+                        :title="'Edit skip markers for S' + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0')"
+                      >
+                        <i class="ph ph-timer"></i>
+                      </button>
                     </div>
                   </div>
                   <div class="episode-card-overview">
