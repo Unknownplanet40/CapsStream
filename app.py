@@ -512,7 +512,7 @@ def _prune_old_logs():
             print(f"[Maintenance] Pruned {removed} old log file(s)")
     except Exception as e:
         print(f"[Maintenance] Log prune failed: {e}")
-    for legacy in ("_finish_update_fallback.bat", "_finish_update.bat"):
+    for legacy in ("_finish_update_fallback.bat", "_finish_update.bat", "_finish_update_helper.py"):
         fp = os.path.join(BASE_DIR, legacy)
         if os.path.isfile(fp):
             try:

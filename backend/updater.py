@@ -434,6 +434,11 @@ try:
 except Exception as e:
     log(f"RELUNCH FAILED: {e}")
     sys.exit(2)
+
+try:
+    os.remove(__file__)
+except Exception:
+    pass
 '''
 
 
