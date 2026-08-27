@@ -404,16 +404,33 @@ if not os.path.isfile(python_exe):
 if not os.path.isfile(python_exe):
     python_exe = sys.executable
 
+launcher_script = os.path.join(root, "silent_launcher.py")
+today_log_name = time.strftime("capsstream_%Y%m%d.log")
+today_log_path = os.path.join(root, "logs", today_log_name)
 try:
-    out = open(log_path, "a", encoding="utf-8")
-    subprocess.Popen(
-        [python_exe, os.path.join(root, "app.py")],
-        cwd=root,
-        stdout=out,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-    )
-    log("server relaunched (startup output captured in this log)")
+    os.makedirs(os.path.join(root, "logs"), exist_ok=True)
+except Exception:
+    pass
+
+try:
+    if os.path.isfile(launcher_script):
+        subprocess.Popen(
+            [python_exe, launcher_script],
+            cwd=root,
+            stdin=subprocess.DEVNULL,
+            close_fds=True,
+        )
+        log("silent_launcher relaunched (logging to logs/ and window monitoring active)")
+    else:
+        out = open(today_log_path, "a", encoding="utf-8")
+        subprocess.Popen(
+            [python_exe, os.path.join(root, "app.py")],
+            cwd=root,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+        )
+        log("server relaunched (startup output captured in " + today_log_name + ")")
 except Exception as e:
     log(f"RELUNCH FAILED: {e}")
     sys.exit(2)
