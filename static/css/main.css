@@ -12009,17 +12009,18 @@ kbd.about-kbd {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 420px;
-  max-width: 92vw;
-  background: rgba(10, 10, 15, 0.94);
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
+  width: 460px;
+  max-width: 90vw;
+  background: rgba(10, 10, 15, 0.95);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
   border-left: 1px solid rgba(255, 255, 255, 0.1);
   z-index: 180;
   display: flex;
   flex-direction: column;
-  box-shadow: -12px 0 45px rgba(0, 0, 0, 0.88);
+  box-shadow: -14px 0 50px rgba(0, 0, 0, 0.9);
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
 }
 
 .episodes-drawer-header {
@@ -12029,6 +12030,7 @@ kbd.about-kbd {
   gap: 12px;
   padding: 1.25rem 1.25rem 0.85rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
 }
 
 .episodes-drawer-title-group {
@@ -12087,38 +12089,42 @@ kbd.about-kbd {
 }
 
 .episodes-drawer-list {
-  flex: 1;
+  flex: 1 1 0%;
+  min-height: 0;
   overflow-y: auto;
-  padding: 0.85rem;
+  padding: 0.9rem;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .drawer-ep-item {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  align-items: flex-start;
+  gap: 14px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 12px;
   cursor: pointer;
   transition: all 0.18s ease;
   position: relative;
   overflow: hidden;
+  flex-shrink: 0;
+  min-height: 84px;
+  box-sizing: border-box;
 }
 
 .drawer-ep-item:hover {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
-  transform: translateX(-2px);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateX(-3px);
 }
 
 .drawer-ep-item.active-playing {
-  background: rgba(229, 9, 20, 0.14);
-  border-color: rgba(229, 9, 20, 0.55);
-  box-shadow: inset 0 0 0 1px rgba(229, 9, 20, 0.3), 0 4px 20px rgba(229, 9, 20, 0.15);
+  background: rgba(229, 9, 20, 0.16);
+  border-color: rgba(229, 9, 20, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(229, 9, 20, 0.3), 0 4px 20px rgba(229, 9, 20, 0.2);
 }
 
 .drawer-ep-item.missing-ep {
@@ -12127,9 +12133,9 @@ kbd.about-kbd {
 }
 
 .drawer-ep-thumb-wrap {
-  width: 120px;
-  min-width: 120px;
-  aspect-ratio: 16/9;
+  width: 124px;
+  min-width: 124px;
+  height: 70px;
   border-radius: 8px;
   background: var(--bg-tertiary, #151520);
   position: relative;
@@ -12138,6 +12144,7 @@ kbd.about-kbd {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  align-self: flex-start;
 }
 
 .drawer-ep-thumb-img {
@@ -12236,12 +12243,12 @@ kbd.about-kbd {
 }
 
 .drawer-ep-info {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 2px;
+  justify-content: flex-start;
+  gap: 4px;
 }
 
 .drawer-ep-meta-row {
@@ -12252,31 +12259,36 @@ kbd.about-kbd {
 }
 
 .drawer-ep-code {
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   font-weight: 800;
   color: var(--accent);
+  letter-spacing: 0.3px;
 }
 
 .drawer-ep-duration {
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-weight: 600;
   color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.06);
-  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 7px;
   border-radius: 99px;
 }
 
 .drawer-ep-title {
-  font-size: 0.85rem;
+  font-size: 0.88rem;
   font-weight: 700;
-  color: var(--text-primary);
-  white-space: nowrap;
+  color: #fff;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .drawer-ep-overview {
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   color: var(--text-secondary);
   line-height: 1.35;
   display: -webkit-box;
@@ -12284,6 +12296,7 @@ kbd.about-kbd {
   -webkit-box-orient: vertical;
   overflow: hidden;
   opacity: 0.85;
+  margin-top: 2px;
 }
 
 /* Slide-out Queue Drawer in Player */
