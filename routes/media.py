@@ -33,6 +33,58 @@ def bust_home_cache():
     _HOME_CACHE["ts"] = 0.0
 
 
+def _merge_season_episodes(tmdb_id, s_num, local_map, pid, fallback_backdrop=None, show_title=None):
+    from backend.matcher import fetch_season_episodes
+    tmdb_eps = fetch_season_episodes(tmdb_id, s_num) if tmdb_id else []
+    merged_list = []
+    if tmdb_eps:
+        seen_ep_nums = set()
+        for meta in tmdb_eps:
+            ep_num = meta["episode_number"]
+            seen_ep_nums.add(ep_num)
+            if (s_num, ep_num) in local_map:
+                ep = dict(local_map[(s_num, ep_num)])
+                ep["is_local"] = True
+                if not ep.get("ep_title") or ep.get("ep_title") == ep.get("title"):
+                    ep["ep_title"] = meta.get("name")
+                ep["overview"] = meta.get("overview") or ep.get("overview")
+                ep["still_path"] = meta.get("still_path") or ep.get("backdrop_path") or fallback_backdrop
+                if meta.get("runtime"):
+                    ep["duration"] = meta.get("runtime") * 60
+                if pid and ep.get("id"):
+                    ep_progress = get_progress(pid, ep["id"])
+                    ep["progress"] = dict(ep_progress) if ep_progress else None
+                merged_list.append(ep)
+            else:
+                merged_list.append({
+                    "id": None, "is_local": False,
+                    "season": s_num, "episode": ep_num,
+                    "ep_title": meta.get("name"), "overview": meta.get("overview"),
+                    "still_path": meta.get("still_path") or fallback_backdrop,
+                    "duration": (meta.get("runtime") * 60) if meta.get("runtime") else None,
+                    "title": show_title or (local_map.get((s_num, ep_num), {}).get("title")),
+                    "progress": None
+                })
+        for (ls, le), ep in local_map.items():
+            if ls == s_num and le not in seen_ep_nums:
+                ep_dict = dict(ep)
+                ep_dict["is_local"] = True
+                if pid and ep_dict.get("id"):
+                    ep_progress = get_progress(pid, ep_dict["id"])
+                    ep_dict["progress"] = dict(ep_progress) if ep_progress else None
+                merged_list.append(ep_dict)
+    else:
+        for (ls, le), ep in local_map.items():
+            if ls == s_num:
+                ep_dict = dict(ep)
+                ep_dict["is_local"] = True
+                if pid and ep_dict.get("id"):
+                    ep_progress = get_progress(pid, ep_dict["id"])
+                    ep_dict["progress"] = dict(ep_progress) if ep_progress else None
+                merged_list.append(ep_dict)
+    return sorted(merged_list, key=lambda e: e.get("episode") or 0)
+
+
 # ─── Anime Detection job state ─────────────────────────────────────────────────
 
 _ANIME_DETECT = {
@@ -324,53 +376,11 @@ def api_media_detail(media_id):
             s_nums = [1]
 
         for s_num in s_nums:
-            tmdb_eps = fetch_season_episodes(media["tmdb_id"], s_num)
-            merged_list = []
-            if tmdb_eps:
-                seen_ep_nums = set()
-                for meta in tmdb_eps:
-                    ep_num = meta["episode_number"]
-                    seen_ep_nums.add(ep_num)
-                    if (s_num, ep_num) in local_map:
-                        ep = dict(local_map[(s_num, ep_num)])
-                        ep["is_local"] = True
-                        if not ep.get("ep_title") or ep.get("ep_title") == ep.get("title"):
-                            ep["ep_title"] = meta.get("name")
-                        ep["overview"] = meta.get("overview") or ep.get("overview")
-                        ep["still_path"] = meta.get("still_path") or ep.get("backdrop_path")
-                        if meta.get("runtime"):
-                            ep["duration"] = meta.get("runtime") * 60
-                        if pid and ep.get("id"):
-                            ep_progress = get_progress(pid, ep["id"])
-                            ep["progress"] = dict(ep_progress) if ep_progress else None
-                        merged_list.append(ep)
-                    else:
-                        merged_list.append({
-                            "id": None, "is_local": False,
-                            "season": s_num, "episode": ep_num,
-                            "ep_title": meta.get("name"), "overview": meta.get("overview"),
-                            "still_path": meta.get("still_path") or media.get("backdrop_path"),
-                            "duration": (meta.get("runtime") * 60) if meta.get("runtime") else None,
-                            "title": media.get("title"), "progress": None
-                        })
-                for (ls, le), ep in local_map.items():
-                    if ls == s_num and le not in seen_ep_nums:
-                        ep_dict = dict(ep)
-                        ep_dict["is_local"] = True
-                        if pid and ep_dict.get("id"):
-                            ep_progress = get_progress(pid, ep_dict["id"])
-                            ep_dict["progress"] = dict(ep_progress) if ep_progress else None
-                        merged_list.append(ep_dict)
-            else:
-                for (ls, le), ep in local_map.items():
-                    if ls == s_num:
-                        ep_dict = dict(ep)
-                        ep_dict["is_local"] = True
-                        if pid and ep_dict.get("id"):
-                            ep_progress = get_progress(pid, ep_dict["id"])
-                            ep_dict["progress"] = dict(ep_progress) if ep_progress else None
-                        merged_list.append(ep_dict)
-            seasons[str(s_num)] = sorted(merged_list, key=lambda e: e.get("episode") or 0)
+            seasons[str(s_num)] = _merge_season_episodes(
+                media["tmdb_id"], s_num, local_map, pid,
+                fallback_backdrop=media.get("backdrop_path"),
+                show_title=media.get("title")
+            )
         media["seasons"] = seasons
 
     if media.get("cast_json"):
@@ -502,54 +512,11 @@ def api_show_detail(tmdb_id):
         s_nums = {1}
 
     for s_num in s_nums:
-        tmdb_eps = fetch_season_episodes(show_tmdb_id, s_num) if show_tmdb_id else []
-        merged_list = []
-        if tmdb_eps:
-            seen_ep_nums = set()
-            for meta in tmdb_eps:
-                ep_num = meta["episode_number"]
-                seen_ep_nums.add(ep_num)
-                if (s_num, ep_num) in local_map:
-                    ep = dict(local_map[(s_num, ep_num)])
-                    ep["is_local"] = True
-                    if not ep.get("ep_title") or ep.get("ep_title") == ep.get("title"):
-                        ep["ep_title"] = meta.get("name")
-                    ep["overview"] = meta.get("overview") or ep.get("overview")
-                    ep["still_path"] = meta.get("still_path") or ep.get("backdrop_path")
-                    if meta.get("runtime"):
-                        ep["duration"] = meta.get("runtime") * 60
-                    if pid and ep.get("id"):
-                        ep_progress = get_progress(pid, ep["id"])
-                        ep["progress"] = dict(ep_progress) if ep_progress else None
-                    merged_list.append(ep)
-                else:
-                    merged_list.append({
-                        "id": None, "is_local": False,
-                        "season": s_num, "episode": ep_num,
-                        "ep_title": meta.get("name"), "overview": meta.get("overview"),
-                        "still_path": meta.get("still_path") or show.get("backdrop_path"),
-                        "duration": (meta.get("runtime") * 60) if meta.get("runtime") else None,
-                        "title": show.get("title"), "progress": None
-                    })
-            for (ls, le), ep in local_map.items():
-                if ls == s_num and le not in seen_ep_nums:
-                    ep_dict = dict(ep)
-                    ep_dict["is_local"] = True
-                    if pid and ep_dict.get("id"):
-                        ep_progress = get_progress(pid, ep_dict["id"])
-                        ep_dict["progress"] = dict(ep_progress) if ep_progress else None
-                    merged_list.append(ep_dict)
-        else:
-            for (ls, le), ep in local_map.items():
-                if ls == s_num:
-                    ep_dict = dict(ep)
-                    ep_dict["is_local"] = True
-                    if pid and ep_dict.get("id"):
-                        ep_progress = get_progress(pid, ep_dict["id"])
-                        ep_dict["progress"] = dict(ep_progress) if ep_progress else None
-                    merged_list.append(ep_dict)
-
-        seasons[str(s_num)] = sorted(merged_list, key=lambda e: e.get("episode") or 0)
+        seasons[str(s_num)] = _merge_season_episodes(
+            show_tmdb_id, s_num, local_map, pid,
+            fallback_backdrop=show.get("backdrop_path"),
+            show_title=show.get("title")
+        )
 
     # Missing seasons (placeholder)
     expected_seasons = 0

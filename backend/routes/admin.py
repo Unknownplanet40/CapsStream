@@ -11,6 +11,10 @@ import threading
 from flask import Blueprint, jsonify, request, send_file, abort, current_app, session
 
 from .middleware import require_admin, is_admin, require_profile
+from backend.utils.version import get_app_version, is_dev_mode
+from backend.utils.scheduler import write_last_scheduled_scan
+from backend.utils.formatting import format_bytes
+from backend.utils.paths import has_ffmpeg, has_ffprobe
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -26,14 +30,6 @@ def _safe_log_path(name, log_dir):
 
 def _get_log_dir():
     return os.path.join(current_app.config["BASE_DIR"], "logs")
-
-
-def get_app_version():
-    try:
-        with open(os.path.join(current_app.config["BASE_DIR"], "VERSION"), encoding="utf-8") as f:
-            return f.read().strip() or "2.0.0.0"
-    except Exception:
-        return "2.0.0.0"
 
 
 # ─── Settings ─────────────────────────────────────────────────────────────────
@@ -62,7 +58,7 @@ def api_post_settings():
     ok, result = save_config(data)
     if ok:
         if "library" in data and "scan_interval_hours" in (data.get("library") or {}):
-            _write_last_scheduled_scan(time.time())
+            write_last_scheduled_scan(time.time())
         return jsonify({"ok": True, "config": result})
     return jsonify({"error": result}), 500
 
@@ -269,23 +265,6 @@ _scan_thread = None
 _SCAN_SCHEDULE_FILE = None
 
 
-def _get_scan_schedule_file():
-    global _SCAN_SCHEDULE_FILE
-    if _SCAN_SCHEDULE_FILE is None:
-        _SCAN_SCHEDULE_FILE = os.path.join(current_app.config["BASE_DIR"], "data", "scan_schedule.json")
-    return _SCAN_SCHEDULE_FILE
-
-
-def _write_last_scheduled_scan(ts):
-    import json
-    try:
-        sf = os.path.join(current_app.config["BASE_DIR"], "data", "scan_schedule.json")
-        os.makedirs(os.path.dirname(sf), exist_ok=True)
-        with open(sf, "w", encoding="utf-8") as f:
-            json.dump({"last_run": ts}, f)
-    except Exception:
-        pass
-
 
 @admin_bp.route("/api/scan", methods=["POST"])
 def api_scan():
@@ -434,9 +413,8 @@ def api_system_info():
         else:
             db_size_str = f"{sz / 1024:.1f} KB"
 
-    ffmpeg_path = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffmpeg.exe")
-    has_ffmpeg = os.path.exists(ffmpeg_path)
-    has_ffprobe = os.path.exists(os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe"))
+    ffmpeg_available = has_ffmpeg()
+    ffprobe_available = has_ffprobe()
 
     movies_count = series_count = anime_count = 0
     skip_markers_count = 0
@@ -501,19 +479,6 @@ def api_system_info():
     except Exception:
         pass
 
-    def format_bytes(b):
-        if not b or b <= 0:
-            return "0 GB"
-        tb = b / (1024 ** 4)
-        if tb >= 1.0:
-            return f"{tb:.2f} TB" if tb < 10 else f"{tb:.1f} TB"
-        gb = b / (1024 ** 3)
-        if gb >= 1.0:
-            return f"{gb:.2f} GB" if gb < 10 else f"{gb:.1f} GB"
-        mb = b / (1024 ** 2)
-        if mb >= 1.0:
-            return f"{mb:.1f} MB"
-        return f"{b / 1024:.0f} KB"
 
     storage_info = {
         "total_size": format_bytes(total_bytes), "total_bytes": total_bytes,
@@ -593,7 +558,6 @@ def api_system_info():
         except Exception:
             continue
 
-    from app import is_dev_mode
     return jsonify({
         "version": get_app_version(),
         "is_dev": is_dev_mode(),
@@ -604,8 +568,8 @@ def api_system_info():
         "os_name": os.name,
         "server_uptime": uptime_str,
         "database_size": db_size_str,
-        "has_ffmpeg": has_ffmpeg,
-        "has_ffprobe": has_ffprobe,
+        "has_ffmpeg": ffmpeg_available,
+        "has_ffprobe": ffprobe_available,
         "ram_info": ram_info,
         "db_metrics": db_metrics,
         "api_health": api_health,

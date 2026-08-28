@@ -18,8 +18,8 @@ import time
 import threading
 from backend.db import upsert_media, get_all_media, get_conn, is_drive_mounted
 from backend.matcher import match_movie, match_show, fetch_season_episodes
+from backend.utils.paths import BASE_DIR
 
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".webm", ".mov", ".m4v", ".ts", ".wmv", ".flv", ".m2ts"}
 
 _scan_status = {
@@ -136,13 +136,13 @@ def _parse_episode(filename):
 
 
 def _parse_season_dir(rel_path):
-    """Detect season number from folder names like S02, S2, Season 2, s03, Specials, etc."""
+    """Detect season number from folder names like S02, S2, Season 2, s03, Specials, Extras, OADs, etc."""
     if not rel_path or rel_path == ".":
         return None
     parts = os.path.normpath(rel_path).split(os.sep)
     for part in reversed(parts):
         part_clean = part.strip()
-        if re.search(r'\bspecials?\b', part_clean, re.IGNORECASE):
+        if re.search(r'\b(specials?|extras?|oads?|ovas?|nced|ncop|featurettes?|shorts?|bonus|sp)\b', part_clean, re.IGNORECASE):
             return 0
         m = re.search(r'(?:[Ss]eason|[Ss]taffel|[Ss]aison|[Ss]eries|[Ss])\s*[-_]?\s*(\d{1,2})\b', part_clean)
         if m:

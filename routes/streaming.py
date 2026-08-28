@@ -18,9 +18,8 @@ streaming_bp = Blueprint("streaming", __name__)
 def _media_duration_seconds(file_path):
     """Best-effort stream duration via ffprobe (0 if unavailable)."""
     import subprocess, json as _json
-    BASE_DIR = current_app.config["BASE_DIR"]
-    ffprobe = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe")
-    if not file_path or not os.path.isfile(ffprobe):
+    from backend.utils.paths import FFPROBE_BIN
+    if not file_path or not os.path.isfile(FFPROBE_BIN):
         return 0.0
     try:
         from backend.proc_utils import CREATE_NO_WINDOW

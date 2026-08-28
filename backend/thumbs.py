@@ -16,10 +16,8 @@ import shutil
 import subprocess
 
 from backend.proc_utils import CREATE_NO_WINDOW, BELOW_NORMAL_PRIORITY
+from backend.utils.paths import BASE_DIR, FFMPEG_BIN, FFPROBE_BIN
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FFMPEG_BIN = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffmpeg.exe")
-FFPROBE_BIN = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe")
 THUMB_DIR = os.path.join(BASE_DIR, "data", "metadata", "thumbs")
 
 MAX_CELLS = 60         # 10-wide grid, ~1 frame per N seconds — 4K files stay tractable

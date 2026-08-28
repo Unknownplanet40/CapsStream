@@ -7,14 +7,8 @@ import subprocess
 import json
 
 from backend.proc_utils import CREATE_NO_WINDOW
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FFPROBE_BIN = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe")
-
-# Probe results cached per file+size+mtime — avoids re-spawning ffprobe
-# (slow over network storage) on every detail view / quality menu open.
-_PROBE_CACHE = {}
-_PROBE_CACHE_MAX = 4096
+from backend.utils.paths import BASE_DIR, FFPROBE_BIN
+from backend.utils import probe_cache
 
 
 def extract_codec_tag(codec_name, file_path=""):
@@ -57,8 +51,8 @@ def probe_video_resolution(file_path):
     if os.path.isfile(file_path) and os.path.exists(FFPROBE_BIN):
         try:
             st = os.stat(file_path)
-            cache_key = (os.path.abspath(file_path), st.st_size, st.st_mtime)
-            cached = _PROBE_CACHE.get(cache_key)
+            cache_key = ("video_res", os.path.abspath(file_path), st.st_size, st.st_mtime)
+            cached = probe_cache.get(cache_key)
             if cached is not None:
                 return cached
 
@@ -86,9 +80,7 @@ def probe_video_resolution(file_path):
             return _format_probe_result(width, height, codec_name, file_path)
 
         result = _format_probe_result(width, height, codec_name, file_path)
-        if len(_PROBE_CACHE) >= _PROBE_CACHE_MAX:
-            _PROBE_CACHE.clear()
-        _PROBE_CACHE[cache_key] = result
+        probe_cache.put(cache_key, result)
         return result
 
     return _format_probe_result(width, height, codec_name, file_path)
@@ -139,7 +131,7 @@ def probe_video_details(file_path):
     try:
         st = os.stat(file_path)
         cache_key = ("details", os.path.abspath(file_path), st.st_size, st.st_mtime)
-        cached = _PROBE_CACHE.get(cache_key)
+        cached = probe_cache.get(cache_key)
         if cached is not None:
             return cached
 
@@ -185,9 +177,7 @@ def probe_video_details(file_path):
             "audio_tracks": audio_tracks,
         }
 
-        if len(_PROBE_CACHE) >= _PROBE_CACHE_MAX:
-            _PROBE_CACHE.clear()
-        _PROBE_CACHE[cache_key] = res
+        probe_cache.put(cache_key, res)
         return res
     except Exception as e:
         print(f"[VideoProbe] Details probe error for {file_path}: {e}")

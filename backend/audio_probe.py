@@ -3,10 +3,8 @@ import subprocess
 import json
 
 from backend.proc_utils import CREATE_NO_WINDOW
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FFPROBE_BIN = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe")
-FFMPEG_BIN  = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffmpeg.exe")
+from backend.utils.paths import FFPROBE_BIN
+from backend.utils import probe_cache
 
 LANG_NAMES = {
     "eng": "English", "jpn": "Japanese", "spa": "Spanish", "fre": "French", "fra": "French",
@@ -14,11 +12,6 @@ LANG_NAMES = {
     "kor": "Korean", "rus": "Russian", "por": "Portuguese", "tag": "Tagalog", "tgl": "Tagalog",
     "und": "Default Audio"
 }
-
-# Probe results cached per file+size+mtime — avoids re-spawning ffprobe
-# every time the player or a detail view asks for the audio track list.
-_PROBE_CACHE = {}
-_PROBE_CACHE_MAX = 4096
 
 
 def probe_audio_tracks(file_path):
@@ -31,11 +24,11 @@ def probe_audio_tracks(file_path):
 
     try:
         st = os.stat(file_path)
-        cache_key = (os.path.abspath(file_path), st.st_size, st.st_mtime)
+        cache_key = ("audio_tracks", os.path.abspath(file_path), st.st_size, st.st_mtime)
     except OSError:
         return []
 
-    cached = _PROBE_CACHE.get(cache_key)
+    cached = probe_cache.get(cache_key)
     if cached is not None:
         return cached
 
@@ -84,9 +77,7 @@ def probe_audio_tracks(file_path):
                 })
                 track_num += 1
 
-        if len(_PROBE_CACHE) >= _PROBE_CACHE_MAX:
-            _PROBE_CACHE.clear()
-        _PROBE_CACHE[cache_key] = audio_tracks
+        probe_cache.put(cache_key, audio_tracks)
         return audio_tracks
     except Exception as e:
         print(f"[AudioProbe] Error probing {file_path}: {e}")

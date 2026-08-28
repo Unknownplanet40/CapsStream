@@ -808,7 +808,13 @@ async function startLibraryScan(force = false) {
         sessionScanStarted = true; // don't retry later in the session
         return false;
       }
-    } catch (e) {}
+      // If we successfully fetched settings but scan_on_startup is not explicitly false,
+      // we proceed with the scan (default behavior)
+    } catch (e) {
+      // If we can't fetch settings to check the preference, do NOT auto-scan
+      // to avoid scanning against the user's wishes
+      return false;
+    }
   }
   sessionScanStarted = true;
   try {
@@ -910,6 +916,75 @@ document.addEventListener(
   },
   true
 );
+
+// ─── 4K Compatibility Checker ─────────────────────────────────
+// Tests display resolution and hardware decoding capability for 4K video.
+// Uses raw window.screen dimensions (without DPR) so high-DPI 1080p monitors are not misidentified as 4K.
+async function check4KCompatibility() {
+  const reasons = [];
+  let displayCapable = true;
+  let decodeCapable = true;
+
+  // 1. Display resolution check using raw screen dimensions
+  const screenW = window.screen?.width || 0;
+  const screenH = window.screen?.height || 0;
+  if (screenW > 0 && screenH > 0 && screenW < 3840 && screenH < 2160) {
+    displayCapable = false;
+    reasons.push(`Display is ${screenW}×${screenH} (native 4K is 3840×2160)`);
+  }
+
+  // 2. Hardware Decoding capabilities via Media Capabilities API
+  if (navigator.mediaCapabilities && navigator.mediaCapabilities.decodingInfo) {
+    try {
+      const hevcConfig = {
+        type: 'file',
+        video: {
+          contentType: 'video/mp4; codecs="hev1.1.6.L150.B0"',
+          width: 3840,
+          height: 2160,
+          bitrate: 25000000,
+          framerate: 30
+        }
+      };
+      const h264Config = {
+        type: 'file',
+        video: {
+          contentType: 'video/mp4; codecs="avc1.640033"',
+          width: 3840,
+          height: 2160,
+          bitrate: 25000000,
+          framerate: 30
+        }
+      };
+      const [hevcInfo, h264Info] = await Promise.all([
+        navigator.mediaCapabilities.decodingInfo(hevcConfig).catch(() => null),
+        navigator.mediaCapabilities.decodingInfo(h264Config).catch(() => null)
+      ]);
+
+      const isHevcSupported = hevcInfo?.supported;
+      const isHevcSmooth = hevcInfo?.smooth;
+      const isH264Supported = h264Info?.supported;
+      const isH264Smooth = h264Info?.smooth;
+
+      if (!isHevcSupported && !isH264Supported) {
+        decodeCapable = false;
+        reasons.push('Hardware 4K decoding not supported on this browser/GPU');
+      } else if (hevcInfo && !isHevcSmooth && (!h264Info || !isH264Smooth)) {
+        decodeCapable = false;
+        reasons.push('4K HEVC playback may experience frame drops / high CPU load');
+      }
+    } catch (e) {
+      console.warn('[4K Check] Error querying media capabilities:', e);
+    }
+  }
+
+  return {
+    compatible: displayCapable && decodeCapable,
+    displayCapable,
+    decodeCapable,
+    reasons
+  };
+}
 
 function formatRating(r) {
   return r ? r.toFixed(1) : "—";
@@ -5564,11 +5639,15 @@ const PlayerPage = {
             <span>{{ playbackWarning.msg }}</span>
             <div class="player-compat-actions">
               <button
-                v-if="!streamState.transcode && compatInfo && compatInfo.available"
+                v-if="!streamState.transcode"
                 class="player-compat-btn"
+                :disabled="!compatInfo || !compatInfo.available"
+                :class="{ 'loading': !compatInfo }"
                 @click.stop="enableCompatPlayback"
               >
-                <i class="ph ph-lightning"></i> Play converted (1080p)
+                <i v-if="!compatInfo" class="ph ph-circle-notch player-compat-spin"></i>
+                <i v-else class="ph ph-lightning"></i>
+                {{ !compatInfo ? 'Loading...' : (compatInfo.available ? 'Play converted (1080p)' : 'Unavailable') }}
               </button>
               <button
                 v-else-if="streamState.transcode"
@@ -5642,9 +5721,9 @@ const PlayerPage = {
       <div v-if="showResumeModal" class="resume-backdrop-blocker" @click.stop.prevent></div>
 
       <!-- Controls Overlay -->
-      <div class="custom-player-controls" :class="{ hidden: controlsHidden && !showResumeModal }" @touchstart="showControls" @mousemove="showControls" @click.stop="showControls">
+      <div class="custom-player-controls" :class="{ hidden: controlsHidden && !showResumeModal && !playerError }" @touchstart="showControls" @mousemove="showControls" @click.stop="showControls">
         <!-- Top Bar (Always Clickable) -->
-        <div class="custom-player-top" style="z-index: 220; position: relative; pointer-events: auto;">
+        <div class="custom-player-top" style="z-index: 500; position: relative; pointer-events: auto;">
           <div style="display:flex;align-items:center;gap:8px">
             <div class="player-back" @click="goBack" title="Back" id="player-back-btn">
               <i class="ph ph-arrow-left" style="font-size:1.25rem"></i>
@@ -6332,55 +6411,7 @@ const PlayerPage = {
                 </div>
                 <div class="drawer-ep-title" :title="ep.ep_title || ep.title || ('Episode ' + ep.episode)">
                   {{ ep.ep_title || ep.title || ('Episode ' + ep.episode) }}
-                </div>
-                <div v-if="ep.overview" class="drawer-ep-overview">
-                  {{ ep.overview }}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </transition>
-
-      <!-- In-Player Slide-Out Queue Drawer -->
-      <transition name="slide-left">
-        <div v-if="showQueueDrawer" class="player-queue-drawer" @click.stop>
-          <div class="queue-drawer-header">
-            <div class="queue-drawer-title">
-              <i class="ph ph-queue" style="color:var(--accent);font-size:1.3rem"></i>
-              <span>{{ store.queuePlaylistName || 'Playback Queue' }}</span>
-              <span v-if="store.queue && store.queue.length" class="queue-count-pill">{{ store.queue.length }}</span>
-            </div>
-            <button class="queue-close-btn" @click="showQueueDrawer = false" title="Close Queue">
-              <i class="ph ph-x"></i>
-            </button>
-          </div>
-
-          <!-- Queue Controls Toolbar -->
-          <div class="queue-toolbar">
-            <button
-              class="queue-tool-btn"
-              :class="{ active: store.queueShuffle }"
-              @click="toggleQueueShuffle"
-              title="Shuffle Queue"
-            >
-              <i class="ph ph-shuffle"></i> Shuffle
-            </button>
-            <button
-              class="queue-tool-btn"
-              :class="{ active: store.queueRepeat !== 'off' }"
-              @click="cycleQueueRepeat"
-              :title="'Repeat: ' + store.queueRepeat"
-            >
-              <i :class="store.queueRepeat === 'one' ? 'ph ph-repeat-once' : 'ph ph-repeat'"></i>
-              {{ store.queueRepeat === 'all' ? 'Repeat All' : store.queueRepeat === 'one' ? 'Repeat One' : 'Repeat Off' }}
-            </button>
-            <button class="queue-tool-btn danger" @click="clearActiveQueue" title="Clear Queue">
-              <i class="ph ph-trash"></i> Clear
-            </button>
-          </div>
-
-          <!-- Queue Items List -->
+               <!-- Queue Items List -->
           <div v-if="!store.queue || !store.queue.length" class="queue-empty-state">
             <i class="ph ph-queue"></i>
             <div style="font-weight:700;font-size:0.95rem;margin-bottom:4px">Queue is empty</div>
@@ -6429,23 +6460,79 @@ const PlayerPage = {
         </div>
       </transition>
 
-      <!-- Playback Error Overlay -->
-      <div v-if="playerError" class="empty-state" style="position:fixed;inset:0;background:rgba(10,10,15,0.95);z-index:300;padding:2rem">
-        <div class="empty-icon"><i class="ph-bold ph-warning"></i></div>
-        <div class="empty-title">Playback Issue</div>
-        <div class="empty-subtitle" style="max-width:480px;margin-bottom:1.5rem">
+      <!-- Auto-Switch 4K Undo Pill (non-blocking, bottom-left) -->
+      <transition name="fade">
+        <div
+          v-if="autoSwitched4K"
+          style="position:absolute;bottom:90px;left:50%;transform:translateX(-50%);z-index:300;display:flex;align-items:center;gap:10px;background:rgba(18,18,26,0.88);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.1);border-radius:99px;padding:8px 16px 8px 12px;font-size:0.83rem;color:rgba(255,255,255,0.85);pointer-events:auto;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,0.4)"
+        >
+          <i class="ph ph-info" style="font-size:1rem;color:rgba(255,200,80,0.9);flex-shrink:0"></i>
+          <span>Switched to {{ autoSwitched4K.label }} — 4K may not play smoothly</span>
+          <button
+            @click="force4KPlayback"
+            style="margin-left:4px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);border-radius:99px;padding:3px 12px;color:#fff;font-size:0.8rem;font-weight:600;cursor:pointer;transition:background 0.2s;flex-shrink:0"
+          >Play 4K Anyway</button>
+          <button
+            @click="autoSwitched4K = null"
+            style="background:none;border:none;color:rgba(255,255,255,0.45);cursor:pointer;padding:0 2px;font-size:0.9rem;flex-shrink:0"
+            title="Dismiss"
+          ><i class="ph ph-x"></i></button>
+        </div>
+      </transition>
+
+      <!-- Stutter 4K Banner (non-blocking, bottom, mid-playback) -->
+      <transition name="fade">
+        <div
+          v-if="stutter4KBanner"
+          style="position:absolute;bottom:80px;left:50%;transform:translateX(-50%);z-index:300;display:flex;align-items:center;gap:10px;background:rgba(18,18,26,0.9);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,160,60,0.25);border-radius:99px;padding:9px 18px 9px 14px;font-size:0.84rem;color:rgba(255,255,255,0.85);pointer-events:auto;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,0.45)"
+        >
+          <i class="ph ph-warning" style="font-size:1rem;color:rgba(255,160,60,0.9);flex-shrink:0"></i>
+          <span>4K playback is struggling on this device</span>
+          <button
+            @click="stutter4KAutoSwitch"
+            style="margin-left:4px;background:#e50914;border:none;border-radius:99px;padding:4px 14px;color:#fff;font-size:0.8rem;font-weight:700;cursor:pointer;transition:background 0.2s;flex-shrink:0"
+          >Switch to 1080p</button>
+          <button
+            @click="stutter4KBanner = null"
+            style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);border-radius:99px;padding:4px 12px;color:rgba(255,255,255,0.8);font-size:0.8rem;font-weight:500;cursor:pointer;flex-shrink:0"
+          >Keep Playing</button>
+        </div>
+      </transition>
+
+      <!-- Playback Error Overlay (real failures only) -->
+      <div
+        v-if="playerError"
+        class="player-issue-overlay"
+        style="position:absolute;inset:0;background:radial-gradient(circle at center, rgba(16,16,24,0.78) 0%, rgba(6,6,10,0.92) 100%);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:400;padding:2.5rem 1.5rem;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:auto"
+        @click.stop.prevent
+        @dblclick.stop.prevent
+      >
+        <div class="player-issue-icon-wrap" style="position:relative;margin-bottom:1.25rem;display:flex;align-items:center;justify-content:center">
+          <div style="position:absolute;width:90px;height:90px;border-radius:50%;background:radial-gradient(circle, rgba(239,68,68,0.28) 0%, transparent 70%);pointer-events:none"></div>
+          <i class="ph ph-warning" style="font-size:3.8rem;color:rgba(255,255,255,0.9);position:relative;z-index:2"></i>
+        </div>
+        <div style="font-size:1.5rem;font-weight:700;letter-spacing:-0.3px;color:#fff;margin-bottom:0.65rem">
+          Playback Issue
+        </div>
+        <div style="max-width:540px;margin:0 auto 1.5rem;font-size:0.92rem;color:rgba(255,255,255,0.72);line-height:1.65;font-weight:400">
           {{ playerError }}
         </div>
-        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-          <button v-if="!streamState.transcode" class="btn btn-primary" @click="enableCompatPlayback">
-            <i class="ph ph-lightning" style="margin-right:6px"></i>
+        <!-- Primary Action Button (Top) -->
+        <div v-if="!streamState.transcode" style="display:flex;justify-content:center;margin-bottom:12px;width:100%">
+          <button class="btn player-issue-btn-red" style="background:#e50914;color:#fff;border:none;border-radius:99px;padding:0.75rem 1.85rem;font-weight:700;font-size:0.95rem;display:flex;align-items:center;gap:8px;box-shadow:0 4px 18px rgba(229,9,20,0.45);cursor:pointer;transition:all 0.2s" @click="enableCompatPlayback">
+            <i class="ph-bold ph-lightning"></i>
             Play Converted (1080p)
           </button>
-          <button class="btn" :class="streamState.transcode ? 'btn-primary' : 'btn-secondary'" @click="recoverFromError" :disabled="recovering">
-            <i :class="recovering ? 'ph ph-circle-notch' : 'ph ph-arrow-counter-clockwise'" :style="recovering ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+        </div>
+        <!-- Secondary Actions -->
+        <div style="display:flex;gap:12px;justify-content:center;align-items:center;flex-wrap:wrap">
+          <button class="btn player-issue-btn-dark" style="background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.18);border-radius:99px;padding:0.65rem 1.5rem;font-weight:600;font-size:0.9rem;display:flex;align-items:center;gap:8px;cursor:pointer;transition:all 0.2s" @click="recoverFromError" :disabled="recovering">
+            <i :class="recovering ? 'ph ph-circle-notch' : 'ph-bold ph-arrow-counter-clockwise'" :style="recovering ? 'animation:spin 1s linear infinite' : ''"></i>
             {{ recovering ? 'Recovering…' : 'Resume Playback' }}
           </button>
-          <button class="btn btn-secondary" @click="goBack">Go Back</button>
+          <button class="btn player-issue-btn-dark" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.85);border:1px solid rgba(255,255,255,0.14);border-radius:99px;padding:0.65rem 1.5rem;font-weight:600;font-size:0.9rem;cursor:pointer;transition:all 0.2s" @click="goBack">
+            Go Back
+          </button>
         </div>
       </div>
     </div>
@@ -6470,6 +6557,8 @@ const PlayerPage = {
     const isFullscreen = ref(false);
     const controlsHidden = ref(false);
     const playerError = ref(null);
+    const autoSwitched4K = ref(null);  // { label, original4kOption }
+    const stutter4KBanner = ref(false);
 
     const playbackRate = ref(1);
     const selectedSub = ref(-1);
@@ -6911,23 +7000,98 @@ const PlayerPage = {
       }
     }
 
-    async function selectQuality(option) {
+    // ── Force 4K even though compat check failed (undo auto-switch) ──
+    function force4KPlayback() {
+      const original = autoSwitched4K.value?.original4kOption;
+      autoSwitched4K.value = null;
+      stutter4KBanner.value = null;
+      if (original) {
+        selectQuality(original, true);
+      }
+    }
+
+    // ── Auto-switch to best non-4K option when stutter is detected ──
+    function stutter4KAutoSwitch() {
+      stutter4KBanner.value = null;
+      const fallback = (qualityOptions.value || []).find(
+        (o) => !(o.base_label || o.resolution || "").startsWith("4K") && o.media_id !== selectedQualityMediaId.value
+      );
+      if (fallback) {
+        selectQuality(fallback, true);
+      } else if (!streamState.transcode) {
+        enableCompatPlayback(true);
+      }
+    }
+
+    async function selectQuality(option, bypassCheck = false) {
       if (!option || option.media_id === selectedQualityMediaId.value) {
         showQualityMenu.value = false;
         return;
       }
+
+      // ── 4K Compatibility Smart Auto-Switch ──────────────────────────
+      const is4KOption = (option.base_label || option.resolution || "").startsWith("4K");
+      const check4KEnabled = playerSettings.value?.playback?.check_4k_compat !== false;
+      if (is4KOption && !bypassCheck && check4KEnabled) {
+        const compat = await check4KCompatibility();
+        if (!compat.compatible) {
+          showQualityMenu.value = false;
+          const fallback = (qualityOptions.value || []).find(
+            (o) => o.media_id !== option.media_id && !(o.base_label || o.resolution || "").startsWith("4K")
+          ) || null;
+          if (fallback) {
+            // Silently switch to fallback and show undo pill
+            const original4kOption = option;
+            selectQuality(fallback, true);
+            autoSwitched4K.value = {
+              label: fallback.display_label || fallback.base_label || "1080p",
+              original4kOption,
+            };
+            // Auto-dismiss undo pill after 8 seconds
+            setTimeout(() => { if (autoSwitched4K.value) autoSwitched4K.value = null; }, 8000);
+          } else if (!streamState.transcode) {
+            // No lower quality available — switch to converted playback silently
+            enableCompatPlayback(true);
+          }
+          return;
+        }
+      }
+      // ──────────────────────────────────────────────────────────────
+
       showQualityMenu.value = false;
+      autoSwitched4K.value = null;
+      stutter4KBanner.value = null;
       trackPlayerFeature("quality");
       suppressResume = true;
       saveProgressNow();
 
-      // Preserve BOTH the position AND the chosen audio track across files.
-      // The remote audio (if any) is re-pointed at the new file by
-      // syncRemoteAudio once the new video source reports its position.
+      // Immediately silence & detach any existing remote audio stream and pause old video
+      detachRemoteAudio();
+      if (videoRef.value) {
+        try { videoRef.value.pause(); } catch (e) {}
+      }
+
       const atContent = currentContentTime();
       selectedQualityMediaId.value = option.media_id;
       streamState.mediaId = option.media_id;
-      swapStream(atContent);
+
+      // Refresh metadata, audio tracks, subtitles, skip-times, and thumb sheet for new quality file
+      API.get(`/api/media/${option.media_id}`).then((newMedia) => {
+        if (newMedia) {
+          media.value = newMedia;
+          if (newMedia.duration) displayDuration.value = newMedia.duration;
+          subtitles.value = newMedia.subtitles || [];
+        }
+      }).catch(() => {});
+
+      API.get(`/api/audio-tracks/${option.media_id}`).then((tracks) => {
+        audioTracks.value = Array.isArray(tracks) ? tracks : [];
+      }).catch(() => { audioTracks.value = []; });
+
+      loadSkipTimes(option.media_id);
+      loadThumbSheet(option.media_id);
+
+      swapStream(atContent, true);
 
       API.post("/api/achievements/unlock", { achievement_id: "quality_switcher" }).catch(() => {});
     }
@@ -7299,6 +7463,7 @@ const PlayerPage = {
     let hasAutoFullscreened = false;
 
     function togglePlay() {
+      if (playerError.value) return;
       if (!videoRef.value) return;
       if (videoRef.value.paused) {
         const p = videoRef.value.play();
@@ -7372,6 +7537,7 @@ const PlayerPage = {
     }
 
     function onPlayerTouchStart(e) {
+      if (playerError.value) return;
       lastTouchTime = Date.now();
       if (e.target.closest(".custom-player-controls") || e.target.closest(".shortcuts-modal-card")) {
         showControls();
@@ -7394,6 +7560,7 @@ const PlayerPage = {
     }
 
     function onPlayerTouchMove(e) {
+      if (playerError.value) return;
       if (e.target.closest(".custom-player-controls") || e.target.closest(".shortcuts-modal-card")) return;
       if (e.touches && e.touches.length === 2 && touchGestureState.mode === "pinch") {
         const currentDist = getTouchDist(e.touches[0], e.touches[1]);
@@ -7448,6 +7615,7 @@ const PlayerPage = {
     let singleTapTimeout = null;
 
     function onPlayerTouchEnd(e) {
+      if (playerError.value) return;
       if (e.target.closest(".custom-player-controls") || e.target.closest(".shortcuts-modal-card")) return;
       lastTouchTime = Date.now();
       if (touchGestureState.mode === "brightness" || touchGestureState.mode === "volume" || touchGestureState.mode === "pinch") {
@@ -7495,6 +7663,7 @@ const PlayerPage = {
     }
 
     function handleContainerClick(e) {
+      if (playerError.value) return;
       if (e.target.closest(".custom-player-controls")) return;
       // Prevent synthetic touch clicks from toggling play immediately after tap
       if (Date.now() - lastTouchTime < 1000) return;
@@ -7506,6 +7675,7 @@ const PlayerPage = {
     }
 
     function handleContainerDblClick(e) {
+      if (playerError.value) return;
       if (e.target.closest(".custom-player-controls")) return;
       // Strictly ignore dblclick on touch interactions to prevent unfullscreen
       if (Date.now() - lastTouchTime < 1500) return;
@@ -9009,9 +9179,15 @@ const PlayerPage = {
         const p = (media.value?.file_path || "").toLowerCase();
         const heavy = p.includes("2160") || p.includes("4k") || p.includes("uhd") ||
                       (codecInfo.value?.tags || []).some((t) => t.includes("HEVC"));
-        playerError.value = heavy
-          ? "Decoder appears stuck — 4K/HEVC stream may exceed hardware capabilities. Use Converted Playback (1080p) or Resume below."
-          : "Playback appears stuck. Use Resume Playback to reload the stream from where you left off.";
+        if (heavy) {
+          // For 4K/HEVC: show non-blocking stutter banner — ask before switching, don't block player
+          if (!stutter4KBanner.value) {
+            stutter4KBanner.value = true;
+          }
+        } else {
+          // For standard content: show full-screen error overlay as usual
+          playerError.value = "Playback appears stuck. Use Resume Playback to reload the stream from where you left off.";
+        }
       }
     }
 
@@ -9028,6 +9204,8 @@ const PlayerPage = {
 
     function handleKeyboard(e) {
       if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
+      // Block all shortcuts while error overlay is shown
+      if (playerError.value) return;
       unlockAchievementSilently("keyboard_ninja");
 
       if (showResumeModal.value) {
@@ -9296,6 +9474,34 @@ const PlayerPage = {
         if (isHevc && !hevcSupported && !streamState.transcode) {
           console.info("[Player] HEVC content detected on browser without native HEVC decoder. Starting in converted mode...");
           streamState.transcode = true;
+        }
+
+        // ── 4K Hardware / Browser Compatibility Guard (Smart Auto-Switch) ──
+        const is4KInitial = (media.value?.base_label || "").startsWith("4K") ||
+                            (media.value?.video_info?.height >= 2160 || media.value?.video_info?.width >= 3840) ||
+                            (media.value?.height >= 2160 || media.value?.width >= 3840) ||
+                            (filePath.includes("2160p") || filePath.includes("4k") || filePath.includes("uhd"));
+
+        const check4KEnabled = playerSettings.value?.playback?.check_4k_compat !== false;
+        if (is4KInitial && !streamState.transcode && check4KEnabled) {
+          const compat = await check4KCompatibility();
+          if (!compat.compatible) {
+            const currentOpt = (qualityOptions.value || []).find((o) => o.media_id === selectedQualityMediaId.value);
+            const fallback = (qualityOptions.value || []).find(
+              (o) => !(o.base_label || o.resolution || "").startsWith("4K") && o.media_id !== selectedQualityMediaId.value
+            ) || null;
+            if (fallback) {
+              // Silently switch to fallback quality and show undo pill (non-blocking)
+              autoSwitched4K.value = {
+                label: fallback.display_label || fallback.base_label || "1080p",
+                original4kOption: currentOpt || null,
+              };
+              selectedQualityMediaId.value = fallback.media_id;
+              streamState.mediaId = fallback.media_id;
+              // Auto-dismiss undo pill after 8 seconds
+              setTimeout(() => { if (autoSwitched4K.value) autoSwitched4K.value = null; }, 8000);
+            }
+          }
         }
 
         // Auto-download subtitles via OpenSubtitles when none exist and enabled
@@ -9710,6 +9916,10 @@ const PlayerPage = {
       brightnessLevel,
       aspectRatioFit,
       cycleAspectRatio,
+      autoSwitched4K,
+      stutter4KBanner,
+      force4KPlayback,
+      stutter4KAutoSwitch,
     };
   },
 };
@@ -12149,9 +12359,11 @@ const ProfilesPage = {
           store.profile = res.profile;
           pinTarget.value = null;
           takeoverTarget.value = null;
-          router.push("/");
-          // Active login — start the library scan (once per session)
-          startLibraryScan();
+          // Wait for the route to settle on "/" before starting the scan,
+          // so the library scan doesn't fire while still on the profile page.
+          router.push("/").then(() => {
+            startLibraryScan();
+          });
         }
       } catch (e) {
         if (e.status === "in_use" || (e.message && e.message.includes("currently active"))) {
@@ -12425,10 +12637,11 @@ const SetupPage = {
         store.profile = authRes.profile || created;
         addToast(`Welcome, ${created.name}!`, "success");
 
-        // Active login — start the library scan (once per session)
-        startLibraryScan();
-
-        router.push("/");
+        // Wait for the route to settle on "/" before starting the scan,
+        // so the library scan doesn't fire while still on the profile page.
+        router.push("/").then(() => {
+          startLibraryScan();
+        });
       } catch (e) {
         addToast(e.message || "Failed to create profile", "error");
       } finally {

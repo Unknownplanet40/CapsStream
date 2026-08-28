@@ -10,10 +10,8 @@ import zipfile
 import io
 
 from backend.proc_utils import CREATE_NO_WINDOW
+from backend.utils.paths import BASE_DIR, FFPROBE_BIN, FFMPEG_BIN
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FFPROBE_BIN = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe")
-FFMPEG_BIN  = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffmpeg.exe")
 SUB_CACHE_DIR = os.path.join(BASE_DIR, "data", "metadata", "subtitles")
 
 LANG_NAMES = {

@@ -13,19 +13,17 @@ import subprocess
 import threading
 from flask import Response, request, abort
 
-from backend.proc_utils import CREATE_NO_WINDOW
+from backend.proc_utils import CREATE_NO_WINDOW, BELOW_NORMAL_PRIORITY
+from backend.utils.paths import FFMPEG_BIN, FFPROBE_BIN
 
-# Active ffmpeg transcodes keyed by absolute file path — switching audio
-# tracks rapidly used to stack multiple ffmpeg processes per file.
+# Active ffmpeg transcodes keyed by absolute file path
 _TRANSCODE_LOCK = threading.Lock()
 _ACTIVE_TRANSCODES = {}
+_ACTIVE_AUDIO_STREAMS = {}
 
 # Keyframe lookup cache: (path, size, mtime, requested_t) -> keyframe_time
 _KEYFRAME_CACHE = {}
 _KEYFRAME_CACHE_MAX = 2048
-
-BASE_DIR_STREAM = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_FFPROBE_BIN = os.path.join(BASE_DIR_STREAM, "ffmpeg", "bin", "ffprobe.exe")
 
 
 def find_keyframe_before(file_path, t):
@@ -53,11 +51,11 @@ def find_keyframe_before(file_path, t):
         return cached
 
     result = t
-    if os.path.exists(_FFPROBE_BIN):
+    if os.path.exists(FFPROBE_BIN):
         try:
             window_start = max(0.0, t - 60)
             cmd = [
-                _FFPROBE_BIN, "-v", "quiet",
+                FFPROBE_BIN, "-v", "quiet",
                 "-select_streams", "v:0",
                 "-show_packets",
                 "-print_format", "json",
@@ -209,22 +207,17 @@ _HW_ENCODER_LOCK = threading.Lock()
 
 _HW_CANDIDATES = [
     # (encoder name, extra output opts, is_hardware)
-    ("h264_qsv",   ["-preset", "medium", "-global_quality", "23"], True),
+    ("h264_qsv",   ["-preset", "veryfast", "-global_quality", "23"], True),
     ("h264_nvenc", ["-preset", "p4", "-rc", "vbr", "-cq", "24", "-b:v", "0"], True),
     ("h264_mf",    [], True),
     ("libx264",    ["-preset", "veryfast", "-crf", "23"], False),
 ]
 
 
-def _ffmpeg_bin():
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_dir, "ffmpeg", "bin", "ffmpeg.exe")
-
-
 def _encoder_selftest(encoder, extra_opts):
     """Quick null-render encode to confirm the encoder actually works
     (a listed encoder may still lack a usable GPU/driver)."""
-    ff = _ffmpeg_bin()
+    ff = FFMPEG_BIN
     if not os.path.exists(ff):
         return False
     try:
@@ -251,7 +244,7 @@ def describe_hw_encoder(force=False):
         if _HW_ENCODER_CACHE is not None and not force:
             return _HW_ENCODER_CACHE
 
-        ff = _ffmpeg_bin()
+        ff = FFMPEG_BIN
         result = {"available": False, "encoder": None, "hardware": False}
 
         if os.path.exists(ff):
@@ -277,16 +270,21 @@ def describe_hw_encoder(force=False):
 
 
 def _build_convert_cmd(file_path, audio_track_index, effective_start, max_height, encoder_name, has_audio, remux_video=False, boost_audio=True):
-    ff = _ffmpeg_bin()
+    ff = FFMPEG_BIN
     cmd = [ff, "-hide_banner", "-loglevel", "warning"]
 
     # Use hardware decoding acceleration for full transcode modes when hardware encoder is used
-    if not remux_video and encoder_name in ("h264_qsv", "h264_nvenc", "h264_mf"):
+    # Note: skip hwaccel auto for QSV with 10-bit input — the software decoder is more reliable
+    # for HDR/10-bit HEVC→8-bit H.264 conversion and avoids 7-second pipeline stall.
+    if not remux_video and encoder_name in ("h264_nvenc", "h264_mf"):
         cmd.extend(["-hwaccel", "auto"])
 
     if effective_start > 0:
         cmd.extend(["-ss", f"{effective_start:.3f}"])
-    cmd.extend(["-probesize", "10M", "-analyzeduration", "10M"])
+    # Keep probesize small — stream details are already known from the pre-probe cache.
+    # 2M/1M handles PGS subtitle headers in HEVC anime MKVs. -ignore_unknown silences the
+    # "unspecified size" warning for pgssub streams (which we exclude anyway via -map -0:s?).
+    cmd.extend(["-ignore_unknown", "-probesize", "2M", "-analyzeduration", "1M"])
     cmd.extend(["-i", file_path])
     cmd.extend(["-map", "0:V:0?"])
 
@@ -294,28 +292,38 @@ def _build_convert_cmd(file_path, audio_track_index, effective_start, max_height
         cmd.extend(["-map", f"0:a:{audio_track_index}?"])
     else:
         cmd.extend(["-an"])
+    # Exclude subtitle streams — PGS/ASS subs in MKV are incompatible with MP4
+    # muxer and their "unspecified size" causes FFmpeg to stall during analyze.
+    cmd.extend(["-map", "-0:s?"])
 
     if remux_video:
         # Zero-loss / Zero-CPU stream copy for video
         cmd.extend(["-c:v", "copy"])
     else:
         vf_filters = []
-        if max_height and max_height > 0:
-            try:
-                from backend.video_probe import probe_video_resolution
-                src_h = probe_video_resolution(file_path).get("height") or 0
-            except Exception:
-                src_h = 0
-            if src_h > max_height:
-                vf_filters.append(f"scale=-2:{int(max_height)}:flags=fast_bilinear")
+        try:
+            from backend.video_probe import probe_video_resolution
+            src_res = probe_video_resolution(file_path)
+            src_h = src_res.get("height") or 0
+            src_w = src_res.get("width") or 0
+        except Exception:
+            src_h = 0
+            src_w = 0
 
-        # Always ensure 8-bit yuv420p for maximum browser and player compatibility
-        vf_filters.append("format=yuv420p")
+        # When transcoding 4K / UHD on-the-fly for web browser playback, cap max height to 1080p
+        # unless direct-playing, so real-time playback never stutters or pegs the CPU.
+        effective_max_h = max_height if (max_height and max_height > 0) else (1080 if (src_h > 1080 or src_w > 1920) else 0)
+        if effective_max_h and src_h > effective_max_h:
+            vf_filters.append(f"scale=-2:{int(effective_max_h)}:flags=fast_bilinear")
+
+        # Use native pixel format for encoder (nv12 for QSV, yuv420p for others)
+        pix_fmt = "nv12" if encoder_name == "h264_qsv" else "yuv420p"
+        vf_filters.append(f"format={pix_fmt}")
         cmd.extend(["-vf", ",".join(vf_filters)])
 
         extra = next((o for n, o, _ in _HW_CANDIDATES if n == encoder_name), ["-preset", "veryfast", "-crf", "23"])
         cmd.extend(["-c:v", encoder_name, *extra])
-        cmd.extend(["-pix_fmt", "yuv420p"])
+        cmd.extend(["-pix_fmt", pix_fmt])
 
     if has_audio:
         # High-compatibility stereo AAC audio stream with precise timestamp resampling
@@ -329,6 +337,7 @@ def _build_convert_cmd(file_path, audio_track_index, effective_start, max_height
     cmd.extend([
         "-avoid_negative_ts", "make_zero",
         "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-flush_packets", "1",   # push each MP4 fragment immediately, reducing initial delay
         "-f", "mp4",
         "pipe:1",
     ])
@@ -376,19 +385,21 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
 
     key = ("convert", os.path.abspath(file_path))
     with _TRANSCODE_LOCK:
-        old = _ACTIVE_TRANSCODES.pop(key, None)
-    if old is not None and old.poll() is None:
-        try:
-            old.kill()
-        except Exception:
-            pass
+        for k, p in list(_ACTIVE_TRANSCODES.items()):
+            if p and p.poll() is None:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+        _ACTIVE_TRANSCODES.clear()
 
+    proc_flags = CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY
     try:
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            creationflags=CREATE_NO_WINDOW,
+            creationflags=proc_flags,
             bufsize=2 * 1024 * 1024,
         )
         with _TRANSCODE_LOCK:
@@ -423,7 +434,7 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
                         fallback_cmd,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
-                        creationflags=CREATE_NO_WINDOW,
+                        creationflags=proc_flags,
                         bufsize=2 * 1024 * 1024,
                     )
                     with _TRANSCODE_LOCK:
@@ -497,15 +508,16 @@ def stream_audio_only(file_path, track_index, start_time=0.0):
 
     key = ("audio", os.path.abspath(file_path))
     with _TRANSCODE_LOCK:
-        old = _ACTIVE_AUDIO_STREAMS.pop(key, None)
-    if old is not None and old.poll() is None:
-        try:
-            old.kill()
-        except Exception:
-            pass
+        for k, p in list(_ACTIVE_AUDIO_STREAMS.items()):
+            if p and p.poll() is None:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+        _ACTIVE_AUDIO_STREAMS.clear()
 
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY)
         with _TRANSCODE_LOCK:
             _ACTIVE_AUDIO_STREAMS[key] = proc
 
@@ -580,10 +592,12 @@ def stream_transcoded(file_path, audio_track_index=0, start_time=0.0):
         effective_start = find_keyframe_before(file_path, float(start_time))
         cmd.extend(["-ss", f"{effective_start:.3f}"])
 
+    cmd.extend(["-probesize", "2M", "-analyzeduration", "1M"])
     cmd.extend([
         "-i", file_path,
         "-map", "0:V:0?",
         "-map", f"0:a:{audio_track_index}?",
+        "-map", "-0:s?",  # exclude PGS/ASS subtitle streams (incompatible with MP4)
         "-c:v", "copy",
         "-c:a", "aac",
         "-ac", "2",
@@ -591,6 +605,7 @@ def stream_transcoded(file_path, audio_track_index=0, start_time=0.0):
         "-af", "aresample=async=1:first_pts=0",
         "-avoid_negative_ts", "make_zero",
         "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-flush_packets", "1",
         "-f", "mp4",
         "pipe:1"
     ])

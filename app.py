@@ -58,6 +58,8 @@ from backend.db import init_db, get_all_profiles
 from backend.settings import load_config, save_config, apply_system_file_hiding
 from backend.network_inspector import init_network_inspector
 from backend.kids_filter import start_background_enrichment
+from backend.utils.version import get_app_version, is_dev_mode
+from backend.utils.scheduler import read_last_scheduled_scan, write_last_scheduled_scan
 
 # Initialize outgoing HTTP interceptor
 init_network_inspector()
@@ -137,28 +139,7 @@ def _teardown_db_conn(exc):
     release_conn()
 
 
-# ─── Utility helpers (used by admin.py blueprint) ──────────────────────────────
 
-def get_app_version():
-    """Read the version from the VERSION file (fallback to 2.0.0.0)."""
-    try:
-        with open(os.path.join(BASE_DIR, "VERSION"), encoding="utf-8") as f:
-            return f.read().strip() or "2.0.0.0"
-    except Exception:
-        return "2.0.0.0"
-
-
-def is_dev_mode():
-    """Check if local DEV file exists with valid development flag."""
-    try:
-        dev_file = os.path.join(BASE_DIR, "DEV")
-        if os.path.isfile(dev_file):
-            with open(dev_file, "r", encoding="utf-8") as f:
-                val = f.read().strip().lower()
-                return val in ("development", "dev", "true", "1", "yes", "on")
-    except Exception:
-        pass
-    return False
 
 
 # ─── API Health / GitHub cache (used by admin blueprint) ───────────────────────
@@ -401,42 +382,22 @@ def serve_avatar_image(filename):
 
 # ─── Scheduled Scan helpers (used by admin blueprint and __main__) ─────────────
 
-_SCAN_SCHEDULE_FILE = os.path.join(BASE_DIR, "data", "scan_schedule.json")
-
-
-def _read_last_scheduled_scan():
-    try:
-        with open(_SCAN_SCHEDULE_FILE, encoding="utf-8") as f:
-            return float(json.load(f).get("last_run", 0))
-    except Exception:
-        return 0.0
-
-
-def _write_last_scheduled_scan(ts):
-    try:
-        os.makedirs(os.path.dirname(_SCAN_SCHEDULE_FILE), exist_ok=True)
-        with open(_SCAN_SCHEDULE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"last_run": ts}, f)
-    except Exception:
-        pass
-
-
 def _scan_scheduler_loop():
     from backend.settings import load_config as _lc
     from backend.scanner import get_scan_status, scan_library
-    if _read_last_scheduled_scan() <= 0:
-        _write_last_scheduled_scan(time.time())
+    if read_last_scheduled_scan() <= 0:
+        write_last_scheduled_scan(time.time())
     while True:
         try:
             interval = float((_lc().get("library") or {}).get("scan_interval_hours") or 0)
             if interval > 0 and not get_scan_status()["running"]:
-                last = _read_last_scheduled_scan()
+                last = read_last_scheduled_scan()
                 if last <= 0:
-                    _write_last_scheduled_scan(time.time())
+                    write_last_scheduled_scan(time.time())
                 elif time.time() - last >= interval * 3600:
                     if not get_scan_status()["running"]:
                         print(f"[Scheduler] Interval {interval}h elapsed — starting scheduled scan")
-                        _write_last_scheduled_scan(time.time())
+                        write_last_scheduled_scan(time.time())
                         scan_library()
         except Exception as e:
             print(f"[Scheduler] Scan scheduler error: {e}")

@@ -16,11 +16,10 @@ import subprocess
 import requests
 from backend.db import get_media_by_id
 from backend.proc_utils import CREATE_NO_WINDOW
+from backend.utils.paths import BASE_DIR, FFPROBE_BIN
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP_CACHE_DIR = os.path.join(BASE_DIR, "data", "metadata", "skip_times")
 MAL_CACHE_FILE = os.path.join(BASE_DIR, "data", "metadata", "mal_ids.json")
-FFPROBE_BIN = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe")
 os.makedirs(SKIP_CACHE_DIR, exist_ok=True)
 
 HEADERS = {

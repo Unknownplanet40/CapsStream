@@ -17,9 +17,7 @@ import re
 import subprocess
 
 from backend.proc_utils import CREATE_NO_WINDOW, BELOW_NORMAL_PRIORITY
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FFMPEG_BIN = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffmpeg.exe")
+from backend.utils.paths import FFMPEG_BIN
 
 ANALYZE_SECONDS = 420   # only analyze the first 7 minutes
 MIN_INTRO = 15          # shorter than this is noise

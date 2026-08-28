@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
+import re
 import json
 import time
 import random
@@ -154,16 +155,72 @@ def get_all_sources_for_media(media):
     conn.close()
     items = [dict(r) for r in rows]
 
-    # For series/anime: distinct filenames inside the SAME directory are separate episodes, never quality options!
+    # For series/anime: strictly verify that candidate sources are genuine duplicates across
+    # different library roots / drives, and NOT different episodes, extras, specials, or OADs.
     if mtype in ("series", "anime") and len(items) > 1 and isinstance(media, dict) and media.get("file_path"):
-        target_dir = os.path.dirname(media["file_path"])
-        target_file = os.path.basename(media["file_path"])
-        same_dir_items = [i for i in items if os.path.dirname(i.get("file_path", "")) == target_dir]
-        if len(same_dir_items) > 1:
-            items = [
-                i for i in items 
-                if os.path.dirname(i.get("file_path", "")) != target_dir or os.path.basename(i.get("file_path", "")) == target_file
-            ]
+        target_fp = os.path.normpath(media["file_path"]).lower()
+        target_fn = os.path.basename(target_fp)
+        extra_pat = re.compile(r'\b(extras?|oads?|ovas?|nced|ncop|featurettes?|shorts?|bonus|specials?|sp|pv|sample|trailer)\b', re.IGNORECASE)
+        ep_pat = re.compile(r'[Ss](\d{1,2})[\s._-]*[Ee](\d{1,3})', re.IGNORECASE)
+
+        m_target = ep_pat.search(target_fn)
+        target_extra = bool(extra_pat.search(target_fp))
+
+        filtered = []
+        for item in items:
+            cand_fp = os.path.normpath(item.get("file_path", "")).lower()
+            if not cand_fp or cand_fp == target_fp:
+                filtered.append(item)
+                continue
+
+            cand_fn = os.path.basename(cand_fp)
+            cand_extra = bool(extra_pat.search(cand_fp))
+
+            # 1. Extras vs regular episodes mismatch
+            if target_extra != cand_extra:
+                continue
+
+            # 2. Specific extra tag mismatch (e.g. NCOP vs OAD)
+            if target_extra and cand_extra:
+                mismatch = False
+                for tag in ("ncop", "nced", "oad", "ova", "sp", "pv", "trailer", "sample"):
+                    if (tag in target_fp) != (tag in cand_fp):
+                        mismatch = True
+                        break
+                if mismatch:
+                    continue
+
+            # 3. SxxExx mismatch
+            m_cand = ep_pat.search(cand_fn)
+            if m_target and m_cand:
+                if (int(m_target.group(1)), int(m_target.group(2))) != (int(m_cand.group(1)), int(m_cand.group(2))):
+                    continue
+            elif (m_target is None) != (m_cand is None):
+                continue
+
+            # 4. Same drive / same show directory check
+            d_target = os.path.splitdrive(target_fp)[0]
+            d_cand = os.path.splitdrive(cand_fp)[0]
+            if d_target == d_cand:
+                try:
+                    common = os.path.commonpath([target_fp, cand_fp])
+                    rel_target = os.path.relpath(target_fp, common)
+                    rel_cand = os.path.relpath(cand_fp, common)
+                    parts_target = [p for p in rel_target.split(os.sep) if p]
+                    parts_cand = [p for p in rel_cand.split(os.sep) if p]
+                    # If both live in the same show folder tree and have different filenames
+                    if len(parts_target) <= 3 and len(parts_cand) <= 3 and target_fn != cand_fn:
+                        # Unless they have matching explicit SxxExx tags in different quality subfolders
+                        if not (m_target and m_cand and (int(m_target.group(1)), int(m_target.group(2))) == (int(m_cand.group(1)), int(m_cand.group(2)))):
+                            continue
+                        if parts_target[:-1] != parts_cand[:-1] and any(extra_pat.search(p) for p in parts_target[:-1] + parts_cand[:-1]):
+                            continue
+                except Exception:
+                    pass
+
+            filtered.append(item)
+
+        items = filtered
 
     disabled_roots = get_disabled_path_roots()
     if disabled_roots:

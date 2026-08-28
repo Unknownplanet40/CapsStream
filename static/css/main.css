@@ -8564,12 +8564,29 @@ body.kids-mode-theme .suggestion-tag:hover {
   border: 1px solid transparent;
   transition:
     background 150ms ease,
-    transform 150ms ease;
+    transform 150ms ease,
+    opacity 150ms ease;
 }
 
 .player-compat-btn:hover {
   background: rgba(229, 9, 20, 1);
   transform: translateY(-1px);
+}
+
+.player-compat-btn:disabled,
+.player-compat-btn.loading {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
+}
+
+.player-compat-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .player-compat-btn.on {
@@ -9476,6 +9493,15 @@ body.kids-mode-theme .suggestion-tag:hover {
   line-height: 1.35;
 }
 
+.toast-card-subtitle {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 4px;
+  opacity: 0.85;
+}
+
 /* Status themes — neutral scan-widget border everywhere; color carried by
    the icon / tag / drain bar only (matches the widget's single-accent look) */
 .toast-card.success .toast-card-icon,
@@ -9508,6 +9534,46 @@ body.kids-mode-theme .suggestion-tag:hover {
 }
 .toast-progress-fill.warning {
   background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+
+/* ─── Toast Action Buttons (4K warning, etc.) ────────────────── */
+.toast-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.toast-action-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-pill, 99px);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 5px 14px;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast);
+  white-space: nowrap;
+}
+
+.toast-action-btn:hover {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.6);
+  color: #fbbf24;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.25);
+}
+
+.toast-card.error .toast-action-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.6);
+  color: #f87171;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.25);
 }
 
 /* ─── Trophy Case Achievement Banner Component ──────────────── */
