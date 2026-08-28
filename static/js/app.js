@@ -8983,9 +8983,11 @@ const PlayerPage = {
           activeDrawerSeason.value = Number(media.value.season) || 1;
         }
         Vue.nextTick(() => {
-          const activeEl = document.querySelector(".drawer-ep-item.active-playing");
-          if (activeEl) {
-            activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+          const listEl = document.querySelector(".episodes-drawer-list");
+          const activeEl = listEl?.querySelector(".drawer-ep-item.active-playing");
+          if (listEl && activeEl) {
+            const targetScroll = activeEl.offsetTop - (listEl.clientHeight / 2) + (activeEl.clientHeight / 2);
+            listEl.scrollTo({ top: Math.max(0, targetScroll), behavior: "smooth" });
           }
         });
       }

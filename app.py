@@ -239,8 +239,9 @@ _BOOT_TS = int(time.time())
 @app.route("/")
 @limiter.exempt
 def index():
-    resp = make_response(render_template("index.html", version=get_app_version(), t=_BOOT_TS))
-    resp.headers["Cache-Control"] = "no-cache"
+    t_val = int(time.time()) if is_dev_mode() else _BOOT_TS
+    resp = make_response(render_template("index.html", version=get_app_version(), t=t_val))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resp
 
 

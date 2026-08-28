@@ -12155,6 +12155,7 @@ kbd.about-kbd {
 }
 
 .episodes-drawer-list {
+  position: relative;
   flex: 1 1 0%;
   min-height: 0;
   overflow-y: auto;
