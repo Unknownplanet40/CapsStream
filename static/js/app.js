@@ -6411,7 +6411,55 @@ const PlayerPage = {
                 </div>
                 <div class="drawer-ep-title" :title="ep.ep_title || ep.title || ('Episode ' + ep.episode)">
                   {{ ep.ep_title || ep.title || ('Episode ' + ep.episode) }}
-               <!-- Queue Items List -->
+                </div>
+                <div v-if="ep.overview" class="drawer-ep-overview">
+                  {{ ep.overview }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
+
+      <!-- In-Player Slide-Out Queue Drawer -->
+      <transition name="slide-left">
+        <div v-if="showQueueDrawer" class="player-queue-drawer" @click.stop>
+          <div class="queue-drawer-header">
+            <div class="queue-drawer-title">
+              <i class="ph ph-queue" style="color:var(--accent);font-size:1.3rem"></i>
+              <span>{{ store.queuePlaylistName || 'Playback Queue' }}</span>
+              <span v-if="store.queue && store.queue.length" class="queue-count-pill">{{ store.queue.length }}</span>
+            </div>
+            <button class="queue-close-btn" @click="showQueueDrawer = false" title="Close Queue">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+
+          <!-- Queue Controls Toolbar -->
+          <div class="queue-toolbar">
+            <button
+              class="queue-tool-btn"
+              :class="{ active: store.queueShuffle }"
+              @click="toggleQueueShuffle"
+              title="Shuffle Queue"
+            >
+              <i class="ph ph-shuffle"></i> Shuffle
+            </button>
+            <button
+              class="queue-tool-btn"
+              :class="{ active: store.queueRepeat !== 'off' }"
+              @click="cycleQueueRepeat"
+              :title="'Repeat: ' + store.queueRepeat"
+            >
+              <i :class="store.queueRepeat === 'one' ? 'ph ph-repeat-once' : 'ph ph-repeat'"></i>
+              {{ store.queueRepeat === 'all' ? 'Repeat All' : store.queueRepeat === 'one' ? 'Repeat One' : 'Repeat Off' }}
+            </button>
+            <button class="queue-tool-btn danger" @click="clearActiveQueue" title="Clear Queue">
+              <i class="ph ph-trash"></i> Clear
+            </button>
+          </div>
+
+          <!-- Queue Items List -->
           <div v-if="!store.queue || !store.queue.length" class="queue-empty-state">
             <i class="ph ph-queue"></i>
             <div style="font-weight:700;font-size:0.95rem;margin-bottom:4px">Queue is empty</div>
