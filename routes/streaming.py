@@ -83,15 +83,34 @@ def api_stream(media_id):
         from backend.streamer import stream_audio_only
         return stream_audio_only(media["file_path"], int(audio_track), start_time=at)
 
+    if request.args.get("remux") in ("1", "true"):
+        audio_track = request.args.get("audio_track", "")
+        track_idx = int(audio_track) if audio_track.isdigit() else 0
+        start_time = request.args.get("start", type=float, default=0.0)
+        boost = request.args.get("boost", "1") not in ("0", "false")
+        from backend.streamer import stream_video_convert
+        return stream_video_convert(
+            media["file_path"], audio_track_index=track_idx,
+            start_time=start_time, max_height=0, remux_video=True, boost_audio=boost,
+        )
+
     if request.args.get("transcode") in ("1", "true"):
         audio_track = request.args.get("audio_track", "")
         track_idx = int(audio_track) if audio_track.isdigit() else 0
         start_time = request.args.get("start", type=float, default=0.0)
         max_height = request.args.get("max_height", type=int, default=1080)
+        boost = request.args.get("boost", "1") not in ("0", "false")
+        remux_flag = None
+        if request.args.get("force_remux") in ("1", "true"):
+            remux_flag = True
+        elif request.args.get("force_transcode") in ("1", "true"):
+            remux_flag = False
+
         from backend.streamer import stream_video_convert
         return stream_video_convert(
             media["file_path"], audio_track_index=track_idx,
             start_time=start_time, max_height=max_height,
+            remux_video=remux_flag, boost_audio=boost,
         )
 
     audio_track = request.args.get("audio_track")
@@ -103,6 +122,16 @@ def api_stream(media_id):
         return stream_transcoded(media["file_path"], audio_track_index=track_idx, start_time=start_time)
 
     return stream_file(media["file_path"])
+
+
+@streaming_bp.route("/api/stream-details/<int:media_id>")
+def api_stream_details(media_id):
+    media = get_best_media_source(media_id)
+    if not media:
+        abort(404)
+    from backend.video_probe import probe_video_details
+    details = probe_video_details(media["file_path"])
+    return jsonify(details)
 
 
 @streaming_bp.route("/api/transcode-caps", methods=["GET"])

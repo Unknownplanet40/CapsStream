@@ -6543,8 +6543,9 @@ const PlayerPage = {
     // The active stream session. Changing any field triggers a stream swap.
     const streamState = reactive({
       mediaId: null,        // which file/quality is streaming
-      audioTrack: null,     // null/undefined/default  native; otherwise remote-audio index
+      audioTrack: null,     // null/undefined/default -> native; otherwise remote-audio index
       transcode: false,     // hardware-accelerated compatibility playback
+      maxHeight: 1080,      // target resolution limit (1080, 720, 480)
       streamStart: 0,       // content time where the converted stream begins
     });
 
@@ -6571,7 +6572,8 @@ const PlayerPage = {
       if (!streamState.transcode) {
         return `/api/stream/${mediaId}`;
       }
-      let url = `/api/stream/${mediaId}?transcode=1&max_height=1080`;
+      const maxH = streamState.maxHeight || 1080;
+      let url = `/api/stream/${mediaId}?transcode=1&max_height=${maxH}&boost=1`;
       if (streamState.audioTrack !== null && streamState.audioTrack !== undefined) {
         url += `&audio_track=${streamState.audioTrack}`;
       }
@@ -7021,8 +7023,11 @@ const PlayerPage = {
         clearTimeout(seekDebounceTimer);
       }
 
-      // Smooth seek debouncing (80ms): accumulates multiple rapid skip/seek requests
-      // without bombarding Chromium's demuxer or aborting range requests mid-packet.
+    // Smooth seek debouncing (120ms): accumulates multiple rapid skip/seek requests
+      // without bombarding Chromium's demuxer or spinning up redundant FFmpeg processes.
+      if (streamState.transcode) {
+        isBuffering.value = true;
+      }
       seekDebounceTimer = setTimeout(() => {
         seekDebounceTimer = null;
         const target = pendingSeekTarget;
@@ -7050,7 +7055,7 @@ const PlayerPage = {
           currentTime.value = target;
         }
         saveProgressNow();
-      }, 80);
+      }, 120);
     }
 
     function executeSkipAction() {
@@ -8898,47 +8903,37 @@ const PlayerPage = {
         }
         lastErrorTimestamp = now;
 
-        // If we have failed repeatedly (>= 3 times within 3.5s), stop auto-reconnecting
-        // to prevent UI freezing / infinite log spam, and display the error with manual recovery options.
-        if (consecutiveErrorCount >= 3) {
-          console.warn("[HTML5 Player] Multiple consecutive playback errors encountered. Halting auto-retry loop.");
-          const p = (media.value?.file_path || "").toLowerCase();
-          const isHeavy4k = p.includes("2160") || p.includes("4k") || p.includes("uhd");
-          playerError.value = isHeavy4k
-            ? "Playback failed — 4K/HEVC content needs hardware acceleration or converted playback. Click 'Play Converted' or 'Resume' below."
-            : "The stream encountered an issue (decode failure or disconnected pipeline). Click 'Play Converted' or 'Resume Playback' to continue.";
-          return;
-        }
-        
-        // If native HTML5 direct playback encountered a decode error (code 3) or unsupported source (code 4),
-        // automatically fallback to converted transcode mode (1080p H.264/AAC)
-        if (!streamState.transcode && (v.error.code === 3 || v.error.code === 4)) {
-          console.warn("[HTML5 Player] Video decode failed natively (code " + v.error.code + "). Automatically switching to converted compatibility stream...");
-          addToast("Video decode issue detected — switching to converted playback...", "info");
+        // If native direct playback encountered network (code 2), decode (code 3), or unsupported source (code 4),
+        // seamlessly switch to hardware-accelerated/smart converted playback
+        if (!streamState.transcode && (v.error.code === 2 || v.error.code === 3 || v.error.code === 4)) {
+          console.warn("[HTML5 Player] Video decode/pipeline error natively (code " + v.error.code + "). Seamlessly switching to smart converted playback...");
+          addToast("Optimizing media stream for smooth playback...", "info");
           playerError.value = null;
           enableCompatPlayback(true);
           return;
         }
 
-        // If transcode stream encountered a pipeline hiccup, restart from keyframe
-        if (streamState.transcode && (v.error.code === 3 || v.error.code === 4)) {
+        // If converted stream encountered a hiccup, reconnect at keyframe
+        if (streamState.transcode && consecutiveErrorCount < 3) {
           console.warn("[HTML5 Player] Converted stream hiccup — reconnecting at keyframe...");
           playerError.value = null;
           enableCompatPlayback(true);
           return;
         }
 
-        const p = (media.value?.file_path || "").toLowerCase();
-        const isHeavy4k = p.includes("2160") || p.includes("4k") || p.includes("uhd");
-        playerError.value = isHeavy4k
-          ? "Playback failed — 4K/HEVC content needs hardware acceleration or a compatible browser (Edge recommended). Try converted playback below."
-          : "The stream encountered an issue (decode failure or connection dropped). Use Play Converted (1080p) or Resume Playback to continue.";
+        // If we have failed repeatedly (>= 3 times within 3.5s), stop auto-reconnecting
+        if (consecutiveErrorCount >= 3) {
+          console.warn("[HTML5 Player] Multiple consecutive playback errors encountered. Halting auto-retry loop.");
+          const p = (media.value?.file_path || "").toLowerCase();
+          const isHeavy4k = p.includes("2160") || p.includes("4k") || p.includes("uhd");
+          playerError.value = isHeavy4k
+            ? "Playback failed — 4K/HEVC content needs hardware acceleration or converted playback. Click 'Play Converted' or 'Resume' below."
+            : "The stream encountered an issue. Click 'Play Converted' or 'Resume Playback' to continue.";
+        }
       }
     }
 
     // ─── Error recovery: reload the stream and resume from last position ──
-    // Resumes playback via the hardware-accelerated compatibility stream at the current
-    // timestamp so we never reload a broken raw stream that only plays audio.
     const recovering = ref(false);
 
     async function recoverFromError() {
@@ -8957,16 +8952,15 @@ const PlayerPage = {
       }
     }
 
-    // Decoder-stall watchdog: 4K HEVC software decode can wedge the renderer
-    // without firing an error event. If the video claims to be playing but
-    // time stops advancing for >= 16s while not paused/seeking, surface a recovery notice.
+    // Fast-recovery Watchdog: detects stalled decoders and buffered freezes
     let lastStallCheckTime = Date.now();
     let lastStallVideoTime = -1;
     let stallDurationSec = 0;
+    let autoRecoverAttempts = 0;
 
     function checkPlaybackStall() {
       const v = videoRef.value;
-      if (!v || v.paused || v.ended || v.seeking || !media.value) {
+      if (!v || v.paused || v.ended || v.seeking || !media.value || showResumeModal.value) {
         stallDurationSec = 0;
         lastStallVideoTime = v ? v.currentTime : -1;
         lastStallCheckTime = Date.now();
@@ -8978,11 +8972,12 @@ const PlayerPage = {
       lastStallCheckTime = now;
 
       const curr = v.currentTime;
-      // If playback position has advanced by at least 0.25s, video is actively progressing
-      if (lastStallVideoTime >= 0 && Math.abs(curr - lastStallVideoTime) >= 0.25) {
+      // If playback position has advanced by at least 0.2s, video is actively progressing
+      if (lastStallVideoTime >= 0 && Math.abs(curr - lastStallVideoTime) >= 0.2) {
         stallDurationSec = 0;
+        autoRecoverAttempts = 0;
         lastStallVideoTime = curr;
-        if (playerError.value && (playerError.value.includes("stuck") || playerError.value.includes("Stuck"))) {
+        if (playerError.value && (playerError.value.includes("stuck") || playerError.value.includes("Stuck") || playerError.value.includes("stalled"))) {
           playerError.value = null; // recovered on its own
         }
         return;
@@ -8991,13 +8986,31 @@ const PlayerPage = {
       lastStallVideoTime = curr;
       stallDurationSec += deltaReal;
 
-      // Only flag as stalled if frozen for at least 16 continuous seconds
-      if (stallDurationSec >= 16) {
+      // Smart Watchdog: if playback freezes for >= 3.5s while active, attempt auto-recovery
+      if (stallDurationSec >= 3.5 && autoRecoverAttempts < 2) {
+        autoRecoverAttempts++;
+        stallDurationSec = 0;
+        console.warn(`[Player Watchdog] Stalled stream detected (attempt ${autoRecoverAttempts}/2). Reconnecting...`);
+        addToast("Stream buffer stalled — auto-recovering...", "info");
+        if (!streamState.transcode) {
+          enableCompatPlayback(true);
+        } else {
+          const at = currentContentTime();
+          alignedStreamStart(at).then((startAt) => {
+            streamState.streamStart = startAt;
+            swapStream(0, true);
+          });
+        }
+        return;
+      }
+
+      // If stall persists after auto-recovery attempts (>= 8s continuous freeze)
+      if (stallDurationSec >= 8) {
         const p = (media.value?.file_path || "").toLowerCase();
         const heavy = p.includes("2160") || p.includes("4k") || p.includes("uhd") ||
                       (codecInfo.value?.tags || []).some((t) => t.includes("HEVC"));
         playerError.value = heavy
-          ? "Decoder appears stuck — this 4K/HEVC stream exceeds what this device can handle. Enable hardware acceleration, use Edge, or pick a lower-quality source."
+          ? "Decoder appears stuck — 4K/HEVC stream may exceed hardware capabilities. Use Converted Playback (1080p) or Resume below."
           : "Playback appears stuck. Use Resume Playback to reload the stream from where you left off.";
       }
     }

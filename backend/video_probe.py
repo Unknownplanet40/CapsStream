@@ -126,3 +126,70 @@ def format_resolution_label(width, height):
     elif height > 0:
         return f"{height}p"
     return "Standard Quality"
+
+
+def probe_video_details(file_path):
+    """
+    Detailed probe of media streams including video codec, pixel format,
+    H.264 compatibility, and audio track details.
+    """
+    if not file_path or not os.path.isfile(file_path) or not os.path.exists(FFPROBE_BIN):
+        return {"video_codec": "", "pix_fmt": "", "is_h264": False, "width": 0, "height": 0, "audio_tracks": []}
+
+    try:
+        st = os.stat(file_path)
+        cache_key = ("details", os.path.abspath(file_path), st.st_size, st.st_mtime)
+        cached = _PROBE_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+        cmd = [
+            FFPROBE_BIN,
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_streams",
+            file_path
+        ]
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=10,
+                                      creationflags=CREATE_NO_WINDOW)
+        data = json.loads(out.decode("utf-8", errors="ignore"))
+        streams = data.get("streams", [])
+
+        v_codec = ""
+        pix_fmt = ""
+        width, height = 0, 0
+        audio_tracks = []
+
+        for s in streams:
+            ctype = s.get("codec_type")
+            if ctype == "video" and not v_codec:
+                v_codec = (s.get("codec_name") or "").lower()
+                pix_fmt = (s.get("pix_fmt") or "").lower()
+                width = int(s.get("width") or 0)
+                height = int(s.get("height") or 0)
+            elif ctype == "audio":
+                audio_tracks.append({
+                    "codec": s.get("codec_name") or "",
+                    "channels": int(s.get("channels") or 2),
+                    "sample_rate": s.get("sample_rate") or "",
+                })
+
+        is_h264 = v_codec in ("h264", "avc", "avc1") and ("10" not in pix_fmt)
+
+        res = {
+            "video_codec": v_codec,
+            "pix_fmt": pix_fmt,
+            "is_h264": is_h264,
+            "width": width,
+            "height": height,
+            "audio_tracks": audio_tracks,
+        }
+
+        if len(_PROBE_CACHE) >= _PROBE_CACHE_MAX:
+            _PROBE_CACHE.clear()
+        _PROBE_CACHE[cache_key] = res
+        return res
+    except Exception as e:
+        print(f"[VideoProbe] Details probe error for {file_path}: {e}")
+        return {"video_codec": "", "pix_fmt": "", "is_h264": False, "width": 0, "height": 0, "audio_tracks": []}
+
