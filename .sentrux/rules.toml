@@ -1,0 +1,17 @@
+# CapsStream — Sentrux Architectural Rules
+# Run `sentrux check_rules` after changes to verify no regressions.
+
+[[rule]]
+name = "routes-no-entrypoint-import"
+description = "Blueprints (routes/) must never import from app.py. Use backend/utils/ instead."
+deny = [
+  { from = "routes/**", imports = ["app"] }
+]
+
+[[rule]]
+name = "utils-is-leaf"
+description = "backend/utils/ is a shared leaf — it must not import from routes/ or backend/db/"
+deny = [
+  { from = "backend/utils/**", imports = ["routes/**"] },
+  { from = "backend/utils/**", imports = ["backend/db/**"] }
+]
