@@ -10,7 +10,7 @@ import threading
 
 from flask import Blueprint, jsonify, request, send_file, abort, current_app, session
 
-from routes.middleware import require_admin, is_admin, require_profile
+from routes.middleware import require_admin, is_admin, require_profile, current_profile
 from backend.utils.version import get_app_version, is_dev_mode
 from backend.utils.scheduler import write_last_scheduled_scan
 from backend.utils.formatting import format_bytes
@@ -272,7 +272,8 @@ def api_scan():
         from .media import bust_home_cache
     except ImportError:
         from routes.media import bust_home_cache
-    require_admin()
+    if not current_profile() and not is_admin():
+        abort(401, description="No profile selected")
     global _scan_thread
     from backend.scanner import scan_library, get_scan_status
     status = get_scan_status()

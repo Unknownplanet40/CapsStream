@@ -19,80 +19,6 @@ Point CapsStream to your media folders. It automatically matches your titles aga
 
 ---
 
-## Screenshots
-
-<p align="center">
-  <img src="static/img/Previews/Home Page.png" alt="Home Page" width="100%">
-</p>
-<p align="center"><em>Home — Cinematic hero banner with genre carousels and continue-watching row</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/Movie Page.png" alt="Movie Page" width="100%">
-</p>
-<p align="center"><em>Movies — Browse your full movie collection with posters, ratings, and filters</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/Series.png" alt="Series Page" width="100%">
-</p>
-<p align="center"><em>Series — Organized TV show library with season and episode breakdowns</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/Details view.png" alt="Details View" width="100%">
-</p>
-<p align="center"><em>Details — Full metadata view with backdrop, cast, overview, and episode list</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/Search.png" alt="Search" width="100%">
-</p>
-<p align="center"><em>Search — Instant fuzzy search across your entire library</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/Change video quality.png" alt="Change Video Quality" width="100%">
-</p>
-<p align="center"><em>Player — Hardware-accelerated video player with quality selection</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/Resume Playback.png" alt="Resume Playback" width="100%">
-</p>
-<p align="center"><em>Resume Playback — Pick up right where you left off</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/Auto Next Episode.png" alt="Auto Next Episode" width="100%">
-</p>
-<p align="center"><em>Auto Next Episode — Seamless binge-watching with automatic episode advancement</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/unavailable Season & Episode.png" alt="Unavailable Season & Episode" width="100%">
-</p>
-<p align="center"><em>Missing Episodes — Spot gaps in your collection at a glance</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/Select Account.png" alt="Select Account" width="100%">
-</p>
-<p align="center"><em>Multi-Profile — Family profiles with custom avatars and PIN protection</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/achievement and trophy.png" alt="Achievements & Trophies" width="100%">
-</p>
-<p align="center"><em>Achievements — Unlock streaming milestones and level up your profile</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/Stats.png" alt="Watch Stats" width="100%">
-</p>
-<p align="center"><em>Stats — Track your hours watched, media breakdown, and viewing habits</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/Setting.png" alt="Settings" width="100%">
-</p>
-<p align="center"><em>Settings — Configure media paths, API keys, transcoding, and preferences</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/About.png" alt="About" width="100%">
-</p>
-<p align="center"><em>About — Version info and application details</em></p>
-
----
-
 ## Why I Built CapsStream
 
 CapsStream started as a personal project to help my uncle, who lives in an area with unreliable internet connectivity. While platforms like Jellyfin and Plex are powerful options, they can require more setup and ongoing maintenance. I also needed something simple enough to use without me being there to troubleshoot it when something goes wrong.
@@ -101,13 +27,13 @@ I initially stored the movies and TV shows he requested on a 1 TB external hard 
 
 To solve this, I built CapsStream — a lightweight, self-hosted media server focused on simplicity and portability. It transforms a folder of media files into a structured and easy-to-browse library without the complexity of a full media-server setup.
 
-**What CapsStream Provides:**
-- Automatic posters, descriptions, and episode metadata
-- Subtitle support
-- Organized movie and TV show libraries
-- Local media playback without requiring an internet connection
-- Runs directly from an external hard drive
-- No complex installation or cloud service required
+What CapsStream Provides
+Automatic posters, descriptions, and episode metadata
+Subtitle support
+Organized movie and TV show libraries
+Local media playback without requiring an internet connection
+Runs directly from an external hard drive
+No complex installation or cloud service required
 
 The application is designed to be portable: plug in the drive, run CapsStream, and the library is ready to use.
 

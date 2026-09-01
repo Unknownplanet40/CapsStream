@@ -56,6 +56,22 @@ class TestRouteAdmin(unittest.TestCase):
         data = resp.get_json()
         self.assertEqual(data["items"], 42)
 
+    @patch("backend.routes.admin.current_profile", return_value=None)
+    @patch("backend.routes.admin.is_admin", return_value=False)
+    def test_api_scan_unauthorized_without_profile(self, mock_admin, mock_prof):
+        """Verify POST /api/scan returns 401 when no profile is selected and not admin."""
+        resp = self.client.post("/api/scan", json={})
+        self.assertEqual(resp.status_code, 401)
+
+    @patch("backend.routes.admin.current_profile", return_value=1)
+    @patch("backend.scanner.get_scan_status", return_value={"running": True, "phase": "scanning"})
+    def test_api_scan_authorized_with_profile(self, mock_status, mock_prof):
+        """Verify POST /api/scan succeeds when a profile is selected."""
+        resp = self.client.post("/api/scan", json={})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()
