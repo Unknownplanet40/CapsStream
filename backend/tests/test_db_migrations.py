@@ -17,6 +17,7 @@ from backend.db.profiles import create_profile, get_all_profiles, delete_profile
 from backend.db.media import upsert_media, get_media_by_id
 from backend.db.playback import save_progress, get_progress
 from backend.db.playlists import create_playlist, get_playlists
+from backend.db.stats import get_profile_watch_stats
 
 
 class TestDatabaseMigrations(unittest.TestCase):
@@ -110,6 +111,44 @@ class TestDatabaseMigrations(unittest.TestCase):
 
         profiles = get_all_profiles()
         self.assertTrue(any(p["id"] == pid for p in profiles))
+
+    def test_recent_history_groups_movie_quality_duplicates(self):
+        """Duplicate movie copies for different quality files should appear as one recent-history item."""
+        pid = create_profile(name="QualityWatcher", pin_hash="", avatar="ph-user")
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        quality_dir = os.path.join(repo_root, "data", "test_quality_history")
+        os.makedirs(quality_dir, exist_ok=True)
+
+        movie_1080 = os.path.join(quality_dir, "Arrival-1080p.mp4")
+        movie_2160 = os.path.join(quality_dir, "Arrival-2160p.mp4")
+        for p in (movie_1080, movie_2160):
+            with open(p, "wb") as f:
+                f.write(b"test")
+
+        mid_1080 = upsert_media({
+            "title": "Arrival",
+            "type": "movie",
+            "tmdb_id": 329865,
+            "file_path": movie_1080,
+            "file_size": 2_000_000_000,
+            "duration": 7200,
+        })
+        mid_2160 = upsert_media({
+            "title": "Arrival",
+            "type": "movie",
+            "tmdb_id": 329865,
+            "file_path": movie_2160,
+            "file_size": 5_000_000_000,
+            "duration": 7200,
+        })
+
+        save_progress(pid, mid_1080, position=1200, duration=7200, completed=False)
+        save_progress(pid, mid_2160, position=1500, duration=7200, completed=False)
+
+        stats = get_profile_watch_stats(pid)
+        self.assertEqual(len(stats["recent_history"]), 1)
+        self.assertEqual(stats["recent_history"][0]["title"], "Arrival")
 
 
 if __name__ == "__main__":

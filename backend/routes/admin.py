@@ -10,7 +10,7 @@ import threading
 
 from flask import Blueprint, jsonify, request, send_file, abort, current_app, session
 
-from .middleware import require_admin, is_admin, require_profile, current_profile
+from .middleware import require_admin, is_admin, require_profile, current_profile, has_active_profile_session
 from backend.utils.version import get_app_version, is_dev_mode
 from backend.utils.scheduler import write_last_scheduled_scan
 from backend.utils.formatting import format_bytes
@@ -269,8 +269,9 @@ _SCAN_SCHEDULE_FILE = None
 @admin_bp.route("/api/scan", methods=["POST"])
 def api_scan():
     from .media import bust_home_cache
-    if not current_profile() and not is_admin():
-        abort(401, description="No profile selected")
+    # Scans must only run for an authenticated, active profile session.
+    if not current_profile() or not has_active_profile_session():
+        abort(401, description="No active profile session")
     global _scan_thread
     from backend.scanner import scan_library, get_scan_status
     status = get_scan_status()
@@ -404,6 +405,7 @@ def api_system_info():
     BASE_DIR = current_app.config["BASE_DIR"]
     SERVER_START_TIME = current_app.config["SERVER_START_TIME"]
     from backend.db import DB_PATH, get_conn, get_all_profiles
+    from backend.db.media import is_item_mounted
     from backend.updater import _read_state as _updater_state
 
     db_size_str = "0 KB"
@@ -421,13 +423,18 @@ def api_system_info():
     skip_markers_count = 0
     try:
         conn = get_conn()
-        for r in conn.execute("SELECT type, COUNT(*) FROM media GROUP BY type").fetchall():
-            if r[0] == "movie":
-                movies_count = r[1]
-            elif r[0] == "series":
-                series_count = r[1]
-            elif r[0] == "anime":
-                anime_count = r[1]
+        media_rows = conn.execute("SELECT type, file_path FROM media").fetchall()
+        for media_type, file_path in media_rows:
+            if not file_path:
+                continue
+            if not is_item_mounted({"file_path": file_path}):
+                continue
+            if media_type == "movie":
+                movies_count += 1
+            elif media_type == "series":
+                series_count += 1
+            elif media_type == "anime":
+                anime_count += 1
         manual_marker_ids = {
             row[0] for row in conn.execute("""
                 SELECT id FROM media WHERE
@@ -463,20 +470,20 @@ def api_system_info():
     total_bytes, movies_bytes, series_bytes, anime_bytes = 0, 0, 0, 0
     try:
         conn = get_conn()
-        res = conn.execute("""
-            SELECT
-                COALESCE(SUM(file_size), 0) as total_bytes,
-                COALESCE(SUM(CASE WHEN type='movie' THEN file_size ELSE 0 END), 0) as movies_bytes,
-                COALESCE(SUM(CASE WHEN type='series' THEN file_size ELSE 0 END), 0) as series_bytes,
-                COALESCE(SUM(CASE WHEN type='anime' THEN file_size ELSE 0 END), 0) as anime_bytes
-            FROM media
-        """).fetchone()
+        media_rows = conn.execute("SELECT type, file_path, file_size FROM media").fetchall()
+        for row in media_rows:
+            media_type, file_path, file_size = row
+            if not file_path or not is_item_mounted({"file_path": file_path}):
+                continue
+            file_size = file_size or 0
+            total_bytes += file_size
+            if media_type == "movie":
+                movies_bytes += file_size
+            elif media_type == "series":
+                series_bytes += file_size
+            elif media_type == "anime":
+                anime_bytes += file_size
         conn.close()
-        if res:
-            total_bytes = res[0] or 0
-            movies_bytes = res[1] or 0
-            series_bytes = res[2] or 0
-            anime_bytes = res[3] or 0
     except Exception:
         pass
 

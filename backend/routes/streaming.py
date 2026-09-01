@@ -6,7 +6,7 @@ All streaming endpoints are unlimited (no rate limiting).
 import os
 import threading
 
-from flask import Blueprint, jsonify, request, send_file, abort, current_app
+from flask import Blueprint, jsonify, request, send_file, abort, current_app, Response
 
 from .middleware import kids_guard_media, current_profile
 from backend.db import get_best_media_source, get_media_by_id, get_media_quality_options
@@ -102,6 +102,106 @@ def api_stream(media_id):
         return stream_transcoded(media["file_path"], audio_track_index=track_idx, start_time=start_time)
 
     return stream_file(media["file_path"])
+
+
+@streaming_bp.route("/api/system/health-status")
+def api_system_health_status():
+    """
+    Lightweight health check for host RAM pressure and server responsiveness.
+    """
+    ram_load = 0
+    try:
+        import ctypes
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ('dwLength', ctypes.c_ulong), ('dwMemoryLoad', ctypes.c_ulong),
+                ('ullTotalPhys', ctypes.c_ulonglong), ('ullAvailPhys', ctypes.c_ulonglong),
+                ('ullTotalPageFile', ctypes.c_ulonglong), ('ullAvailPageFile', ctypes.c_ulonglong),
+                ('ullTotalVirtual', ctypes.c_ulonglong), ('ullAvailVirtual', ctypes.c_ulonglong),
+                ('ullAvailExtendedVirtual', ctypes.c_ulonglong)
+            ]
+        ms = MEMORYSTATUSEX()
+        ms.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+        if hasattr(ctypes, "windll") and hasattr(ctypes.windll, "kernel32"):
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+                ram_load = int(ms.dwMemoryLoad)
+    except Exception:
+        pass
+
+    return jsonify({
+        "status": "ok",
+        "ram_load_pct": ram_load,
+        "is_low_memory": ram_load >= 88,
+    })
+
+
+
+# ─── On-Demand Adaptive HLS Streaming ────────────────────────────────────────
+
+@streaming_bp.route("/api/hls/<int:media_id>/master.m3u8")
+def api_hls_master(media_id):
+    media = get_best_media_source(media_id)
+    if not media or not media.get("file_path"):
+        abort(404)
+    guard = kids_guard_media(media, deep=True)
+    if guard:
+        return guard
+    audio_track = request.args.get("audio_track", 0, type=int)
+    from backend.hls_transcoder import generate_master_playlist
+    playlist = generate_master_playlist(media_id, media["file_path"], audio_track_index=audio_track)
+    return Response(playlist, mimetype="application/vnd.apple.mpegurl", headers={
+        "Cache-Control": "no-cache",
+        "Access-Control-Allow-Origin": "*",
+    })
+
+
+@streaming_bp.route("/api/hls/<int:media_id>/stream_<quality>.m3u8")
+def api_hls_variant(media_id, quality):
+    media = get_best_media_source(media_id)
+    if not media or not media.get("file_path"):
+        abort(404)
+    guard = kids_guard_media(media, deep=True)
+    if guard:
+        return guard
+    audio_track = request.args.get("audio_track", 0, type=int)
+    duration = float(media.get("duration") or 0)
+    if duration <= 0:
+        duration = _media_duration_seconds(media["file_path"])
+    from backend.hls_transcoder import generate_variant_playlist
+    playlist = generate_variant_playlist(media_id, media["file_path"], quality, duration, audio_track_index=audio_track)
+    return Response(playlist, mimetype="application/vnd.apple.mpegurl", headers={
+        "Cache-Control": "no-cache",
+        "Access-Control-Allow-Origin": "*",
+    })
+
+
+@streaming_bp.route("/api/hls/<int:media_id>/seg_<quality>_<seg_name>.ts")
+def api_hls_segment(media_id, quality, seg_name):
+    media = get_best_media_source(media_id)
+    if not media or not media.get("file_path"):
+        abort(404)
+    guard = kids_guard_media(media, deep=True)
+    if guard:
+        return guard
+    audio_track = request.args.get("audio_track", 0, type=int)
+    try:
+        # seg_name might be "00000" or "0"
+        seg_index = int(seg_name)
+    except ValueError:
+        abort(400)
+    duration = float(media.get("duration") or 0)
+    from backend.hls_transcoder import get_or_generate_segment
+    seg_path = get_or_generate_segment(media_id, media["file_path"], quality, seg_index, audio_track_index=audio_track, duration=duration)
+    if not seg_path or not os.path.isfile(seg_path):
+        abort(404)
+    return send_file(seg_path, mimetype="video/MP2T")
+
+
+@streaming_bp.route("/api/hls/<int:media_id>/cleanup", methods=["GET", "POST"])
+def api_hls_cleanup(media_id):
+    from backend.hls_transcoder import cleanup_hls_session
+    cleanup_hls_session(media_id)
+    return jsonify({"ok": True})
 
 
 @streaming_bp.route("/api/transcode-caps", methods=["GET"])

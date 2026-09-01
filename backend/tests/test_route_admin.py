@@ -8,6 +8,7 @@ from unittest.mock import patch
 from flask import Flask
 
 from backend.routes.admin import admin_bp
+from backend.routes.middleware import has_active_profile_session
 
 
 class TestRouteAdmin(unittest.TestCase):
@@ -64,13 +65,20 @@ class TestRouteAdmin(unittest.TestCase):
         self.assertEqual(resp.status_code, 401)
 
     @patch("backend.routes.admin.current_profile", return_value=1)
+    @patch("backend.routes.admin.has_active_profile_session", return_value=True)
     @patch("backend.scanner.get_scan_status", return_value={"running": True, "phase": "scanning"})
-    def test_api_scan_authorized_with_profile(self, mock_status, mock_prof):
-        """Verify POST /api/scan succeeds when a profile is selected."""
+    def test_api_scan_authorized_with_profile(self, mock_status, mock_has_active, mock_prof):
+        """Verify POST /api/scan succeeds when a live profile session is active."""
         resp = self.client.post("/api/scan", json={})
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
         self.assertTrue(data["ok"])
+
+    @patch("backend.routes.middleware.ACTIVE_PROFILE_SESSIONS", {1: {"last_seen": 9999999999, "evicted": False}})
+    def test_has_active_profile_session_detects_live_session(self):
+        """Scheduled scans should only run when an authenticated profile session is still active."""
+        with patch("time.time", return_value=10000000000):
+            self.assertTrue(has_active_profile_session(1))
 
 
 if __name__ == "__main__":

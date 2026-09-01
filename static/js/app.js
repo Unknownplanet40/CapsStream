@@ -101,6 +101,8 @@ const API = {
   },
 };
 
+window.API = API;
+
 // ─── Global State ─────────────────────────────────────────────
 
 const store = reactive({
@@ -136,6 +138,8 @@ const store = reactive({
   queuePlaylistId: null,   // id of playlist if playing from a saved playlist
   queuePlaylistName: "",   // name of active playlist
 });
+
+window.store = store;
 
 const playlistPickerState = reactive({
   show: false,
@@ -345,6 +349,8 @@ function addToast(message, type = "info", duration = 3000) {
     store.toasts = store.toasts.filter((t) => t.id !== id);
   }, duration);
 }
+
+window.addToast = addToast;
 
 function playAchievementSound() {
   try {
@@ -884,6 +890,9 @@ function trackPlayerFeature(feature) {
   } catch (e) {}
 }
 
+window.unlockAchievement = unlockAchievement;
+window.trackPlayerFeature = trackPlayerFeature;
+
 function imgUrl(path, size = "original") {
   if (!path) return null;
   if (path.startsWith("http")) {
@@ -1090,16 +1099,32 @@ const MediaCard = {
           <span class="placeholder-title">{{ cardItem.title }}</span>
         </div>
 
+        <!-- Continue watching overlay elements -->
+        <div v-if="isContinue" class="cw-card-art-overlay">
+          <!-- Quick Resume Play hover circle -->
+          <div class="cw-center-play">
+            <div class="cw-play-circle" title="Resume Playback">
+              <i class="ph-fill ph-play"></i>
+            </div>
+          </div>
+
+          <!-- Episode tag pill (top-left) -->
+          <div v-if="cardItem.season !== undefined && cardItem.season !== null && cardItem.episode !== undefined && cardItem.episode !== null" class="cw-ep-tag-badge">
+            S{{ String(cardItem.season || 1).padStart(2,'0') }}E{{ String(cardItem.episode || 1).padStart(2,'0') }}
+          </div>
+
+          <!-- Time Left pill (bottom-right above progress bar) -->
+          <div v-if="calcTimeLeft(cardItem)" class="cw-time-left-badge">
+            <i class="ph ph-clock"></i> {{ calcTimeLeft(cardItem) }}
+          </div>
+        </div>
+
         <div v-if="cardItem.is_mounted === false" class="unmounted-badge">
           <i class="ph ph-hard-drive"></i> Unmounted
         </div>
 
         <span v-if="showBadge !== false && !isContinue && cardItem.is_mounted !== false && cardItem.type !== 'anime'" class="card-badge" :class="cardItem.type">
           {{ cardItem.type === 'series' ? 'Series' : 'Movie' }}
-        </span>
-
-        <span v-if="isContinue && calcTimeLeft(cardItem)" class="continue-time-badge">
-          {{ calcTimeLeft(cardItem) }}
         </span>
 
         <!-- Top Right Actions: 3-Dots Menu & Remove Button -->
@@ -1121,25 +1146,44 @@ const MediaCard = {
           </button>
         </div>
 
-        <div v-if="calcProgressPercent(cardItem) > 0" class="card-progress">
+        <!-- Progress bar for regular card -->
+        <div v-if="!isContinue && calcProgressPercent(cardItem) > 0" class="card-progress">
           <div class="card-progress-fill" :style="{ width: calcProgressPercent(cardItem) + '%' }"></div>
         </div>
 
-        <div class="card-overlay" v-if="!isPopoutActive">
+        <!-- Regular card overlay (non-continue) -->
+        <div class="card-overlay" v-if="!isContinue && !isPopoutActive">
           <div class="card-play-btn">
             <i class="ph-fill ph-play" style="color:white;font-size:1rem;margin-left:2px"></i>
           </div>
           <div class="card-title">{{ cardItem.title }}</div>
-          <div v-if="isContinue && (cardItem.season || cardItem.ep_title)" class="card-meta" style="color:var(--text-secondary);font-weight:600">
-            <span v-if="cardItem.season">S{{ cardItem.season.toString().padStart(2,'0') }}E{{ (cardItem.episode||'').toString().padStart(2,'0') }}</span>
-            <span v-if="cardItem.ep_title"> — {{ cardItem.ep_title }}</span>
-          </div>
-          <div v-else class="card-meta">
+          <div class="card-meta">
             <span v-if="cardItem.year">{{ cardItem.year }}</span>
             <span v-if="cardItem.rating" class="card-rating">
               <i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ formatRating(cardItem.rating) }}
             </span>
           </div>
+        </div>
+
+        <!-- Continue watching integrated progress bar -->
+        <div v-if="isContinue && calcProgressPercent(cardItem) > 0" class="cw-art-progress">
+          <div class="cw-art-progress-fill" :style="{ width: calcProgressPercent(cardItem) + '%' }"></div>
+        </div>
+      </div>
+
+      <!-- Continue Watching: bottom info strip -->
+      <div v-if="isContinue" class="continue-card-info">
+        <div class="cw-info-header">
+          <div class="cw-info-title" :title="cardItem.title">{{ cardItem.title }}</div>
+        </div>
+        <div v-if="cardItem.ep_title && cardItem.ep_title !== cardItem.title" class="cw-ep-title" :title="cardItem.ep_title">
+          {{ cardItem.ep_title }}
+        </div>
+        <div v-else-if="cardItem.season !== undefined && cardItem.season !== null" class="cw-ep-title">
+          Episode {{ cardItem.episode || 1 }}
+        </div>
+        <div v-else-if="cardItem.year" class="cw-ep-title">
+          {{ cardItem.year }}
         </div>
       </div>
 
@@ -1256,7 +1300,14 @@ const MediaCard = {
     const posterSrc = computed(() => {
       if (imgError.value) return null;
       const item = cardItem.value;
-      if (props.isContinue && item.backdrop_path) return imgUrl(item.backdrop_path);
+      const isSeriesLike = ["series", "anime", "show"].includes(item.type);
+
+      if (props.isContinue) {
+        if (isSeriesLike && item.still_path) return imgUrl(item.still_path);
+        if (item.still_path) return imgUrl(item.still_path);
+        if (item.backdrop_path) return imgUrl(item.backdrop_path);
+        if (item.poster_path) return imgUrl(item.poster_path);
+      }
       if (item.poster_path) return imgUrl(item.poster_path);
       if (item.backdrop_path) return imgUrl(item.backdrop_path);
       if (item.still_path) return imgUrl(item.still_path);
@@ -1266,6 +1317,9 @@ const MediaCard = {
     const backdropSrc = computed(() => {
       if (popoutImgError.value) return posterSrc.value;
       const item = cardItem.value;
+      const isSeriesLike = ["series", "anime", "show"].includes(item.type);
+
+      if (isSeriesLike && item.still_path) return imgUrl(item.still_path);
       if (item.backdrop_path) return imgUrl(item.backdrop_path);
       if (item.still_path) return imgUrl(item.still_path);
       return posterSrc.value;
@@ -1494,8 +1548,28 @@ const ContentRow = {
   emits: ["card-click", "remove-continue"],
   components: { MediaCard },
   template: `
-    <div class="content-row">
-      <div class="row-header">
+    <div :class="row?.type === 'continue' ? 'continue-watching-section' : 'content-row'">
+      <!-- Custom header for continue watching -->
+      <div v-if="row?.type === 'continue'" class="continue-watching-header">
+        <div class="continue-watching-title">
+          <span class="cw-icon"><i class="ph-fill ph-play-circle"></i></span>
+          {{ row.title }}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="continue-watching-count">{{ (row.items || []).length }} titles</span>
+          <div class="row-header-controls">
+            <button class="row-control-btn" :disabled="!canScrollLeft" @click="scrollLeft" title="Scroll Left" id="cw-row-prev-btn">
+              <i class="ph ph-caret-left"></i>
+            </button>
+            <button class="row-control-btn" :disabled="!canScrollRight" @click="scrollRight" title="Scroll Right" id="cw-row-next-btn">
+              <i class="ph ph-caret-right"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Generic row header for other rows -->
+      <div v-else class="row-header">
         <div class="row-title">
           {{ row.title }}
           <span class="row-arrow">›</span>
@@ -1711,7 +1785,7 @@ const HeroBanner = {
 
       <div class="hero-indicators" v-if="items && items.length > 1">
         <div
-          v-for="(item, i) in (items || []).slice(0, 6)"
+          v-for="(item, i) in (items || []).slice(0, 10)"
           :key="i"
           class="hero-indicator"
           :class="{ active: i === currentIdx }"
@@ -1758,7 +1832,7 @@ const HeroBanner = {
 
     function advanceToNextSlide() {
       if (props.items && props.items.length > 1) {
-        currentIdx.value = (currentIdx.value + 1) % Math.min(props.items.length, 6);
+        currentIdx.value = (currentIdx.value + 1) % Math.min(props.items.length, 10);
       }
     }
 
@@ -2126,30 +2200,56 @@ const HomePage = {
           <div class="sk-hero">
             <div class="sk-hero-backdrop skeleton"></div>
             <div class="sk-hero-content">
-              <div class="sk-line skeleton" style="width:70px;height:20px;border-radius:6px"></div>
-              <div class="sk-line skeleton" style="width:42%;height:34px"></div>
-              <div class="sk-line skeleton" style="width:56%;height:13px"></div>
-              <div class="sk-line skeleton" style="width:47%;height:13px"></div>
+              <div class="sk-hero-tags">
+                <div class="sk-line skeleton sk-pill" style="width:75px;height:24px"></div>
+                <div class="sk-line skeleton sk-pill" style="width:95px;height:24px"></div>
+              </div>
+              <div class="sk-line skeleton" style="width:48%;min-width:240px;height:38px;border-radius:8px"></div>
+              <div class="sk-line skeleton" style="width:58%;height:14px"></div>
+              <div class="sk-line skeleton" style="width:46%;height:14px"></div>
               <div class="sk-hero-actions">
-                <div class="sk-line skeleton" style="width:118px;height:42px;border-radius:8px"></div>
-                <div class="sk-line skeleton" style="width:118px;height:42px;border-radius:8px"></div>
+                <div class="sk-line skeleton" style="width:125px;height:44px;border-radius:10px"></div>
+                <div class="sk-line skeleton" style="width:125px;height:44px;border-radius:10px"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Continue Watching landscape skeleton row -->
+          <div class="sk-row">
+            <div class="sk-row-header">
+              <div class="sk-line skeleton sk-row-title" style="width:160px"></div>
+            </div>
+            <div class="sk-continue-scroller">
+              <div
+                v-for="i in 4"
+                :key="'cw-' + i"
+                class="sk-continue-card"
+                :style="{ '--sk-delay': (0.1 + i * 0.08) + 's' }"
+              >
+                <div class="sk-continue-thumb skeleton">
+                  <div class="sk-continue-progress"></div>
+                </div>
+                <div class="sk-line skeleton" style="width:78%;height:13px"></div>
+                <div class="sk-line skeleton" style="width:45%;height:11px"></div>
               </div>
             </div>
           </div>
 
           <!-- Content-row skeletons -->
-          <div v-for="r in 3" :key="r" class="sk-row">
-            <div class="sk-line skeleton sk-row-title"></div>
+          <div v-for="r in 3" :key="'r-' + r" class="sk-row">
+            <div class="sk-row-header">
+              <div class="sk-line skeleton sk-row-title"></div>
+            </div>
             <div class="cards-scroller">
               <div
                 v-for="i in 8"
-                :key="i"
+                :key="'card-' + i"
                 class="sk-card"
-                :style="{ '--sk-delay': (0.12 + i * 0.09) + 's' }"
+                :style="{ '--sk-delay': (0.12 + (r * 0.08) + (i * 0.07)) + 's' }"
               >
                 <div class="sk-poster skeleton"></div>
-                <div class="sk-line skeleton" style="width:86%;height:11px"></div>
-                <div class="sk-line skeleton" style="width:54%;height:11px"></div>
+                <div class="sk-line skeleton" style="width:86%;height:12px"></div>
+                <div class="sk-line skeleton" style="width:54%;height:10px"></div>
               </div>
             </div>
           </div>
@@ -2176,7 +2276,7 @@ const HomePage = {
 
         <template v-else>
           <content-row
-            v-for="row in (rows || [])"
+            v-for="row in displayRows"
             :key="row.title || row.id"
             :row="row"
             @card-click="handleCardClick"
@@ -2194,12 +2294,29 @@ const HomePage = {
     const kidsAllRows = ref([]);
     const kidsItemCount = ref(0);
 
+    const displayRows = computed(() => {
+      return (rows.value || []).filter((r) => r && r.type !== "hero");
+    });
+
     const heroItems = computed(() => {
       if (!rows.value || !Array.isArray(rows.value)) return [];
-      const topRatedRow = rows.value.find((r) => r && r.title === "Top Rated");
-      const recentRow = rows.value.find((r) => r && r.title === "Recently Added");
-      const source = topRatedRow || recentRow || rows.value[1] || rows.value[0];
-      return (source?.items || []).filter((i) => i && i.backdrop_path).slice(0, 6);
+      const heroRow = rows.value.find((r) => r && (r.type === "hero" || r.title === "Featured"));
+      if (heroRow && heroRow.items && heroRow.items.length) {
+        return heroRow.items.filter((i) => i && i.backdrop_path).slice(0, 10);
+      }
+      const allItems = [];
+      const seen = new Set();
+      for (const r of rows.value) {
+        if (r && r.type === "hero") continue;
+        for (const item of (r?.items || [])) {
+          const key = item?.tmdb_id || item?.id || item?.title;
+          if (key && !seen.has(key) && item?.backdrop_path) {
+            seen.add(key);
+            allItems.push(item);
+          }
+        }
+      }
+      return allItems.slice(0, 10);
     });
 
     function selectCategory(cat) {
@@ -2395,6 +2512,7 @@ const HomePage = {
       store,
       router,
       rows,
+      displayRows,
       loading,
       heroItems,
       trailerModalUrl,
@@ -2843,8 +2961,47 @@ const DetailPage = {
       />
     </div>
 
-    <div v-else-if="loading" class="detail-page" style="display:flex;align-items:center;justify-content:center;min-height:100vh">
-      <div class="loading-spinner"></div>
+    <div v-else-if="loading" class="sk-detail-page" aria-hidden="true">
+      <div class="sk-detail-backdrop skeleton"></div>
+      <div class="sk-detail-body">
+        <div class="sk-detail-poster-wrap">
+          <div class="sk-detail-poster skeleton"></div>
+        </div>
+        <div class="sk-detail-info">
+          <div style="display:flex;gap:10px;align-items:center;">
+            <div class="sk-line skeleton sk-pill" style="width:75px;height:24px"></div>
+            <div class="sk-line skeleton sk-pill" style="width:90px;height:24px"></div>
+          </div>
+          <div class="sk-line skeleton" style="width:60%;min-width:260px;height:38px;border-radius:8px;margin:4px 0"></div>
+          <div style="display:flex;gap:14px;align-items:center;">
+            <div class="sk-line skeleton" style="width:55px;height:16px"></div>
+            <div class="sk-line skeleton" style="width:65px;height:16px"></div>
+            <div class="sk-line skeleton" style="width:85px;height:16px"></div>
+          </div>
+          <div style="display:flex;gap:12px;margin:8px 0;">
+            <div class="sk-line skeleton" style="width:145px;height:46px;border-radius:12px"></div>
+            <div class="sk-line skeleton" style="width:145px;height:46px;border-radius:12px"></div>
+            <div class="sk-line skeleton" style="width:46px;height:46px;border-radius:50%"></div>
+          </div>
+          <div class="sk-line skeleton" style="width:100%;height:14px;margin-top:10px"></div>
+          <div class="sk-line skeleton" style="width:92%;height:14px"></div>
+          <div class="sk-line skeleton" style="width:75%;height:14px"></div>
+
+          <!-- Season tabs & episodes skeleton preview -->
+          <div class="sk-detail-tabs">
+            <div class="sk-line skeleton sk-pill" style="width:90px;height:32px"></div>
+            <div class="sk-line skeleton sk-pill" style="width:90px;height:32px"></div>
+            <div class="sk-line skeleton sk-pill" style="width:90px;height:32px"></div>
+          </div>
+          <div class="sk-detail-episodes">
+            <div v-for="e in 4" :key="'ep-sk-' + e" class="sk-detail-episode-card" :style="{ '--sk-delay': (0.1 + e * 0.08) + 's' }">
+              <div class="sk-detail-episode-thumb skeleton"></div>
+              <div class="sk-line skeleton" style="width:80%;height:13px"></div>
+              <div class="sk-line skeleton" style="width:50%;height:11px"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div v-else class="empty-state" style="padding-top:calc(var(--nav-height) + 4rem);min-height:80vh">
@@ -4103,52 +4260,76 @@ const SettingsPage = {
             <div class="network-inspector-container">
               <!-- Summary bar -->
               <div class="network-summary-bar">
-                <div class="network-metric-chip">
-                  <span class="metric-label">Total Outgoing:</span>
-                  <span class="metric-val">{{ networkSummary.total || 0 }}</span>
+                <div class="network-metric-chip success">
+                  <span class="metric-icon"><i class="ph ph-check-circle"></i></span>
+                  <div class="metric-copy">
+                    <span class="metric-label">Successful</span>
+                    <span class="metric-val">{{ networkSummary.success || 0 }}</span>
+                  </div>
                 </div>
-                <div class="network-metric-chip">
-                  <span class="metric-label">Success Rate:</span>
-                  <span class="metric-val" :style="{ color: networkSummary.failed > 0 ? '#fbbf24' : '#10b981' }">
-                    {{ networkSummary.success_rate || 100 }}% ({{ networkSummary.success || 0 }}/{{ networkSummary.total || 0 }})
-                  </span>
+                <div class="network-metric-chip warning">
+                  <span class="metric-icon"><i class="ph ph-warning-circle"></i></span>
+                  <div class="metric-copy">
+                    <span class="metric-label">Failed</span>
+                    <span class="metric-val">{{ networkSummary.failed || 0 }}</span>
+                  </div>
                 </div>
-                <div class="network-metric-chip">
-                  <span class="metric-label">Avg Latency:</span>
-                  <span class="metric-val" style="color:#38bdf8">{{ networkSummary.avg_latency_ms || 0 }} ms</span>
+                <div class="network-metric-chip info">
+                  <span class="metric-icon"><i class="ph ph-timer"></i></span>
+                  <div class="metric-copy">
+                    <span class="metric-label">Avg. Latency</span>
+                    <span class="metric-val">{{ networkSummary.avg_latency_ms || 0 }} ms</span>
+                  </div>
                 </div>
-                <div class="network-metric-chip" style="margin-left:auto">
-                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.78rem;color:var(--text-secondary)">
-                    <input type="checkbox" v-model="networkAutoRefresh" style="cursor:pointer" />
-                    <span>Auto-Refresh (3s)</span>
-                  </label>
+                <div class="network-metric-chip strong" style="margin-left:auto">
+                  <span class="metric-icon"><i class="ph ph-chart-line-up"></i></span>
+                  <div class="metric-copy">
+                    <span class="metric-label">Success Rate</span>
+                    <span class="metric-val" :style="{ color: networkSummary.failed > 0 ? '#fbbf24' : '#10b981' }">
+                      {{ networkSummary.success_rate || 100 }}%
+                    </span>
+                  </div>
                 </div>
               </div>
 
               <!-- Filter Toolbar -->
               <div class="network-toolbar">
                 <div class="network-filters">
-                  <span style="font-size:0.78rem;color:var(--text-secondary);font-weight:600">Service:</span>
-                  <select v-model="networkServiceFilter" class="form-input" style="font-size:0.8rem;padding:4px 8px;width:150px">
-                    <option value="all">All Services</option>
-                    <option value="TMDb API">TMDb API</option>
-                    <option value="TMDb CDN">TMDb CDN (Images)</option>
-                    <option value="OpenSubtitles">OpenSubtitles</option>
-                    <option value="AniSkip">AniSkip</option>
-                    <option value="Jikan / MAL">Jikan / MAL</option>
-                    <option value="GitHub">GitHub</option>
-                    <option value="YTS Subs">YTS Subs</option>
-                  </select>
+                  <label class="network-search-box" aria-label="Search outgoing requests">
+                    <i class="ph ph-magnifying-glass"></i>
+                    <input v-model="networkSearchQuery" type="search" placeholder="Search URL, service, or method" />
+                  </label>
 
-                  <span style="font-size:0.78rem;color:var(--text-secondary);font-weight:600;margin-left:6px">Status:</span>
-                  <select v-model="networkStatusFilter" class="form-input" style="font-size:0.8rem;padding:4px 8px;width:120px">
-                    <option value="all">All Status</option>
-                    <option value="success">Success (2xx/3xx)</option>
-                    <option value="error">Errors / Failed</option>
-                  </select>
+                  <label class="network-select-wrap">
+                    <span>Service</span>
+                    <select v-model="networkServiceFilter" class="form-input">
+                      <option value="all">All Services</option>
+                      <option value="TMDb API">TMDb API</option>
+                      <option value="TMDb CDN">TMDb CDN (Images)</option>
+                      <option value="OpenSubtitles">OpenSubtitles</option>
+                      <option value="AniSkip">AniSkip</option>
+                      <option value="Jikan / MAL">Jikan / MAL</option>
+                      <option value="GitHub">GitHub</option>
+                      <option value="YTS Subs">YTS Subs</option>
+                    </select>
+                  </label>
+
+                  <label class="network-select-wrap">
+                    <span>Status</span>
+                    <select v-model="networkStatusFilter" class="form-input">
+                      <option value="all">All Status</option>
+                      <option value="success">Success (2xx/3xx)</option>
+                      <option value="error">Errors / Failed</option>
+                    </select>
+                  </label>
                 </div>
-                <div style="font-size:0.76rem;color:var(--text-muted)">
-                  Showing {{ filteredNetworkList.length }} recorded requests
+
+                <div class="network-toolbar-meta">
+                  <span class="network-pill" :class="{ active: networkAutoRefresh }">
+                    <input type="checkbox" v-model="networkAutoRefresh" />
+                    Auto-refresh (3s)
+                  </span>
+                  <span class="network-records-count">{{ filteredNetworkList.length }} shown</span>
                 </div>
               </div>
 
@@ -4166,24 +4347,28 @@ const SettingsPage = {
                 <table v-else class="network-table">
                   <thead>
                     <tr>
-                      <th style="width:75px">Time</th>
-                      <th style="width:130px">Service</th>
-                      <th style="width:65px">Method</th>
+                      <th style="width:78px">Time</th>
+                      <th style="width:138px">Service</th>
+                      <th style="width:72px">Method</th>
                       <th>Target URL</th>
-                      <th style="width:90px">Status</th>
-                      <th style="width:85px;text-align:right">Duration</th>
+                      <th style="width:98px">Status</th>
+                      <th style="width:90px;text-align:right">Latency</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="req in filteredNetworkList" :key="req.id">
-                      <td style="color:var(--text-muted);font-family:monospace;font-size:0.75rem">{{ req.timestamp }}</td>
+                    <tr v-for="req in filteredNetworkList" :key="req.id" class="network-row" :title="req.error || req.url">
+                      <td class="network-time-cell">
+                        <span>{{ req.timestamp }}</span>
+                      </td>
                       <td>
                         <span class="network-service-badge" :class="getServiceBadgeClass(req.service)">
                           {{ req.service }}
                         </span>
                       </td>
                       <td>
-                        <span class="network-method-tag">{{ req.method }}</span>
+                        <span class="network-method-tag" :class="req.method === 'GET' ? 'get' : req.method === 'POST' ? 'post' : 'other'">
+                          {{ req.method }}
+                        </span>
                       </td>
                       <td>
                         <div class="network-url-text" :title="req.url">
@@ -4196,7 +4381,7 @@ const SettingsPage = {
                         </span>
                       </td>
                       <td style="text-align:right">
-                        <span class="network-latency-text">{{ req.duration_ms }} ms</span>
+                        <span class="network-latency-text" :class="req.ok ? 'ok' : 'err'">{{ req.duration_ms }} ms</span>
                       </td>
                     </tr>
                   </tbody>
@@ -5191,6 +5376,7 @@ const SettingsPage = {
     const loadingNetwork = ref(false);
     const networkServiceFilter = ref("all");
     const networkStatusFilter = ref("all");
+    const networkSearchQuery = ref("");
     const networkAutoRefresh = ref(false);
     let networkPollInterval = null;
 
@@ -5219,6 +5405,7 @@ const SettingsPage = {
 
     const filteredNetworkList = computed(() => {
       let list = networkList.value || [];
+
       if (networkServiceFilter.value && networkServiceFilter.value !== "all") {
         list = list.filter(r => r.service === networkServiceFilter.value);
       }
@@ -5226,6 +5413,13 @@ const SettingsPage = {
         list = list.filter(r => r.ok);
       } else if (networkStatusFilter.value === "error") {
         list = list.filter(r => !r.ok);
+      }
+      if (networkSearchQuery.value && networkSearchQuery.value.trim()) {
+        const needle = networkSearchQuery.value.trim().toLowerCase();
+        list = list.filter(r => {
+          const haystack = `${r.service || ""} ${r.method || ""} ${r.url || ""}`.toLowerCase();
+          return haystack.includes(needle);
+        });
       }
       return list;
     });
@@ -5614,8 +5808,18 @@ const BrowsePage = {
         </div>
       </div>
 
-      <div v-if="loading" class="media-grid">
-        <div v-for="i in 12" :key="i" class="skeleton" style="aspect-ratio:2/3;border-radius:10px"></div>
+      <div v-if="loading" class="media-grid" aria-hidden="true">
+        <div
+          v-for="i in 18"
+          :key="'sk-browse-' + i"
+          class="sk-card"
+          style="width:100%;gap:8px"
+          :style="{ '--sk-delay': (0.04 + (i % 6) * 0.07) + 's' }"
+        >
+          <div class="sk-poster skeleton"></div>
+          <div class="sk-line skeleton" style="width:84%;height:13px"></div>
+          <div class="sk-line skeleton" style="width:48%;height:11px"></div>
+        </div>
       </div>
 
       <div v-else-if="filteredItems.length === 0" class="empty-state">
@@ -8373,12 +8577,18 @@ const SearchPage = {
 
       <!-- Results Body -->
       <div class="search-results-container">
-        <!-- Double-Bezel Loading Card -->
-        <div v-if="loading" class="search-loading-card">
-          <div class="search-loading-inner">
-            <div class="search-bento-spinner"></div>
-            <div class="search-loading-title">Searching media library...</div>
-            <div class="search-loading-subtitle">Probing audio tracks, titles & cast metadata</div>
+        <!-- Skeleton Grid while searching -->
+        <div v-if="loading" class="search-grid" aria-hidden="true" style="margin-top:1rem">
+          <div
+            v-for="i in 12"
+            :key="'sk-search-' + i"
+            class="sk-card"
+            style="width:100%;gap:8px"
+            :style="{ '--sk-delay': (0.04 + (i % 6) * 0.08) + 's' }"
+          >
+            <div class="sk-poster skeleton"></div>
+            <div class="sk-line skeleton" style="width:82%;height:13px"></div>
+            <div class="sk-line skeleton" style="width:50%;height:11px"></div>
           </div>
         </div>
 
@@ -8579,17 +8789,26 @@ const SearchPage = {
       if (route.query.q) {
         query.value = route.query.q;
       }
+      if (route.query.type && ['all', 'movie', 'series', 'anime'].includes(String(route.query.type))) {
+        selectedType.value = String(route.query.type);
+      }
       performSearch();
     });
 
     // React to external navigations into /search?q=... (e.g., cast member
     // clicks) while this page is already mounted.
     watch(
-      () => route.query.q,
-      (q) => {
+      () => [route.query.q, route.query.type],
+      ([q, type]) => {
         const newQ = typeof q === "string" ? q : "";
+        const newType = typeof type === "string" ? type : "all";
         if (newQ && newQ !== query.value) {
           query.value = newQ;
+        }
+        if (['all', 'movie', 'series', 'anime'].includes(newType) && newType !== selectedType.value) {
+          selectedType.value = newType;
+        }
+        if (newQ || newType) {
           performSearch();
         }
       }
@@ -8715,44 +8934,50 @@ const StatsPage = {
               <i class="ph ph-film-strip" style="color:#38bdf8"></i> Library Resolution & Quality
             </h3>
             <div class="tech-res-grid">
-              <div class="tech-res-card" :class="{ 'has-items': stats.technical_stats?.resolutions?.['4K'] > 0 }">
-                <div class="tech-res-val" style="color:#a855f7">{{ stats.technical_stats?.resolutions?.['4K'] || 0 }}</div>
-                <div class="tech-res-label">4K Ultra HD</div>
-              </div>
-              <div class="tech-res-card" :class="{ 'has-items': stats.technical_stats?.resolutions?.['1080p'] > 0 }">
-                <div class="tech-res-val" style="color:#38bdf8">{{ stats.technical_stats?.resolutions?.['1080p'] || 0 }}</div>
-                <div class="tech-res-label">1080p Full HD</div>
-              </div>
-              <div class="tech-res-card" :class="{ 'has-items': stats.technical_stats?.resolutions?.['720p'] > 0 }">
-                <div class="tech-res-val" style="color:#f59e0b">{{ stats.technical_stats?.resolutions?.['720p'] || 0 }}</div>
-                <div class="tech-res-label">720p HD</div>
-              </div>
-              <div class="tech-res-card" :class="{ 'has-items': stats.technical_stats?.resolutions?.['SD'] > 0 }">
-                <div class="tech-res-val" style="color:var(--text-muted)">{{ stats.technical_stats?.resolutions?.['SD'] || 0 }}</div>
-                <div class="tech-res-label">Standard (SD)</div>
+              <div
+                v-for="card in resolutionCards"
+                :key="card.key"
+                class="tech-res-card"
+                :class="{ 'has-items': card.count > 0 }"
+                @click="openResolutionSearch(card.key)"
+                style="cursor:pointer"
+              >
+                <div class="tech-res-val" :style="{ color: card.color }">{{ card.count }}</div>
+                <div class="tech-res-label">{{ card.label }}</div>
               </div>
             </div>
           </div>
         </div>
 
         <!-- Genre Distribution Progress Section -->
-        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem;margin-bottom:2.5rem">
-          <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px">
-            <i :class="store.profile?.is_kids ? 'ph ph-balloon' : 'ph ph-tag'" :style="{ color: store.profile?.is_kids ? '#fdcb6e' : 'var(--accent)' }"></i>
-            <span>{{ store.profile?.is_kids ? 'Favorite Cartoon Categories' : 'Favorite Genres Distribution' }}</span>
-          </h3>
-          <div v-if="stats.top_genres && stats.top_genres.length" style="display:flex;flex-direction:column;gap:1rem">
-            <div v-for="g in stats.top_genres" :key="g.genre">
-              <div style="display:flex;justify-content:space-between;font-size:0.9rem;font-weight:600;margin-bottom:4px">
-                <span>{{ g.genre }}</span>
-                <span style="color:var(--text-muted)">{{ g.count }} title{{ g.count > 1 ? 's' : '' }}</span>
+        <div class="genre-distribution-panel">
+          <div class="section-header-inline">
+            <h3>
+              <i :class="store.profile?.is_kids ? 'ph ph-balloon' : 'ph ph-tag'" :style="{ color: store.profile?.is_kids ? '#fdcb6e' : 'var(--accent)' }"></i>
+              <span>{{ store.profile?.is_kids ? 'Favorite Cartoon Categories' : 'Favorite Genres Distribution' }}</span>
+            </h3>
+            <span class="section-meta" v-if="stats.top_genres?.length">Top {{ Math.min(stats.top_genres.length, 5) }}</span>
+          </div>
+
+          <div v-if="stats.top_genres && stats.top_genres.length" class="genre-distribution-list">
+            <div v-for="(g, index) in stats.top_genres" :key="g.genre" class="genre-distribution-item">
+              <div class="genre-distribution-header">
+                <div class="genre-name-wrap">
+                  <span class="genre-dot" :style="{ background: getGenreAccent(index) }"></span>
+                  <span class="genre-name">{{ g.genre }}</span>
+                </div>
+                <span class="genre-count">{{ g.count }} title{{ g.count > 1 ? 's' : '' }}</span>
               </div>
-              <div style="height:10px;background:rgba(255,255,255,0.08);border-radius:6px;overflow:hidden">
-                <div :style="{ width: calcGenrePercent(g.count) + '%' }" style="height:100%;background:linear-gradient(90deg, var(--accent), #ff758c);border-radius:6px;transition:width 0.6s ease"></div>
+              <div class="genre-distribution-bar-track">
+                <div
+                  class="genre-distribution-bar-fill"
+                  :style="{ width: calcGenrePercent(g.count) + '%', background: 'linear-gradient(90deg, ' + getGenreAccent(index) + ' 0%, rgba(255,255,255,0.95) 100%)' }"
+                ></div>
               </div>
             </div>
           </div>
-          <div v-else style="color:var(--text-muted);text-align:center;padding:1.5rem">
+
+          <div v-else class="empty-state-panel">
             Watch titles in your library to unlock genre analytics!
           </div>
         </div>
@@ -9131,6 +9356,9 @@ const StatsPage = {
 
     function toggleGroup(key) {
       collapsedGroups[key] = !collapsedGroups[key];
+      if (collapsedGroups[key] === undefined) {
+        collapsedGroups[key] = true;
+      }
     }
 
     const BADGE_TIERS = [
@@ -9224,6 +9452,15 @@ const StatsPage = {
       return [];
     });
 
+    watch(groupedAchievements, (groups) => {
+      if (!groups || !groups.length) return;
+      for (const group of groups) {
+        if (collapsedGroups[group.key] === undefined) {
+          collapsedGroups[group.key] = true;
+        }
+      }
+    }, { immediate: true });
+
     const recentUnlocks = computed(() => {
       if (!stats.value?.achievements) return [];
       const unlocked = stats.value.achievements.filter(a => a.unlocked);
@@ -9297,7 +9534,21 @@ const StatsPage = {
     function calcGenrePercent(count) {
       if (!stats.value?.top_genres?.length) return 0;
       const maxCount = Math.max(...stats.value.top_genres.map(g => g.count));
-      return Math.min(100, Math.round((count / (maxCount || 1)) * 100));
+      return Math.min(100, Math.max(8, Math.round((count / (maxCount || 1)) * 100)));
+    }
+
+    function getGenreAccent(index) {
+      const palette = [
+        '#8b5cf6',
+        '#38bdf8',
+        '#f59e0b',
+        '#22c55e',
+        '#f43f5e',
+        '#06b6d4',
+        '#a78bfa',
+        '#f97316',
+      ];
+      return palette[index % palette.length];
     }
 
     function formatDate(dateStr) {
@@ -9317,6 +9568,36 @@ const StatsPage = {
       }
     }
 
+    const RES_META = {
+      "8K": { label: "8K Ultra HD", color: "#ec4899" },
+      "4K": { label: "4K Ultra HD", color: "#a855f7" },
+      "1440p": { label: "1440p Quad HD", color: "#6366f1" },
+      "1080p": { label: "1080p Full HD", color: "#38bdf8" },
+      "720p": { label: "720p HD", color: "#f59e0b" },
+      "SD": { label: "Standard (SD)", color: "var(--text-muted)" },
+    };
+
+    const resolutionCards = computed(() => {
+      const raw = stats.value?.technical_stats?.resolutions || { "4K": 0, "1080p": 0, "720p": 0, "SD": 0 };
+      const cards = [];
+      for (const [key, count] of Object.entries(raw)) {
+        const meta = RES_META[key] || { label: `${key} Quality`, color: "#38bdf8" };
+        cards.push({
+          key,
+          count: count || 0,
+          label: meta.label,
+          color: meta.color,
+        });
+      }
+      return cards;
+    });
+
+    function openResolutionSearch(quality) {
+      const q = (quality || "").trim();
+      if (!q) return;
+      router.push({ path: "/search", query: { q, type: "all" } });
+    }
+
     function handleCarouselWheel(e) {
       if (e.deltaY !== 0) {
         e.currentTarget.scrollLeft += e.deltaY;
@@ -9329,6 +9610,7 @@ const StatsPage = {
       loading,
       activeCategory,
       categories,
+      resolutionCards,
       groupBy,
       unlockedCount,
       totalCount,
@@ -9344,8 +9626,10 @@ const StatsPage = {
       maxWeeklyMinutes,
       formatTimeSpent,
       calcGenrePercent,
+      getGenreAccent,
       formatDate,
       openMedia,
+      openResolutionSearch,
       imgUrl,
       collapsedGroups,
       toggleGroup,
@@ -10629,51 +10913,9 @@ const App = {
           <span>View Details</span>
         </div>
 
-        <div class="context-menu-item" @click="handleContextMenuTrailer">
-          <i class="ph ph-film-strip"></i>
-          <span>Watch Trailer</span>
-        </div>
-
-        <div class="context-menu-divider"></div>
-
         <div class="context-menu-item" @click="handleContextMenuFav">
           <i :class="contextMenuState.isFavorite ? 'ph-fill ph-heart' : 'ph ph-heart'"></i>
           <span>{{ contextMenuState.isFavorite ? 'Remove from Watchlist' : 'Add to Watchlist' }}</span>
-        </div>
-
-        <div class="context-menu-item" @click="handleContextMenuPlaylist">
-          <i class="ph ph-queue"></i>
-          <span>Add to Playlist</span>
-        </div>
-
-        <div class="context-menu-item" @click="handleContextMenuQueueNext">
-          <i class="ph ph-skip-forward"></i>
-          <span>Play Next</span>
-        </div>
-
-        <div class="context-menu-item" @click="handleContextMenuQueueEnd">
-          <i class="ph ph-plus-circle"></i>
-          <span>Add to Queue</span>
-        </div>
-
-        <div v-if="!store.profile?.is_kids" class="context-menu-item" @click="handleContextMenuCollection">
-          <i class="ph ph-stack"></i>
-          <span>Add to Collection</span>
-        </div>
-
-        <div v-if="store.profile?.is_admin" class="context-menu-item" @click="handleContextMenuFixMatch">
-          <i class="ph ph-magic-wand"></i>
-          <span>Fix Match</span>
-        </div>
-
-        <div v-if="store.profile?.is_admin && contextMenuState.item.tmdb_id" class="context-menu-item" @click="handleContextKidsOverride('allow')">
-          <i class="ph ph-shield-check" style="color:#2ecc71"></i>
-          <span>Kids Mode: Always Allow</span>
-        </div>
-
-        <div v-if="store.profile?.is_admin && contextMenuState.item.tmdb_id" class="context-menu-item danger" @click="handleContextKidsOverride('block')">
-          <i class="ph ph-shield-warning"></i>
-          <span>Kids Mode: Block Title</span>
         </div>
 
         <template v-if="contextMenuState.item.position > 0">
@@ -10683,18 +10925,6 @@ const App = {
             <span>Remove from Continue</span>
           </div>
         </template>
-
-        <template v-if="contextMenuState.item.type !== 'series'">
-          <div class="context-menu-item" @click="handleContextMenuMarkWatched">
-            <i class="ph ph-check-circle" style="color:#2ecc71"></i>
-            <span>Mark as Watched</span>
-          </div>
-        </template>
-
-        <div v-if="!store.profile?.is_kids" class="context-menu-item danger" @click="handleContextMenuDelete">
-          <i class="ph ph-trash"></i>
-          <span>Delete from Library</span>
-        </div>
       </div>
 
       <!-- Global Collection Picker Modal -->
@@ -11367,6 +11597,8 @@ const App = {
 
     function switchProfile() {
       showProfileMenu.value = false;
+      clearInterval(scanPollTimer);
+      store.scanRunning = false;
       if (store.profile?.is_kids) {
         generateAppMathProblem(() => {
           store.profile = null;
@@ -11382,6 +11614,8 @@ const App = {
 
     function logout() {
       showProfileMenu.value = false;
+      clearInterval(scanPollTimer);
+      store.scanRunning = false;
       if (store.profile?.is_kids) {
         generateAppMathProblem(() => {
           store.profile = null;
@@ -11481,6 +11715,10 @@ const App = {
     }
 
     async function triggerScan() {
+      if (!store.profile) {
+        addToast("Select a profile before scanning the library", "warning");
+        return;
+      }
       try {
         unlockAchievement("scan_master");
         const res = await API.post("/api/scan", {});
@@ -11640,8 +11878,13 @@ const App = {
 
       const serverHealthTimer = setInterval(checkServerHealth, 10000);
 
-      // Poll if scan is running
+      // Poll if scan is running only when an active profile is logged in.
       try {
+        if (!store.profile) {
+          store.scanRunning = false;
+          clearInterval(scanPollTimer);
+          return;
+        }
         const status = await API.get("/api/scan/status");
         if (status.running) {
           store.scanRunning = true;
@@ -11720,13 +11963,6 @@ const App = {
       }
     }
 
-    function handleContextMenuTrailer() {
-      const item = contextMenuState.item;
-      closeGlobalContextMenu();
-      if (!item) return;
-      openGlobalTrailer(item);
-    }
-
     async function handleContextMenuFav() {
       const item = contextMenuState.item;
       if (!item) return;
@@ -11741,83 +11977,6 @@ const App = {
         addToast("Failed to update watchlist", "error");
       }
       closeGlobalContextMenu();
-    }
-
-    function handleContextMenuCollection() {
-      const item = contextMenuState.item;
-      closeGlobalContextMenu();
-      if (!item) return;
-      openGlobalCollectionPicker(item);
-    }
-
-    function handleContextMenuFixMatch() {
-      const item = contextMenuState.item;
-      closeGlobalContextMenu();
-      if (!item) return;
-      openGlobalFixMatch(item, () => {
-        if (route.path === "/") {
-          location.reload();
-        }
-      });
-    }
-
-    async function handleContextMenuMarkWatched() {
-      const item = contextMenuState.item;
-      closeGlobalContextMenu();
-      if (!item || !item.id) return;
-      try {
-        await API.post("/api/progress/mark-watched", { media_id: item.id });
-        addToast(`Marked "${item.title}" as watched`, "success");
-        if (route.path === "/") {
-          location.reload();
-        }
-      } catch (e) {
-        addToast("Failed to mark as watched", "error");
-      }
-    }
-
-    async function handleContextMenuDelete() {
-      const item = contextMenuState.item;
-      closeGlobalContextMenu();
-      if (!item) return;
-      const label = item.title || "this title";
-      const scope = (item.type === "movie") ? `"${label}"` : `all ${label} episodes`;
-      if (!confirm(
-        `Remove ${scope} from the CapsStream library?\n\n` +
-        "Your video files on disk are NOT deleted — this only removes the title from the app. " +
-        "Watch progress and watchlist entries for it will be lost."
-      )) return;
-      try {
-        const r = await API.post("/api/library/delete", {
-          tmdb_id: item.tmdb_id,
-          type: item.type,
-          media_id: item.id,
-          title: item.title,
-        });
-        addToast(`Removed "${label}" from the library (${r.removed ?? 0} entries)`, "success");
-        if (route.path === "/") {
-          location.reload();
-        }
-      } catch (e) {
-        addToast(e.message || "Failed to delete", "error");
-      }
-    }
-
-    async function handleContextKidsOverride(action) {
-      const item = contextMenuState.item;
-      closeGlobalContextMenu();
-      if (!item || !item.tmdb_id) return;
-      try {
-        await API.post("/api/kids-overrides", { tmdb_id: item.tmdb_id, action });
-        addToast(
-          action === "allow"
-            ? `Kids Mode: "${item.title}" will always be shown`
-            : `Kids Mode: "${item.title}" is now blocked`,
-          "success"
-        );
-      } catch (e) {
-        addToast("Failed to save Kids Mode override", "error");
-      }
     }
 
     async function handleContextMenuResetProgress() {
@@ -11835,38 +11994,6 @@ const App = {
       } catch (e) {
         addToast("Failed to reset progress", "error");
       }
-    }
-
-    function handleContextMenuPlaylist() {
-      const item = contextMenuState.item;
-      closeGlobalContextMenu();
-      if (!item) return;
-      openAddToPlaylist(item);
-    }
-
-    function handleContextMenuQueueNext() {
-      const item = contextMenuState.item;
-      closeGlobalContextMenu();
-      if (!item) return;
-      if (!store.queue) store.queue = [];
-      if (store.queue.length > 0 && store.queueIndex >= 0) {
-        store.queue.splice(store.queueIndex + 1, 0, item);
-        addToast(`Added "${item.title}" to play next ⏭️`, "success");
-      } else {
-        store.queue.push(item);
-        store.queueIndex = 0;
-        addToast(`Added "${item.title}" to queue`, "success");
-      }
-    }
-
-    function handleContextMenuQueueEnd() {
-      const item = contextMenuState.item;
-      closeGlobalContextMenu();
-      if (!item) return;
-      if (!store.queue) store.queue = [];
-      store.queue.push(item);
-      if (store.queueIndex < 0) store.queueIndex = 0;
-      addToast(`Added "${item.title}" to queue`, "success");
     }
 
     // ─── Global Collection Picker Helpers ──────────────────────
@@ -11981,16 +12108,7 @@ const App = {
       contextMenuPoster,
       handleContextMenuPlay,
       handleContextMenuDetails,
-      handleContextMenuTrailer,
       handleContextMenuFav,
-      handleContextMenuPlaylist,
-      handleContextMenuQueueNext,
-      handleContextMenuQueueEnd,
-      handleContextMenuCollection,
-      handleContextMenuFixMatch,
-      handleContextKidsOverride,
-      handleContextMenuMarkWatched,
-      handleContextMenuDelete,
       handleContextMenuResetProgress,
       collectionPickerState,
       playlistPickerState,
@@ -12668,6 +12786,7 @@ const app = createApp(App);
 // Expose to ALL component templates — module-level helpers aren't visible
 // in template scope otherwise (this is why IMDb-link clicks did nothing).
 app.config.globalProperties.unlockAchievement = unlockAchievement;
+app.component("shortcuts-modal", ShortcutsModal);
 app.component("skip-timestamps-modal", SkipTimestampsModal);
 app.component("fix-match-modal", FixMatchModal);
 app.use(router);

@@ -89,7 +89,28 @@ def get_continue_watching(profile_id, limit=20):
             if (not curr_mounted and it_mounted) or (curr_mounted == it_mounted and (it.get("file_size") or 0) > (curr.get("file_size") or 0)):
                 deduped[key] = it
 
-    return list(deduped.values())[:limit]
+    results = list(deduped.values())[:limit]
+    try:
+        from backend.matcher import fetch_season_episodes
+        for it in results:
+            if it.get("type") in ("series", "anime") and it.get("tmdb_id") and it.get("season") is not None and it.get("episode") is not None:
+                try:
+                    s_num = int(it["season"] or 1)
+                    e_num = int(it["episode"] or 1)
+                    eps = fetch_season_episodes(it["tmdb_id"], s_num)
+                    for ep in eps:
+                        if ep.get("episode_number") == e_num:
+                            if ep.get("still_path"):
+                                it["still_path"] = ep["still_path"]
+                            if ep.get("name") and (not it.get("ep_title") or it.get("ep_title") == it.get("title")):
+                                it["ep_title"] = ep["name"]
+                            break
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    return results
 
 
 def get_profile_recommendations(profile_id, limit=2):

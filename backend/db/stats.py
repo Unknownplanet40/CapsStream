@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from .connection import get_conn
 from .achievements import get_profile_achievements
-from .media import enrich_mounted_list, format_file_size_bytes
+from .media import enrich_mounted_list, format_file_size_bytes, is_item_mounted
 
 
 
@@ -96,25 +96,41 @@ def get_profile_watch_stats(profile_id):
     top_genres = sorted([{"genre": g, "count": c} for g, c in genre_counts.items()], key=lambda x: x["count"], reverse=True)[:6]
 
     # 6. Technical Stats & Resolution/Storage
-    tech_rows = conn.execute("""
-        SELECT file_size, duration FROM media
+    media_rows = conn.execute("""
+        SELECT file_path, file_size, duration, type FROM media
     """).fetchall()
+    mounted_media_rows = []
+    for r in media_rows:
+        row = dict(r)
+        file_path = row.get("file_path")
+        if file_path and is_item_mounted({"file_path": file_path}):
+            mounted_media_rows.append(row)
 
-    total_storage_bytes = sum((r["file_size"] or 0) for r in tech_rows)
+    total_storage_bytes = sum((r["file_size"] or 0) for r in mounted_media_rows)
     total_storage_formatted = format_file_size_bytes(total_storage_bytes) or "0 GB"
     total_storage_gb = round(total_storage_bytes / (1024 * 1024 * 1024), 2)
 
-    res_counts = {"4K": 0, "1080p": 0, "720p": 0, "SD": 0}
-    for r in tech_rows:
-        sz = r["file_size"] or 0
-        if sz >= 3.5 * 1024 * 1024 * 1024:
-            res_counts["4K"] += 1
-        elif sz >= 1.2 * 1024 * 1024 * 1024:
-            res_counts["1080p"] += 1
-        elif sz >= 400 * 1024 * 1024:
-            res_counts["720p"] += 1
-        elif sz > 0:
-            res_counts["SD"] += 1
+    from backend.db.media import get_media_resolution
+    RESOLUTION_HIERARCHY = ["8K", "4K", "1440p", "1080p", "720p", "SD"]
+    dynamic_counts = {}
+
+    for r in mounted_media_rows:
+        res = get_media_resolution(r)
+        if res:
+            dynamic_counts[res] = dynamic_counts.get(res, 0) + 1
+
+    # Ensure standard baseline tiers are always present for UI stability
+    for std_res in ["4K", "1080p", "720p", "SD"]:
+        if std_res not in dynamic_counts:
+            dynamic_counts[std_res] = 0
+
+    # Sort keys by resolution hierarchy (highest first)
+    res_counts = {}
+    for k in sorted(
+        dynamic_counts.keys(),
+        key=lambda x: RESOLUTION_HIERARCHY.index(x) if x in RESOLUTION_HIERARCHY else 99
+    ):
+        res_counts[k] = dynamic_counts[k]
 
     # 7. Recent history (Consolidated 10 distinct titles watched)
     all_history = conn.execute("""
@@ -132,23 +148,23 @@ def get_profile_watch_stats(profile_id):
         item = dict(row)
         m_type = item.get("type", "movie")
         tmdb_id = item.get("tmdb_id")
-        title = item.get("title", "")
+        title = (item.get("title") or "").strip()
 
-        if m_type in ("series", "anime") and tmdb_id:
+        if tmdb_id is not None:
             group_key = f"{m_type}_{tmdb_id}"
-        elif m_type in ("series", "anime") and title:
+        elif title:
             group_key = f"{m_type}_{title.lower()}"
         else:
-            group_key = f"movie_{item.get('id')}"
+            group_key = f"{m_type}_{item.get('id')}"
 
         if group_key not in seen_groups:
             seen_groups.add(group_key)
             if m_type in ("series", "anime"):
                 ep_cnt = sum(
-                    1 for r in all_history 
+                    1 for r in all_history
                     if r["type"] == m_type and (
-                        (tmdb_id and r["tmdb_id"] == tmdb_id) or 
-                        (not tmdb_id and (r["title"] or "").lower() == title.lower())
+                        (tmdb_id is not None and r["tmdb_id"] == tmdb_id) or
+                        (tmdb_id is None and (r["title"] or "").strip().lower() == title.lower())
                     )
                 )
                 item["ep_count"] = ep_cnt

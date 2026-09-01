@@ -16,10 +16,10 @@ from flask import Response, request, abort
 from backend.proc_utils import CREATE_NO_WINDOW, BELOW_NORMAL_PRIORITY
 from backend.utils.paths import FFMPEG_BIN, FFPROBE_BIN
 
-# Active ffmpeg transcodes keyed by absolute file path
-_TRANSCODE_LOCK = threading.Lock()
-_ACTIVE_TRANSCODES = {}
-_ACTIVE_AUDIO_STREAMS = {}
+import uuid
+# Active ffmpeg transcodes keyed by unique stream ID
+_STREAM_LOCK = threading.Lock()
+_ACTIVE_STREAMS = {}
 
 # Keyframe lookup cache: (path, size, mtime, requested_t) -> keyframe_time
 _KEYFRAME_CACHE = {}
@@ -383,16 +383,7 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
         boost_audio=boost_audio,
     )
 
-    key = ("convert", os.path.abspath(file_path))
-    with _TRANSCODE_LOCK:
-        for k, p in list(_ACTIVE_TRANSCODES.items()):
-            if p and p.poll() is None:
-                try:
-                    p.kill()
-                except Exception:
-                    pass
-        _ACTIVE_TRANSCODES.clear()
-
+    stream_id = uuid.uuid4().hex
     proc_flags = CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY
     try:
         proc = subprocess.Popen(
@@ -402,8 +393,8 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
             creationflags=proc_flags,
             bufsize=2 * 1024 * 1024,
         )
-        with _TRANSCODE_LOCK:
-            _ACTIVE_TRANSCODES[key] = proc
+        with _STREAM_LOCK:
+            _ACTIVE_STREAMS[stream_id] = proc
 
         def generate():
             current_proc = proc
@@ -437,8 +428,8 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
                         creationflags=proc_flags,
                         bufsize=2 * 1024 * 1024,
                     )
-                    with _TRANSCODE_LOCK:
-                        _ACTIVE_TRANSCODES[key] = current_proc
+                    with _STREAM_LOCK:
+                        _ACTIVE_STREAMS[stream_id] = current_proc
                     chunk = current_proc.stdout.read(chunk_size)
 
                 while chunk:
@@ -450,11 +441,11 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
                 try:
                     if current_proc.poll() is None:
                         current_proc.kill()
+                        current_proc.wait(timeout=2)
                 except Exception:
                     pass
-                with _TRANSCODE_LOCK:
-                    if _ACTIVE_TRANSCODES.get(key) is current_proc:
-                        _ACTIVE_TRANSCODES.pop(key, None)
+                with _STREAM_LOCK:
+                    _ACTIVE_STREAMS.pop(stream_id, None)
 
         return Response(generate(), mimetype="video/mp4", headers={
             "Cache-Control": "no-cache",
@@ -506,20 +497,11 @@ def stream_audio_only(file_path, track_index, start_time=0.0):
         "pipe:1"
     ])
 
-    key = ("audio", os.path.abspath(file_path))
-    with _TRANSCODE_LOCK:
-        for k, p in list(_ACTIVE_AUDIO_STREAMS.items()):
-            if p and p.poll() is None:
-                try:
-                    p.kill()
-                except Exception:
-                    pass
-        _ACTIVE_AUDIO_STREAMS.clear()
-
+    stream_id = uuid.uuid4().hex
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY)
-        with _TRANSCODE_LOCK:
-            _ACTIVE_AUDIO_STREAMS[key] = proc
+        with _STREAM_LOCK:
+            _ACTIVE_STREAMS[stream_id] = proc
 
         def generate():
             try:
@@ -534,11 +516,11 @@ def stream_audio_only(file_path, track_index, start_time=0.0):
                 try:
                     if proc.poll() is None:
                         proc.kill()
+                        proc.wait(timeout=2)
                 except Exception:
                     pass
-                with _TRANSCODE_LOCK:
-                    if _ACTIVE_AUDIO_STREAMS.get(key) is proc:
-                        _ACTIVE_AUDIO_STREAMS.pop(key, None)
+                with _STREAM_LOCK:
+                    _ACTIVE_STREAMS.pop(stream_id, None)
 
         return Response(generate(), mimetype="audio/aac", headers={
             "Cache-Control": "no-cache",
@@ -610,17 +592,7 @@ def stream_transcoded(file_path, audio_track_index=0, start_time=0.0):
         "pipe:1"
     ])
 
-    key = os.path.abspath(file_path)
-
-    # A new transcode for this file replaces any previous one — the old
-    # browser connection is dead anyway once the <video> src changes.
-    with _TRANSCODE_LOCK:
-        old = _ACTIVE_TRANSCODES.pop(key, None)
-    if old is not None and old.poll() is None:
-        try:
-            old.kill()
-        except Exception:
-            pass
+    stream_id = uuid.uuid4().hex
 
     try:
         proc = subprocess.Popen(
@@ -630,8 +602,8 @@ def stream_transcoded(file_path, audio_track_index=0, start_time=0.0):
             creationflags=CREATE_NO_WINDOW,
             bufsize=2 * 1024 * 1024,
         )
-        with _TRANSCODE_LOCK:
-            _ACTIVE_TRANSCODES[key] = proc
+        with _STREAM_LOCK:
+            _ACTIVE_STREAMS[stream_id] = proc
 
         def generate():
             chunk_size = 131072  # 128 KB buffer chunks
@@ -647,11 +619,11 @@ def stream_transcoded(file_path, audio_track_index=0, start_time=0.0):
                 try:
                     if proc.poll() is None:
                         proc.kill()
+                        proc.wait(timeout=2)
                 except Exception:
                     pass
-                with _TRANSCODE_LOCK:
-                    if _ACTIVE_TRANSCODES.get(key) is proc:
-                        _ACTIVE_TRANSCODES.pop(key, None)
+                with _STREAM_LOCK:
+                    _ACTIVE_STREAMS.pop(stream_id, None)
 
         return Response(generate(), mimetype="video/mp4", headers={
             "Cache-Control": "no-cache",

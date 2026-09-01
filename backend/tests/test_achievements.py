@@ -35,6 +35,9 @@ class TestAchievementsIntegrity(unittest.TestCase):
             db_code = f.read()
         with open("static/js/app.js", "r", encoding="utf-8") as f:
             js_code = f.read()
+        if os.path.exists("static/js/player.js"):
+            with open("static/js/player.js", "r", encoding="utf-8") as f:
+                js_code += "\n" + f.read()
         with open("app.py", "r", encoding="utf-8") as f:
             app_code = f.read()
 
@@ -57,6 +60,9 @@ class TestAchievementsIntegrity(unittest.TestCase):
             db_code = f.read()
         with open("static/js/app.js", "r", encoding="utf-8") as f:
             js_code = f.read()
+        if os.path.exists("static/js/player.js"):
+            with open("static/js/player.js", "r", encoding="utf-8") as f:
+                js_code += "\n" + f.read()
         with open("app.py", "r", encoding="utf-8") as f:
             app_code = f.read()
 

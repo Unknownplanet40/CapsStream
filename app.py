@@ -386,12 +386,17 @@ def serve_avatar_image(filename):
 def _scan_scheduler_loop():
     from backend.settings import load_config as _lc
     from backend.scanner import get_scan_status, scan_library
+    from backend.routes.middleware import has_active_profile_session
     if read_last_scheduled_scan() <= 0:
         write_last_scheduled_scan(time.time())
     while True:
         try:
             interval = float((_lc().get("library") or {}).get("scan_interval_hours") or 0)
             if interval > 0 and not get_scan_status()["running"]:
+                if not has_active_profile_session():
+                    write_last_scheduled_scan(time.time())
+                    time.sleep(600)
+                    continue
                 last = read_last_scheduled_scan()
                 if last <= 0:
                     write_last_scheduled_scan(time.time())

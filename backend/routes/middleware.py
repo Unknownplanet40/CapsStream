@@ -85,6 +85,24 @@ def current_profile():
     return session.get("profile_id")
 
 
+def has_active_profile_session(pid=None):
+    """True only when the profile session is both selected and still active."""
+    if pid is None:
+        pid = current_profile()
+    if not pid:
+        return False
+
+    now = time.time()
+    with ACTIVE_PROFILE_LOCK:
+        sess = ACTIVE_PROFILE_SESSIONS.get(pid)
+        if not sess or sess.get("evicted"):
+            return False
+        if now - sess.get("last_seen", 0) > 45:
+            ACTIVE_PROFILE_SESSIONS.pop(pid, None)
+            return False
+        return True
+
+
 def require_profile():
     pid = current_profile()
     if not pid:

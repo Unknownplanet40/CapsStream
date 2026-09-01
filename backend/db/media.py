@@ -518,6 +518,78 @@ def get_media_by_tmdb(tmdb_id, media_type=None):
     return sorted(deduped, key=lambda e: (e.get("season") or 0, e.get("episode") or 0))
 
 
+def get_media_resolution(item):
+    """Determine a single representative resolution category for a media item."""
+    text = " ".join([
+        item.get("file_path") or "",
+        item.get("title") or "",
+        item.get("original_title") or "",
+    ]).lower()
+    file_size = float(item.get("file_size") or 0)
+
+    # 1. Explicit markers (Highest resolution first)
+    if any(marker in text for marker in ["8k", "4320p", "7680x4320", "8k uhd"]):
+        return "8K"
+    if any(marker in text for marker in ["4k", "2160p", "uhd", "3840x2160", "4096x2160", "ultra hd"]):
+        return "4K"
+    if any(marker in text for marker in ["1440p", "2560x1440", "qhd", "2k", "quad hd"]):
+        return "1440p"
+    if any(marker in text for marker in ["1080p", "1920x1080", "fhd", "full hd"]):
+        return "1080p"
+    if any(marker in text for marker in ["720p", "1280x720", "hd"]):
+        return "720p"
+    if any(marker in text for marker in ["576p", "480p", "854x480", "360p", "640x360", "sd", "dvd"]):
+        return "SD"
+
+    # 2. Fallback based on file size
+    if file_size >= 3.5 * 1024 * 1024 * 1024:
+        return "4K"
+    elif file_size >= 1.2 * 1024 * 1024 * 1024:
+        return "1080p"
+    elif file_size >= 400 * 1024 * 1024:
+        return "720p"
+    return "SD"
+
+def _matches_resolution_query(item, query_clean):
+    """Check whether a media item truly matches a resolution query like 8K/4K/1440p/1080p/720p/SD."""
+    if not query_clean:
+        return True
+
+    q = query_clean.replace("ultra hd", "uhd").replace("full hd", "1080p").replace("quad hd", "1440p")
+    res = get_media_resolution(item)
+    
+    if any(token in q for token in ["8k", "4320p"]) and res == "8K":
+        return True
+    if any(token in q for token in ["4k", "2160p", "uhd"]) and res == "4K":
+        return True
+    if any(token in q for token in ["1440p", "2k", "qhd"]) and res == "1440p":
+        return True
+    if "1080p" in q and res == "1080p":
+        return True
+    if "720p" in q and res == "720p":
+        return True
+    if any(token in q for token in ["sd", "480p", "576p", "360p", "dvd"]) and res == "SD":
+        return True
+        
+    return False
+
+
+def _pick_best_group_candidate(current, candidate):
+    """Prefer the mounted, higher-quality item when a title is represented by multiple rows."""
+    if current is None:
+        return True
+
+    current_mounted = bool(current.get("is_mounted", is_item_mounted(current)))
+    candidate_mounted = bool(candidate.get("is_mounted", is_item_mounted(candidate)))
+
+    if candidate_mounted and not current_mounted:
+        return True
+    if current_mounted != candidate_mounted:
+        return False
+
+    return (candidate.get("file_size") or 0) > (current.get("file_size") or 0)
+
+
 def search_media(query="", media_type=None, genre=None, sort_by="relevance"):
     """
     Multi-field deep search for media items matching query across:
@@ -540,8 +612,9 @@ def search_media(query="", media_type=None, genre=None, sort_by="relevance"):
 
     query_clean = (query or "").strip().lower()
     is_multi_query = any(k in query_clean for k in ["multi", "dual", "dub", "multi audio", "dual audio", "multi-audio", "multiaudio"])
+    resolution_query = any(token in query_clean for token in ["4k", "2160p", "1080p", "720p", "480p", "360p", "sd", "uhd"])
 
-    if query and query.strip() and not is_multi_query:
+    if query and query.strip() and not is_multi_query and not resolution_query:
         q = f"%{query.strip()}%"
         if query_clean.isdigit() and len(query_clean) == 4:
             conditions.append("(m.title LIKE ? OR m.original_title LIKE ? OR m.year = ?)")
@@ -560,13 +633,14 @@ def search_media(query="", media_type=None, genre=None, sort_by="relevance"):
     if conditions:
         sql += " WHERE " + " AND ".join(conditions)
 
-    sql += """
-        GROUP BY CASE 
-            WHEN m.type IN ('series', 'anime') AND m.tmdb_id IS NOT NULL THEN 'tmdb_' || m.tmdb_id 
-            WHEN m.type IN ('series', 'anime') THEN 'title_' || LOWER(m.title)
-            ELSE 'id_' || m.id 
-        END
-    """
+    if not resolution_query:
+        sql += """
+            GROUP BY CASE 
+                WHEN m.tmdb_id IS NOT NULL THEN m.type || '_tmdb_' || m.tmdb_id 
+                WHEN m.year IS NOT NULL THEN m.type || '_title_' || LOWER(m.title) || '_' || m.year
+                ELSE m.type || '_title_' || LOWER(m.title)
+            END
+        """
 
     if sort_by == "rating_desc":
         sql += " ORDER BY m.rating DESC, m.added_at DESC"
@@ -576,13 +650,41 @@ def search_media(query="", media_type=None, genre=None, sort_by="relevance"):
         sql += " ORDER BY m.title ASC"
     else:
         sql += " ORDER BY m.rating DESC, m.added_at DESC"
-
-    sql += " LIMIT 150"
+    if not resolution_query and not is_multi_query:
+        sql += " LIMIT 150"
 
     rows = conn.execute(sql, params).fetchall()
     conn.close()
 
     results = [dict(r) for r in rows]
+
+    def _get_search_group_key(item):
+        mtype = item.get("type") or "media"
+        tmdb_id = item.get("tmdb_id")
+        if tmdb_id:
+            return f"{mtype}_tmdb_{tmdb_id}"
+        title = (item.get("title") or "").strip().lower()
+        year = item.get("year") or ""
+        return f"{mtype}_title_{title}_{year}"
+
+    # For resolution searches, we cannot rely on the SQL GROUP BY reduction because it may
+    # collapse a show down to a lower-quality episode row. Keep the raw matches, then dedupe
+    # to the best candidate for each title after filtering.
+    if resolution_query:
+        filtered = [item for item in results if _matches_resolution_query(item, query_clean)]
+        grouped = {}
+        for item in filtered:
+            group_key = _get_search_group_key(item)
+            if group_key not in grouped or _pick_best_group_candidate(grouped[group_key], item):
+                grouped[group_key] = item
+        results = list(grouped.values())
+    else:
+        grouped = {}
+        for item in results:
+            group_key = _get_search_group_key(item)
+            if group_key not in grouped or _pick_best_group_candidate(grouped[group_key], item):
+                grouped[group_key] = item
+        results = list(grouped.values())
 
     # Handle multi-audio probing & filtering if requested
     if is_multi_query:
@@ -744,6 +846,35 @@ def get_random_pick(limit=10):
     rows = conn.execute("""
         SELECT * FROM media
         WHERE poster_path IS NOT NULL
+    """).fetchall()
+    conn.close()
+
+    disabled_roots = get_disabled_path_roots()
+    if disabled_roots:
+        items = [dict(r) for r in rows if not is_file_path_disabled(r["file_path"], disabled_roots)]
+    else:
+        items = [dict(r) for r in rows]
+
+    grouped = {}
+    for item in items:
+        key = item.get("tmdb_id") or item.get("title")
+        if not key:
+            continue
+        if key not in grouped:
+            grouped[key] = item
+
+    import random
+    result = list(grouped.values())
+    random.shuffle(result)
+    return enrich_mounted_list(result[:limit])
+
+
+def get_hero_featured(limit=10):
+    """Retrieve a randomized selection of unique titles with backdrops across the entire library."""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT * FROM media
+        WHERE backdrop_path IS NOT NULL AND backdrop_path != ''
     """).fetchall()
     conn.close()
 

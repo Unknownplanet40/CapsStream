@@ -15,7 +15,7 @@ from backend.db import (
     get_all_media, get_media_by_id, get_media_by_tmdb, get_best_media_source,
     get_media_quality_options, search_media as db_search_media, get_unique_shows,
     get_recently_added, get_top_rated, get_by_genre, get_all_genres,
-    get_random_pick, get_continue_watching, get_profile_recommendations, get_progress, is_favorite,
+    get_random_pick, get_hero_featured, get_continue_watching, get_profile_recommendations, get_progress, is_favorite,
     get_unmatched, upsert_media,
     delete_media_by_id, delete_media_by_tmdb, delete_media_by_title_and_type,
 )
@@ -231,6 +231,12 @@ def api_home():
             if items:
                 filtered_rows.append({**row, "items": items})
         final_rows = filtered_rows
+
+    hero_items = get_hero_featured(limit=10)
+    if kids:
+        hero_items = filter_for_profile(hero_items)
+    if hero_items:
+        final_rows.insert(0, {"title": "Featured", "type": "hero", "items": hero_items})
 
     return jsonify(final_rows)
 
