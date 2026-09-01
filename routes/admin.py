@@ -526,7 +526,7 @@ def api_system_info():
         from backend.db import get_db
         with get_db() as conn:
             c = conn.cursor()
-            c.execute("SELECT COUNT(*) FROM progress")
+            c.execute("SELECT COUNT(*) FROM watch_progress")
             db_metrics["progress_count"] = c.fetchone()[0] or 0
             c.execute("SELECT COUNT(*) FROM favorites")
             db_metrics["favorites_count"] = c.fetchone()[0] or 0
