@@ -86,6 +86,7 @@ from .achievements import (
 
 from .stats import (
     get_profile_watch_stats,
+    get_profile_wrapped_analytics,
 )
 
 from .collections import (
@@ -173,6 +174,7 @@ __all__ = [
     "check_and_unlock_achievements",
     "get_profile_achievements",
     "get_profile_watch_stats",
+    "get_profile_wrapped_analytics",
     "get_favorites",
     "toggle_favorite",
     "is_favorite",

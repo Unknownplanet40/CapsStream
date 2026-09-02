@@ -11,7 +11,10 @@ Rate limit rules:
 """
 
 from flask import Flask
-from flask_limiter import Limiter
+try:
+    from flask_limiter import Limiter
+except ImportError:
+    Limiter = object
 
 
 def register_blueprints(app: Flask, limiter: Limiter) -> None:

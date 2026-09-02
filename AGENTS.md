@@ -121,6 +121,10 @@ Whenever the user asks to commit, release, or save changes in this project, foll
 5. **Commit the Changes**
    - Stage the relevant files.
    - Commit using the full conventional commit message generated above.
+   - **PowerShell escaping**: Do NOT pass complex commit messages via `git commit -m "..."` in PowerShell. Backticks, dollar signs, and other metacharacters will cause parse failures. Instead:
+     1. Write the message to a temporary `.commit_msg.txt` file.
+     2. Run `git commit -F .commit_msg.txt`.
+     3. Delete `.commit_msg.txt` after the commit succeeds.
 
 6. **Ask Before Push (Mandatory)**
    - **ALWAYS** ask the user for confirmation before executing `git push`.

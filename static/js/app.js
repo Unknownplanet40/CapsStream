@@ -8840,99 +8840,1534 @@ const SearchPage = {
   }
 };
 
-// ─── Profile Watch Stats & Insights Page ──────────────────────
+// ─── CapsStream Wrapped Story & Poster Component ──────────────
+
+// ─── CapsStream Wrapped Sound & Ambient Synth Engine ───────────
+
+let wrappedAudioCtx = null;
+let ambientOsc1 = null;
+let ambientOsc2 = null;
+let ambientGain = null;
+let ambientFilter = null;
+
+function getWrappedAudioCtx() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+  if (!wrappedAudioCtx || wrappedAudioCtx.state === "closed") {
+    wrappedAudioCtx = new AudioCtx();
+  }
+  if (wrappedAudioCtx.state === "suspended") {
+    wrappedAudioCtx.resume();
+  }
+  return wrappedAudioCtx;
+}
+
+function playWrappedChime(freq = 587.33, isMuted = false) {
+  if (isMuted) return;
+  try {
+    const ctx = getWrappedAudioCtx();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(freq * 1.35, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.09, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (e) {}
+}
+
+function playWrappedTap(isMuted = false) {
+  if (isMuted) return;
+  try {
+    const ctx = getWrappedAudioCtx();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(360, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(120, ctx.currentTime + 0.06);
+    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.06);
+  } catch (e) {}
+}
+
+function playWrappedSuccess(isMuted = false) {
+  if (isMuted) return;
+  try {
+    const ctx = getWrappedAudioCtx();
+    if (!ctx) return;
+    [523.25, 659.25, 783.99].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      const startT = ctx.currentTime + idx * 0.07;
+      osc.frequency.setValueAtTime(freq, startT);
+      gain.gain.setValueAtTime(0.12, startT);
+      gain.gain.exponentialRampToValueAtTime(0.001, startT + 0.26);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startT);
+      osc.stop(startT + 0.26);
+    });
+  } catch (e) {}
+}
+
+function playWrappedWrong(isMuted = false) {
+  if (isMuted) return;
+  try {
+    const ctx = getWrappedAudioCtx();
+    if (!ctx) return;
+    [349.23, 293.66].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "triangle";
+      const startT = ctx.currentTime + idx * 0.09;
+      osc.frequency.setValueAtTime(freq, startT);
+      gain.gain.setValueAtTime(0.09, startT);
+      gain.gain.exponentialRampToValueAtTime(0.001, startT + 0.22);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startT);
+      osc.stop(startT + 0.22);
+    });
+  } catch (e) {}
+}
+
+function playWrappedFanfare(isMuted = false) {
+  if (isMuted) return;
+  try {
+    const ctx = getWrappedAudioCtx();
+    if (!ctx) return;
+    const chords = [
+      { notes: [261.63, 329.63, 392.00], dur: 0.22 },
+      { notes: [349.23, 440.00, 523.25], dur: 0.22 },
+      { notes: [392.00, 493.88, 587.33], dur: 0.3 },
+      { notes: [523.25, 659.25, 783.99, 1046.50], dur: 0.8 }
+    ];
+    let time = ctx.currentTime;
+    chords.forEach((c) => {
+      c.notes.forEach((freq) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, time);
+        gain.gain.setValueAtTime(0.07, time);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + c.dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(time);
+        osc.stop(time + c.dur);
+      });
+      time += c.dur * 0.8;
+    });
+  } catch (e) {}
+}
+
+function startAmbientSynth(slideIndex = 0, isMuted = false) {
+  stopAmbientSynth();
+  if (isMuted) return;
+  try {
+    const ctx = getWrappedAudioCtx();
+    if (!ctx) return;
+
+    const baseFreqs = [130.81, 146.83, 164.81, 174.61, 196.00, 220.00, 130.81, 164.81, 196.00, 130.81];
+    const root = baseFreqs[slideIndex % baseFreqs.length];
+
+    ambientOsc1 = ctx.createOscillator();
+    ambientOsc2 = ctx.createOscillator();
+    ambientFilter = ctx.createBiquadFilter();
+    ambientGain = ctx.createGain();
+
+    ambientOsc1.type = "triangle";
+    ambientOsc2.type = "sine";
+    ambientOsc1.frequency.setValueAtTime(root, ctx.currentTime);
+    ambientOsc2.frequency.setValueAtTime(root * 1.5, ctx.currentTime);
+
+    ambientFilter.type = "lowpass";
+    ambientFilter.frequency.setValueAtTime(600, ctx.currentTime);
+
+    ambientGain.gain.setValueAtTime(0.001, ctx.currentTime);
+    ambientGain.gain.exponentialRampToValueAtTime(0.035, ctx.currentTime + 0.6);
+
+    ambientOsc1.connect(ambientFilter);
+    ambientOsc2.connect(ambientFilter);
+    ambientFilter.connect(ambientGain);
+    ambientGain.connect(ctx.destination);
+
+    ambientOsc1.start();
+    ambientOsc2.start();
+  } catch (e) {}
+}
+
+function stopAmbientSynth() {
+  try {
+    if (ambientGain && wrappedAudioCtx) {
+      ambientGain.gain.setValueAtTime(ambientGain.gain.value, wrappedAudioCtx.currentTime);
+      ambientGain.gain.exponentialRampToValueAtTime(0.0001, wrappedAudioCtx.currentTime + 0.2);
+    }
+    setTimeout(() => {
+      if (ambientOsc1) { ambientOsc1.stop(); ambientOsc1.disconnect(); ambientOsc1 = null; }
+      if (ambientOsc2) { ambientOsc2.stop(); ambientOsc2.disconnect(); ambientOsc2 = null; }
+      ambientGain = null;
+      ambientFilter = null;
+    }, 220);
+  } catch (e) {}
+}
+
+// ─── Confetti Physics Emitter ─────────────────────────────────
+
+function triggerConfetti(canvas) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  canvas.width = canvas.parentElement?.clientWidth || 460;
+  canvas.height = canvas.parentElement?.clientHeight || 800;
+
+  const count = 75;
+  const colors = ["#ffd700", "#ef4444", "#3b82f6", "#10b981", "#a855f7", "#ec4899", "#f97316", "#ffffff"];
+  const particles = [];
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x: canvas.width / 2 + (Math.random() - 0.5) * 70,
+      y: canvas.height * 0.4 + (Math.random() - 0.5) * 50,
+      vx: (Math.random() - 0.5) * 14,
+      vy: (Math.random() - 0.8) * 18,
+      size: Math.random() * 8 + 4,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rotation: Math.random() * Math.PI * 2,
+      vRot: (Math.random() - 0.5) * 0.2,
+      opacity: 1,
+      drag: 0.96,
+      gravity: 0.38,
+    });
+  }
+
+  function update() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let active = false;
+    particles.forEach((p) => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= p.drag;
+      p.vy += p.gravity;
+      p.rotation += p.vRot;
+      p.opacity -= 0.012;
+      if (p.opacity > 0 && p.y < canvas.height + 20) {
+        active = true;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, p.opacity);
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rotation);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.7);
+        ctx.restore();
+      }
+    });
+    if (active) {
+      requestAnimationFrame(update);
+    } else {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+  update();
+}
+
+// ─── CapsStream Wrapped Story & Multi-Theme Poster Component ──
+
+const WrappedStoryModal = {
+  props: ["show", "data", "profile"],
+  emits: ["close"],
+  template: `
+    <div v-if="show && data" class="wrapped-modal-backdrop" @click.self="closeStory">
+      <div
+        class="wrapped-story-card"
+        :style="{ background: slideBackground }"
+        @pointerdown="onPointerDown"
+        @pointerup="onPointerUp"
+      >
+        <!-- Particle Confetti Overlay Canvas -->
+        <canvas ref="confettiCanvasRef" class="story-confetti-canvas"></canvas>
+
+        <!-- Story Progress Bars at Top -->
+        <div class="story-progress-segments">
+          <div
+            v-for="idx in totalSlides"
+            :key="idx"
+            class="story-progress-segment"
+          >
+            <div
+              class="story-progress-fill"
+              :class="{
+                'done': idx - 1 < currentSlide,
+                'active': idx - 1 === currentSlide && !isPaused
+              }"
+              :style="{
+                width: idx - 1 < currentSlide ? '100%' : (idx - 1 === currentSlide ? slideProgress + '%' : '0%')
+              }"
+            ></div>
+          </div>
+        </div>
+
+        <!-- Top Actions Bar -->
+        <div class="story-top-actions">
+          <div class="story-top-left-chips">
+            <div class="story-profile-chip">
+              <i class="ph-fill ph-sparkle" style="color:var(--gold)"></i>
+              <span>{{ profile?.name }} · {{ data.label }} Wrapped</span>
+            </div>
+            <button
+              class="story-btn-circle story-audio-btn"
+              :class="{ muted: isMuted }"
+              @click.stop="toggleMute"
+              :title="isMuted ? 'Unmute Audio' : 'Mute Audio'"
+            >
+              <i class="ph-bold" :class="isMuted ? 'ph-speaker-simple-slash' : 'ph-speaker-simple-high'"></i>
+            </button>
+          </div>
+
+          <button class="story-btn-circle story-close-btn" @click.stop="closeStory" title="Close (Esc)">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+
+        <!-- Tap Hitboxes for Prev / Next Navigation -->
+        <div class="story-tap-area story-tap-prev" @click="prevSlide" title="Previous Slide"></div>
+        <div class="story-tap-area story-tap-next" @click="nextSlide" title="Next Slide"></div>
+
+        <!-- Slide 0: Welcome & Total Watch Time -->
+        <div v-if="currentSlide === 0" class="story-slide-content">
+          <div class="wrapped-hero-badge" style="margin-bottom:1.25rem">
+            <i class="ph-fill ph-popcorn"></i> CapsStream Wrapped {{ data.year || data.label }}
+          </div>
+          <h2 style="font-size:clamp(2rem, 5vw, 2.6rem);font-weight:900;line-height:1.15;margin-bottom:0.75rem;font-family:'Cabinet Grotesk',sans-serif">
+            {{ profile?.name ? profile.name + ', what a journey.' : 'What a journey.' }}
+          </h2>
+          <p style="font-size:1rem;color:rgba(255,255,255,0.78);margin-bottom:2rem;max-width:320px">
+            You hit play, escaped reality, and explored countless worlds.
+          </p>
+          <div style="background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.18);border-radius:24px;padding:2rem 1.5rem;width:100%;max-width:330px;backdrop-filter:blur(18px);box-shadow:0 16px 40px rgba(0,0,0,0.55)">
+            <div style="font-size:0.8rem;color:rgba(255,255,255,0.65);text-transform:uppercase;font-weight:700;letter-spacing:0.06em">Total Watch Time</div>
+            <div style="font-size:3.3rem;font-weight:900;color:#fff;margin:0.25rem 0 0.5rem;font-family:'Cabinet Grotesk',sans-serif">
+              {{ data.overview?.total_hours || 0 }} <span style="font-size:1.4rem;font-weight:700">hrs</span>
+            </div>
+            <div style="font-size:0.92rem;color:rgba(255,255,255,0.85);font-weight:600">
+              Across {{ data.overview?.total_items || 0 }} titles & episodes
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 1: Top Obsession ("The One You Couldn't Stop Watching") -->
+        <div v-else-if="currentSlide === 1" class="story-slide-content">
+          <div class="wrapped-hero-badge" style="margin-bottom:1rem">
+            <i class="ph-fill ph-flame" style="color:#f59e0b"></i> Your #1 Obsession
+          </div>
+          <h2 style="font-size:2.1rem;font-weight:900;line-height:1.2;margin-bottom:0.5rem">
+            The One You Couldn't Stop
+          </h2>
+          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
+            When this started playing, time stopped existing.
+          </p>
+          <div v-if="data.top_obsession" class="obsession-spotlight-card">
+            <div class="obsession-backdrop-wrap">
+              <img
+                v-if="data.top_obsession.backdrop_path"
+                :src="imgUrl(data.top_obsession.backdrop_path, 'w780')"
+                class="obsession-backdrop-img"
+              />
+              <div class="obsession-backdrop-gradient"></div>
+              <img
+                v-if="data.top_obsession.poster_path"
+                :src="imgUrl(data.top_obsession.poster_path, 'w185')"
+                class="obsession-poster-thumb"
+              />
+            </div>
+            <div class="obsession-info-body">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+                <span class="rarity-badge gold">{{ data.top_obsession.badge }}</span>
+                <span style="font-size:0.75rem;color:var(--text-muted);font-weight:600">{{ data.top_obsession.year || '' }}</span>
+              </div>
+              <h3 style="font-size:1.35rem;font-weight:900;color:#fff;margin:4px 0">{{ data.top_obsession.title }}</h3>
+              <div style="display:flex;gap:16px;margin-top:10px;font-size:0.85rem">
+                <div>
+                  <span style="color:rgba(255,255,255,0.55);font-size:0.72rem;display:block">TIME STREAMED</span>
+                  <strong style="color:var(--gold);font-size:1.05rem">{{ data.top_obsession.hours }} hrs</strong>
+                </div>
+                <div v-if="data.top_obsession.plays > 1">
+                  <span style="color:rgba(255,255,255,0.55);font-size:0.72rem;display:block">EPISODES WATCHED</span>
+                  <strong style="color:#fff;font-size:1.05rem">{{ data.top_obsession.plays }}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else style="color:rgba(255,255,255,0.7);font-size:1rem">
+            Keep watching to reveal your #1 obsession!
+          </div>
+        </div>
+
+        <!-- Slide 2: Interactive Genre Quiz & Leaderboard -->
+        <div v-else-if="currentSlide === 2" class="story-slide-content">
+          <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
+            <i class="ph-fill ph-compass"></i> Musical Rhythm of Cinema
+          </div>
+          <h2 style="font-size:2rem;font-weight:900;line-height:1.2;margin-bottom:0.4rem">
+            {{ genreQuizAnswered ? 'Your Top Genres' : 'Test Your Intuition' }}
+          </h2>
+          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
+            {{ genreQuizAnswered ? 'These worlds claimed the highest share of your screen.' : (data.quizzes?.genre?.question || 'Which genre claimed your year?') }}
+          </p>
+
+          <!-- Interactive Quiz Stage -->
+          <div v-if="!genreQuizAnswered && data.quizzes?.genre" class="wrapped-quiz-box">
+            <div
+              v-for="opt in data.quizzes.genre.options"
+              :key="opt.id"
+              class="wrapped-quiz-option"
+              @click.stop="answerGenreQuiz(opt)"
+            >
+              <span>{{ opt.text }}</span>
+              <i class="ph-bold ph-arrow-right" style="opacity:0.6"></i>
+            </div>
+          </div>
+
+          <!-- Revealed Leaderboard -->
+          <div v-else style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:340px">
+            <div
+              v-for="(g, idx) in (data.content_breakdown?.top_genres || []).slice(0, 4)"
+              :key="g.genre"
+              style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-radius:16px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);backdrop-filter:blur(12px)"
+            >
+              <div style="display:flex;align-items:center;gap:12px">
+                <span style="font-size:1.15rem;font-weight:900;color:rgba(255,255,255,0.4)">#{{ idx + 1 }}</span>
+                <span style="font-size:1.05rem;font-weight:800;color:#fff">{{ g.genre }}</span>
+              </div>
+              <span :style="{ color: g.color || 'var(--accent)', fontWeight: 800, fontSize: '1rem' }">{{ g.percent }}%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 3: Speed Binge & Streaks -->
+        <div v-else-if="currentSlide === 3" class="story-slide-content">
+          <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
+            <i class="ph-fill ph-fire" style="color:#f97316"></i> Unstoppable Momentum
+          </div>
+          <h2 style="font-size:2.1rem;font-weight:900;line-height:1.2;margin-bottom:0.4rem">
+            The Speed Binge
+          </h2>
+          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
+            When a cliffhanger hit, there was no going back.
+          </p>
+
+          <div style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);border-radius:24px;padding:1.75rem 1.5rem;width:100%;max-width:340px;backdrop-filter:blur(16px)">
+            <div v-if="data.speed_binge?.fastest_season" style="margin-bottom:1.25rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,0.12);text-align:left">
+              <span style="font-size:0.7rem;text-transform:uppercase;color:var(--gold);font-weight:800;letter-spacing:0.06em">FASTEST SEASON COMPLETED</span>
+              <div style="font-size:1.15rem;font-weight:800;color:#fff;margin:3px 0">{{ data.speed_binge.fastest_season.title }} · Season {{ data.speed_binge.fastest_season.season }}</div>
+              <div style="font-size:0.85rem;color:rgba(255,255,255,0.8)">
+                {{ data.speed_binge.fastest_season.episodes_count }} episodes devoured in <strong>{{ data.speed_binge.fastest_season.time_label }}</strong>!
+              </div>
+            </div>
+
+            <template v-if="data.binge_records?.biggest_binge_day">
+              <div style="font-size:0.72rem;text-transform:uppercase;color:rgba(255,255,255,0.6);font-weight:700">PEAK SINGLE-DAY MARATHON</div>
+              <div style="font-size:2.3rem;font-weight:900;color:#fff;margin:0.2rem 0">{{ data.binge_records.biggest_binge_day.hours }} hrs</div>
+              <div style="font-size:0.85rem;color:rgba(255,255,255,0.85);font-weight:600">
+                {{ formatDateShort(data.binge_records.biggest_binge_day.date) }} · {{ data.binge_records.biggest_binge_day.items_count }} items streamed
+              </div>
+            </template>
+
+            <div style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:space-around">
+              <div>
+                <div style="font-size:0.72rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">Longest Streak</div>
+                <div style="font-size:1.5rem;font-weight:900;color:#f97316">🔥 {{ data.heatmap?.longest_streak || 0 }} <span style="font-size:0.8rem">days</span></div>
+              </div>
+              <div style="width:1px;height:32px;background:rgba(255,255,255,0.15)"></div>
+              <div>
+                <div style="font-size:0.72rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">Active Days</div>
+                <div style="font-size:1.5rem;font-weight:900;color:#38bdf8">📅 {{ data.heatmap?.days_active || 0 }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 4: Audio & Subtitle DNA -->
+        <div v-else-if="currentSlide === 4" class="story-slide-content">
+          <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
+            <i class="ph-fill ph-headphones"></i> Audio & Subtitle DNA
+          </div>
+          <h2 style="font-size:2.1rem;font-weight:900;line-height:1.2;margin-bottom:0.4rem">
+            How You Listen & Read
+          </h2>
+          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
+            Dialogue, accents, and soundscapes tailored to your ears.
+          </p>
+
+          <div style="width:100%;max-width:340px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);border-radius:24px;padding:1.75rem 1.5rem;backdrop-filter:blur(16px)">
+            <div style="display:inline-block;padding:4px 12px;border-radius:99px;background:rgba(168,85,247,0.25);border:1px solid #a855f7;color:#c084fc;font-size:0.8rem;font-weight:800;margin-bottom:12px">
+              {{ data.audio_sub_dna?.sub_style || 'Cinema Purist' }}
+            </div>
+            <p style="font-size:0.9rem;color:rgba(255,255,255,0.9);line-height:1.4;margin-bottom:1.5rem">
+              "{{ data.audio_sub_dna?.sub_desc || 'You enjoy cinema with crystal-clear dialogue and authentic audio.' }}"
+            </p>
+
+            <div class="dna-specs-grid">
+              <div class="dna-spec-card">
+                <span style="font-size:0.7rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">Audio Dial</span>
+                <strong style="display:block;font-size:0.95rem;color:#fff;margin-top:4px">{{ data.audio_sub_dna?.preferred_audio || 'Original' }}</strong>
+              </div>
+              <div class="dna-spec-card">
+                <span style="font-size:0.7rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">Subtitles</span>
+                <strong style="display:block;font-size:0.95rem;color:#fff;margin-top:4px">{{ data.audio_sub_dna?.preferred_subtitle || 'English' }}</strong>
+              </div>
+            </div>
+            <div v-if="data.audio_sub_dna?.anime_ratio_pct > 0" style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1);font-size:0.82rem;color:rgba(255,255,255,0.75)">
+              🌸 Anime share of viewing: <strong style="color:#ec4899">{{ data.audio_sub_dna.anime_ratio_pct }}%</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 5: Viewing Clock & Peak Habit -->
+        <div v-else-if="currentSlide === 5" class="story-slide-content">
+          <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
+            <i class="ph-fill ph-clock"></i> Your Natural Rhythm
+          </div>
+          <h2 style="font-size:2.1rem;font-weight:900;line-height:1.2;margin-bottom:0.4rem">
+            When The Screen Glows
+          </h2>
+          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
+            Your schedule has an unmistakable signature fingerprint.
+          </p>
+
+          <div style="width:100%;max-width:340px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);border-radius:24px;padding:1.75rem 1.5rem;backdrop-filter:blur(16px)">
+            <div style="font-size:0.75rem;text-transform:uppercase;color:rgba(255,255,255,0.6);font-weight:700">Weekday vs. Weekend</div>
+            <div class="split-pill-track" style="margin:10px 0 6px">
+              <div class="split-weekday-fill" :style="{ width: data.habits?.weekday_pct + '%' }"></div>
+              <div class="split-weekend-fill" :style="{ width: data.habits?.weekend_pct + '%' }"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:0.82rem;font-weight:700;color:#fff;margin-bottom:1.25rem">
+              <span>Weekdays: {{ data.habits?.weekday_pct }}%</span>
+              <span>Weekends: {{ data.habits?.weekend_pct }}%</span>
+            </div>
+            <div style="background:rgba(255,255,255,0.06);border-radius:14px;padding:12px;display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:0.85rem;color:rgba(255,255,255,0.7);font-weight:600">Peak Window</span>
+              <span style="font-size:0.95rem;color:#fff;font-weight:800">{{ peakWindowLabel }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 6: Interactive Cast Quiz & Screen Stars -->
+        <div v-else-if="currentSlide === 6" class="story-slide-content">
+          <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
+            <i class="ph-fill ph-film-strip"></i> Familiar Faces
+          </div>
+          <h2 style="font-size:2rem;font-weight:900;line-height:1.2;margin-bottom:0.4rem">
+            {{ talentQuizAnswered ? 'Your Screen Stars' : 'Star Guesser' }}
+          </h2>
+          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
+            {{ talentQuizAnswered ? 'The talent that accompanied your greatest adventures.' : (data.quizzes?.talent?.question || 'Who was your most-watched star?') }}
+          </p>
+
+          <!-- Interactive Star Quiz -->
+          <div v-if="!talentQuizAnswered && data.quizzes?.talent" class="wrapped-quiz-box">
+            <div
+              v-for="opt in data.quizzes.talent.options"
+              :key="opt.id"
+              class="wrapped-quiz-option"
+              @click.stop="answerTalentQuiz(opt)"
+            >
+              <span>{{ opt.text }}</span>
+              <i class="ph-bold ph-star" style="opacity:0.6"></i>
+            </div>
+          </div>
+
+          <!-- Revealed Talent Grid -->
+          <div v-else style="display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:340px">
+            <div
+              v-for="actor in (data.talent?.top_actors || []).slice(0, 4)"
+              :key="actor.name"
+              style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:18px;padding:12px 10px;text-align:center;cursor:pointer;position:relative;z-index:25;transition:transform 0.18s ease"
+              @click.stop="openCastSearch(actor.name)"
+              :title="'Search library for ' + actor.name"
+            >
+              <img
+                v-if="actor.profile_path"
+                :src="'https://image.tmdb.org/t/p/w185' + actor.profile_path"
+                class="talent-avatar"
+                style="width:52px;height:52px;border:2px solid rgba(255,255,255,0.2)"
+              />
+              <div v-else style="width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,0.1);margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-size:1.5rem">
+                🎭
+              </div>
+              <div style="font-size:0.85rem;font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ actor.name }}</div>
+              <div style="font-size:0.72rem;color:var(--accent);font-weight:700;margin-top:2px">{{ actor.titles_count }} titles</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 7: Ultra-HD Tech Specs -->
+        <div v-else-if="currentSlide === 7" class="story-slide-content">
+          <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
+            <i class="ph-fill ph-monitor-play" style="color:#38bdf8"></i> Cinema Tech Specs
+          </div>
+          <h2 style="font-size:2.1rem;font-weight:900;line-height:1.2;margin-bottom:0.4rem">
+            Pixels & Bitrates
+          </h2>
+          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
+            Your personal server worked overtime rendering pristine quality.
+          </p>
+
+          <div style="width:100%;max-width:340px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);border-radius:24px;padding:1.75rem 1.5rem;backdrop-filter:blur(16px)">
+            <div style="font-size:0.75rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">ESTIMATED DATA STREAMED</div>
+            <div style="font-size:2.8rem;font-weight:900;color:#38bdf8;margin:0.2rem 0;font-family:'Cabinet Grotesk',sans-serif">
+              {{ data.tech_specs?.total_gb_streamed || 0 }} <span style="font-size:1.3rem;font-weight:700">GB</span>
+            </div>
+
+            <div class="dna-specs-grid" style="margin-top:14px">
+              <div class="dna-spec-card">
+                <span style="font-size:0.7rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">4K Ultra HD</span>
+                <strong style="display:block;font-size:1.15rem;color:#f59e0b;margin-top:3px">{{ data.tech_specs?.k4_percentage || 0 }}%</strong>
+              </div>
+              <div class="dna-spec-card">
+                <span style="font-size:0.7rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">Direct Play</span>
+                <strong style="display:block;font-size:1.15rem;color:#10b981;margin-top:3px">{{ data.tech_specs?.direct_play_pct || 98.4 }}%</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide 8: Viewer Archetype Grand Reveal -->
+        <div v-else-if="currentSlide === 8" class="story-slide-content">
+          <div class="wrapped-hero-badge" style="margin-bottom:1.25rem">
+            <i class="ph-fill ph-crown" style="color:#ffd700"></i> Persona Unlocked
+          </div>
+          <h2 style="font-size:2.2rem;font-weight:900;line-height:1.2;margin-bottom:0.75rem">
+            Your Viewer Archetype
+          </h2>
+          <div
+            style="background:rgba(255,255,255,0.08);border-radius:28px;padding:2.25rem 1.75rem;width:100%;max-width:340px;backdrop-filter:blur(20px);margin-top:0.75rem;box-shadow:0 16px 40px rgba(0,0,0,0.6)"
+            :style="{ borderColor: (data.archetype?.color || 'var(--accent)') + '88', borderWidth: '2px', borderStyle: 'solid' }"
+          >
+            <div
+              class="archetype-preview-icon"
+              :style="{ background: (data.archetype?.color || 'var(--accent)') + '33', color: data.archetype?.color || 'var(--accent)', margin: '0 auto 1.25rem' }"
+            >
+              <i :class="'ph-bold ' + (data.archetype?.badge || 'ph-film-strip')"></i>
+            </div>
+            <div style="font-size:1.6rem;font-weight:900;color:#fff;margin-bottom:0.5rem;font-family:'Cabinet Grotesk',sans-serif">
+              {{ data.archetype?.title }}
+            </div>
+            <p style="font-size:0.95rem;font-style:italic;color:rgba(255,255,255,0.9);line-height:1.4;margin-bottom:1rem">
+              "{{ data.archetype?.tagline }}"
+            </p>
+            <p style="font-size:0.82rem;color:rgba(255,255,255,0.65);line-height:1.4">
+              {{ data.archetype?.description }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Slide 9: Multi-Theme Poster Generator & HD Export -->
+        <div v-else-if="currentSlide === 9" class="story-slide-content" style="padding-top:68px">
+          <h3 style="font-size:1.35rem;font-weight:900;margin-bottom:0.5rem;color:#fff">
+            Your {{ data.label }} Snapshot
+          </h3>
+
+          <!-- Theme Selector Pills -->
+          <div class="poster-theme-selector">
+            <button
+              v-for="th in posterThemes"
+              :key="th.id"
+              class="poster-theme-pill"
+              :class="{ active: selectedPosterTheme === th.id }"
+              @click.stop="setPosterTheme(th.id)"
+            >
+              {{ th.label }}
+            </button>
+          </div>
+
+          <!-- Live Preview Canvas -->
+          <div class="poster-preview-canvas-wrap" style="margin-bottom:1.25rem">
+            <canvas ref="posterCanvasRef" class="poster-preview-canvas"></canvas>
+          </div>
+
+          <div style="display:flex;gap:10px;width:100%;max-width:340px;justify-content:center;z-index:30;position:relative">
+            <button class="btn btn-primary" @click.stop="downloadPoster" style="flex:1;padding:12px;font-weight:800">
+              <i class="ph-bold ph-download-simple" style="margin-right:6px"></i> Download Poster (HD)
+            </button>
+            <button class="btn btn-secondary" @click.stop="replayStory" title="Replay Story">
+              <i class="ph ph-arrow-counter-clockwise"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Slide Footer Indicator -->
+        <div style="position:absolute;bottom:12px;left:0;right:0;text-align:center;font-size:0.72rem;color:rgba(255,255,255,0.4);pointer-events:none;z-index:20">
+          Tap left/right to navigate · Hold to pause
+        </div>
+      </div>
+    </div>
+  `,
+  setup(props, { emit }) {
+    const router = VueRouter.useRouter();
+    const currentSlide = ref(0);
+    const totalSlides = 10;
+    const isPaused = ref(false);
+    const slideProgress = ref(0);
+    const posterCanvasRef = ref(null);
+    const confettiCanvasRef = ref(null);
+
+    const isMuted = ref(localStorage.getItem("capsstream_wrapped_muted") === "true");
+
+    const genreQuizAnswered = ref(false);
+    const talentQuizAnswered = ref(false);
+
+    const selectedPosterTheme = ref("neon");
+    const posterThemes = [
+      { id: "neon", label: "Neon" },
+      { id: "clean", label: "Clean" },
+      { id: "retro", label: "Retro" },
+      { id: "sunset", label: "Sunset" },
+    ];
+
+    let progressInterval = null;
+
+    function toggleMute() {
+      isMuted.value = !isMuted.value;
+      localStorage.setItem("capsstream_wrapped_muted", isMuted.value ? "true" : "false");
+      if (isMuted.value) {
+        stopAmbientSynth();
+      } else {
+        startAmbientSynth(currentSlide.value, false);
+      }
+    }
+
+    function openCastSearch(actorName) {
+      const q = (actorName || "").trim();
+      if (!q) return;
+      closeStory();
+      router.push({ path: "/search", query: { q, type: "all" } });
+    }
+
+    const slideBackground = computed(() => {
+      const archCol = props.data?.archetype?.color || "#e50914";
+      if (currentSlide.value === 0) return "linear-gradient(180deg, #18182b 0%, #080811 100%)";
+      if (currentSlide.value === 1) return "linear-gradient(180deg, #2a1122 0%, #09060e 100%)";
+      if (currentSlide.value === 2) return "linear-gradient(180deg, #1b263b 0%, #070d18 100%)";
+      if (currentSlide.value === 3) return "linear-gradient(180deg, #3d1c10 0%, #0c0604 100%)";
+      if (currentSlide.value === 4) return "linear-gradient(180deg, #281238 0%, #090514 100%)";
+      if (currentSlide.value === 5) return "linear-gradient(180deg, #0e2a38 0%, #040d12 100%)";
+      if (currentSlide.value === 6) return "linear-gradient(180deg, #1a2238 0%, #070910 100%)";
+      if (currentSlide.value === 7) return "linear-gradient(180deg, #09272d 0%, #030c0e 100%)";
+      if (currentSlide.value === 8) return `linear-gradient(180deg, ${archCol}44 0%, #080811 100%)`;
+      return "linear-gradient(180deg, #181829 0%, #06060c 100%)";
+    });
+
+    const peakWindowLabel = computed(() => {
+      if (!props.data?.habits?.time_windows) return "Evening Watcher";
+      const tw = props.data.habits.time_windows;
+      const arr = [
+        { label: "Night Owl (12AM - 6AM)", h: tw.late_night_hours || 0 },
+        { label: "Morning (6AM - 12PM)", h: tw.morning_hours || 0 },
+        { label: "Afternoon (12PM - 6PM)", h: tw.afternoon_hours || 0 },
+        { label: "Prime Time (6PM - 12AM)", h: tw.evening_hours || 0 },
+      ];
+      arr.sort((a, b) => b.h - a.h);
+      return arr[0].label;
+    });
+
+    function startProgress() {
+      clearInterval(progressInterval);
+      slideProgress.value = 0;
+      const stepMs = 50;
+      const totalDuration = 7000;
+      const increment = (stepMs / totalDuration) * 100;
+
+      progressInterval = setInterval(() => {
+        if (!isPaused.value) {
+          slideProgress.value += increment;
+          if (slideProgress.value >= 100) {
+            nextSlide();
+          }
+        }
+      }, stepMs);
+    }
+
+    function nextSlide() {
+      if (currentSlide.value < totalSlides - 1) {
+        currentSlide.value++;
+        slideProgress.value = 0;
+        onSlideEntered(currentSlide.value);
+      } else {
+        clearInterval(progressInterval);
+      }
+    }
+
+    function prevSlide() {
+      if (currentSlide.value > 0) {
+        currentSlide.value--;
+        slideProgress.value = 0;
+        onSlideEntered(currentSlide.value);
+      }
+    }
+
+    function onSlideEntered(idx) {
+      if (idx === 8) {
+        // Archetype reveal!
+        playWrappedFanfare(isMuted.value);
+        nextTick(() => triggerConfetti(confettiCanvasRef.value));
+      } else {
+        playWrappedChime(500 + idx * 40, isMuted.value);
+      }
+      startAmbientSynth(idx, isMuted.value);
+
+      if (idx === totalSlides - 1) {
+        clearInterval(progressInterval);
+        nextTick(renderPosterPreview);
+      }
+    }
+
+    function answerGenreQuiz(opt) {
+      genreQuizAnswered.value = true;
+      if (opt.is_correct) {
+        playWrappedSuccess(isMuted.value);
+        triggerConfetti(confettiCanvasRef.value);
+      } else {
+        playWrappedWrong(isMuted.value);
+      }
+      startProgress();
+    }
+
+    function answerTalentQuiz(opt) {
+      talentQuizAnswered.value = true;
+      if (opt.is_correct) {
+        playWrappedSuccess(isMuted.value);
+        triggerConfetti(confettiCanvasRef.value);
+      } else {
+        playWrappedWrong(isMuted.value);
+      }
+      startProgress();
+    }
+
+    function replayStory() {
+      currentSlide.value = 0;
+      slideProgress.value = 0;
+      genreQuizAnswered.value = false;
+      talentQuizAnswered.value = false;
+      onSlideEntered(0);
+      startProgress();
+    }
+
+    function onPointerDown() {
+      isPaused.value = true;
+    }
+
+    function onPointerUp() {
+      isPaused.value = false;
+    }
+
+    function closeStory() {
+      clearInterval(progressInterval);
+      stopAmbientSynth();
+      emit("close");
+    }
+
+    function formatDateShort(str) {
+      if (!str) return "";
+      try {
+        const d = new Date(str + "T00:00:00");
+        return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      } catch (e) {
+        return str;
+      }
+    }
+
+    function handleKeydown(e) {
+      if (!props.show) return;
+      if (e.key === "Escape") closeStory();
+      else if (e.key === "ArrowRight") nextSlide();
+      else if (e.key === "ArrowLeft") prevSlide();
+      else if (e.key === " ") {
+        e.preventDefault();
+        isPaused.value = !isPaused.value;
+      }
+    }
+
+    function setPosterTheme(thId) {
+      selectedPosterTheme.value = thId;
+      playWrappedTap(isMuted.value);
+      renderPosterPreview();
+    }
+
+    watch(
+      () => props.show,
+      (newVal) => {
+        if (newVal) {
+          currentSlide.value = 0;
+          slideProgress.value = 0;
+          genreQuizAnswered.value = false;
+          talentQuizAnswered.value = false;
+          onSlideEntered(0);
+          startProgress();
+          window.addEventListener("keydown", handleKeydown);
+        } else {
+          clearInterval(progressInterval);
+          stopAmbientSynth();
+          window.removeEventListener("keydown", handleKeydown);
+        }
+      },
+      { immediate: true }
+    );
+
+    onUnmounted(() => {
+      clearInterval(progressInterval);
+      stopAmbientSynth();
+      window.removeEventListener("keydown", handleKeydown);
+    });
+
+    // ─── Multi-Theme Poster Renderer ─────────────────────────
+
+    function renderPosterPreview() {
+      const canvas = posterCanvasRef.value;
+      if (!canvas || !props.data) return;
+      drawPosterToCanvas(canvas, 330, 480, selectedPosterTheme.value);
+    }
+
+    function drawPosterToCanvas(canvas, width, height, theme = "neon") {
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const scale = width / 1080;
+      ctx.save();
+      ctx.scale(scale, scale);
+
+      const targetH = height / scale;
+      const archColor = props.data.archetype?.color || "#e50914";
+
+      // 1. Theme Backgrounds
+      if (theme === "clean") {
+        const grad = ctx.createLinearGradient(0, 0, 1080, targetH);
+        grad.addColorStop(0, "#1c1d24");
+        grad.addColorStop(0.5, "#121319");
+        grad.addColorStop(1, "#0a0a0f");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 1080, targetH);
+      } else if (theme === "retro") {
+        const grad = ctx.createLinearGradient(0, 0, 1080, targetH);
+        grad.addColorStop(0, "#2c1c11");
+        grad.addColorStop(0.6, "#180f08");
+        grad.addColorStop(1, "#0b0603");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 1080, targetH);
+      } else if (theme === "sunset") {
+        const grad = ctx.createLinearGradient(0, 0, 1080, targetH);
+        grad.addColorStop(0, "#3e122b");
+        grad.addColorStop(0.5, "#25102a");
+        grad.addColorStop(1, "#0b0512");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 1080, targetH);
+      } else {
+        // Neon Cyberpunk
+        const grad = ctx.createLinearGradient(0, 0, 1080, targetH);
+        grad.addColorStop(0, "#080811");
+        grad.addColorStop(0.5, "#101026");
+        grad.addColorStop(1, "#050509");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 1080, targetH);
+
+        const glow = ctx.createRadialGradient(540, 480, 40, 540, 480, 580);
+        glow.addColorStop(0, archColor + "55");
+        glow.addColorStop(1, "transparent");
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, 1080, targetH);
+      }
+
+      // 2. Top Branding
+      ctx.fillStyle = theme === "retro" ? "#f59e0b" : "#ffffff";
+      ctx.font = "900 50px 'Plus Jakarta Sans', sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("CAPSSTREAM", 540, 120);
+
+      // 3. Year Tag Badge
+      ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
+      ctx.beginPath();
+      ctx.roundRect(380, 155, 320, 48, 24);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 24px 'Plus Jakarta Sans', sans-serif";
+      ctx.fillText(`${props.data.label || "2026"} WRAPPED`, 540, 188);
+
+      // 4. Viewer Name
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "900 56px 'Plus Jakarta Sans', sans-serif";
+      ctx.fillText(props.profile?.name || "Viewer", 540, 290);
+
+      // 5. Archetype Showcase Card
+      ctx.fillStyle = theme === "retro" ? "rgba(245, 158, 11, 0.08)" : "rgba(255, 255, 255, 0.06)";
+      ctx.strokeStyle = theme === "clean" ? "rgba(255,255,255,0.2)" : (theme === "retro" ? "#f59e0b" : archColor);
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(140, 340, 800, 280, 28);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = theme === "clean" ? "#94a3b8" : (theme === "retro" ? "#f59e0b" : archColor);
+      ctx.font = "bold 26px 'Plus Jakarta Sans', sans-serif";
+      ctx.fillText("VIEWER ARCHETYPE", 540, 400);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "900 48px 'Plus Jakarta Sans', sans-serif";
+      ctx.fillText(props.data.archetype?.title || "The Omnivorous Cinephile", 540, 465);
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.82)";
+      ctx.font = "italic 24px 'Plus Jakarta Sans', sans-serif";
+      ctx.fillText(`"${props.data.archetype?.tagline || ''}"`, 540, 530);
+
+      // 6. Stats 4-Card Grid
+      const boxes = [
+        { label: "HOURS STREAMED", val: `${props.data.overview?.total_hours || 0} hrs`, col: 140, row: 650 },
+        { label: "TITLES DEVOURRED", val: `${props.data.overview?.total_items || 0}`, col: 560, row: 650 },
+        { label: "LONGEST STREAK", val: `${props.data.heatmap?.longest_streak || 0} days`, col: 140, row: 840 },
+        { label: "TOP GENRE", val: `${props.data.content_breakdown?.top_genres?.[0]?.genre || 'Cinema'}`, col: 560, row: 840 },
+      ];
+
+      boxes.forEach((b) => {
+        ctx.fillStyle = "rgba(255, 255, 255, 0.06)";
+        ctx.beginPath();
+        ctx.roundRect(b.col, b.row, 380, 165, 22);
+        ctx.fill();
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+        ctx.font = "bold 20px 'Plus Jakarta Sans', sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(b.label, b.col + 28, b.row + 52);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "900 42px 'Plus Jakarta Sans', sans-serif";
+        ctx.fillText(b.val, b.col + 28, b.row + 118);
+      });
+
+      // 7. Top Obsession or Top 3 Highlights Box
+      ctx.fillStyle = "rgba(255, 255, 255, 0.06)";
+      ctx.beginPath();
+      ctx.roundRect(140, 1035, 800, 240, 24);
+      ctx.fill();
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 26px 'Plus Jakarta Sans', sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("TOP FAVORITES & OBSESSION", 180, 1090);
+
+      if (props.data.top_obsession) {
+        ctx.fillStyle = "var(--gold)";
+        ctx.font = "bold 22px 'Plus Jakarta Sans', sans-serif";
+        ctx.fillText(`★ #1 ${props.data.top_obsession.title}`, 180, 1140);
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
+        ctx.font = "20px 'Plus Jakarta Sans', sans-serif";
+        ctx.fillText(`${props.data.top_obsession.hours} hours streamed · ${props.data.top_obsession.badge}`, 180, 1175);
+      }
+
+      const topG = (props.data.content_breakdown?.top_genres || []).slice(0, 3);
+      const genreLine = topG.map((g) => `${g.genre} (${g.percent}%)`).join("  •  ");
+      ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+      ctx.font = "bold 22px 'Plus Jakarta Sans', sans-serif";
+      ctx.fillText(genreLine, 180, 1225);
+
+      // 8. Footer Server Seal
+      ctx.textAlign = "center";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+      ctx.font = "18px 'Plus Jakarta Sans', sans-serif";
+      ctx.fillText("Streamed on CapsStream Personal Cinema Server", 540, 1340);
+
+      ctx.restore();
+    }
+
+    function downloadPoster() {
+      const canvas = document.createElement("canvas");
+      drawPosterToCanvas(canvas, 1080, 1540, selectedPosterTheme.value);
+      playWrappedSuccess(isMuted.value);
+      triggerConfetti(confettiCanvasRef.value);
+
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const safePeriod = (props.data?.label || "recap").toLowerCase().replace(/[^a-z0-9]/g, "-");
+        a.download = `capsstream-wrapped-${safePeriod}-${selectedPosterTheme.value}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        addToast("HD Wrapped Card downloaded successfully!", "success");
+      }, "image/png");
+    }
+
+    return {
+      currentSlide,
+      totalSlides,
+      isPaused,
+      slideProgress,
+      slideBackground,
+      peakWindowLabel,
+      isMuted,
+      toggleMute,
+      nextSlide,
+      prevSlide,
+      replayStory,
+      onPointerDown,
+      onPointerUp,
+      closeStory,
+      formatDateShort,
+      posterCanvasRef,
+      confettiCanvasRef,
+      selectedPosterTheme,
+      posterThemes,
+      setPosterTheme,
+      downloadPoster,
+      openCastSearch,
+      imgUrl,
+      genreQuizAnswered,
+      talentQuizAnswered,
+      answerGenreQuiz,
+      answerTalentQuiz,
+    };
+  },
+};
+
+// ─── Upgraded Profile Watch Stats & Wrapped Analytics Hub ─────
 
 const StatsPage = {
+  components: {
+    WrappedStoryModal,
+  },
   template: `
-    <div class="stats-page" style="max-width:1100px;margin:calc(var(--nav-height) + 2rem) auto 4rem;padding:0 var(--space-lg)">
-      <div style="margin-bottom:2rem;display:flex;align-items:center;justify-content:space-between">
+    <div class="stats-page" style="max-width:1160px;margin:calc(var(--nav-height) + 1.75rem) auto 4rem;padding:0 var(--space-lg)">
+      
+      <!-- Top Header -->
+      <div style="margin-bottom:1.75rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem">
         <div>
-          <h1 style="font-size:2rem;font-weight:800;display:flex;align-items:center;gap:10px">
-            <i :class="store.profile?.is_kids ? 'ph ph-star' : 'ph ph-chart-bar'" :style="{ color: store.profile?.is_kids ? '#fdcb6e' : 'var(--accent)' }"></i>
-            <span>{{ store.profile?.is_kids ? 'Kids Stats & Trophy Case' : 'Watch Stats & Insights' }}</span>
+          <h1 style="font-size:2.2rem;font-weight:900;display:flex;align-items:center;gap:12px;letter-spacing:-0.03em;font-family:'Cabinet Grotesk','Plus Jakarta Sans',sans-serif">
+            <i class="ph-fill ph-chart-polar" style="color:var(--accent)"></i>
+            <span>{{ store.profile?.is_kids ? 'Kids Adventures & Trophy Case' : 'Analytics & Wrapped Hub' }}</span>
           </h1>
-          <p style="color:var(--text-secondary);margin-top:4px">{{ store.profile?.is_kids ? 'Viewing badges and cartoon adventures for ' : 'Viewing analytics and watch activity for ' }}<strong>{{ store.profile?.name }}</strong></p>
+          <p style="color:var(--text-secondary);margin-top:4px;font-size:0.95rem">
+            Personalized viewing insights, 365-day heatmaps, and trophies for <strong>{{ store.profile?.name }}</strong>
+          </p>
+        </div>
+
+        <!-- Header Launch Button (Unlocked during December or past years) -->
+        <button
+          v-if="wrappedData && !store.profile?.is_kids && isWrappedUnlocked"
+          class="wrapped-launch-btn"
+          @click="launchStory"
+          id="btn-launch-wrapped-header"
+        >
+          <i class="ph-fill ph-sparkle"></i> Launch {{ wrappedData.label }} Wrapped
+        </button>
+
+        <!-- Admin Preview Button (Outside December) -->
+        <button
+          v-else-if="wrappedData && !store.profile?.is_kids && store.profile?.is_admin"
+          class="wrapped-launch-btn admin-preview"
+          @click="launchStory"
+          id="btn-launch-wrapped-header-admin"
+          title="Admin Mode: Preview Wrapped story before December"
+        >
+          <i class="ph-bold ph-shield-check"></i> Preview {{ wrappedData.label }} Wrapped
+        </button>
+      </div>
+
+      <!-- 1. Celebratory Hero Banner (When Unlocked in December or for Past Years) -->
+      <div v-if="wrappedData && !store.profile?.is_kids && activeSubView === 'analytics' && isWrappedUnlocked" class="wrapped-hero-banner">
+        <div class="wrapped-hero-content">
+          <div class="wrapped-hero-badge">
+            <i class="ph-fill ph-film-strip"></i> Interactive Experience
+          </div>
+          <h2 class="wrapped-hero-title">
+            {{ store.profile?.name ? store.profile.name + "'s " : "Your " }}{{ wrappedData.label }} Wrapped is Ready!
+          </h2>
+          <p class="wrapped-hero-subtitle">
+            Relive your top cinematic moments, binge marathons, favorite genres, and reveal your algorithmically assigned <strong>Viewer Archetype</strong>.
+          </p>
+          <button class="wrapped-launch-btn" @click="launchStory" id="btn-launch-wrapped-banner">
+            <i class="ph-bold ph-play"></i> Watch Your Wrapped Story
+          </button>
+        </div>
+
+        <!-- Archetype Sneak Peek -->
+        <div class="wrapped-hero-archetype-preview" v-if="wrappedData.archetype">
+          <div
+            class="archetype-preview-icon"
+            :style="{ background: wrappedData.archetype.color + '33', color: wrappedData.archetype.color }"
+          >
+            <i :class="'ph-bold ' + wrappedData.archetype.badge"></i>
+          </div>
+          <div style="font-size:0.75rem;text-transform:uppercase;color:var(--text-muted);font-weight:700">Archetype</div>
+          <div style="font-size:1.15rem;font-weight:800;color:#fff;margin:2px 0 4px">{{ wrappedData.archetype.title }}</div>
+          <div style="font-size:0.78rem;color:var(--text-secondary);font-style:italic">"{{ wrappedData.archetype.tagline }}"</div>
         </div>
       </div>
 
-      <div v-if="loading" class="loading-spinner" style="margin:4rem auto"></div>
+      <!-- 2. Year-in-Review Compiling Teaser Banner (Outside of December) -->
+      <div v-else-if="wrappedData && !store.profile?.is_kids && activeSubView === 'analytics' && !isWrappedUnlocked" class="wrapped-teaser-banner">
+        <div class="wrapped-teaser-content">
+          <div class="wrapped-teaser-badge">
+            <i class="ph-fill ph-hourglass-high"></i> Compiling {{ currentYear }} Recap
+          </div>
+          <h2 class="wrapped-teaser-title">
+            {{ store.profile?.name ? store.profile.name + "'s " : "Your " }}{{ currentYear }} Wrapped Drops in December!
+          </h2>
+          <p class="wrapped-teaser-subtitle">
+            Every episode, late-night marathon, and favorite genre is shaping your personalized year-in-review story, interactive trivia quizzes, and viewer archetype.
+          </p>
 
-      <template v-else-if="stats">
-        <!-- Overview Stat Cards Grid -->
+          <!-- Year Progress Track -->
+          <div class="wrapped-teaser-progress-track">
+            <div class="wrapped-teaser-progress-fill" :style="{ width: yearCompletionPercent + '%' }"></div>
+          </div>
+          <div class="wrapped-teaser-progress-label">
+            <span>{{ yearCompletionPercent }}% of {{ currentYear }} completed</span>
+            <span>{{ daysUntilDecember }} days until Dec 1</span>
+          </div>
+
+          <!-- Feature Sneak Peek Chips -->
+          <div class="wrapped-teaser-chips">
+            <span class="wrapped-teaser-chip"><i class="ph-fill ph-trophy" style="color:#ffd700"></i> Viewer Archetypes</span>
+            <span class="wrapped-teaser-chip"><i class="ph-fill ph-brain" style="color:#a855f7"></i> Guessing Quizzes</span>
+            <span class="wrapped-teaser-chip"><i class="ph-fill ph-music-notes" style="color:#22d3ee"></i> Synth Soundtrack</span>
+            <span class="wrapped-teaser-chip"><i class="ph-fill ph-paint-brush" style="color:#ec4899"></i> 4-Theme HD Posters</span>
+          </div>
+
+          <!-- Admin Mode Preview Trigger -->
+          <div v-if="store.profile?.is_admin" style="margin-top:1.25rem">
+            <button class="wrapped-launch-btn admin-preview" @click="launchStory" id="btn-launch-wrapped-teaser-admin">
+              <i class="ph-bold ph-shield-check"></i> Preview Wrapped Story (Admin Mode)
+            </button>
+          </div>
+        </div>
+
+        <!-- Countdown Card -->
+        <div class="wrapped-teaser-countdown-card">
+          <div class="wrapped-countdown-num">{{ daysUntilDecember }}</div>
+          <div class="wrapped-countdown-label">Days to December</div>
+          <div class="wrapped-countdown-date">Unlocks December 1, {{ currentYear }}</div>
+          <div style="margin-top:14px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.1);width:100%;font-size:0.78rem;color:var(--text-secondary)">
+            <div><strong>{{ wrappedData.overview?.total_hours || 0 }} hrs</strong> recorded</div>
+            <div style="margin-top:2px">{{ wrappedData.overview?.total_items || 0 }} titles watched so far</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Period Selector & Subview Switcher Bar -->
+      <div class="wrapped-period-bar">
+        <!-- Period Tabs (Only shown in Analytics subview) -->
+        <div class="wrapped-period-pills" v-if="activeSubView === 'analytics'">
+          <button
+            class="period-pill-btn"
+            :class="{ active: selectedPeriod === 'all' }"
+            @click="setPeriod('all')"
+          >
+            All-Time
+          </button>
+
+          <button
+            v-for="yr in (wrappedData?.available_years || [currentYear])"
+            :key="yr"
+            class="period-pill-btn"
+            :class="{ active: selectedPeriod === 'year' && (selectedYear == yr || (!selectedYear && yr == currentYear)) }"
+            @click="setPeriod('year', yr)"
+          >
+            {{ yr }}
+          </button>
+
+          <button
+            class="period-pill-btn"
+            :class="{ active: selectedPeriod === 'month' }"
+            @click="setPeriod('month')"
+          >
+            Last 30 Days
+          </button>
+        </div>
+
+        <!-- Sub-View Switcher (Analytics vs Trophies) -->
+        <div class="subview-toggle-btns" :style="{ marginLeft: activeSubView !== 'analytics' ? 'auto' : '0' }">
+          <button
+            class="subview-toggle-btn"
+            :class="{ active: activeSubView === 'analytics' }"
+            @click="activeSubView = 'analytics'"
+          >
+            <i class="ph-bold ph-chart-bar"></i> Analytics
+          </button>
+          <button
+            class="subview-toggle-btn"
+            :class="{ active: activeSubView === 'trophies' }"
+            @click="activeSubView = 'trophies'"
+          >
+            <i class="ph-bold ph-trophy"></i> Trophies ({{ unlockedCount }}/{{ totalCount }})
+          </button>
+        </div>
+      </div>
+
+      <!-- Loading State -->
+      <div v-if="loading || loadingWrapped" class="loading-spinner" style="margin:4rem auto"></div>
+
+      <!-- SUB-VIEW 1: ANALYTICS & HEATMAP -->
+      <template v-else-if="activeSubView === 'analytics' && wrappedData">
+        
+        <!-- Top Metric Highlight Cards Grid -->
         <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:1.25rem;margin-bottom:2rem">
-          <div class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;display:flex;align-items:center;gap:1rem">
-            <div style="width:52px;height:52px;border-radius:12px;background:rgba(229,9,20,0.15);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:var(--accent)">
+          <!-- 1. Total Time -->
+          <div class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:18px;display:flex;align-items:center;gap:1.1rem">
+            <div style="width:54px;height:54px;border-radius:14px;background:rgba(229,9,20,0.15);display:flex;align-items:center;justify-content:center;font-size:1.7rem;color:var(--accent)">
               <i class="ph ph-clock"></i>
             </div>
             <div>
-              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">{{ store.profile?.is_kids ? 'Total Cartoon Time' : 'Total Watch Time' }}</div>
-              <div style="font-size:1.4rem;font-weight:800;color:#fff">{{ formatTimeSpent(stats.total_seconds) }}</div>
+              <div style="font-size:0.78rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em">Watch Time</div>
+              <div style="font-size:1.6rem;font-weight:900;color:#fff;line-height:1.2;margin:2px 0">{{ wrappedData.overview?.total_hours }} hrs</div>
+              <div style="font-size:0.75rem;color:var(--text-secondary)">{{ formatTimeSpent(wrappedData.overview?.total_seconds) }}</div>
             </div>
           </div>
 
-          <div class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;display:flex;align-items:center;gap:1rem">
-            <div style="width:52px;height:52px;border-radius:12px;background:rgba(56,189,248,0.15);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#38bdf8">
+          <!-- 2. Completion Rate -->
+          <div class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:18px;display:flex;align-items:center;gap:1.1rem">
+            <div style="width:54px;height:54px;border-radius:14px;background:rgba(56,189,248,0.15);display:flex;align-items:center;justify-content:center;font-size:1.7rem;color:#38bdf8">
               <i class="ph ph-check-circle"></i>
             </div>
             <div>
-              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">{{ store.profile?.is_kids ? 'Cartoons Finished' : 'Completion Rate' }}</div>
-              <div style="font-size:1.4rem;font-weight:800;color:#fff">{{ stats.completion_rate }}% <span style="font-size:0.75rem;color:var(--text-muted);font-weight:500">({{ stats.completed_items }}/{{ stats.total_items }})</span></div>
+              <div style="font-size:0.78rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em">Completion Rate</div>
+              <div style="font-size:1.6rem;font-weight:900;color:#fff;line-height:1.2;margin:2px 0">{{ wrappedData.overview?.completion_rate }}%</div>
+              <div style="font-size:0.75rem;color:var(--text-secondary)">{{ wrappedData.overview?.completed_items }}/{{ wrappedData.overview?.total_items }} finished</div>
             </div>
           </div>
 
-          <div class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;display:flex;align-items:center;gap:1rem">
-            <div style="width:52px;height:52px;border-radius:12px;background:rgba(245,158,11,0.15);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#f59e0b">
-              <i class="ph ph-sun-dim"></i>
+          <!-- 3. Daily Streaks -->
+          <div class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:18px;display:flex;align-items:center;gap:1.1rem">
+            <div style="width:54px;height:54px;border-radius:14px;background:rgba(249,115,22,0.15);display:flex;align-items:center;justify-content:center;font-size:1.7rem;color:#f97316">
+              <i class="ph ph-fire"></i>
             </div>
             <div>
-              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">{{ store.profile?.is_kids ? 'Favorite Watch Time' : 'Peak Watch Hour' }}</div>
-              <div style="font-size:1.2rem;font-weight:800;color:#fff">{{ stats.peak_hour }}</div>
+              <div style="font-size:0.78rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em">Current Streak</div>
+              <div style="font-size:1.6rem;font-weight:900;color:#fff;line-height:1.2;margin:2px 0">{{ wrappedData.heatmap?.current_streak || 0 }} days</div>
+              <div style="font-size:0.75rem;color:var(--text-secondary)">Record: {{ wrappedData.heatmap?.longest_streak || 0 }} days</div>
             </div>
           </div>
 
-          <div v-if="!store.profile?.is_kids" class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;display:flex;align-items:center;gap:1rem">
-            <div style="width:52px;height:52px;border-radius:12px;background:rgba(168,85,247,0.15);display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#a855f7">
-              <i class="ph ph-hard-drives"></i>
+          <!-- 4. Peak Window -->
+          <div class="card-inner" style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:18px;display:flex;align-items:center;gap:1.1rem">
+            <div style="width:54px;height:54px;border-radius:14px;background:rgba(168,85,247,0.15);display:flex;align-items:center;justify-content:center;font-size:1.7rem;color:#a855f7">
+              <i class="ph ph-moon-stars"></i>
             </div>
             <div>
-              <div style="font-size:0.8rem;color:var(--text-muted);font-weight:600;text-transform:uppercase">Mounted Storage</div>
-              <div style="font-size:1.4rem;font-weight:800;color:#fff">{{ stats.technical_stats?.total_storage_formatted || (stats.technical_stats?.total_storage_gb ? stats.technical_stats.total_storage_gb + ' GB' : '0 GB') }}</div>
+              <div style="font-size:0.78rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:0.04em">Prime Viewing</div>
+              <div style="font-size:1.25rem;font-weight:900;color:#fff;line-height:1.2;margin:2px 0">{{ wrappedData.peak_hour || 'N/A' }}</div>
+              <div style="font-size:0.75rem;color:var(--text-secondary)">{{ peakWindowName }}</div>
             </div>
           </div>
         </div>
 
-        <!-- 7-Day Watch Activity & Technical Metrics Row -->
-        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:1.5rem;margin-bottom:2.5rem">
-          <!-- 7-Day Watch Activity Chart -->
-          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem">
-            <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px">
-              <i :class="store.profile?.is_kids ? 'ph ph-calendar' : 'ph ph-chart-line-up'" :style="{ color: store.profile?.is_kids ? '#fdcb6e' : 'var(--accent)' }"></i>
-              <span>{{ store.profile?.is_kids ? '7-Day Cartoon Time' : '7-Day Watch Activity (Minutes)' }}</span>
-            </h3>
-            <div class="stats-activity-chart">
+        <!-- 365-Day Activity Calendar Heatmap -->
+        <div class="heatmap-card">
+          <div class="heatmap-header">
+            <div class="heatmap-title">
+              <i class="ph ph-calendar-check" style="color:var(--accent)"></i>
+              <span v-if="selectedPeriod === 'month'">30-Day Activity Heatmap (Last 30 Days)</span>
+              <span v-else-if="selectedPeriod === 'all'">All-Time Activity Heatmap (Past 12 Months)</span>
+              <span v-else>{{ wrappedData.label }} Activity Heatmap</span>
+            </div>
+            <div class="heatmap-stats-pills">
+              <span class="streak-pill">
+                <i class="ph-fill ph-check-circle" style="color:#22d3ee"></i> {{ wrappedData.heatmap?.days_active || 0 }} Active Days
+              </span>
+              <span class="streak-pill">
+                <i class="ph-fill ph-fire" style="color:#f97316"></i> Longest Streak: {{ wrappedData.heatmap?.longest_streak || 0 }}d
+              </span>
+            </div>
+          </div>
+
+          <div class="heatmap-scroll-wrap">
+            <div class="heatmap-months-labels">
               <div
-                v-for="d in stats.weekly_activity"
-                :key="d.date"
-                class="chart-bar-col"
-                :class="{ 'active-day': d.minutes > 0 }"
+                v-for="(m, mIdx) in (wrappedData.heatmap?.month_labels || [])"
+                :key="mIdx"
+                class="heatmap-col-month-label"
               >
-                <div class="chart-bar-track">
-                  <div
-                    class="chart-bar-fill"
-                    :style="{ height: Math.min(100, Math.max(12, (d.minutes / (maxWeeklyMinutes || 1)) * 100)) + '%' }"
-                  ></div>
-                </div>
-                <div class="chart-bar-val" v-if="d.minutes > 0">{{ d.minutes }}m</div>
-                <div class="chart-bar-label">{{ d.day }}</div>
+                {{ m }}
+              </div>
+            </div>
+            <div class="heatmap-body">
+              <div class="heatmap-days-labels">
+                <span>Mon</span>
+                <span>Wed</span>
+                <span>Fri</span>
+              </div>
+              <div class="heatmap-grid">
+                <div
+                  v-for="(cell, cIdx) in (wrappedData.heatmap?.days || [])"
+                  :key="cell.date || ('pad-' + cIdx)"
+                  class="heatmap-cell"
+                  :class="[
+                    'level-' + cell.intensity,
+                    {
+                      'is-future': cell.is_future,
+                      'is-padding': cell.is_padding
+                    }
+                  ]"
+                  @mouseenter="!cell.is_padding && (hoveredDay = cell)"
+                  @mouseleave="hoveredDay = null"
+                  :title="cell.is_padding ? '' : (cell.date + ': ' + cell.minutes + 'm (' + cell.count + ' items)')"
+                ></div>
               </div>
             </div>
           </div>
 
-          <!-- Technical Library & Resolution Breakdown -->
-          <div v-if="!store.profile?.is_kids" style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem">
-            <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px">
-              <i class="ph ph-film-strip" style="color:#38bdf8"></i> Library Resolution & Quality
+          <!-- Heatmap Footer & Hover Preview -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;flex-wrap:wrap;gap:10px">
+            <div style="font-size:0.82rem;color:var(--text-secondary)">
+              <span v-if="hoveredDay">
+                <strong>{{ hoveredDay.date }}</strong>: {{ hoveredDay.minutes }} minutes watched across {{ hoveredDay.count }} title(s)
+              </span>
+              <span v-else style="color:var(--text-muted)">Hover over any day square for playback details</span>
+            </div>
+            <div class="heatmap-legend">
+              <span>Less</span>
+              <div class="heatmap-legend-cell level-0"></div>
+              <div class="heatmap-legend-cell level-1"></div>
+              <div class="heatmap-legend-cell level-2"></div>
+              <div class="heatmap-legend-cell level-3"></div>
+              <div class="heatmap-legend-cell level-4"></div>
+              <span>More</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 24-Hour Habit Matrix & Day-of-Week Split -->
+        <div class="habits-row">
+          <!-- 24-Hour Hourly Histogram -->
+          <div class="habit-card">
+            <div class="habit-header">
+              <div class="habit-title">
+                <i class="ph ph-clock-countdown" style="color:var(--accent)"></i>
+                <span>24-Hour Viewing Curve</span>
+              </div>
+              <span style="font-size:0.75rem;font-weight:700;color:var(--text-muted)">00:00 - 23:00</span>
+            </div>
+            <div class="hourly-histogram">
+              <div
+                v-for="h in (wrappedData.habits?.hourly || [])"
+                :key="h.hour"
+                class="hourly-col"
+                :title="h.label + ': ' + h.minutes + 'm watched'"
+              >
+                <div class="hourly-bar-wrap">
+                  <div
+                    class="hourly-bar-fill"
+                    :style="{ height: Math.min(100, Math.max(4, (h.minutes / maxHourlyMinutes) * 100)) + '%' }"
+                  ></div>
+                </div>
+                <div class="hourly-label" v-if="h.hour % 4 === 0">{{ h.hour }}h</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Weekday vs Weekend Split & Binge Records -->
+          <div class="habit-card">
+            <div class="habit-header">
+              <div class="habit-title">
+                <i class="ph ph-calendar" style="color:#38bdf8"></i>
+                <span>Weekday vs. Weekend Habits</span>
+              </div>
+              <span style="font-size:0.75rem;font-weight:700;color:var(--text-muted)">Day Distribution</span>
+            </div>
+
+            <div class="split-pill-track">
+              <div class="split-weekday-fill" :style="{ width: (wrappedData.habits?.weekday_pct || 50) + '%' }"></div>
+              <div class="split-weekend-fill" :style="{ width: (wrappedData.habits?.weekend_pct || 50) + '%' }"></div>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;font-size:0.85rem;font-weight:700;color:#fff;margin-bottom:1.5rem">
+              <span style="display:flex;align-items:center;gap:6px">
+                <span style="width:8px;height:8px;border-radius:50%;background:#3b82f6;display:inline-block"></span>
+                Weekdays: {{ wrappedData.habits?.weekday_pct }}%
+              </span>
+              <span style="display:flex;align-items:center;gap:6px">
+                <span style="width:8px;height:8px;border-radius:50%;background:#ec4899;display:inline-block"></span>
+                Weekends: {{ wrappedData.habits?.weekend_pct }}%
+              </span>
+            </div>
+
+            <!-- Binge Highlight Box -->
+            <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;align-items:center;justify-content:space-between">
+              <div>
+                <div style="font-size:0.72rem;color:var(--text-muted);font-weight:700;text-transform:uppercase">Biggest Marathon Day</div>
+                <div style="font-size:1.1rem;font-weight:800;color:#fff;margin-top:2px" v-if="wrappedData.binge_records?.biggest_binge_day">
+                  {{ wrappedData.binge_records.biggest_binge_day.hours }} hrs <span style="font-size:0.75rem;color:var(--text-muted)">({{ wrappedData.binge_records.biggest_binge_day.date }})</span>
+                </div>
+                <div v-else style="font-size:0.9rem;color:var(--text-muted)">No marathons recorded yet</div>
+              </div>
+              <div style="text-align:right" v-if="wrappedData.binge_records?.most_episodes_in_day">
+                <div style="font-size:0.72rem;color:var(--text-muted);font-weight:700;text-transform:uppercase">Most Episodes / 24h</div>
+                <div style="font-size:1.1rem;font-weight:800;color:#22c55e">{{ wrappedData.binge_records.most_episodes_in_day }} eps</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Top Genres & Content Types Row -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:1.5rem;margin-bottom:2rem">
+          <!-- Top Genres Distribution -->
+          <div class="habit-card">
+            <h3 style="font-size:1.1rem;font-weight:800;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px;color:#fff">
+              <i class="ph ph-bookmarks" style="color:var(--accent)"></i> Top Genres
             </h3>
+            <div v-if="wrappedData.content_breakdown?.top_genres?.length" style="display:flex;flex-direction:column;gap:10px">
+              <div
+                v-for="g in wrappedData.content_breakdown.top_genres"
+                :key="g.genre"
+                style="display:flex;flex-direction:column;gap:4px"
+              >
+                <div style="display:flex;justify-content:space-between;font-size:0.85rem;font-weight:700;color:#fff">
+                  <span style="display:flex;align-items:center;gap:6px">
+                    <span :style="{ background: g.color || 'var(--accent)', width: '8px', height: '8px', borderRadius: '50%', display: 'inline-block' }"></span>
+                    {{ g.genre }}
+                  </span>
+                  <span style="color:var(--text-muted)">{{ g.hours }}h ({{ g.percent }}%)</span>
+                </div>
+                <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden">
+                  <div :style="{ width: g.percent + '%', background: g.color || 'var(--accent)', height: '100%' }"></div>
+                </div>
+              </div>
+            </div>
+            <div v-else style="color:var(--text-muted);font-size:0.85rem">No genre records found.</div>
+          </div>
+
+          <!-- Content Types Breakdown -->
+          <div class="habit-card">
+            <h3 style="font-size:1.1rem;font-weight:800;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px;color:#fff">
+              <i class="ph ph-video-camera" style="color:#a855f7"></i> Format Distribution
+            </h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:1.5rem">
+              <div
+                v-for="(info, tKey) in (wrappedData.content_breakdown?.types || {})"
+                :key="tKey"
+                style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:12px 10px;text-align:center"
+              >
+                <div style="font-size:0.75rem;text-transform:capitalize;color:var(--text-muted);font-weight:700">{{ tKey }}</div>
+                <div style="font-size:1.3rem;font-weight:900;color:#fff;margin:3px 0">{{ info.hours }}h</div>
+                <div style="font-size:0.72rem;color:var(--text-secondary)">{{ info.count }} items</div>
+              </div>
+            </div>
+
+            <!-- Resolution footprint -->
+            <div style="font-size:0.8rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Quality Tiers Streamed</div>
             <div class="tech-res-grid">
               <div
                 v-for="card in resolutionCards"
@@ -8949,93 +10384,132 @@ const StatsPage = {
           </div>
         </div>
 
-        <!-- Genre Distribution Progress Section -->
-        <div class="genre-distribution-panel">
-          <div class="section-header-inline">
-            <h3>
-              <i :class="store.profile?.is_kids ? 'ph ph-balloon' : 'ph ph-tag'" :style="{ color: store.profile?.is_kids ? '#fdcb6e' : 'var(--accent)' }"></i>
-              <span>{{ store.profile?.is_kids ? 'Favorite Cartoon Categories' : 'Favorite Genres Distribution' }}</span>
-            </h3>
-            <span class="section-meta" v-if="stats.top_genres?.length">Top {{ Math.min(stats.top_genres.length, 5) }}</span>
-          </div>
-
-          <div v-if="stats.top_genres && stats.top_genres.length" class="genre-distribution-list">
-            <div v-for="(g, index) in stats.top_genres" :key="g.genre" class="genre-distribution-item">
-              <div class="genre-distribution-header">
-                <div class="genre-name-wrap">
-                  <span class="genre-dot" :style="{ background: getGenreAccent(index) }"></span>
-                  <span class="genre-name">{{ g.genre }}</span>
-                </div>
-                <span class="genre-count">{{ g.count }} title{{ g.count > 1 ? 's' : '' }}</span>
+        <!-- Top Talent / Cast Leaderboard -->
+        <div class="habit-card" style="margin-bottom:2rem" v-if="wrappedData.talent?.top_actors?.length">
+          <h3 style="font-size:1.1rem;font-weight:800;margin-bottom:1.25rem;display:flex;align-items:center;gap:8px;color:#fff">
+            <i class="ph ph-users-three" style="color:#ffd700"></i> Top Cast & Talent
+          </h3>
+          <div class="talent-grid">
+            <div
+              v-for="actor in wrappedData.talent.top_actors"
+              :key="actor.name"
+              class="talent-card"
+              @click="openCastSearch(actor.name)"
+              :title="'Search library for ' + actor.name"
+            >
+              <img
+                v-if="actor.profile_path"
+                :src="'https://image.tmdb.org/t/p/w185' + actor.profile_path"
+                class="talent-avatar"
+                :alt="actor.name"
+              />
+              <div v-else class="talent-avatar" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">
+                👤
               </div>
-              <div class="genre-distribution-bar-track">
-                <div
-                  class="genre-distribution-bar-fill"
-                  :style="{ width: calcGenrePercent(g.count) + '%', background: 'linear-gradient(90deg, ' + getGenreAccent(index) + ' 0%, rgba(255,255,255,0.95) 100%)' }"
-                ></div>
-              </div>
+              <div class="talent-name" :title="actor.name">{{ actor.name }}</div>
+              <div class="talent-count">{{ actor.titles_count }} titles</div>
             </div>
-          </div>
-
-          <div v-else class="empty-state-panel">
-            Watch titles in your library to unlock genre analytics!
           </div>
         </div>
 
-        <!-- Achievements & Badges Trophy Case Section -->
+        <!-- Recently Watched History -->
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:18px;padding:1.75rem;margin-bottom:2rem">
+          <h3 style="font-size:1.1rem;font-weight:800;margin-bottom:1.25rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <span style="display:flex;align-items:center;gap:8px">
+              <i class="ph ph-history" style="color:var(--accent)"></i>
+              <span>Recent Watch Activity</span>
+            </span>
+            <span style="font-size:0.75rem;font-weight:600;color:var(--text-muted)">Latest Consolidated Titles</span>
+          </h3>
+          <div v-if="stats?.recent_history && stats.recent_history.length" style="display:flex;flex-direction:column;gap:10px">
+            <div
+              v-for="item in stats.recent_history"
+              :key="item.id"
+              style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(255,255,255,0.03);border-radius:14px;cursor:pointer;transition:background 0.2s ease"
+              class="history-row-item"
+              @click="openMedia(item)"
+            >
+              <div style="display:flex;align-items:center;gap:14px;min-width:0">
+                <img
+                  v-if="item.poster_path"
+                  :src="imgUrl(item.poster_path)"
+                  style="width:42px;height:58px;object-fit:cover;border-radius:8px;flex-shrink:0"
+                />
+                <div style="min-width:0">
+                  <div style="font-weight:800;color:#fff;font-size:0.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                    {{ item.title }}
+                  </div>
+                  <div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px">
+                    {{ item.type ? item.type.toUpperCase() : 'TITLE' }} <span v-if="item.ep_count > 1">· {{ item.ep_count }} eps watched</span>
+                  </div>
+                </div>
+              </div>
+              <div style="text-align:right;flex-shrink:0">
+                <div style="font-size:0.75rem;color:var(--text-muted)">{{ formatDate(item.last_watched) }}</div>
+                <span v-if="item.completed" style="font-size:0.7rem;font-weight:700;color:#10b981">Completed</span>
+                <span v-else style="font-size:0.7rem;font-weight:700;color:var(--accent)">In Progress</span>
+              </div>
+            </div>
+          </div>
+          <div v-else style="color:var(--text-muted);text-align:center;padding:1rem">No recent playback recorded.</div>
+        </div>
+
+      </template>
+
+      <!-- SUB-VIEW 2: TROPHIES & ACHIEVEMENTS CASE -->
+      <template v-else-if="activeSubView === 'trophies'">
         <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem;margin-bottom:2.5rem" class="trophy-case-header">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;flex-wrap:wrap;gap:10px">
             <h3 style="font-size:1.15rem;font-weight:800;display:flex;align-items:center;gap:10px">
               <i class="ph ph-trophy" style="color:#f59e0b;font-size:1.35rem"></i>
               <span>{{ store.profile?.is_kids ? 'Kids Badges & Trophy Case' : 'Achievements & Badges Trophy Case' }}</span>
             </h3>
-            <span style="font-size:0.9rem;font-weight:700;color:var(--accent)" v-if="stats.achievements">
+            <span style="font-size:0.9rem;font-weight:700;color:var(--accent)" v-if="stats?.achievements">
               {{ unlockedCount }} / {{ totalCount }} Unlocked ({{ completionPercent }}%)
             </span>
           </div>
 
           <!-- Completion Progress Bar -->
-          <div class="trophy-progress-container" v-if="stats.achievements">
+          <div class="trophy-progress-container" v-if="stats?.achievements">
             <div class="trophy-progress-bar">
               <div class="trophy-progress-fill" :style="{ width: completionPercent + '%' }"></div>
             </div>
           </div>
+
+          <!-- Recent Unlocks Highlights Showcase -->
           <div v-if="recentUnlocks && recentUnlocks.length" class="recent-unlocks-section">
             <div class="recent-unlocks-title">
-              <i class="ph-fill ph-sparkle" style="color:#f59e0b"></i>
-              <span>Recent Unlocks &amp; Highlights</span>
+              <i class="ph-fill ph-sparkle" style="color:#f59e0b"></i> Recent Unlocks
             </div>
             <div class="recent-unlocks-carousel" @wheel.passive="handleCarouselWheel">
               <div
                 v-for="ach in recentUnlocks"
-                :key="'recent-' + ach.id"
+                :key="ach.id"
                 class="recent-unlock-card"
-                :class="'rarity-' + (ach.rarity || 'bronze').toLowerCase()"
                 @click="openAchievementModal(ach)"
-                title="Click to view details & progress"
               >
                 <div class="recent-unlock-icon">
-                  <i :class="'ph-bold ' + (ach.icon && ach.icon.startsWith('ph-') ? ach.icon : 'ph-trophy')"></i>
+                  <i :class="'ph-bold ' + (ach.icon || 'ph-trophy')"></i>
                 </div>
                 <div class="recent-unlock-details">
                   <div class="recent-unlock-name">{{ ach.title }}</div>
                   <div class="recent-unlock-meta">
                     <span class="rarity-badge" :class="(ach.rarity || 'bronze').toLowerCase()">{{ ach.rarity || 'Bronze' }}</span>
-                    <span class="recent-unlock-date"><i class="ph ph-calendar-blank"></i> {{ ach.unlocked_at }}</span>
+                    <span class="recent-unlock-date"><i class="ph ph-check-circle" style="color:#10b981"></i> {{ ach.unlocked_at }}</span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Controls Row: Category Filter Tabs & Group By Selector -->
-          <div class="trophy-controls-row" v-if="stats.achievements">
-            <!-- Category Filter Tabs -->
-            <div class="trophy-category-tabs">
+          <!-- Category Filter Bar and Group Toolbar -->
+          <div class="trophy-controls-row">
+            <!-- Category Filter Pills -->
+            <div class="trophy-category-pills">
               <button
                 v-for="cat in categories"
                 :key="cat"
-                class="trophy-category-tab"
+                class="trophy-cat-pill"
                 :class="{ active: activeCategory === cat }"
                 @click="activeCategory = cat"
               >
@@ -9083,14 +10557,14 @@ const StatsPage = {
               v-for="group in groupedAchievements"
               :key="group.key"
               class="trophy-group-section"
-              :class="{ 'is-collapsed': collapsedGroups[group.key] }"
+              :class="{ 'is-collapsed': isGroupCollapsed(group.key) }"
             >
               <!-- Group Header (Clickable Collapsible) -->
               <div
                 class="trophy-group-header"
                 :class="'group-' + group.key.toLowerCase().replace(/[^a-z0-9]/g, '')"
                 @click="toggleGroup(group.key)"
-                title="Click to collapse / expand"
+                title="Click to expand / collapse"
               >
                 <div class="trophy-group-title-wrap">
                   <span class="trophy-group-icon"><i :class="'ph-bold ' + (group.icon && group.icon.startsWith('ph-') ? group.icon : 'ph-folder')"></i></span>
@@ -9110,14 +10584,14 @@ const StatsPage = {
                   <span class="trophy-group-percent">{{ group.percent }}%</span>
                   <i
                     class="ph-bold ph-caret-down trophy-group-chevron"
-                    :class="{ 'is-collapsed': collapsedGroups[group.key] }"
+                    :class="{ 'is-collapsed': isGroupCollapsed(group.key) }"
                   ></i>
                 </div>
               </div>
 
               <!-- Group Grid -->
               <transition name="trophy-collapse">
-                <div v-show="!collapsedGroups[group.key]" class="achievements-grid">
+                <div v-show="!isGroupCollapsed(group.key)" class="achievements-grid">
                   <div
                     v-for="ach in group.items"
                     :key="ach.id"
@@ -9195,170 +10669,143 @@ const StatsPage = {
             No achievements found in this category.
           </div>
         </div>
+      </template>
 
-        <!-- Recently Watched History -->
-        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:1.75rem">
-          <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-            <span style="display:flex;align-items:center;gap:8px">
-              <i class="ph ph-history" style="color:var(--accent)"></i>
-              <span>{{ store.profile?.is_kids ? 'Recent Cartoons & Movies' : 'Recent Watch History' }}</span>
-            </span>
-            <span style="font-size:0.75rem;font-weight:600;color:var(--text-muted)">Consolidated Titles</span>
-          </h3>
-          <div v-if="stats.recent_history && stats.recent_history.length" style="display:flex;flex-direction:column;gap:10px">
-            <div
-              v-for="item in stats.recent_history"
-              :key="item.id"
-              style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(255,255,255,0.03);border-radius:12px;cursor:pointer;transition:background 0.2s ease"
-              class="history-row-item"
-              @click="openMedia(item)"
-            >
-              <div style="display:flex;align-items:center;gap:14px;min-width:0">
-                <img
-                  v-if="item.poster_path"
-                  :src="imgUrl(item.poster_path)"
-                  style="width:42px;height:58px;object-fit:cover;border-radius:6px;flex-shrink:0"
-                />
-                <div style="min-width:0">
-                  <div style="font-weight:700;font-size:0.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" :title="item.title">
-                    {{ item.title }}
-                  </div>
-                  <div style="font-size:0.8rem;color:var(--text-muted);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                    <span style="color:var(--text-secondary);font-weight:600">
-                      {{ item.type === 'anime' ? 'Anime' : item.type === 'series' ? 'Series' : 'Movie' }}
-                    </span>
-                    <span v-if="item.season && item.episode" style="color:var(--text-primary);font-weight:600">
-                      · Latest: S{{ (item.season||'').toString().padStart(2,'0') }}E{{ (item.episode||'').toString().padStart(2,'0') }}
-                      <span v-if="item.ep_title" style="color:var(--text-muted);font-weight:500"> ("{{ item.ep_title }}")</span>
-                    </span>
-                  </div>
-                </div>
+      <!-- Fullscreen Interactive Wrapped Story Modal -->
+      <wrapped-story-modal
+        :show="showStoryModal"
+        :data="wrappedData"
+        :profile="store.profile"
+        @close="showStoryModal = false"
+      ></wrapped-story-modal>
+
+      <!-- Achievement Details Modal -->
+      <transition name="fade">
+        <div
+          v-if="selectedAchievement"
+          class="modal-backdrop achievement-modal-backdrop"
+          @click.self="closeAchievementModal"
+        >
+          <div
+            class="achievement-modal-card"
+            :class="'tier-' + (selectedAchievement.rarity || 'bronze').toLowerCase()"
+            @click.stop
+          >
+            <!-- Ambient Halo Glow -->
+            <div class="achievement-modal-glow"></div>
+
+            <!-- Close Button -->
+            <button class="modal-close-btn" @click="closeAchievementModal" title="Close (Esc)">
+              <i class="ph-bold ph-x"></i>
+            </button>
+
+            <!-- Modal Showcase -->
+            <div class="achievement-modal-icon-showcase">
+              <div class="achievement-modal-icon-wrap" :class="[{ unlocked: selectedAchievement.unlocked }]">
+                <i :class="'ph-bold ' + (selectedAchievement.unlocked ? (selectedAchievement.icon && selectedAchievement.icon.startsWith('ph-') ? selectedAchievement.icon : 'ph-trophy') : 'ph-lock')"></i>
               </div>
-
-              <div style="text-align:right;flex-shrink:0;margin-left:12px">
-                <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
-                  <span v-if="item.ep_count && item.ep_count > 1" style="font-size:0.72rem;font-weight:700;background:rgba(229,9,20,0.18);color:var(--accent);border:1px solid rgba(229,9,20,0.35);padding:2px 8px;border-radius:99px">
-                    {{ item.ep_count }} eps watched
-                  </span>
-                  <span style="font-size:0.85rem;font-weight:700;color:var(--accent)">
-                    {{ item.completed ? 'Completed' : formatTimeSpent(item.position) }}
-                  </span>
-                </div>
-                <div style="font-size:0.75rem;color:var(--text-muted);margin-top:3px">
-                  {{ formatDate(item.last_watched) }}
-                </div>
+              <div class="achievement-modal-badges">
+                <span class="rarity-badge" :class="(selectedAchievement.rarity || 'bronze').toLowerCase()">
+                  {{ selectedAchievement.rarity || 'Bronze' }} Tier
+                </span>
+                <span class="achievement-category-pill">
+                  {{ selectedAchievement.category }}
+                </span>
+                <span v-if="selectedAchievement.unlocked" class="achievement-badge unlocked-pill">
+                  <i class="ph-bold ph-check"></i> UNLOCKED
+                </span>
+                <span v-else class="achievement-badge locked-pill">
+                  <i class="ph-bold ph-lock"></i> LOCKED
+                </span>
               </div>
             </div>
-          </div>
-          <div v-else style="color:var(--text-muted);text-align:center;padding:1.5rem">
-            No watch history recorded yet. Start watching a title!
+
+            <!-- Modal Content -->
+            <div class="achievement-modal-body">
+              <h2 class="achievement-modal-title">{{ selectedAchievement.title }}</h2>
+              <p class="achievement-modal-desc">{{ selectedAchievement.description }}</p>
+
+              <!-- Progress Tracking Box (Only shown for locked/in-progress achievements) -->
+              <div v-if="!selectedAchievement.unlocked" class="achievement-modal-progress-box">
+                <div class="achievement-modal-progress-header">
+                  <span class="progress-title">Trophy Progress</span>
+                  <span class="progress-ratio">{{ selectedAchievement.progress_label || 'In Progress' }} ({{ selectedAchievement.progress_percent || 0 }}%)</span>
+                </div>
+                <div class="achievement-modal-progress-bar">
+                  <div
+                    class="achievement-modal-progress-fill"
+                    :style="{ width: (selectedAchievement.progress_percent || 0) + '%' }"
+                  ></div>
+                </div>
+              </div>
+
+              <!-- Unlocked Date or Hint -->
+              <div v-if="selectedAchievement.unlocked && selectedAchievement.unlocked_at" class="achievement-modal-unlocked-info">
+                <i class="ph-fill ph-check-circle" style="color:#10b981"></i>
+                <span>Achieved on <strong>{{ selectedAchievement.unlocked_at }}</strong></span>
+              </div>
+              <div v-else class="achievement-modal-hint-info">
+                <i class="ph-fill ph-lightbulb" style="color:#f59e0b"></i>
+                <span>Watch matching titles in your library to make progress toward this trophy!</span>
+              </div>
+            </div>
+
+            <!-- Modal Actions -->
+            <div class="achievement-modal-footer">
+              <button
+                v-if="selectedAchievement.browse_url"
+                class="btn btn-primary btn-browse-achievement"
+                @click="browseForAchievement(selectedAchievement)"
+              >
+                <i class="ph-bold ph-play-circle" style="margin-right:6px"></i>
+                {{ selectedAchievement.browse_label || 'Browse Matching Titles' }}
+              </button>
+              <button class="btn btn-secondary" @click="closeAchievementModal">
+                Close
+              </button>
+            </div>
           </div>
         </div>
+      </transition>
 
-        <!-- Achievement Detail Modal -->
-        <transition name="fade">
-          <div
-            v-if="selectedAchievement"
-            class="modal-backdrop achievement-modal-backdrop"
-            @click.self="closeAchievementModal"
-          >
-            <div
-              class="achievement-modal-card"
-              :class="'tier-' + (selectedAchievement.rarity || 'bronze').toLowerCase()"
-              @click.stop
-            >
-              <!-- Ambient Halo Glow -->
-              <div class="achievement-modal-glow"></div>
-
-              <!-- Close Button -->
-              <button class="modal-close-btn" @click="closeAchievementModal" title="Close (Esc)">
-                <i class="ph-bold ph-x"></i>
-              </button>
-
-              <!-- Modal Showcase -->
-              <div class="achievement-modal-icon-showcase">
-                <div class="achievement-modal-icon-wrap" :class="[{ unlocked: selectedAchievement.unlocked }]">
-                  <i :class="'ph-bold ' + (selectedAchievement.unlocked ? (selectedAchievement.icon && selectedAchievement.icon.startsWith('ph-') ? selectedAchievement.icon : 'ph-trophy') : 'ph-lock')"></i>
-                </div>
-                <div class="achievement-modal-badges">
-                  <span class="rarity-badge" :class="(selectedAchievement.rarity || 'bronze').toLowerCase()">
-                    {{ selectedAchievement.rarity || 'Bronze' }} Tier
-                  </span>
-                  <span class="achievement-category-pill">
-                    {{ selectedAchievement.category }}
-                  </span>
-                  <span v-if="selectedAchievement.unlocked" class="achievement-badge unlocked-pill">
-                    <i class="ph-bold ph-check"></i> UNLOCKED
-                  </span>
-                  <span v-else class="achievement-badge locked-pill">
-                    <i class="ph-bold ph-lock"></i> LOCKED
-                  </span>
-                </div>
-              </div>
-
-              <!-- Modal Content -->
-              <div class="achievement-modal-body">
-                <h2 class="achievement-modal-title">{{ selectedAchievement.title }}</h2>
-                <p class="achievement-modal-desc">{{ selectedAchievement.description }}</p>
-
-                <!-- Progress Tracking Box (Only shown for locked/in-progress achievements) -->
-                <div v-if="!selectedAchievement.unlocked" class="achievement-modal-progress-box">
-                  <div class="achievement-modal-progress-header">
-                    <span class="progress-title">Trophy Progress</span>
-                    <span class="progress-ratio">{{ selectedAchievement.progress_label || 'In Progress' }} ({{ selectedAchievement.progress_percent || 0 }}%)</span>
-                  </div>
-                  <div class="achievement-modal-progress-bar">
-                    <div
-                      class="achievement-modal-progress-fill"
-                      :style="{ width: (selectedAchievement.progress_percent || 0) + '%' }"
-                    ></div>
-                  </div>
-                </div>
-
-                <!-- Unlocked Date or Hint -->
-                <div v-if="selectedAchievement.unlocked && selectedAchievement.unlocked_at" class="achievement-modal-unlocked-info">
-                  <i class="ph-fill ph-check-circle" style="color:#10b981"></i>
-                  <span>Achieved on <strong>{{ selectedAchievement.unlocked_at }}</strong></span>
-                </div>
-                <div v-else class="achievement-modal-hint-info">
-                  <i class="ph-fill ph-lightbulb" style="color:#f59e0b"></i>
-                  <span>Watch matching titles in your library to make progress toward this trophy!</span>
-                </div>
-              </div>
-
-              <!-- Modal Actions -->
-              <div class="achievement-modal-footer">
-                <button
-                  v-if="selectedAchievement.browse_url"
-                  class="btn btn-primary btn-browse-achievement"
-                  @click="browseForAchievement(selectedAchievement)"
-                >
-                  <i class="ph-bold ph-play-circle" style="margin-right:6px"></i>
-                  {{ selectedAchievement.browse_label || 'Browse Matching Titles' }}
-                </button>
-                <button class="btn btn-secondary" @click="closeAchievementModal">
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </transition>
-      </template>
     </div>
   `,
   setup() {
     const router = VueRouter.useRouter();
     const stats = ref(null);
+    const wrappedData = ref(null);
     const loading = ref(true);
+    const loadingWrapped = ref(false);
+    const selectedPeriod = ref("year");
+    const selectedYear = ref(new Date().getFullYear());
+    const currentYear = new Date().getFullYear();
+    const activeSubView = ref("analytics");
+    const showStoryModal = ref(false);
+    const hoveredDay = ref(null);
+
     const activeCategory = ref("All");
     const groupBy = ref("badge");
     const collapsedGroups = reactive({});
+    const selectedAchievement = ref(null);
+
+    function isGroupCollapsed(key) {
+      return collapsedGroups[key] !== false;
+    }
 
     function toggleGroup(key) {
-      collapsedGroups[key] = !collapsedGroups[key];
       if (collapsedGroups[key] === undefined) {
-        collapsedGroups[key] = true;
+        collapsedGroups[key] = false;
+      } else {
+        collapsedGroups[key] = !collapsedGroups[key];
       }
+    }
+
+    function openAchievementModal(ach) {
+      selectedAchievement.value = ach;
+    }
+
+    function closeAchievementModal() {
+      selectedAchievement.value = null;
     }
 
     const BADGE_TIERS = [
@@ -9372,13 +10819,13 @@ const StatsPage = {
       if (!stats.value?.achievements?.length) {
         return ["All", "Milestones", "Viewing Habits", "Player Master", "Discovery", "Collector"];
       }
-      const uniqueCats = Array.from(new Set(stats.value.achievements.map(a => a.category).filter(Boolean)));
+      const uniqueCats = Array.from(new Set(stats.value.achievements.map((a) => a.category).filter(Boolean)));
       return ["All", ...uniqueCats];
     });
 
     const unlockedCount = computed(() => {
       if (!stats.value?.achievements) return 0;
-      return stats.value.achievements.filter(a => a.unlocked).length;
+      return stats.value.achievements.filter((a) => a.unlocked).length;
     });
 
     const totalCount = computed(() => stats.value?.achievements?.length || 0);
@@ -9391,7 +10838,7 @@ const StatsPage = {
     const filteredAchievements = computed(() => {
       if (!stats.value?.achievements) return [];
       if (activeCategory.value === "All") return stats.value.achievements;
-      return stats.value.achievements.filter(a => a.category === activeCategory.value);
+      return stats.value.achievements.filter((a) => a.category === activeCategory.value);
     });
 
     const groupedAchievements = computed(() => {
@@ -9399,9 +10846,9 @@ const StatsPage = {
       if (!list || !list.length) return [];
 
       if (groupBy.value === "badge") {
-        return BADGE_TIERS.map(tier => {
-          const items = list.filter(a => (a.rarity || "Bronze").toLowerCase() === tier.key.toLowerCase());
-          const unlocked = items.filter(a => a.unlocked).length;
+        return BADGE_TIERS.map((tier) => {
+          const items = list.filter((a) => (a.rarity || "Bronze").toLowerCase() === tier.key.toLowerCase());
+          const unlocked = items.filter((a) => a.unlocked).length;
           const total = items.length;
           const percent = total ? Math.round((unlocked / total) * 100) : 0;
           return {
@@ -9414,7 +10861,7 @@ const StatsPage = {
             totalCount: total,
             percent,
           };
-        }).filter(g => g.items.length > 0);
+        }).filter((g) => g.items.length > 0);
       }
 
       if (groupBy.value === "category") {
@@ -9430,10 +10877,10 @@ const StatsPage = {
           "Fun Player": "ph-smiley",
           "Sticker Collector": "ph-sticker",
         };
-        const cats = Array.from(new Set(list.map(a => a.category).filter(Boolean)));
-        return cats.map(cat => {
-          const items = list.filter(a => a.category === cat);
-          const unlocked = items.filter(a => a.unlocked).length;
+        const cats = Array.from(new Set(list.map((a) => a.category).filter(Boolean)));
+        return cats.map((cat) => {
+          const items = list.filter((a) => a.category === cat);
+          const unlocked = items.filter((a) => a.unlocked).length;
           const total = items.length;
           const percent = total ? Math.round((unlocked / total) * 100) : 0;
           return {
@@ -9446,40 +10893,21 @@ const StatsPage = {
             totalCount: total,
             percent,
           };
-        }).filter(g => g.items.length > 0);
+        }).filter((g) => g.items.length > 0);
       }
 
       return [];
     });
 
-    watch(groupedAchievements, (groups) => {
-      if (!groups || !groups.length) return;
-      for (const group of groups) {
-        if (collapsedGroups[group.key] === undefined) {
-          collapsedGroups[group.key] = true;
-        }
-      }
-    }, { immediate: true });
-
     const recentUnlocks = computed(() => {
       if (!stats.value?.achievements) return [];
-      const unlocked = stats.value.achievements.filter(a => a.unlocked);
+      const unlocked = stats.value.achievements.filter((a) => a.unlocked);
       return [...unlocked].sort((a, b) => {
         const da = a.unlocked_at || "";
         const db = b.unlocked_at || "";
         return db.localeCompare(da);
       }).slice(0, 6);
     });
-
-    const selectedAchievement = ref(null);
-
-    function openAchievementModal(ach) {
-      selectedAchievement.value = ach;
-    }
-
-    function closeAchievementModal() {
-      selectedAchievement.value = null;
-    }
 
     function browseForAchievement(ach) {
       closeAchievementModal();
@@ -9494,10 +10922,66 @@ const StatsPage = {
       }
     }
 
-    const maxWeeklyMinutes = computed(() => {
-      if (!stats.value?.weekly_activity?.length) return 60;
-      const maxVal = Math.max(...stats.value.weekly_activity.map(d => d.minutes || 0));
-      return maxVal > 0 ? maxVal : 60;
+    function handleCarouselWheel(e) {
+      if (e.deltaY !== 0) {
+        e.currentTarget.scrollLeft += e.deltaY;
+      }
+    }
+
+    const maxHourlyMinutes = computed(() => {
+      if (!wrappedData.value?.habits?.hourly?.length) return 60;
+      const m = Math.max(...wrappedData.value.habits.hourly.map((h) => h.minutes || 0));
+      return m > 0 ? m : 60;
+    });
+
+    const peakWindowName = computed(() => {
+      if (!wrappedData.value?.habits?.time_windows) return "Evening";
+      const tw = wrappedData.value.habits.time_windows;
+      const arr = [
+        { label: "Night Owl", h: tw.late_night_hours || 0 },
+        { label: "Morning", h: tw.morning_hours || 0 },
+        { label: "Afternoon", h: tw.afternoon_hours || 0 },
+        { label: "Evening", h: tw.evening_hours || 0 },
+      ];
+      arr.sort((a, b) => b.h - a.h);
+      return arr[0].label;
+    });
+
+    const isDecember = computed(() => {
+      return new Date().getMonth() === 11; // 0-indexed: 11 = December
+    });
+
+    const isCurrentYearSelected = computed(() => {
+      if (selectedPeriod.value === "year") {
+        return !selectedYear.value || Number(selectedYear.value) === currentYear;
+      }
+      return true;
+    });
+
+    const isWrappedUnlocked = computed(() => {
+      // Past completed years (e.g. 2025 when currentYear is 2026) are always unlocked archive stories
+      if (selectedPeriod.value === "year" && selectedYear.value && Number(selectedYear.value) < currentYear) {
+        return true;
+      }
+      // Current year / rolling periods unlock in December
+      return isDecember.value;
+    });
+
+    const daysUntilDecember = computed(() => {
+      const now = new Date();
+      const decFirst = new Date(now.getFullYear(), 11, 1);
+      if (now >= decFirst) return 0;
+      const diffMs = decFirst.getTime() - now.getTime();
+      return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    });
+
+    const yearCompletionPercent = computed(() => {
+      const now = new Date();
+      const startOfYear = new Date(now.getFullYear(), 0, 1);
+      const endOfYear = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+      const totalMs = endOfYear.getTime() - startOfYear.getTime();
+      const elapsedMs = Math.max(0, now.getTime() - startOfYear.getTime());
+      return Math.min(100, Math.max(1, Math.round((elapsedMs / totalMs) * 100)));
     });
 
     async function loadStats() {
@@ -9511,10 +10995,46 @@ const StatsPage = {
       }
     }
 
+    async function loadWrapped(period = "year", year = null) {
+      loadingWrapped.value = true;
+      try {
+        let url = `/api/analytics/wrapped?period=${period}`;
+        if (period === "year" && year) url += `&year=${year}`;
+        wrappedData.value = await API.get(url);
+      } catch (e) {
+        addToast("Failed to load wrapped analytics", "error");
+      } finally {
+        loadingWrapped.value = false;
+      }
+    }
+
+    function setPeriod(period, yr = null) {
+      selectedPeriod.value = period;
+      if (yr) selectedYear.value = yr;
+      hoveredDay.value = null;
+      loadWrapped(period, yr || (period === "year" ? selectedYear.value : null));
+    }
+
+    function launchStory() {
+      if (!wrappedData.value) return;
+      showStoryModal.value = true;
+    }
+
     onMounted(() => {
       loadStats();
+      loadWrapped(selectedPeriod.value, selectedYear.value);
       window.addEventListener("keydown", handleKeydown);
     });
+
+    watch(
+      () => store.profile?.id,
+      (newId) => {
+        if (newId) {
+          loadStats();
+          loadWrapped(selectedPeriod.value, selectedYear.value);
+        }
+      }
+    );
 
     onUnmounted(() => {
       window.removeEventListener("keydown", handleKeydown);
@@ -9525,30 +11045,8 @@ const StatsPage = {
       const s = Math.floor(seconds);
       const h = Math.floor(s / 3600);
       const m = Math.floor((s % 3600) / 60);
-      if (h > 0) {
-        return `${h}h ${m}m`;
-      }
+      if (h > 0) return `${h}h ${m}m`;
       return `${m}m`;
-    }
-
-    function calcGenrePercent(count) {
-      if (!stats.value?.top_genres?.length) return 0;
-      const maxCount = Math.max(...stats.value.top_genres.map(g => g.count));
-      return Math.min(100, Math.max(8, Math.round((count / (maxCount || 1)) * 100)));
-    }
-
-    function getGenreAccent(index) {
-      const palette = [
-        '#8b5cf6',
-        '#38bdf8',
-        '#f59e0b',
-        '#22c55e',
-        '#f43f5e',
-        '#06b6d4',
-        '#a78bfa',
-        '#f97316',
-      ];
-      return palette[index % palette.length];
     }
 
     function formatDate(dateStr) {
@@ -9578,7 +11076,7 @@ const StatsPage = {
     };
 
     const resolutionCards = computed(() => {
-      const raw = stats.value?.technical_stats?.resolutions || { "4K": 0, "1080p": 0, "720p": 0, "SD": 0 };
+      const raw = wrappedData.value?.technical?.resolutions || stats.value?.technical_stats?.resolutions || { "4K": 0, "1080p": 0, "720p": 0, "SD": 0 };
       const cards = [];
       for (const [key, count] of Object.entries(raw)) {
         const meta = RES_META[key] || { label: `${key} Quality`, color: "#38bdf8" };
@@ -9598,20 +11096,32 @@ const StatsPage = {
       router.push({ path: "/search", query: { q, type: "all" } });
     }
 
-    function handleCarouselWheel(e) {
-      if (e.deltaY !== 0) {
-        e.currentTarget.scrollLeft += e.deltaY;
-      }
+    function openCastSearch(actorName) {
+      const q = (actorName || "").trim();
+      if (!q) return;
+      router.push({ path: "/search", query: { q, type: "all" } });
     }
 
     return {
       store,
       stats,
+      wrappedData,
       loading,
+      loadingWrapped,
+      selectedPeriod,
+      selectedYear,
+      currentYear,
+      activeSubView,
+      showStoryModal,
+      hoveredDay,
+      launchStory,
+      setPeriod,
+      maxHourlyMinutes,
+      peakWindowName,
       activeCategory,
       categories,
-      resolutionCards,
       groupBy,
+      resolutionCards,
       unlockedCount,
       totalCount,
       completionPercent,
@@ -9623,16 +11133,20 @@ const StatsPage = {
       closeAchievementModal,
       browseForAchievement,
       handleCarouselWheel,
-      maxWeeklyMinutes,
       formatTimeSpent,
-      calcGenrePercent,
-      getGenreAccent,
       formatDate,
       openMedia,
       openResolutionSearch,
+      openCastSearch,
       imgUrl,
       collapsedGroups,
+      isGroupCollapsed,
       toggleGroup,
+      isDecember,
+      isCurrentYearSelected,
+      isWrappedUnlocked,
+      daysUntilDecember,
+      yearCompletionPercent,
     };
   },
 };
@@ -10606,8 +12120,8 @@ const App = {
                   <span>Collections</span>
                 </div>
                 <div class="profile-dropdown-item" @click.stop="goStats" id="dd-stats">
-                  <i class="ph-bold ph-chart-bar" style="font-size:1.1rem;color:#f59e0b"></i>
-                  <span>Watch Stats</span>
+                  <i class="ph-bold ph-chart-polar" style="font-size:1.1rem;color:#f59e0b"></i>
+                  <span>Analytics & Wrapped</span>
                 </div>
                 <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="dd-settings">
                   <i class="ph-bold ph-gear-six" style="font-size:1.1rem;color:#94a3b8"></i>
@@ -11444,7 +12958,7 @@ const App = {
           { name: "Movies", path: "/browse?type=movie", id: "nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
           { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
           { name: "Playlists", path: "/playlists", id: "nav-playlists", isMatch: (r) => r.path.startsWith("/playlists") },
-          { name: "Stats", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
+          { name: "Analytics & Wrapped", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
           { name: "About", path: "/about", id: "nav-about", isMatch: (r) => r.path === "/about" },
         ];
       }
@@ -11454,7 +12968,7 @@ const App = {
         { name: "Series", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
         { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
         { name: "Playlists", path: "/playlists", id: "nav-playlists", isMatch: (r) => r.path.startsWith("/playlists") },
-        { name: "Stats", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
+        { name: "Analytics & Wrapped", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
         { name: "About", path: "/about", id: "nav-about", isMatch: (r) => r.path === "/about" },
       ];
     });
@@ -12789,5 +14303,6 @@ app.config.globalProperties.unlockAchievement = unlockAchievement;
 app.component("shortcuts-modal", ShortcutsModal);
 app.component("skip-timestamps-modal", SkipTimestampsModal);
 app.component("fix-match-modal", FixMatchModal);
+app.component("wrapped-story-modal", WrappedStoryModal);
 app.use(router);
 app.mount("#app");

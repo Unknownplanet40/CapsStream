@@ -28,7 +28,7 @@ def run_all_tests(pattern="test_*.py"):
 
     loader = unittest.TestLoader()
     tests_dir = os.path.join(BASE_DIR, "backend", "tests")
-    suite = loader.discover(start_dir=tests_dir, pattern=pattern)
+    suite = loader.discover(start_dir=tests_dir, pattern=pattern, top_level_dir=BASE_DIR)
 
     start_time = time.time()
     runner = unittest.TextTestRunner(verbosity=2)

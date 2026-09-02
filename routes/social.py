@@ -17,6 +17,16 @@ def api_get_profile_stats():
     return jsonify(stats)
 
 
+@social_bp.route("/api/analytics/wrapped", methods=["GET"])
+def api_get_wrapped_analytics():
+    pid = require_profile()
+    period = request.args.get("period", "year")
+    year = request.args.get("year")
+    from backend.db import get_profile_wrapped_analytics
+    data = get_profile_wrapped_analytics(pid, period=period, year=year)
+    return jsonify(data)
+
+
 @social_bp.route("/api/achievements/unlock", methods=["POST"])
 def api_unlock_custom_achievement():
     pid = require_profile()
