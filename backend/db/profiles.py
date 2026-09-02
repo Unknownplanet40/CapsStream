@@ -9,13 +9,22 @@ from .connection import get_conn
 
 def get_all_profiles():
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, name, avatar, color, theme, is_kids, is_admin, custom_avatar_url, "
-        "maturity_rating, blocked_genres, default_audio_lang, default_sub_lang, position, auto_lock_minutes, "
-        "daily_limit_minutes, bedtime_curfew, "
-        "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
-        "FROM profiles ORDER BY position ASC, id ASC"
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            "SELECT id, name, avatar, color, theme, is_kids, is_admin, custom_avatar_url, "
+            "maturity_rating, blocked_genres, default_audio_lang, default_sub_lang, position, auto_lock_minutes, "
+            "daily_limit_minutes, bedtime_curfew, COALESCE(has_completed_tour, 0) as has_completed_tour, "
+            "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
+            "FROM profiles ORDER BY position ASC, id ASC"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = conn.execute(
+            "SELECT id, name, avatar, color, theme, is_kids, is_admin, custom_avatar_url, "
+            "maturity_rating, blocked_genres, default_audio_lang, default_sub_lang, position, auto_lock_minutes, "
+            "daily_limit_minutes, bedtime_curfew, 0 as has_completed_tour, "
+            "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
+            "FROM profiles ORDER BY position ASC, id ASC"
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -31,7 +40,7 @@ def create_profile(name, pin_hash, avatar="ph-film-strip", color="#e50914", is_k
                    daily_limit_minutes=0, bedtime_curfew="", theme="crimson",
                    is_admin=False, custom_avatar_url="", maturity_rating="All",
                    blocked_genres="", default_audio_lang="", default_sub_lang="",
-                   position=0, auto_lock_minutes=0):
+                   position=0, auto_lock_minutes=0, has_completed_tour=0):
     conn = get_conn()
     count_row = conn.execute("SELECT COUNT(*) FROM profiles").fetchone()
     if count_row and count_row[0] == 0:
@@ -39,12 +48,13 @@ def create_profile(name, pin_hash, avatar="ph-film-strip", color="#e50914", is_k
 
     cur = conn.execute(
         "INSERT INTO profiles (name, pin_hash, avatar, color, is_kids, daily_limit_minutes, bedtime_curfew, theme, "
-        "is_admin, custom_avatar_url, maturity_rating, blocked_genres, default_audio_lang, default_sub_lang, position, auto_lock_minutes) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "is_admin, custom_avatar_url, maturity_rating, blocked_genres, default_audio_lang, default_sub_lang, position, auto_lock_minutes, has_completed_tour) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (name.strip(), pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0),
          str(bedtime_curfew or ''), str(theme or 'crimson'), 1 if is_admin else 0,
          str(custom_avatar_url or ''), str(maturity_rating or 'All'), str(blocked_genres or ''),
-         str(default_audio_lang or ''), str(default_sub_lang or ''), int(position or 0), int(auto_lock_minutes or 0))
+         str(default_audio_lang or ''), str(default_sub_lang or ''), int(position or 0), int(auto_lock_minutes or 0),
+         1 if has_completed_tour else 0)
     )
     conn.commit()
     pid = cur.lastrowid
@@ -56,7 +66,7 @@ def update_profile(profile_id, name, pin_hash=None, avatar="ph-film-strip", colo
                    update_pin=False, daily_limit_minutes=0, bedtime_curfew="", theme="crimson",
                    is_admin=None, custom_avatar_url=None, maturity_rating="All",
                    blocked_genres="", default_audio_lang="", default_sub_lang="",
-                   position=None, auto_lock_minutes=0):
+                   position=None, auto_lock_minutes=0, has_completed_tour=None):
     conn = get_conn()
     row = conn.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
     if not row:
@@ -67,6 +77,7 @@ def update_profile(profile_id, name, pin_hash=None, avatar="ph-film-strip", colo
     admin_val = 1 if is_admin else (0 if is_admin is not None else existing.get("is_admin", 0))
     custom_avatar = custom_avatar_url if custom_avatar_url is not None else existing.get("custom_avatar_url", "")
     pos_val = position if position is not None else existing.get("position", 0)
+    tour_val = 1 if has_completed_tour else (0 if has_completed_tour is not None else existing.get("has_completed_tour", 0))
 
     if is_kids:
         pin_hash = None
@@ -77,21 +88,21 @@ def update_profile(profile_id, name, pin_hash=None, avatar="ph-film-strip", colo
         conn.execute(
             "UPDATE profiles SET name=?, pin_hash=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, "
             "bedtime_curfew=?, theme=?, is_admin=?, custom_avatar_url=?, maturity_rating=?, blocked_genres=?, "
-            "default_audio_lang=?, default_sub_lang=?, position=?, auto_lock_minutes=? WHERE id=?",
+            "default_audio_lang=?, default_sub_lang=?, position=?, auto_lock_minutes=?, has_completed_tour=? WHERE id=?",
             (name, pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0),
              str(bedtime_curfew or ''), str(theme or 'crimson'), int(admin_val or 0), str(custom_avatar or ''),
              str(maturity_rating or 'All'), str(blocked_genres or ''), str(default_audio_lang or ''),
-             str(default_sub_lang or ''), int(pos_val or 0), int(auto_lock_minutes or 0), profile_id)
+             str(default_sub_lang or ''), int(pos_val or 0), int(auto_lock_minutes or 0), int(tour_val or 0), profile_id)
         )
     else:
         conn.execute(
             "UPDATE profiles SET name=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, "
             "bedtime_curfew=?, theme=?, is_admin=?, custom_avatar_url=?, maturity_rating=?, blocked_genres=?, "
-            "default_audio_lang=?, default_sub_lang=?, position=?, auto_lock_minutes=? WHERE id=?",
+            "default_audio_lang=?, default_sub_lang=?, position=?, auto_lock_minutes=?, has_completed_tour=? WHERE id=?",
             (name, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0),
              str(bedtime_curfew or ''), str(theme or 'crimson'), int(admin_val or 0), str(custom_avatar or ''),
              str(maturity_rating or 'All'), str(blocked_genres or ''), str(default_audio_lang or ''),
-             str(default_sub_lang or ''), int(pos_val or 0), int(auto_lock_minutes or 0), profile_id)
+             str(default_sub_lang or ''), int(pos_val or 0), int(auto_lock_minutes or 0), int(tour_val or 0), profile_id)
         )
     conn.commit()
     conn.close()

@@ -224,6 +224,9 @@ def init_db():
         if "auto_lock_minutes" not in pcols:
             conn.execute("ALTER TABLE profiles ADD COLUMN auto_lock_minutes INTEGER DEFAULT 0")
             print("[DB] Migrated: added auto_lock_minutes column to profiles")
+        if "has_completed_tour" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN has_completed_tour INTEGER DEFAULT 0")
+            print("[DB] Migrated: added has_completed_tour column to profiles")
 
         # Guarantee at least one admin profile exists if profiles exist
         conn.execute("""

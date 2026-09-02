@@ -82,6 +82,8 @@ def api_create_profile():
     default_audio_lang = str(data.get("default_audio_lang", "") or "").strip()
     default_sub_lang = str(data.get("default_sub_lang", "") or "").strip()
     auto_lock_minutes = int(data.get("auto_lock_minutes", 0) or 0)
+    has_completed_tour = data.get("has_completed_tour")
+    has_completed_tour_flag = 1 if has_completed_tour else (0 if has_completed_tour is not None else 0)
 
     if not name:
         return jsonify({"error": "Name is required"}), 400
@@ -98,7 +100,8 @@ def api_create_profile():
         theme=theme, is_admin=is_admin_flag, custom_avatar_url=custom_avatar_url,
         maturity_rating=maturity_rating, blocked_genres=blocked_genres,
         default_audio_lang=default_audio_lang, default_sub_lang=default_sub_lang,
-        position=len(all_prof), auto_lock_minutes=auto_lock_minutes
+        position=len(all_prof), auto_lock_minutes=auto_lock_minutes,
+        has_completed_tour=has_completed_tour_flag
     )
     if is_kids:
         active_pid = current_profile()
@@ -114,7 +117,7 @@ def api_create_profile():
         "maturity_rating": maturity_rating, "blocked_genres": blocked_genres,
         "default_audio_lang": default_audio_lang, "default_sub_lang": default_sub_lang,
         "daily_limit_minutes": daily_limit_minutes, "bedtime_curfew": bedtime_curfew,
-        "auto_lock_minutes": auto_lock_minutes
+        "auto_lock_minutes": auto_lock_minutes, "has_completed_tour": has_completed_tour_flag
     }), 201
 
 
@@ -139,6 +142,7 @@ def api_update_profile(profile_id):
     default_audio_lang = str(data.get("default_audio_lang", "") or "").strip()
     default_sub_lang = str(data.get("default_sub_lang", "") or "").strip()
     auto_lock_minutes = int(data.get("auto_lock_minutes", 0) or 0)
+    has_completed_tour = data.get("has_completed_tour")
     update_pin = bool(data.get("update_pin", False))
 
     if not is_admin():
@@ -171,7 +175,8 @@ def api_update_profile(profile_id):
         bedtime_curfew=bedtime_curfew, theme=theme, is_admin=is_admin_flag,
         custom_avatar_url=custom_avatar_url, maturity_rating=maturity_rating,
         blocked_genres=blocked_genres, default_audio_lang=default_audio_lang,
-        default_sub_lang=default_sub_lang, auto_lock_minutes=auto_lock_minutes
+        default_sub_lang=default_sub_lang, auto_lock_minutes=auto_lock_minutes,
+        has_completed_tour=has_completed_tour
     )
 
     if update_pin:

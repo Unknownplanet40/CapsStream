@@ -8,6 +8,7 @@ from unittest.mock import patch, MagicMock
 from flask import Flask, session
 from werkzeug.exceptions import HTTPException
 
+from backend.tests import create_isolated_test_db
 from backend.routes.middleware import (
     record_pin_failure,
     clear_pin_failures,
@@ -23,6 +24,7 @@ from backend.routes.middleware import (
 
 class TestMiddleware(unittest.TestCase):
     def setUp(self):
+        self.db_path, self.cleanup_db = create_isolated_test_db()
         self.app = Flask(__name__)
         self.app.secret_key = "test_secret"
         clear_pin_failures(1)
@@ -31,6 +33,7 @@ class TestMiddleware(unittest.TestCase):
     def tearDown(self):
         clear_pin_failures(1)
         clear_pin_failures(2)
+        self.cleanup_db()
 
     def test_pin_brute_force_lockout(self):
         """Verify 5 failed attempts trigger a lockout window."""

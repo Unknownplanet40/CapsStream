@@ -95,7 +95,7 @@ def get_conn():
         return conn
 
 
-def release_conn():
+def release_conn(exc=None):
     """
     Commit and close the per-request connection stored in Flask g, if any.
     Called automatically by the teardown hook registered in app.py.

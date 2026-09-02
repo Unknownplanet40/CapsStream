@@ -122,6 +122,8 @@ const store = reactive({
   updateInfo: null,      // set when an update is available
   pendingScanAfterCacheCleared: false, // triggers auto-scan when returning home after cache clear
   pendingUpdateCheck: false,           // triggers auto-check for updates when Settings opens from the banner
+  onboardingWaiting: false,            // triggers preparation overlay on first-run setup
+  tourActive: false,                   // true when Driver.js tour is running
   sleepTimerMinutes: 0,
   sleepTimerEndsAt: null,
   bedtimeActive: false,
@@ -902,6 +904,109 @@ function trackPlayerFeature(feature) {
 
 window.unlockAchievement = unlockAchievement;
 window.trackPlayerFeature = trackPlayerFeature;
+
+// ─── Interactive Product Tour (Driver.js) ─────────────────────
+
+function markTourCompleted() {
+  if (store.profile?.id) {
+    try {
+      localStorage.setItem("cs_tour_completed_" + store.profile.id, "true");
+    } catch (e) {}
+    store.profile.has_completed_tour = 1;
+    API.put(`/api/profiles/${store.profile.id}`, {
+      ...store.profile,
+      has_completed_tour: 1,
+    }).catch((err) => console.warn("[Tour] Failed to persist tour completion:", err));
+  }
+}
+
+function startOnboardingTour(force = false) {
+  if (!force && store.profile?.has_completed_tour) return;
+  if (!force && store.profile?.id && localStorage.getItem("cs_tour_completed_" + store.profile.id)) return;
+
+  const driverFn =
+    (window.driver?.js && typeof window.driver.js.driver === "function" ? window.driver.js.driver : null) ||
+    (window.driver && typeof window.driver.driver === "function" ? window.driver.driver : null) ||
+    (typeof window.driver === "function" ? window.driver : null);
+  if (typeof driverFn !== "function") {
+    console.warn("[Tour] Driver.js is not loaded.");
+    return;
+  }
+
+  store.tourActive = true;
+
+  const driverObj = driverFn({
+    showProgress: true,
+    animate: true,
+    allowClose: true,
+    overlayColor: "rgba(0, 0, 0, 0.84)",
+    popoverClass: "caps-tour-popover",
+    nextBtnText: "Next →",
+    prevBtnText: "← Back",
+    doneBtnText: "Start Exploring 🚀",
+    progressText: "{{current}} of {{total}}",
+    steps: [
+      {
+        element: "#nav-logo",
+        popover: {
+          title: "🍿 Welcome to CapsStream!",
+          description: "Your self-hosted personal streaming cinema. Stream movies, TV series, and anime with TMDb metadata, multi-audio tracks, and smart subtitles.",
+          side: "bottom",
+          align: "start",
+        },
+      },
+      {
+        element: ".nav-links",
+        popover: {
+          title: "🧭 Library Navigation",
+          description: "Effortlessly jump between Movies, TV Series, Anime, Watchlist, Playlists, Collections, and Watch Stats.",
+          side: "bottom",
+          align: "center",
+        },
+      },
+      {
+        element: "#nav-search",
+        popover: {
+          title: "🔍 Instant Search & Filters",
+          description: "Search titles across your entire catalog, filter by genres, sort by ratings or release year, and discover hidden gems.",
+          side: "bottom",
+          align: "center",
+        },
+      },
+      {
+        element: "#nav-profile",
+        popover: {
+          title: "👤 Profile Menu & Quick Actions",
+          description: "Switch profiles, customize interface themes, manage watchlists, view Wrapped analytics, or access full server Settings.",
+          side: "bottom",
+          align: "end",
+        },
+      },
+      {
+        element: "#nav-scan",
+        popover: {
+          title: "⚡ Refresh & Sync Library",
+          description: "Whenever you add new video files to your media folders, click here to trigger a fast background scan and fetch new metadata.",
+          side: "bottom",
+          align: "end",
+        },
+      },
+    ],
+    onDestroyStarted: () => {
+      store.tourActive = false;
+      markTourCompleted();
+      driverObj.destroy();
+    },
+    onDestroyed: () => {
+      store.tourActive = false;
+    },
+  });
+
+  driverObj.drive();
+}
+
+window.startOnboardingTour = startOnboardingTour;
+window.markTourCompleted = markTourCompleted;
 
 function imgUrl(path, size = "original") {
   if (!path) return null;
@@ -2465,7 +2570,27 @@ const HomePage = {
       }
     }
 
-    onMounted(loadHome);
+    async function checkOnboardingTrigger() {
+      if (sessionStorage.getItem("cs_pending_onboarding") === "true") {
+        store.onboardingWaiting = true;
+        const scanStarted = await startLibraryScan(true);
+        if (!scanStarted && !store.scanRunning) {
+          // If scan cannot be started or completed immediately (e.g. empty library)
+          store.onboardingWaiting = false;
+          sessionStorage.removeItem("cs_pending_onboarding");
+          setTimeout(() => {
+            if (typeof window.startOnboardingTour === "function") {
+              window.startOnboardingTour();
+            }
+          }, 450);
+        }
+      }
+    }
+
+    onMounted(() => {
+      loadHome();
+      checkOnboardingTrigger();
+    });
 
     const route = VueRouter.useRoute();
     watch(
@@ -2473,6 +2598,7 @@ const HomePage = {
       (newPath) => {
         if (newPath === "/") {
           loadHome();
+          checkOnboardingTrigger();
           // If the user just cleared the cache, kick off a fresh scan automatically
           if (store.pendingScanAfterCacheCleared) {
             store.pendingScanAfterCacheCleared = false;
@@ -2487,6 +2613,7 @@ const HomePage = {
       (newProfile) => {
         if (newProfile) {
           loadHome();
+          checkOnboardingTrigger();
         }
       },
     );
@@ -2496,6 +2623,15 @@ const HomePage = {
       (running, prev) => {
         if (!running && prev === true) {
           loadHome();
+          if (store.onboardingWaiting) {
+            store.onboardingWaiting = false;
+            sessionStorage.removeItem("cs_pending_onboarding");
+            setTimeout(() => {
+              if (typeof window.startOnboardingTour === "function") {
+                window.startOnboardingTour();
+              }
+            }, 600);
+          }
         }
       },
     );
@@ -3636,6 +3772,25 @@ const SettingsPage = {
                   <div class="theme-card-desc">{{ t.desc }}</div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Interactive Tour & Help -->
+        <div class="settings-section" id="settings-tour-section">
+          <div class="settings-section-title">
+            <i class="ph ph-compass" style="color:var(--accent)"></i>
+            <span>Interactive Onboarding & Guide</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Replay Product Tour</div>
+                <div class="settings-desc">Take a guided walkthrough of CapsStream's core interface, features, playlists, and settings.</div>
+              </div>
+              <button class="btn btn-secondary btn-sm" @click="replayTour" id="btn-replay-tour">
+                <i class="ph ph-play-circle" style="margin-right:6px"></i> Start Tour
+              </button>
             </div>
           </div>
         </div>
@@ -5558,6 +5713,15 @@ const SettingsPage = {
       applyTheme(themeId, true);
     }
 
+    function replayTour() {
+      router.push("/");
+      setTimeout(() => {
+        if (typeof window.startOnboardingTour === "function") {
+          window.startOnboardingTour(true);
+        }
+      }, 350);
+    }
+
     // ─── Server Shutdown & Power Management ─────────────────────
     const showShutdownModal = ref(false);
     const isShuttingDown = ref(false);
@@ -5676,6 +5840,7 @@ const SettingsPage = {
       THEME_PRESETS,
       currentTheme,
       selectTheme,
+      replayTour,
       kidsProfiles,
       kidsOverrides,
       loadKidsOverrides,
@@ -8629,6 +8794,7 @@ const SetupPage = {
         });
 
         store.profile = authRes.profile || created;
+        sessionStorage.setItem("cs_pending_onboarding", "true");
         addToast(`Welcome, ${created.name}!`, "success");
 
         // Navigate to home
@@ -12372,54 +12538,55 @@ const App = {
         </div>
       </nav>
 
-      <!-- Update-available banner (Admin only) -->
-      <transition name="fade">
-        <div
-          class="update-banner"
-          v-if="store.updateInfo?.status === 'available' && !updateBannerDismissed && showNav && (store.profile?.is_admin || !store.profile)"
-        >
-          <i class="ph ph-arrow-circle-up"></i>
-          <span>
-            Update available (v{{ store.updateInfo.latest }}) —
-            <a href="#" @click.prevent="store.pendingUpdateCheck = true; router.push('/settings'); updateBannerDismissed = true">go to Settings to install</a>
-          </span>
-          <button class="update-banner-dismiss" @click="updateBannerDismissed = true" title="Dismiss">
-            <i class="ph ph-x"></i>
-          </button>
-        </div>
-      </transition>
+      <!-- Global Notification Banners Container -->
+      <div class="banners-container" v-if="showNav">
+        <!-- Update-available banner (Admin only) -->
+        <transition name="fade">
+          <div
+            class="update-banner update-available-banner"
+            v-if="store.updateInfo?.status === 'available' && !updateBannerDismissed && (store.profile?.is_admin || !store.profile)"
+          >
+            <i class="ph ph-arrow-circle-up"></i>
+            <span>
+              Update available (v{{ store.updateInfo.latest }}) —
+              <a href="#" @click.prevent="store.pendingUpdateCheck = true; router.push('/settings'); updateBannerDismissed = true">go to Settings to install</a>
+            </span>
+            <button class="update-banner-dismiss" @click="updateBannerDismissed = true" title="Dismiss">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+        </transition>
 
-      <!-- Remote exposed warning banner (Admin only) -->
-      <transition name="fade">
-        <div
-          class="update-banner"
-          style="background:linear-gradient(90deg,#7a1f1f,#a12b2b)"
-          v-if="store.sysInfo?.remote_exposed && !remoteBannerDismissed && showNav && (store.profile?.is_admin || !store.profile)"
-        >
-          <i class="ph ph-warning"></i>
-          <span>
-            The server is reachable from your network without authentication —
-            set host to 127.0.0.1 in config.json if this is unintentional.
-          </span>
-          <button class="update-banner-dismiss" @click="remoteBannerDismissed = true" title="Dismiss">
-            <i class="ph ph-x"></i>
-          </button>
-        </div>
-      </transition>
+        <!-- Remote exposed warning banner (Admin only) -->
+        <transition name="fade">
+          <div
+            class="update-banner warning-banner"
+            v-if="store.sysInfo?.remote_exposed && !remoteBannerDismissed && (store.profile?.is_admin || !store.profile)"
+          >
+            <i class="ph ph-warning"></i>
+            <span>
+              The server is reachable from your network without authentication —
+              set host to 127.0.0.1 in config.json if this is unintentional.
+            </span>
+            <button class="update-banner-dismiss" @click="remoteBannerDismissed = true" title="Dismiss">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+        </transition>
 
-      <!-- Global Server Offline / Disconnected Banner -->
-      <transition name="fade">
-        <div
-          class="update-banner"
-          style="background: linear-gradient(90deg, #7a1f1f, #a12b2b); z-index: 1000000; position: sticky; top: 0;"
-          v-if="store.serverOnline === false && showNav"
-        >
-          <i class="ph-fill ph-warning-octagon"></i>
-          <span>
-            <strong>Server Offline</strong> — CapsStream backend is unreachable. Reconnecting automatically...
-          </span>
-        </div>
-      </transition>
+        <!-- Global Server Offline / Disconnected Banner -->
+        <transition name="fade">
+          <div
+            class="update-banner offline-banner"
+            v-if="store.serverOnline === false"
+          >
+            <i class="ph-fill ph-warning-octagon"></i>
+            <span>
+              <strong>Server Offline</strong> — CapsStream backend is unreachable. Reconnecting automatically...
+            </span>
+          </div>
+        </transition>
+      </div>
 
       <!-- Main content -->
       <main :style="{ paddingTop: showNav && isPlayerRoute && isDetailRoute ? 'var(--nav-height)' : '0' }">
@@ -12503,6 +12670,41 @@ const App = {
 
       <!-- Bottom-Left Floating Scan Progress Widget -->
       <scan-progress-widget />
+
+      <!-- Onboarding Preparation Overlay (First Run Setup) -->
+      <div class="onboarding-overlay" v-if="store.onboardingWaiting">
+        <div class="onboarding-card">
+          <div class="onboarding-brand-icon">
+            <img src="/static/img/favicon.png" alt="CapsStream" />
+          </div>
+          <h2 class="onboarding-title">Setting Up Your Cinema</h2>
+          <p class="onboarding-desc">
+            Please wait while CapsStream scans your media folders and matches rich artwork and metadata from TMDb.
+          </p>
+
+          <div class="onboarding-progress-wrap">
+            <div class="onboarding-progress-track">
+              <div
+                class="onboarding-progress-bar"
+                :class="{ indeterminate: store.scanRunning && !store.scanPercent }"
+                :style="{ width: store.scanRunning ? (store.scanPercent || 5) + '%' : '100%' }"
+              ></div>
+            </div>
+
+            <div class="onboarding-status-row">
+              <div class="onboarding-phase-badge">
+                <i :class="store.scanRunning ? 'ph-bold ph-spinner ph-spin' : 'ph-bold ph-check-circle'"></i>
+                <span>{{ onboardingPhaseText }}</span>
+              </div>
+              <span>{{ store.scanPercent || 0 }}%</span>
+            </div>
+          </div>
+
+          <button class="onboarding-skip-btn" @click="skipOnboardingWaiting" id="onboarding-skip-btn">
+            Skip Waiting & Explore →
+          </button>
+        </div>
+      </div>
 
       <!-- Bedtime Celebration Overlay -->
       <div v-if="store.bedtimeActive" class="bedtime-overlay" @click.stop>
@@ -12947,6 +13149,29 @@ const App = {
 
     function scrollToTop() {
       window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    const onboardingPhaseText = computed(() => {
+      if (store.scanPhase === "scanning") {
+        return `Scanning files (${store.scanCount || 0}${store.scanTotal ? " / " + store.scanTotal : ""})...`;
+      }
+      if (store.scanPhase === "matching") {
+        return `Matching metadata (${store.scanMatched || 0} matched)...`;
+      }
+      if (store.scanRunning) {
+        return "Preparing library...";
+      }
+      return "Ready to Stream!";
+    });
+
+    function skipOnboardingWaiting() {
+      store.onboardingWaiting = false;
+      sessionStorage.removeItem("cs_pending_onboarding");
+      setTimeout(() => {
+        if (typeof window.startOnboardingTour === "function") {
+          window.startOnboardingTour();
+        }
+      }, 300);
     }
 
     // Profile presence heartbeat watchdog & session eviction detection
@@ -13890,6 +14115,8 @@ const App = {
       showBackToTop,
       scrollToTop,
       isPlayerRoute,
+      onboardingPhaseText,
+      skipOnboardingWaiting,
     };
   },
 };

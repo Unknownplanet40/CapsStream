@@ -325,4 +325,5 @@ def sanitize_profile(profile):
         "daily_limit_minutes": int(profile.get("daily_limit_minutes", 0) or 0),
         "bedtime_curfew": str(profile.get("bedtime_curfew", "") or ""),
         "has_pin": bool(profile.get("pin_hash")),
+        "has_completed_tour": bool(profile.get("has_completed_tour", 0)),
     }
