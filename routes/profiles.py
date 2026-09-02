@@ -105,6 +105,9 @@ def api_create_profile():
         if active_pid:
             from backend.db import unlock_achievement
             unlock_achievement(active_pid, "kids_creator")
+    created_prof = get_profile(pid)
+    if created_prof:
+        return jsonify(sanitize_profile(created_prof)), 201
     return jsonify({
         "id": pid, "name": name, "avatar": avatar, "color": color, "theme": theme,
         "is_kids": is_kids, "is_admin": is_admin_flag, "custom_avatar_url": custom_avatar_url,
@@ -113,6 +116,7 @@ def api_create_profile():
         "daily_limit_minutes": daily_limit_minutes, "bedtime_curfew": bedtime_curfew,
         "auto_lock_minutes": auto_lock_minutes
     }), 201
+
 
 
 @profiles_bp.route("/api/profiles/<int:profile_id>", methods=["PUT"])

@@ -681,11 +681,61 @@ def reset_application(clear_media_files=False):
     config["library"] = dict(DEFAULT_CONFIG.get("library", {}))
     save_config(config)
 
-    # Delete database file
+    # Clear custom avatars
+    avatars_dir = os.path.join(ROOT_DIR, "data", "avatars")
+    if os.path.isdir(avatars_dir):
+        for root, dirs, files in os.walk(avatars_dir):
+            for f in files:
+                try:
+                    os.remove(os.path.join(root, f))
+                except Exception:
+                    pass
+
+    # Clear state files
+    for state_file in ["pin_fails.json", "library_state.json", "scan_schedule.json"]:
+        p = os.path.join(ROOT_DIR, "data", state_file)
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+
+    # Thoroughly wipe all database tables (works even if database file is locked by open connections)
+    try:
+        from backend.db import get_conn
+        conn = get_conn()
+        conn.execute("PRAGMA foreign_keys = OFF")
+        tables = [
+            "watch_progress", "collection_items", "collections", "favorites",
+            "achievements", "kids_overrides", "playlist_items", "playlists",
+            "media", "profiles"
+        ]
+        for t in tables:
+            try:
+                conn.execute(f"DELETE FROM {t}")
+            except Exception:
+                pass
+        try:
+            conn.execute("DELETE FROM sqlite_sequence")
+        except Exception:
+            pass
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.commit()
+        try:
+            conn.execute("VACUUM")
+        except Exception:
+            pass
+    except Exception as e:
+        print("[Settings] Database reset table wipe notice:", e)
+
+    # Attempt database file removal if not locked
     db_path = os.path.join(ROOT_DIR, "data", "capsstream.db")
     if os.path.exists(db_path):
         try:
             os.remove(db_path)
+            for extra in [db_path + "-wal", db_path + "-shm"]:
+                if os.path.exists(extra):
+                    os.remove(extra)
         except Exception:
             pass
 
@@ -704,5 +754,6 @@ def reset_application(clear_media_files=False):
     from backend.db import init_db
     init_db()
     return True
+
 
 

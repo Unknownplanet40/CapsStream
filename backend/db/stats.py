@@ -433,14 +433,32 @@ def get_profile_wrapped_analytics(profile_id, period="year", year=None):
     most_episodes_in_day = ep_day_rows["ep_count"] if ep_day_rows else 0
 
     # 4. Hourly Viewing Matrix & Day-of-Week
-    hourly_rows = conn.execute(f"""
-        SELECT strftime('%H', wp.updated_at) as hr, SUM(wp.position) as sec, COUNT(*) as cnt
-        FROM watch_progress wp
-        WHERE wp.profile_id=? {date_filter} AND wp.updated_at IS NOT NULL
-        GROUP BY hr
-    """, [profile_id] + date_params).fetchall()
+    hourly_dict = {h: {"seconds": 0, "count": 0} for h in range(24)}
+    dow_dict = {d: {"seconds": 0, "count": 0} for d in range(7)}  # 0=Mon, 1=Tue, ..., 6=Sun
 
-    hourly_dict = {int(r["hr"]): {"seconds": r["sec"] or 0, "count": r["cnt"] or 0} for r in hourly_rows if r["hr"] is not None}
+    for r in rows:
+        pos = r["position"] or 0
+        u_at = r["updated_at"]
+        if not u_at or pos <= 0:
+            continue
+        dt_obj = None
+        try:
+            clean_ts = str(u_at).replace("T", " ").split(".")[0].replace("Z", "")
+            dt_obj = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            try:
+                dt_obj = datetime.strptime(str(u_at)[:10], "%Y-%m-%d")
+            except Exception:
+                pass
+
+        if dt_obj:
+            h = dt_obj.hour
+            dow = dt_obj.weekday()  # 0=Monday, 6=Sunday
+            hourly_dict[h]["seconds"] += pos
+            hourly_dict[h]["count"] += 1
+            dow_dict[dow]["seconds"] += pos
+            dow_dict[dow]["count"] += 1
+
     hourly_distribution = []
     for h in range(24):
         h_data = hourly_dict.get(h, {"seconds": 0, "count": 0})
@@ -460,34 +478,43 @@ def get_profile_wrapped_analytics(profile_id, period="year", year=None):
     evening_sec = sum(hourly_dict.get(h, {}).get("seconds", 0) for h in range(18, 24))
     late_night_sec = sum(hourly_dict.get(h, {}).get("seconds", 0) for h in range(0, 6))
 
-    dow_rows = conn.execute(f"""
-        SELECT strftime('%w', wp.updated_at) as dow, SUM(wp.position) as sec, COUNT(*) as cnt
-        FROM watch_progress wp
-        WHERE wp.profile_id=? {date_filter} AND wp.updated_at IS NOT NULL
-        GROUP BY dow
-    """, [profile_id] + date_params).fetchall()
-    dow_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-    dow_dict = {int(r["dow"]): {"seconds": r["sec"] or 0, "count": r["cnt"] or 0} for r in dow_rows if r["dow"] is not None}
+    dow_names = [
+        {"dow": 0, "short": "Mon", "name": "Monday", "is_weekend": False},
+        {"dow": 1, "short": "Tue", "name": "Tuesday", "is_weekend": False},
+        {"dow": 2, "short": "Wed", "name": "Wednesday", "is_weekend": False},
+        {"dow": 3, "short": "Thu", "name": "Thursday", "is_weekend": False},
+        {"dow": 4, "short": "Fri", "name": "Friday", "is_weekend": False},
+        {"dow": 5, "short": "Sat", "name": "Saturday", "is_weekend": True},
+        {"dow": 6, "short": "Sun", "name": "Sunday", "is_weekend": True},
+    ]
+    weekday_sec = sum(dow_dict[d]["seconds"] for d in (0, 1, 2, 3, 4))
+    weekend_sec = sum(dow_dict[d]["seconds"] for d in (5, 6))
+    total_dow_sec = weekday_sec + weekend_sec
+
+    if total_dow_sec > 0:
+        weekday_pct = round((weekday_sec / total_dow_sec) * 100, 1)
+        weekend_pct = round(100.0 - weekday_pct, 1)
+    else:
+        weekday_pct = 50.0
+        weekend_pct = 50.0
+
     dow_distribution = []
-    weekday_sec = 0
-    weekend_sec = 0
-    for idx, name in enumerate(dow_names):
-        d_data = dow_dict.get(idx, {"seconds": 0, "count": 0})
+    for d_meta in dow_names:
+        d_idx = d_meta["dow"]
+        d_data = dow_dict[d_idx]
+        d_sec = d_data["seconds"]
+        pct = round((d_sec / total_dow_sec) * 100, 1) if total_dow_sec > 0 else 0
         dow_distribution.append({
-            "dow": idx,
-            "name": name,
-            "seconds": d_data["seconds"],
-            "minutes": round(d_data["seconds"] / 60, 1),
+            "dow": d_idx,
+            "short": d_meta["short"],
+            "name": d_meta["name"],
+            "is_weekend": d_meta["is_weekend"],
+            "seconds": d_sec,
+            "minutes": round(d_sec / 60, 1),
+            "hours": round(d_sec / 3600, 1),
+            "percent": pct,
             "count": d_data["count"]
         })
-        if idx in (0, 6):
-            weekend_sec += d_data["seconds"]
-        else:
-            weekday_sec += d_data["seconds"]
-
-    total_dow_sec = max(1, weekday_sec + weekend_sec)
-    weekday_pct = round((weekday_sec / total_dow_sec) * 100, 1)
-    weekend_pct = round((weekend_sec / total_dow_sec) * 100, 1)
 
     # 5. Type Breakdown
     type_counts = {"movie": {"count": 0, "seconds": 0, "hours": 0}, "series": {"count": 0, "seconds": 0, "hours": 0}, "anime": {"count": 0, "seconds": 0, "hours": 0}}
@@ -904,6 +931,8 @@ def get_profile_wrapped_analytics(profile_id, period="year", year=None):
             "day_of_week": dow_distribution,
             "weekday_pct": weekday_pct,
             "weekend_pct": weekend_pct,
+            "weekday_hours": round(weekday_sec / 3600, 1),
+            "weekend_hours": round(weekend_sec / 3600, 1),
             "time_windows": {
                 "morning_hours": round(morning_sec / 3600, 1),
                 "afternoon_hours": round(afternoon_sec / 3600, 1),

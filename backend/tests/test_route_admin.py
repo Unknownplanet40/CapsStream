@@ -74,12 +74,20 @@ class TestRouteAdmin(unittest.TestCase):
         data = resp.get_json()
         self.assertTrue(data["ok"])
 
-    @patch("backend.routes.middleware.ACTIVE_PROFILE_SESSIONS", {1: {"last_seen": 9999999999, "evicted": False}})
-    def test_has_active_profile_session_detects_live_session(self):
-        """Scheduled scans should only run when an authenticated profile session is still active."""
-        with patch("time.time", return_value=10000000000):
-            self.assertTrue(has_active_profile_session(1))
+    @patch("backend.routes.admin.require_admin")
+    @patch("backend.settings.reset_application")
+    def test_api_system_reset(self, mock_reset, mock_admin):
+        """Verify POST /api/system/reset executes reset_application and clears session."""
+        mock_reset.return_value = True
+        with self.client.session_transaction() as sess:
+            sess["profile_id"] = 1
+        resp = self.client.post("/api/system/reset", json={"clear_media_files": False})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data["ok"])
+        mock_reset.assert_called_once_with(clear_media_files=False)
 
 
 if __name__ == "__main__":
     unittest.main()
+

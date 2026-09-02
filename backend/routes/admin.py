@@ -103,7 +103,14 @@ def api_system_reset():
     from backend.settings import reset_application
     reset_application(clear_media_files=clear_media)
     session.clear()
+    try:
+        from backend.routes.profiles import ACTIVE_PROFILE_SESSIONS, ACTIVE_PROFILE_LOCK
+        with ACTIVE_PROFILE_LOCK:
+            ACTIVE_PROFILE_SESSIONS.clear()
+    except Exception:
+        pass
     return jsonify({"ok": True, "message": "Application reset complete"})
+
 
 
 # ─── System Shutdown / Restart ────────────────────────────────────────────────

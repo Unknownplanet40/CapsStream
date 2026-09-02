@@ -515,6 +515,16 @@ const THEME_PRESETS = [
     border: "rgba(244, 63, 94, 0.35)",
     icon: "ph-sun-horizon",
   },
+  {
+    id: "win11",
+    name: "Windows 11 Fluent",
+    desc: "Acrylic Mica surfaces with the signature Windows 11 cyan-blue accent, frosted glass cards, and Fluent soft rounding.",
+    accent: "#4cc2ff",
+    secondary: "#75f1ff",
+    bg: "#1c1c1c",
+    border: "rgba(76, 194, 255, 0.28)",
+    icon: "ph-squares-four",
+  },
 ];
 
 function applyTheme(themeKey, persist = false) {
@@ -1556,7 +1566,7 @@ const ContentRow = {
           {{ row.title }}
         </div>
         <div style="display:flex;align-items:center;gap:10px">
-          <span class="continue-watching-count">{{ (row.items || []).length }} titles</span>
+          <span class="continue-watching-count">{{ deduplicatedItems.length }} titles</span>
           <div class="row-header-controls">
             <button class="row-control-btn" :disabled="!canScrollLeft" @click="scrollLeft" title="Scroll Left" id="cw-row-prev-btn">
               <i class="ph ph-caret-left"></i>
@@ -1588,7 +1598,7 @@ const ContentRow = {
         <div class="cards-scroller" ref="scrollerRef" @scroll="onRowScroll">
           <media-card
             v-for="item in visibleItems"
-            :key="item.id || item.tmdb_id"
+            :key="getItemKey(item)"
             :item="item"
             :is-continue="row?.type === 'continue'"
             @click="$emit('card-click', item, row)"
@@ -1603,11 +1613,60 @@ const ContentRow = {
     const canScrollLeft = ref(false);
     const canScrollRight = ref(true);
 
-    // Progressive rendering: very long rows (big libraries) mount cards in
-    // chunks as the user scrolls instead of building the whole DOM at once.
+    function getMediaDedupKey(item, rowType) {
+      if (!item) return null;
+      const type = (item.type || "movie").toLowerCase();
+      
+      // Series/anime: deduplicate by show so multiple episodes or versions don't duplicate the card in a single row
+      if (type === "series" || type === "anime") {
+        if (item.tmdb_id) return `${type}:tmdb:${item.tmdb_id}`;
+        const title = (item.title || "").toLowerCase().trim();
+        if (title) return `${type}:title:${title}`;
+      }
+
+      // Movies & other media items:
+      if (item.tmdb_id) {
+        return `${type}:tmdb:${item.tmdb_id}`;
+      }
+      if (item.id) {
+        return `id:${item.id}`;
+      }
+      const title = (item.title || "").toLowerCase().trim();
+      const year = item.year || "";
+      if (title) {
+        return `${type}:${title}:${year}`;
+      }
+      return null;
+    }
+
+    const deduplicatedItems = computed(() => {
+      const raw = props.row?.items || [];
+      if (!Array.isArray(raw)) return [];
+      const seen = new Set();
+      const result = [];
+      const rowType = props.row?.type;
+
+      for (const item of raw) {
+        if (!item) continue;
+        const key = getMediaDedupKey(item, rowType);
+        if (key) {
+          if (seen.has(key)) continue;
+          seen.add(key);
+        }
+        result.push(item);
+      }
+      return result;
+    });
+
+    function getItemKey(item) {
+      if (!item) return Math.random();
+      return item.id ? `media-${item.id}` : (item.tmdb_id ? `tmdb-${item.type || 'item'}-${item.tmdb_id}` : `title-${item.title}`);
+    }
+
+    // Progressive rendering: very long rows mount cards in chunks
     const renderCount = ref(24);
-    const totalItems = computed(() => (props.row?.items || []).length);
-    const visibleItems = computed(() => (props.row?.items || []).slice(0, renderCount.value));
+    const totalItems = computed(() => deduplicatedItems.value.length);
+    const visibleItems = computed(() => deduplicatedItems.value.slice(0, renderCount.value));
 
     function maybeRenderMore() {
       if (renderCount.value < totalItems.value && scrollerRef.value) {
@@ -1648,7 +1707,26 @@ const ContentRow = {
       });
     });
 
-    return { scrollerRef, canScrollLeft, canScrollRight, visibleItems, onRowScroll, scrollLeft, scrollRight };
+    watch(
+      () => props.row?.items,
+      () => {
+        renderCount.value = 24;
+        nextTick(checkScroll);
+      },
+      { deep: true }
+    );
+
+    return {
+      scrollerRef,
+      canScrollLeft,
+      canScrollRight,
+      deduplicatedItems,
+      visibleItems,
+      getItemKey,
+      onRowScroll,
+      scrollLeft,
+      scrollRight,
+    };
   },
 };
 
@@ -5278,10 +5356,14 @@ const SettingsPage = {
       try {
         await API.post("/api/system/reset", { clear_media_files: clearMediaFiles.value });
         store.profile = null;
-        addToast("Unlinked external paths & reset complete! Restarting...", "success");
+        if (typeof _API_CACHE !== "undefined" && _API_CACHE && _API_CACHE.clear) {
+          _API_CACHE.clear();
+        }
+        addToast("Reset complete! Redirecting to setup...", "success");
         setTimeout(() => {
+          window.location.href = "/#/setup";
           window.location.reload();
-        }, 1200);
+        }, 1000);
       } catch (e) {
         addToast("Failed to reset application", "error");
       } finally {
@@ -8394,14 +8476,36 @@ const ProfilesPage = {
 const SetupPage = {
   template: `
     <div class="setup-container">
-      <div class="setup-card">
+      <div class="setup-card" style="max-width:540px">
         <div class="setup-header">
-          <div class="setup-logo">
-            <img src="/static/img/favicon.png" alt="CapsStream" style="height:32px;width:32px;vertical-align:middle;margin-right:8px;display:inline-block">
+          <div class="setup-logo" style="display:flex;align-items:center;justify-content:center;gap:10px">
+            <img src="/static/img/favicon.png" alt="CapsStream" style="height:36px;width:36px;display:inline-block">
             <span>CapsStream</span>
           </div>
           <h1 class="setup-title">Welcome to CapsStream</h1>
-          <p class="setup-subtitle">Create your primary profile to set up your media streaming library</p>
+          <p class="setup-subtitle">Create your primary administrator profile to set up your personal media streaming server.</p>
+        </div>
+
+        <!-- Live Profile Preview Card -->
+        <div style="display:flex;flex-direction:column;align-items:center;margin-bottom:1.75rem;padding:1.25rem;background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);border-radius:var(--radius-lg)">
+          <div
+            style="width:96px;height:96px;border-radius:var(--radius-lg);display:flex;align-items:center;justify-content:center;transition:all var(--transition-normal);box-shadow:0 8px 24px rgba(0,0,0,0.4)"
+            :style="{
+              background: color ? color + '33' : 'rgba(229,9,20,0.2)',
+              border: '3px solid ' + (color || 'var(--accent)')
+            }"
+          >
+            <i v-if="avatar && avatar.startsWith('ph-')" :class="'ph-bold ' + avatar" :style="{ color: color || 'var(--accent)', fontSize: '3rem' }"></i>
+            <span v-else style="font-size:3rem">{{ avatar || '🎬' }}</span>
+          </div>
+          <div style="margin-top:10px;font-size:1.15rem;font-weight:700;color:var(--text-primary)">
+            {{ name.trim() || 'Admin' }}
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+            <span style="font-size:0.7rem;font-weight:800;letter-spacing:0.05em;background:rgba(229,9,20,0.2);color:var(--accent);border:1px solid rgba(229,9,20,0.4);padding:2px 8px;border-radius:12px;text-transform:uppercase">
+              Primary Administrator
+            </span>
+          </div>
         </div>
 
         <form @submit.prevent="submitSetup" class="setup-form">
@@ -8413,37 +8517,56 @@ const SetupPage = {
               class="form-input"
               placeholder="e.g. Primary User"
               required
+              maxlength="30"
               id="setup-name-input"
             />
           </div>
 
           <div class="form-group" style="margin-bottom:1.25rem">
-            <label class="form-label">Choose Avatar</label>
-            <div class="avatar-picker-grid">
+            <label class="form-label">Choose Icon</label>
+            <div class="avatar-picker-grid" style="grid-template-columns:repeat(6, 1fr);gap:8px">
               <div
                 v-for="av in avatars"
-                :key="av.icon"
+                :key="av"
                 class="avatar-picker-item"
-                :class="{ active: avatar === av.icon }"
-                @click="avatar = av.icon"
+                :class="{ active: avatar === av }"
+                @click="avatar = av"
+                style="font-size:1.4rem;padding:6px"
               >
-                <span>{{ av.icon }}</span>
+                <i :class="'ph-bold ' + av" :style="{ color: avatar === av ? (color || 'var(--accent)') : 'var(--text-secondary)' }"></i>
               </div>
             </div>
           </div>
 
+          <div class="form-group" style="margin-bottom:1.25rem">
+            <label class="form-label">Profile Accent Color</label>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
+              <div
+                v-for="c in colors"
+                :key="c"
+                class="color-swatch"
+                :class="{ selected: color === c }"
+                :style="{ background: c }"
+                @click="color = c"
+                style="width:32px;height:32px;border-radius:50%;cursor:pointer;transition:transform 0.15s"
+              ></div>
+            </div>
+          </div>
+
           <div class="form-group" style="margin-bottom:1.75rem">
-            <label class="form-label">4-Digit PIN (Optional)</label>
+            <label class="form-label">4-Digit Security PIN (Optional)</label>
             <input
               type="password"
               v-model="pin"
               maxlength="4"
+              inputmode="numeric"
+              pattern="[0-9]*"
               class="form-input"
-              placeholder="Leave empty for no PIN"
+              placeholder="Leave blank for instant access"
               id="setup-pin-input"
             />
-            <span style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;display:block">
-              You can lock your profile with a PIN or leave it empty for instant access.
+            <span style="font-size:0.75rem;color:var(--text-muted);margin-top:5px;display:block">
+              Lock your profile with a PIN or leave it empty for single-click access.
             </span>
           </div>
 
@@ -8464,35 +8587,52 @@ const SetupPage = {
     const router = VueRouter.useRouter();
     const name = ref("");
     const avatar = ref("ph-film-strip");
+    const color = ref("#e50914");
     const pin = ref("");
     const creating = ref(false);
 
-    const avatars = [{ icon: "ph-film-strip" }, { icon: "ph-popcorn" }, { icon: "ph-sparkle" }, { icon: "ph-rocket" }, { icon: "ph-crown" }, { icon: "ph-fire" }, { icon: "ph-lightning" }, { icon: "ph-mask-happy" }];
+    const avatars = [
+      "ph-film-strip", "ph-popcorn", "ph-sparkle", "ph-rocket",
+      "ph-crown", "ph-fire", "ph-lightning", "ph-mask-happy",
+      "ph-game-controller", "ph-star", "ph-music-notes", "ph-trophy"
+    ];
+
+    const colors = [
+      "#e50914", "#3b82f6", "#10b981", "#8b5cf6",
+      "#f59e0b", "#ec4899", "#06b6d4", "#6366f1"
+    ];
 
     async function submitSetup() {
-      if (!name.value.trim() || creating.value) return;
+      const cleanName = name.value.trim();
+      if (!cleanName || creating.value) return;
+
+      const cleanPin = pin.value.trim();
+      if (cleanPin && (cleanPin.length !== 4 || !/^\d{4}$/.test(cleanPin))) {
+        addToast("PIN must be exactly 4 digits", "error");
+        return;
+      }
+
       creating.value = true;
       try {
         const created = await API.post("/api/profiles", {
-          name: name.value.trim(),
+          name: cleanName,
           avatar: avatar.value,
-          pin: pin.value.trim() || null,
+          color: color.value,
+          pin: cleanPin || null,
+          is_admin: true,
         });
 
-        // Log into profile
+        // Authenticate into the created profile session
         const authRes = await API.post("/api/profiles/auth", {
           profile_id: created.id,
-          pin: pin.value.trim() || null,
+          pin: cleanPin || null,
         });
 
         store.profile = authRes.profile || created;
         addToast(`Welcome, ${created.name}!`, "success");
 
-        // Wait for the route to settle on "/" before starting the scan,
-        // so the library scan doesn't fire while still on the profile page.
-        router.push("/").then(() => {
-          startLibraryScan();
-        });
+        // Navigate to home
+        router.push("/");
       } catch (e) {
         addToast(e.message || "Failed to create profile", "error");
       } finally {
@@ -8500,9 +8640,10 @@ const SetupPage = {
       }
     }
 
-    return { store, name, avatar, pin, avatars, creating, submitSetup };
+    return { store, name, avatar, color, pin, avatars, colors, creating, submitSetup };
   },
 };
+
 
 // ─── Search Page ──────────────────────────────────────────────
 
@@ -8841,6 +8982,48 @@ const SearchPage = {
 };
 
 // ─── CapsStream Wrapped Story & Poster Component ──────────────
+
+// ─── Heatmap & Analytics Date Formatter ────────────────────────
+
+function formatHeatmapDate(dateStr) {
+  if (!dateStr) return "";
+  try {
+    if (typeof dateStr === "string" && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
+      const parts = dateStr.slice(0, 10).split("-");
+      const year = parseInt(parts[0], 10);
+      const monthIndex = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const months = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+      ];
+      if (monthIndex >= 0 && monthIndex < 12 && !isNaN(day) && !isNaN(year)) {
+        return `${months[monthIndex]} ${day}, ${year}`;
+      }
+    }
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+    }
+    return dateStr;
+  } catch (e) {
+    return dateStr;
+  }
+}
+
+function formatHeatmapMinutes(mins) {
+  if (!mins || isNaN(mins) || mins <= 0) return "0 mins";
+  const mTotal = Math.round(mins);
+  if (mTotal < 60) {
+    return `${mTotal} min${mTotal === 1 ? "" : "s"}`;
+  }
+  const h = Math.floor(mTotal / 60);
+  const m = mTotal % 60;
+  if (m === 0) {
+    return `${h} hr${h === 1 ? "" : "s"}`;
+  }
+  return `${h} hr${h === 1 ? "" : "s"} ${m} min${m === 1 ? "" : "s"}`;
+}
 
 // ─── CapsStream Wrapped Sound & Ambient Synth Engine ───────────
 
@@ -9678,13 +9861,7 @@ const WrappedStoryModal = {
     }
 
     function formatDateShort(str) {
-      if (!str) return "";
-      try {
-        const d = new Date(str + "T00:00:00");
-        return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-      } catch (e) {
-        return str;
-      }
+      return formatHeatmapDate(str);
     }
 
     function handleKeydown(e) {
@@ -9927,6 +10104,7 @@ const WrappedStoryModal = {
       onPointerUp,
       closeStory,
       formatDateShort,
+      formatHeatmapDate,
       posterCanvasRef,
       confettiCanvasRef,
       selectedPosterTheme,
@@ -10223,7 +10401,7 @@ const StatsPage = {
                   ]"
                   @mouseenter="!cell.is_padding && (hoveredDay = cell)"
                   @mouseleave="hoveredDay = null"
-                  :title="cell.is_padding ? '' : (cell.date + ': ' + cell.minutes + 'm (' + cell.count + ' items)')"
+                  :title="cell.is_padding ? '' : (formatHeatmapDate(cell.date) + ': ' + (cell.minutes > 0 ? (formatHeatmapMinutes(cell.minutes) + ' (' + cell.count + ' ' + (cell.count === 1 ? 'title' : 'titles') + ')') : 'No watch activity'))"
                 ></div>
               </div>
             </div>
@@ -10233,17 +10411,23 @@ const StatsPage = {
           <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;flex-wrap:wrap;gap:10px">
             <div style="font-size:0.82rem;color:var(--text-secondary)">
               <span v-if="hoveredDay">
-                <strong>{{ hoveredDay.date }}</strong>: {{ hoveredDay.minutes }} minutes watched across {{ hoveredDay.count }} title(s)
+                <strong>{{ formatHeatmapDate(hoveredDay.date) }}</strong>: 
+                <span v-if="hoveredDay.minutes > 0" style="color:#fff">
+                  <strong>{{ formatHeatmapMinutes(hoveredDay.minutes) }}</strong> watched across {{ hoveredDay.count || 1 }} {{ (hoveredDay.count || 1) === 1 ? 'title' : 'titles' }}
+                </span>
+                <span v-else style="color:var(--text-muted)">
+                  No playback recorded
+                </span>
               </span>
               <span v-else style="color:var(--text-muted)">Hover over any day square for playback details</span>
             </div>
             <div class="heatmap-legend">
               <span>Less</span>
-              <div class="heatmap-legend-cell level-0"></div>
-              <div class="heatmap-legend-cell level-1"></div>
-              <div class="heatmap-legend-cell level-2"></div>
-              <div class="heatmap-legend-cell level-3"></div>
-              <div class="heatmap-legend-cell level-4"></div>
+              <div class="heatmap-legend-cell level-0" title="No activity (0 mins)"></div>
+              <div class="heatmap-legend-cell level-1" title="1 – 30 mins"></div>
+              <div class="heatmap-legend-cell level-2" title="30 mins – 1.5 hrs"></div>
+              <div class="heatmap-legend-cell level-3" title="1.5 – 3 hrs"></div>
+              <div class="heatmap-legend-cell level-4" title="3+ hrs"></div>
               <span>More</span>
             </div>
           </div>
@@ -10293,15 +10477,44 @@ const StatsPage = {
               <div class="split-weekend-fill" :style="{ width: (wrappedData.habits?.weekend_pct || 50) + '%' }"></div>
             </div>
 
-            <div style="display:flex;justify-content:space-between;font-size:0.85rem;font-weight:700;color:#fff;margin-bottom:1.5rem">
+            <div style="display:flex;justify-content:space-between;font-size:0.85rem;font-weight:700;color:#fff;margin-bottom:1.25rem">
               <span style="display:flex;align-items:center;gap:6px">
                 <span style="width:8px;height:8px;border-radius:50%;background:#3b82f6;display:inline-block"></span>
-                Weekdays: {{ wrappedData.habits?.weekday_pct }}%
+                Weekdays (Mon–Fri): {{ wrappedData.habits?.weekday_pct }}%
+                <span style="color:var(--text-muted);font-size:0.75rem;font-weight:600">({{ wrappedData.habits?.weekday_hours || 0 }}h)</span>
               </span>
               <span style="display:flex;align-items:center;gap:6px">
                 <span style="width:8px;height:8px;border-radius:50%;background:#ec4899;display:inline-block"></span>
-                Weekends: {{ wrappedData.habits?.weekend_pct }}%
+                Weekends (Sat–Sun): {{ wrappedData.habits?.weekend_pct }}%
+                <span style="color:var(--text-muted);font-size:0.75rem;font-weight:600">({{ wrappedData.habits?.weekend_hours || 0 }}h)</span>
               </span>
+            </div>
+
+            <!-- 7-Day Day-by-Day Activity Breakdown -->
+            <div style="display:grid;grid-template-columns:repeat(7, 1fr);gap:6px;margin-bottom:1.5rem;padding:10px 8px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:12px">
+              <div
+                v-for="d in (wrappedData.habits?.day_of_week || [])"
+                :key="d.dow"
+                style="display:flex;flex-direction:column;align-items:center;gap:4px"
+                :title="d.name + ': ' + (d.hours > 0 ? (d.hours + 'h (' + d.percent + '%)') : '0h') + ' across ' + d.count + ' title(s)'"
+              >
+                <div style="height:44px;width:100%;display:flex;align-items:flex-end;justify-content:center;background:rgba(255,255,255,0.03);border-radius:4px;padding:2px">
+                  <div
+                    :style="{
+                      height: Math.min(100, Math.max(d.seconds > 0 ? 15 : 4, (d.seconds / maxDowSeconds) * 100)) + '%',
+                      width: '100%',
+                      borderRadius: '3px',
+                      background: d.is_weekend ? 'linear-gradient(180deg, #ec4899, #be185d)' : 'linear-gradient(180deg, #3b82f6, #1d4ed8)'
+                    }"
+                  ></div>
+                </div>
+                <div style="font-size:0.68rem;font-weight:700" :style="{ color: d.is_weekend ? '#f472b6' : 'var(--text-secondary)' }">
+                  {{ d.short }}
+                </div>
+                <div style="font-size:0.62rem;color:var(--text-muted);font-weight:600">
+                  {{ d.hours > 0 ? (d.hours + 'h') : '0h' }}
+                </div>
+              </div>
             </div>
 
             <!-- Binge Highlight Box -->
@@ -10309,7 +10522,7 @@ const StatsPage = {
               <div>
                 <div style="font-size:0.72rem;color:var(--text-muted);font-weight:700;text-transform:uppercase">Biggest Marathon Day</div>
                 <div style="font-size:1.1rem;font-weight:800;color:#fff;margin-top:2px" v-if="wrappedData.binge_records?.biggest_binge_day">
-                  {{ wrappedData.binge_records.biggest_binge_day.hours }} hrs <span style="font-size:0.75rem;color:var(--text-muted)">({{ wrappedData.binge_records.biggest_binge_day.date }})</span>
+                  {{ wrappedData.binge_records.biggest_binge_day.hours }} hrs <span style="font-size:0.75rem;color:var(--text-muted)">({{ formatHeatmapDate(wrappedData.binge_records.biggest_binge_day.date) }})</span>
                 </div>
                 <div v-else style="font-size:0.9rem;color:var(--text-muted)">No marathons recorded yet</div>
               </div>
@@ -10934,6 +11147,12 @@ const StatsPage = {
       return m > 0 ? m : 60;
     });
 
+    const maxDowSeconds = computed(() => {
+      if (!wrappedData.value?.habits?.day_of_week?.length) return 1;
+      const m = Math.max(...wrappedData.value.habits.day_of_week.map((d) => d.seconds || 0));
+      return m > 0 ? m : 1;
+    });
+
     const peakWindowName = computed(() => {
       if (!wrappedData.value?.habits?.time_windows) return "Evening";
       const tw = wrappedData.value.habits.time_windows;
@@ -11117,6 +11336,7 @@ const StatsPage = {
       launchStory,
       setPeriod,
       maxHourlyMinutes,
+      maxDowSeconds,
       peakWindowName,
       activeCategory,
       categories,
@@ -11135,6 +11355,8 @@ const StatsPage = {
       handleCarouselWheel,
       formatTimeSpent,
       formatDate,
+      formatHeatmapDate,
+      formatHeatmapMinutes,
       openMedia,
       openResolutionSearch,
       openCastSearch,

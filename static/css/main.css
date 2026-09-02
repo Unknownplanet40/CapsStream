@@ -177,6 +177,30 @@
   --border-strong: rgba(253, 164, 175, 0.32);
 }
 
+/* ─── Windows 11 Fluent Design Theme ─────────────────────── */
+/* Mica/Acrylic dark shell aesthetic with cyan-blue accent    */
+[data-theme="win11"] {
+  /* Mica base surfaces — warm neutral near-blacks */
+  --bg-primary:    #1c1c1c;
+  --bg-secondary:  #242424;
+  --bg-card:       rgba(36, 36, 36, 0.88);   /* Acrylic glass card */
+  --bg-card-hover: rgba(52, 52, 52, 0.92);
+  --bg-overlay:    rgba(20, 20, 20, 0.94);
+  --bg-glass:      rgba(36, 36, 36, 0.72);
+
+  /* Windows 11 signature cyan-blue accent */
+  --accent:              #4cc2ff;
+  --accent-hover:        #75f1ff;
+  --accent-dim:          rgba(76, 194, 255, 0.16);
+  --accent-glow:         0 0 28px rgba(76, 194, 255, 0.38), 0 0 48px rgba(117, 241, 255, 0.18);
+  --text-on-accent:      #0a0a0a;   /* Dark text on bright cyan */
+  --toggle-knob-active:  #0a0a0a;
+
+  /* Fluent borders — barely-visible white + accent tint on focus */
+  --border:        rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(76, 194, 255, 0.32);
+}
+
 /* ─── Reset ──────────────────────────────────────────────── */
 *,
 *::before,
@@ -10752,7 +10776,7 @@ body.kids-mode-theme .suggestion-tag:hover {
   position: absolute;
   bottom: 95px;
   right: 32px;
-  z-index: 240;
+  z-index: 170;
   pointer-events: auto;
   display: flex;
   align-items: center;
@@ -17157,11 +17181,32 @@ h1, h2, h3,
   filter: brightness(1.3);
 }
 
-.heatmap-cell.level-0 { background: rgba(255, 255, 255, 0.04); }
-.heatmap-cell.level-1 { background: #164e63; }
-.heatmap-cell.level-2 { background: #0891b2; }
-.heatmap-cell.level-3 { background: #06b6d4; }
-.heatmap-cell.level-4 { background: #22d3ee; box-shadow: 0 0 8px rgba(34, 211, 238, 0.6); }
+.heatmap-cell.level-0,
+.heatmap-legend-cell.level-0 {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.heatmap-cell.level-1,
+.heatmap-legend-cell.level-1 {
+  background: #164e63;
+}
+
+.heatmap-cell.level-2,
+.heatmap-legend-cell.level-2 {
+  background: #0891b2;
+}
+
+.heatmap-cell.level-3,
+.heatmap-legend-cell.level-3 {
+  background: #06b6d4;
+}
+
+.heatmap-cell.level-4,
+.heatmap-legend-cell.level-4 {
+  background: #22d3ee;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
+}
 
 .heatmap-cell.is-future {
   opacity: 0.15;
@@ -17174,19 +17219,20 @@ h1, h2, h3,
 }
 
 .heatmap-legend {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 6px;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  margin-top: 10px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
 }
 
 .heatmap-legend-cell {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 /* ─── 24-Hour Habit Matrix & Day of Week ──────────────────── */
