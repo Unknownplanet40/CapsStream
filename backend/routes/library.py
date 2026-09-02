@@ -18,6 +18,7 @@ from backend.db import (
     delete_playlist, add_to_playlist, remove_from_playlist, reorder_playlist,
 )
 from backend.franchises import get_universe_collections
+from backend.regional import get_country_collections
 
 library_bp = Blueprint("library", __name__)
 
@@ -190,6 +191,9 @@ def api_get_collections():
 
     universe_collections = get_universe_collections(all_media, min_count=2)
     result.extend(universe_collections)
+
+    country_collections = get_country_collections(all_media, min_count=2)
+    result.extend(country_collections)
 
     if kids:
         filtered = []

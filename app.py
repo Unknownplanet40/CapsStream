@@ -376,6 +376,14 @@ def serve_metadata_image(filename):
 def serve_avatar_image(filename):
     avatars_dir = os.path.join(BASE_DIR, "data", "avatars")
     os.makedirs(avatars_dir, exist_ok=True)
+    img_path = os.path.join(avatars_dir, filename)
+    if not os.path.isfile(img_path):
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 24 24" fill="none">
+          <rect width="24" height="24" fill="#1f1f2e"/>
+          <circle cx="12" cy="8" r="4" fill="#666"/>
+          <path d="M4 20c0-4 4-6 8-6s8 2 8 6" fill="#666"/>
+        </svg>"""
+        return Response(svg, mimetype="image/svg+xml", headers={"Cache-Control": "public, max-age=60"})
     resp = send_from_directory(avatars_dir, filename)
     resp.headers["Cache-Control"] = "public, max-age=604800"
     return resp
@@ -440,6 +448,16 @@ def _create_auto_backup():
         if os.path.isfile(CONFIG_PATH):
             zf.write(CONFIG_PATH, "config.json")
         zf.write(db_path, "data/capsstream.db")
+        avatars_dir = os.path.join(BASE_DIR, "data", "avatars")
+        if os.path.isdir(avatars_dir):
+            for root, _dirs, files in os.walk(avatars_dir):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    arc = os.path.relpath(fp, BASE_DIR)
+                    try:
+                        zf.write(fp, arc)
+                    except Exception:
+                        pass
     backups = sorted(f for f in os.listdir(AUTO_BACKUP_DIR) if f.startswith("autobackup-") and f.endswith(".zip"))
     for old in backups[:-AUTO_BACKUP_KEEP]:
         try:

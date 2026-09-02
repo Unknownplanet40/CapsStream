@@ -324,6 +324,16 @@ def api_system_backup():
             if os.path.isfile(CONFIG_PATH):
                 zf.write(CONFIG_PATH, "config.json")
             zf.write(db_path, "data/capsstream.db")
+            avatars_dir = os.path.join(BASE_DIR, "data", "avatars")
+            if os.path.isdir(avatars_dir):
+                for root, _dirs, files in os.walk(avatars_dir):
+                    for f in files:
+                        fp = os.path.join(root, f)
+                        arc = os.path.relpath(fp, BASE_DIR)
+                        try:
+                            zf.write(fp, arc)
+                        except Exception:
+                            continue
             if include_metadata:
                 meta_dir = os.path.join(BASE_DIR, "data", "metadata")
                 for root, _dirs, files in os.walk(meta_dir):
@@ -380,6 +390,8 @@ def api_system_restore():
                         shutil.copyfileobj(src, dst)
                     staged_db = rel
                     restore_db = True
+                elif n.startswith("data/avatars/") and not n.endswith("/"):
+                    zf.extract(n, BASE_DIR)
         os.remove(tmp_zip)
     except zipfile.BadZipFile:
         return jsonify({"error": "That file is not a valid backup zip"}), 400

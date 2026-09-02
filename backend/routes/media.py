@@ -157,6 +157,7 @@ def api_home():
 
     if cache_valid:
         rows = list(_HOME_CACHE["data"])
+        all_shows = _HOME_CACHE.get("all_shows")
     else:
         rows = []
         all_shows = get_unique_shows(None)
@@ -197,6 +198,7 @@ def api_home():
                 rows.append({"title": genre, "type": "row", "items": items})
 
         _HOME_CACHE["data"] = rows
+        _HOME_CACHE["all_shows"] = all_shows
         _HOME_CACHE["ts"] = now
 
     final_rows = []
@@ -204,7 +206,7 @@ def api_home():
         cw = get_continue_watching(pid, limit=15)
         if cw:
             final_rows.append({"title": "Continue Watching", "type": "continue", "items": cw})
-        recs = get_profile_recommendations(pid, limit=2)
+        recs = get_profile_recommendations(pid, limit=2, all_shows=all_shows)
     else:
         recs = []
 
@@ -428,9 +430,20 @@ def api_media_franchise(media_id):
 def api_media_trailer(media_id):
     media = get_media_by_id(media_id)
     if not media:
+        media = get_media_by_tmdb(media_id)
+    if not media:
         return jsonify({"error": "Media not found"}), 404
     if active_is_kids():
         return jsonify({"error": "Trailers are disabled in Kids Mode"}), 403
+
+    trailer_key = media.get("trailer_key")
+    if trailer_key:
+        return jsonify({
+            "key": trailer_key,
+            "title": f"{media.get('title', 'Media')} Trailer",
+            "embed_url": f"https://www.youtube.com/embed/{trailer_key}?autoplay=1&rel=0"
+        })
+
     from backend.matcher import get_media_trailer
     trailer = get_media_trailer(media.get("tmdb_id"), media.get("type", "movie"))
     if not trailer:

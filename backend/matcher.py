@@ -274,6 +274,9 @@ def _fetch_movie_detail(tmdb_id, default_title="", year=None):
         "cast_json":     json.dumps(cast),
         "runtime":       detail.get("runtime"),
         "belongs_to_collection": collection_dict,
+        "origin_country":       detail.get("origin_country") or [],
+        "production_countries": detail.get("production_countries") or [],
+        "original_language":    detail.get("original_language"),
     }
     _save_cache("movie", tmdb_id, result)
     print(f"[Matcher] Matched movie: {result['title']} ({result['year']})")
@@ -329,7 +332,18 @@ def get_show_seasons_list(tmdb_id, media_type="series"):
 def get_media_trailer(tmdb_id, media_type="movie"):
     if not tmdb_id:
         return None
-    endpoint = f"tv/{tmdb_id}/videos" if media_type in ("series", "anime", "tv") else f"movie/{tmdb_id}/videos"
+    media_key = "series" if media_type in ("series", "anime", "tv") else "movie"
+    cached = _load_cache(media_key, tmdb_id)
+    if cached and cached.get("trailer_key"):
+        key = cached["trailer_key"]
+        name = cached.get("trailer_title") or f"{cached.get('title', 'Media')} Trailer"
+        return {
+            "key": key,
+            "title": name,
+            "embed_url": f"https://www.youtube.com/embed/{key}?autoplay=1&rel=0"
+        }
+
+    endpoint = f"tv/{tmdb_id}/videos" if media_key == "series" else f"movie/{tmdb_id}/videos"
     res = _tmdb_get(endpoint, {"language": "en-US"})
     if not res or "results" not in res:
         return None
@@ -342,6 +356,10 @@ def get_media_trailer(tmdb_id, media_type="movie"):
     if trailers:
         key = trailers[0].get("key")
         name = trailers[0].get("name", "Trailer")
+        if cached:
+            cached["trailer_key"] = key
+            cached["trailer_title"] = name
+            _save_cache(media_key, tmdb_id, cached)
         return {
             "key": key,
             "title": name,
@@ -436,6 +454,9 @@ def _fetch_show_detail(tmdb_id, default_title="", year=None, media_type="series"
         "trailer_key":   trailer,
         "cast_json":     json.dumps(cast),
         "seasons":       detail.get("number_of_seasons", 1),
+        "origin_country":       origin_country,
+        "production_countries": detail.get("production_countries") or [],
+        "original_language":    detail.get("original_language"),
     }
     _save_cache(media_type, tmdb_id, result)
     print(f"[Matcher] Matched show: {result['title']} ({result['year']})"

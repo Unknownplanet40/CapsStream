@@ -1016,6 +1016,11 @@ function imgUrl(path, size = "original") {
     }
     return path;
   }
+  if (path.startsWith("/metadata/") || path.startsWith("/static/") || path.startsWith("/api/")) {
+    return path;
+  }
+  if (path.startsWith("avatars/")) return `/metadata/${path}`;
+  if (path.startsWith("avatar_")) return `/metadata/avatars/${path}`;
   if (path.startsWith("/")) {
     const tmdbSize = size === "poster" ? "w500" : "original";
     return `https://image.tmdb.org/t/p/${tmdbSize}${path}`;
@@ -1024,6 +1029,7 @@ function imgUrl(path, size = "original") {
   if (!path.startsWith("metadata/")) return `/metadata/images/${path}`;
   return `/${path}`;
 }
+window.imgUrl = imgUrl;
 
 // Fallback: if a full-res TMDB image fails to load, retry once at w500.
 // (capture phase required — image error events do not bubble)
@@ -2264,6 +2270,7 @@ const HeroBanner = {
 
     async function loadVideoPreview() {
       if (isScrolledPastHero.value) return;
+      const targetIdx = currentIdx.value;
       const item = current.value;
       if (!item) return;
       if (store.profile?.is_kids) return;
@@ -2274,6 +2281,11 @@ const HeroBanner = {
           try {
             trailerData = await API.get(`/api/media/${id}/trailer`);
           } catch (_) {}
+        }
+
+        // GUARD: Ensure user is still on the same slide that triggered the request
+        if (currentIdx.value !== targetIdx || !current.value || (current.value.id !== item.id && current.value.tmdb_id !== item.tmdb_id)) {
+          return;
         }
 
         if (trailerData && (trailerData.embed_url || trailerData.key)) {
@@ -2308,6 +2320,7 @@ const HeroBanner = {
 
         // Fallback: If no official TMDB trailer is available and it's a local movie, play a 25-second preview clip
         if (item.id && item.type === "movie") {
+          if (currentIdx.value !== targetIdx) return;
           videoPreviewUrl.value = `/api/stream/${item.id}?start=60&transcode=1`;
           isIframeTrailer.value = false;
           videoPreviewActive.value = true;
@@ -3848,7 +3861,10 @@ const SettingsPage = {
       </div>
 
       <template v-else>
-        <!-- Appearance & Themes -->
+        <!-- Main Content Area (all sections visible) -->
+        <main class="settings-content">
+
+            <!-- ══════ Appearance & Themes ══════ -->
         <div class="settings-section" id="settings-theme-section">
           <div class="settings-section-title">
             <i class="ph ph-palette" style="color:var(--accent)"></i>
@@ -3887,7 +3903,7 @@ const SettingsPage = {
           </div>
         </div>
 
-        <!-- Interactive Tour & Help -->
+        <!-- ══════ Interactive Tour & Help ══════ -->
         <div class="settings-section" id="settings-tour-section">
           <div class="settings-section-title">
             <i class="ph ph-compass" style="color:var(--accent)"></i>
@@ -3906,7 +3922,7 @@ const SettingsPage = {
           </div>
         </div>
 
-        <!-- Subtitles & Player Defaults (Personal Preferences) -->
+            <!-- ══════ Player & Subtitles ══════ -->
         <div class="settings-section" id="settings-player-section">
           <div class="settings-section-title">
             <i class="ph ph-subtitles" style="color:var(--accent)"></i>
@@ -4128,224 +4144,14 @@ const SettingsPage = {
           </div>
         </div>
 
-        <!-- Admin Only Sections -->
-        <template v-if="store.profile?.is_admin || !store.profile">
-          <!-- 0. Updates -->
-          <div class="settings-section" id="settings-updates-section">
-            <div class="settings-section-title">
-            <i class="ph ph-arrow-circle-up" style="color:var(--accent)"></i>
-            <span>Updates</span>
-          </div>
-          <div class="settings-group" style="display:flex;flex-direction:column;gap:12px">
-            <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-              <div class="settings-label-container">
-                <div class="settings-label">Current version</div>
-                <div class="settings-desc">CapsStream v{{ sysInfo?.version || '…' }}</div>
-              </div>
-              <div class="settings-label-container" v-if="updateState.last_checked">
-                <div class="settings-label">Last checked</div>
-                <div class="settings-desc">{{ updateState.last_checked }}</div>
-              </div>
-              <div class="settings-label-container" v-if="updateState.latest && updateState.status !== 'up_to_date'">
-                <div class="settings-label">Latest available</div>
-                <div class="settings-desc" style="color:var(--accent)">v{{ updateState.latest }}</div>
-              </div>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Automatic Update Checks</div>
-                <div class="settings-desc">Periodically check for new CapsStream releases and show a banner when one is available.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.updates.auto_check" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <div
-              class="update-status-line"
-              :style="{ color: updateState.status === 'available' ? 'var(--accent)' : updateState.status === 'error' ? '#ef4444' : 'var(--text-secondary)' }"
-            >
-              {{ updateState.message || 'Check for updates to see if a new version is available.' }}
-            </div>
-
-            <!-- Live update progress -->
-            <div v-if="updateInstalling && updateProgress && updateProgress.stage === 'downloading' && updateProgress.total" style="margin-top:10px">
-              <div style="height:6px;border-radius:3px;background:var(--bg-secondary);overflow:hidden">
-                <div style="height:100%;background:var(--accent);transition:width .4s" :style="{ width: Math.round(100 * (updateProgress.bytes_done || 0) / (updateProgress.total || 1)) + '%' }"></div>
-              </div>
-              <div style="font-size:.8rem;color:var(--text-secondary);margin-top:4px">
-                Downloading… {{ Math.round((updateProgress.bytes_done || 0) / 1048576 * 10) / 10 }} / {{ Math.round((updateProgress.total || 0) / 1048576 * 10) / 10 }} MB
-              </div>
-            </div>
-            <div v-else-if="updateInstalling && updateProgress && ['verifying','extracting','validating','installing'].includes(updateProgress.stage)" style="font-size:.85rem;color:var(--text-secondary);margin-top:8px">
-              <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:6px"></i>{{ updateProgress.message || (updateProgress.stage[0].toUpperCase() + updateProgress.stage.slice(1)) + '…' }}
-            </div>
-
-            <!-- One-click restart for backend updates -->
-            <div v-if="restartPending" style="margin-top:10px;padding:10px 14px;border-radius:12px;background:rgba(253,203,110,.12);border:1px solid rgba(253,203,110,.35);color:#fdcb6e;font-size:.87rem">
-              <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:6px"></i>Restarting — the server will come back online in a few seconds…
-            </div>
-
-            <div
-              v-if="updateState.changelog"
-              class="changelog-box"
-              v-html="changelogHtml"
-            ></div>
-
-            <div style="display:flex;gap:10px;flex-wrap:wrap">
-              <button class="btn btn-secondary" @click="checkUpdates" :disabled="updateChecking">
-                <i :class="updateChecking ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="updateChecking ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
-                {{ updateChecking ? 'Checking...' : 'Check for Updates' }}
-              </button>
-              <button
-                v-if="updateState.status === 'available'"
-                class="btn btn-primary"
-                @click="installUpdate"
-                :disabled="updateInstalling"
-                id="btn-install-update"
-              >
-                <i :class="updateInstalling ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="updateInstalling ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
-                {{ updateInstalling ? 'Installing...' : 'Install Update' }}
-              </button>
-              <button
-                v-if="updateState.status === 'up_to_date' && !restartPending && !updateInstalling && /restart CapsStream/i.test(updateState.message)"
-                class="btn btn-primary"
-                @click="restartAfterUpdate"
-                id="btn-restart-update"
-              >
-                <i class="ph ph-arrow-clockwise" style="margin-right:6px"></i>
-                Restart &amp; Finish Update
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 1. Metadata Providers -->
-        <div class="settings-section">
+            <!-- ══════ Media Scanner Paths ══════ -->
+        <div class="settings-section" id="settings-paths-section">
           <div class="settings-section-title">
-            <i class="ph ph-database" style="color:var(--accent)"></i>
-            <span>Metadata Providers & API Keys</span>
+            <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
+            <span>Media Scanner Paths</span>
           </div>
           <div class="settings-group">
-            <div class="settings-row" style="flex-direction:column;align-items:flex-start">
-              <div class="settings-label-container">
-                <div class="settings-label">TMDb API Key (Main Metadata Provider)</div>
-                <div class="settings-desc">Used for fetching movie/series posters, backdrops, ratings, overviews, and cast info.</div>
-              </div>
-              <div style="display:flex;gap:8px;width:100%;margin-top:8px">
-                <input type="password" v-model="form.tmdb_api_key" class="form-input" placeholder="Enter TMDb API key..." style="flex:1" />
-                <button class="btn btn-secondary" @click="testApi('tmdb', form.tmdb_api_key)" :disabled="testingApi === 'tmdb'">
-                  {{ testingApi === 'tmdb' ? 'Testing...' : 'Test API' }}
-                </button>
-              </div>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Enable Jikan API (Anime Metadata Fallback)</div>
-                <div class="settings-desc">Use MyAnimeList/Jikan API for fallback anime metadata matching.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.metadata_sources.enable_jikan" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <!-- 1b. Server -->
-        <div class="settings-section">
-          <div class="settings-section-title">
-            <i class="ph ph-hard-drives" style="color:var(--accent)"></i>
-            <span>Server</span>
-          </div>
-          <div class="settings-group">
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Host Address</div>
-                <div class="settings-desc">Network interface the server binds to. Use 127.0.0.1 for this PC only, or 0.0.0.0 to allow other devices on your network.</div>
-              </div>
-              <input type="text" v-model="form.host" class="form-input" style="width:180px" placeholder="127.0.0.1" />
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Port</div>
-                <div class="settings-desc">TCP port the server listens on (1–65535).</div>
-              </div>
-              <input type="number" v-model.number="form.port" min="1" max="65535" class="form-input" style="width:120px" />
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Open Browser on Launch</div>
-                <div class="settings-desc">Automatically open CapsStream in your browser when start.bat runs.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.launch_browser_on_start" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <div class="settings-desc" style="color:#f59e0b">
-              <i class="ph ph-warning" style="margin-right:4px"></i>
-              Host and Port changes take effect after restarting CapsStream (close the server and run start.bat again).
-            </div>
-
-            <div>
-              <button class="btn btn-secondary btn-sm" @click="$router.push('/logs')" title="View live server log">
-                <i class="ph ph-scroll" style="margin-right:4px"></i> View Live Logs
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 2. System Files, Web Browser & Media Paths -->
-        <div class="settings-section">
-          <div class="settings-section-title">
-            <i class="ph ph-globe-hemisphere-west" style="color:var(--accent)"></i>
-            <span>Web Browser & System Configuration</span>
-          </div>
-          <div class="settings-group">
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Default Web Browser</div>
-                <div class="settings-desc">Choose preferred browser for launching media streaming. Microsoft Edge is recommended for native 4K HEVC and Dolby AC-3 decoding.</div>
-              </div>
-              <select v-model="form.browser" class="form-input" style="width:280px" id="setting-browser-select">
-                <option value="edge">Microsoft Edge (Recommended)</option>
-                <option value="chrome">Google Chrome</option>
-                <option value="system">System Default Browser</option>
-              </select>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Hide System Files & Folders</div>
-                <div class="settings-desc">When enabled, hides all files and folders in the root project except media folders and start.bat.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.hide_system_files" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Hide Unmounted Media Items</div>
-                <div class="settings-desc">When enabled, automatically hides media files located on disconnected external drives or unmounted storage paths.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.hide_unmounted_items" id="setting-hide-unmounted-toggle" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <div style="margin-top:1rem">
-              <div class="settings-label">Media Scanner Paths</div>
-              <div class="settings-desc">Local directories scanned for video files, grouped by category. Order sets scan priority.</div>
+            <div class="settings-desc" style="margin-bottom:0.75rem">Local directories scanned for video files, grouped by category. Order sets scan priority.</div>
 
               <!-- Important Warning – Folder Selection & Accepted Naming Formats Banner -->
               <div class="folder-warning-banner">
@@ -4626,10 +4432,8 @@ const SettingsPage = {
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- 2b. Library & Scanning -->
-        <div class="settings-section">
+                <!-- 2b. Library & Scanning -->
+        <div class="settings-section" id="settings-scanning-section">
           <div class="settings-section-title">
             <i class="ph ph-file-video" style="color:var(--accent)"></i>
             <span>Library & Scanning</span>
@@ -4703,8 +4507,39 @@ const SettingsPage = {
             </div>
           </div>
         </div>
+                <!-- ══════ Metadata Providers ══════ -->
+        <div class="settings-section" id="settings-metadata-section">
+          <div class="settings-section-title">
+            <i class="ph ph-database" style="color:var(--accent)"></i>
+            <span>Metadata Providers & API Keys</span>
+          </div>
+          <div class="settings-group">
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start">
+              <div class="settings-label-container">
+                <div class="settings-label">TMDb API Key (Main Metadata Provider)</div>
+                <div class="settings-desc">Used for fetching movie/series posters, backdrops, ratings, overviews, and cast info.</div>
+              </div>
+              <div style="display:flex;gap:8px;width:100%;margin-top:8px">
+                <input type="password" v-model="form.tmdb_api_key" class="form-input" placeholder="Enter TMDb API key..." style="flex:1" />
+                <button class="btn btn-secondary" @click="testApi('tmdb', form.tmdb_api_key)" :disabled="testingApi === 'tmdb'">
+                  {{ testingApi === 'tmdb' ? 'Testing...' : 'Test API' }}
+                </button>
+              </div>
+            </div>
 
-        <!-- 2c. Unmatched Media & Fix Match Inspector -->
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Enable Jikan API (Anime Metadata Fallback)</div>
+                <div class="settings-desc">Use MyAnimeList/Jikan API for fallback anime metadata matching.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.metadata_sources.enable_jikan" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+                <!-- 2c. Unmatched Media & Fix Match Inspector -->
         <div class="settings-section" id="settings-unmatched-section">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
@@ -4775,7 +4610,189 @@ const SettingsPage = {
           </div>
         </div>
 
-        <!-- 2d. Outgoing Network Activity & Request Inspector -->
+              <!-- ══════ Updates Card ══════ -->
+              <div class="settings-section" id="settings-updates-section">
+                <div class="settings-section-title">
+                  <i class="ph ph-arrow-circle-up" style="color:var(--accent)"></i>
+                  <span>Updates & Version</span>
+                </div>
+                <div class="settings-group" style="display:flex;flex-direction:column;gap:12px">
+                  <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:4px 0 8px">
+                    <div class="settings-label-container">
+                      <div class="settings-label">Current version</div>
+                      <div class="settings-desc">CapsStream v{{ sysInfo?.version || '…' }}</div>
+                    </div>
+                    <div class="settings-label-container" v-if="updateState.last_checked">
+                      <div class="settings-label">Last checked</div>
+                      <div class="settings-desc">{{ updateState.last_checked }}</div>
+                    </div>
+                    <div class="settings-label-container" v-if="updateState.latest && updateState.status !== 'up_to_date'">
+                      <div class="settings-label">Latest available</div>
+                      <div class="settings-desc" style="color:var(--accent);font-weight:700">v{{ updateState.latest }}</div>
+                    </div>
+                  </div>
+
+                  <div class="settings-row">
+                    <div class="settings-label-container">
+                      <div class="settings-label">Automatic Update Checks</div>
+                      <div class="settings-desc">Periodically check for new CapsStream releases and show a banner when one is available.</div>
+                    </div>
+                    <label class="toggle-switch">
+                      <input type="checkbox" v-model="form.updates.auto_check" />
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+
+                  <div
+                    class="update-status-line"
+                    :style="{ color: updateState.status === 'available' ? 'var(--accent)' : updateState.status === 'error' ? '#ef4444' : 'var(--text-secondary)' }"
+                  >
+                    {{ updateState.message || 'Check for updates to see if a new version is available.' }}
+                  </div>
+
+                  <!-- Live update progress -->
+                  <div v-if="updateInstalling && updateProgress && updateProgress.stage === 'downloading' && updateProgress.total" style="margin-top:10px">
+                    <div style="height:6px;border-radius:3px;background:var(--bg-secondary);overflow:hidden">
+                      <div style="height:100%;background:var(--accent);transition:width .4s" :style="{ width: Math.round(100 * (updateProgress.bytes_done || 0) / (updateProgress.total || 1)) + '%' }"></div>
+                    </div>
+                    <div style="font-size:.8rem;color:var(--text-secondary);margin-top:4px">
+                      Downloading… {{ Math.round((updateProgress.bytes_done || 0) / 1048576 * 10) / 10 }} / {{ Math.round((updateProgress.total || 0) / 1048576 * 10) / 10 }} MB
+                    </div>
+                  </div>
+                  <div v-else-if="updateInstalling && updateProgress && ['verifying','extracting','validating','installing'].includes(updateProgress.stage)" style="font-size:.85rem;color:var(--text-secondary);margin-top:8px">
+                    <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:6px"></i>{{ updateProgress.message || (updateProgress.stage[0].toUpperCase() + updateProgress.stage.slice(1)) + '…' }}
+                  </div>
+
+                  <!-- One-click restart for backend updates -->
+                  <div v-if="restartPending" style="margin-top:10px;padding:10px 14px;border-radius:12px;background:rgba(253,203,110,.12);border:1px solid rgba(253,203,110,.35);color:#fdcb6e;font-size:.87rem">
+                    <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:6px"></i>Restarting — the server will come back online in a few seconds…
+                  </div>
+
+                  <div
+                    v-if="updateState.changelog"
+                    class="changelog-box"
+                    v-html="changelogHtml"
+                  ></div>
+
+                  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
+                    <button class="btn btn-secondary" @click="checkUpdates" :disabled="updateChecking">
+                      <i :class="updateChecking ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="updateChecking ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+                      {{ updateChecking ? 'Checking...' : 'Check for Updates' }}
+                    </button>
+                    <button
+                      v-if="updateState.status === 'available'"
+                      class="btn btn-primary"
+                      @click="installUpdate"
+                      :disabled="updateInstalling"
+                      id="btn-install-update"
+                    >
+                      <i :class="updateInstalling ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="updateInstalling ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+                      {{ updateInstalling ? 'Installing...' : 'Install Update' }}
+                    </button>
+                    <button
+                      v-if="updateState.status === 'up_to_date' && !restartPending && !updateInstalling && /restart CapsStream/i.test(updateState.message)"
+                      class="btn btn-primary"
+                      @click="restartAfterUpdate"
+                      id="btn-restart-update"
+                    >
+                      <i class="ph ph-arrow-clockwise" style="margin-right:6px"></i>
+                      Restart &amp; Finish Update
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Server Configuration Card -->
+              <div class="settings-section" id="settings-server-section">
+                <div class="settings-section-title">
+                  <i class="ph ph-hard-drives" style="color:var(--accent)"></i>
+                  <span>Server Configuration</span>
+                </div>
+                <div class="settings-group">
+                  <div class="settings-row">
+                    <div class="settings-label-container">
+                      <div class="settings-label">Host Address</div>
+                      <div class="settings-desc">Network interface the server binds to. Use 127.0.0.1 for this PC only, or 0.0.0.0 to allow other devices on your network.</div>
+                    </div>
+                    <input type="text" v-model="form.host" class="form-input" style="width:180px" placeholder="127.0.0.1" />
+                  </div>
+
+                  <div class="settings-row">
+                    <div class="settings-label-container">
+                      <div class="settings-label">Port</div>
+                      <div class="settings-desc">TCP port the server listens on (1–65535).</div>
+                    </div>
+                    <input type="number" v-model.number="form.port" min="1" max="65535" class="form-input" style="width:120px" />
+                  </div>
+
+                  <div class="settings-row">
+                    <div class="settings-label-container">
+                      <div class="settings-label">Open Browser on Launch</div>
+                      <div class="settings-desc">Automatically open CapsStream in your browser when start.bat runs.</div>
+                    </div>
+                    <label class="toggle-switch">
+                      <input type="checkbox" v-model="form.launch_browser_on_start" />
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+
+                  <div class="settings-desc" style="color:#f59e0b">
+                    <i class="ph ph-warning" style="margin-right:4px"></i>
+                    Host and Port changes take effect after restarting CapsStream (close the server and run start.bat again).
+                  </div>
+
+                  <div style="margin-top:4px">
+                    <button class="btn btn-secondary btn-sm" @click="$router.push('/logs')" title="View live server log">
+                      <i class="ph ph-scroll" style="margin-right:4px"></i> View Live Logs
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Web Browser & System Config Card -->
+              <div class="settings-section" id="settings-browser-section">
+                <div class="settings-section-title">
+                  <i class="ph ph-globe-hemisphere-west" style="color:var(--accent)"></i>
+                  <span>Web Browser & System Configuration</span>
+                </div>
+                <div class="settings-group">
+                  <div class="settings-row">
+                    <div class="settings-label-container">
+                      <div class="settings-label">Default Web Browser</div>
+                      <div class="settings-desc">Choose preferred browser for launching media streaming. Microsoft Edge is recommended for native 4K HEVC and Dolby AC-3 decoding.</div>
+                    </div>
+                    <select v-model="form.browser" class="form-input" style="width:280px" id="setting-browser-select">
+                      <option value="edge">Microsoft Edge (Recommended)</option>
+                      <option value="chrome">Google Chrome</option>
+                      <option value="system">System Default Browser</option>
+                    </select>
+                  </div>
+
+                  <div class="settings-row">
+                    <div class="settings-label-container">
+                      <div class="settings-label">Hide System Files & Folders</div>
+                      <div class="settings-desc">When enabled, hides all files and folders in the root project except media folders and start.bat.</div>
+                    </div>
+                    <label class="toggle-switch">
+                      <input type="checkbox" v-model="form.hide_system_files" />
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+
+                  <div class="settings-row">
+                    <div class="settings-label-container">
+                      <div class="settings-label">Hide Unmounted Media Items</div>
+                      <div class="settings-desc">When enabled, automatically hides media files located on disconnected external drives or unmounted storage paths.</div>
+                    </div>
+                    <label class="toggle-switch">
+                      <input type="checkbox" v-model="form.hide_unmounted_items" id="setting-hide-unmounted-toggle" />
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+                <!-- ══════ Outgoing Network Activity ══════ -->
         <div class="settings-section" id="settings-network-section">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
@@ -4927,9 +4944,8 @@ const SettingsPage = {
             </div>
           </div>
         </div>
-
-        <!-- 4. Cache & Storage Management -->
-        <div class="settings-section">
+                <!-- ══════ Cache & Storage Management ══════ -->
+        <div class="settings-section" id="settings-cache-section">
           <div class="settings-section-title">
             <i class="ph ph-hard-drive" style="color:var(--accent)"></i>
             <span>Cache & Storage Management</span>
@@ -4950,9 +4966,8 @@ const SettingsPage = {
             </div>
           </div>
         </div>
-
-        <!-- 5. Backup & Restore -->
-        <div class="settings-section">
+                <!-- ══════ Backup & Restore ══════ -->
+        <div class="settings-section" id="settings-backup-section">
           <div class="settings-section-title">
             <i class="ph ph-archive-box" style="color:var(--accent)"></i>
             <span>Backup & Restore</span>
@@ -4987,9 +5002,8 @@ const SettingsPage = {
             </div>
           </div>
         </div>
-
-        <!-- 6. Parental Controls & Kids Screen Time -->
-        <div class="settings-section">
+                <!-- ══════ Parental Controls ══════ -->
+        <div class="settings-section" id="settings-parental-section">
           <div class="settings-section-title">
             <i class="ph ph-shield-check" style="color:#fdcb6e"></i>
             <span>Parental Controls & Kids Screen Time</span>
@@ -5067,9 +5081,8 @@ const SettingsPage = {
             </div>
           </div>
         </div>
-
-        <!-- 7. Fresh Start (Full System Reset) -->
-        <div class="settings-section" style="border:1px solid rgba(229,9,20,0.3);background:rgba(229,9,20,0.04)">
+                <!-- ══════ Fresh Start ══════ -->
+        <div class="settings-section" id="settings-reset-section">
           <div class="settings-section-title">
             <i class="ph ph-warning-circle" style="color:var(--accent)"></i>
             <span style="color:var(--accent)">Fresh Start & System Reset</span>
@@ -5087,9 +5100,8 @@ const SettingsPage = {
             </div>
           </div>
         </div>
-
-        <!-- 8. Server Control & Shutdown -->
-        <div class="settings-section" id="settings-shutdown-section" style="border:1px solid rgba(239,68,68,0.35);background:rgba(239,68,68,0.04)">
+                <!-- 8. Server Control & Shutdown -->
+        <div class="settings-section" id="settings-shutdown-section">
           <div class="settings-section-title">
             <i class="ph ph-power" style="color:#ef4444"></i>
             <span style="color:#ef4444">Server Control & Shutdown</span>
@@ -5112,8 +5124,15 @@ const SettingsPage = {
             </div>
           </div>
         </div>
-        </template>
-      </template>
+
+      <!-- Floating Save Button -->
+      <button v-if="isDirty" class="settings-save-fab" @click="saveSettings" :disabled="saving" id="btn-save-settings-fab">
+        <i :class="saving ? 'ph ph-circle-notch' : 'ph ph-floppy-disk'" :style="saving ? 'animation:spin 1s linear infinite' : ''"></i>
+        {{ saving ? 'Saving...' : 'Save Settings' }}
+      </button>
+
+    </main>
+  </template>
 
       <!-- Shutdown Confirmation Modal -->
       <div v-if="showShutdownModal" class="modal-backdrop" style="z-index:500;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showShutdownModal = false">
@@ -5244,6 +5263,70 @@ const SettingsPage = {
     </div>
   `,
   setup() {
+    const route = VueRouter.useRoute();
+    const router = VueRouter.useRouter();
+
+    const validTabs = ["appearance", "playback", "library", "server", "security"];
+    function getInitialTab() {
+      try {
+        if (window.location.hash.includes("?")) {
+          const params = new URLSearchParams(window.location.hash.split("?")[1]);
+          const t = params.get("tab");
+          if (t && validTabs.includes(t)) return t;
+        }
+        if (route.query?.tab && validTabs.includes(route.query.tab)) {
+          return route.query.tab;
+        }
+      } catch (e) {}
+      return "appearance";
+    }
+
+    const activeTab = ref(getInitialTab());
+
+    watch(() => route.query?.tab, (newTab) => {
+      if (newTab && validTabs.includes(newTab) && newTab !== activeTab.value) {
+        activeTab.value = newTab;
+      }
+    });
+
+    function setTab(tabKey) {
+      if (!validTabs.includes(tabKey)) return;
+      activeTab.value = tabKey;
+      try {
+        if (window.location.hash.includes("?")) {
+          const parts = window.location.hash.split("?");
+          const params = new URLSearchParams(parts[1]);
+          params.set("tab", tabKey);
+          window.history.replaceState(null, "", parts[0] + "?" + params.toString());
+        } else {
+          window.history.replaceState(null, "", window.location.hash.split("?")[0] + "?tab=" + tabKey);
+        }
+      } catch (e) {}
+
+      try {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } catch (e) {
+        window.scrollTo(0, 0);
+      }
+    }
+
+    const visibleNavItems = computed(() => {
+      const isAdmin = store.profile?.is_admin || !store.profile;
+      const items = [
+        { key: "appearance", label: "Appearance", icon: "ph ph-palette" },
+        { key: "playback", label: "Playback & Subtitles", icon: "ph ph-play-circle" },
+      ];
+
+      if (isAdmin) {
+        items.push(
+          { key: "library", label: "Library & Metadata", icon: "ph ph-film-strip" },
+          { key: "server", label: "Server & Updates", icon: "ph ph-hard-drives" },
+          { key: "security", label: "System & Security", icon: "ph ph-shield-check" }
+        );
+      }
+      return items;
+    });
+
     const loading = ref(true);
     const saving = ref(false);
     const testingApi = ref(null);
@@ -5609,6 +5692,9 @@ const SettingsPage = {
       loadSettings();
       loadCacheInfo();
       loadSystemInfo();
+      loadAllProfiles();
+      loadUnmatched();
+      loadNetworkRequests();
       if (!store.profile?.is_kids) loadKidsOverrides();
       window.addEventListener("beforeunload", handleBeforeUnload);
       // Auto-run the update check when arriving from the update banner
@@ -6002,19 +6088,6 @@ const SettingsPage = {
       }
     });
 
-    onMounted(() => {
-      if (store.profile?.is_kids) {
-        addToast("Settings is locked in Kids Mode", "warning");
-        router.push("/");
-        return;
-      }
-      loadSettings();
-      loadCacheInfo();
-      loadAllProfiles();
-      loadUnmatched();
-      loadNetworkRequests();
-    });
-
     const currentTheme = computed(() => store.profile?.theme || localStorage.getItem("capsstream_theme") || "crimson");
 
     function selectTheme(themeId) {
@@ -6145,6 +6218,9 @@ const SettingsPage = {
     }
 
     return {
+      activeTab,
+      setTab,
+      visibleNavItems,
       THEME_PRESETS,
       currentTheme,
       selectTheme,
@@ -6646,6 +6722,14 @@ const CollectionsPage = {
               All <span class="collections-tab-count">{{ collections.length }}</span>
             </button>
             <button
+              v-if="countriesCount > 0"
+              class="collections-tab-btn"
+              :class="{ active: activeTab === 'countries' }"
+              @click="activeTab = 'countries'"
+            >
+              <i class="ph ph-globe"></i> Country Hubs <span class="collections-tab-count">{{ countriesCount }}</span>
+            </button>
+            <button
               v-if="universesCount > 0"
               class="collections-tab-btn"
               :class="{ active: activeTab === 'universes' }"
@@ -6722,8 +6806,14 @@ const CollectionsPage = {
           </div>
           <div class="collection-info">
             <div class="collection-name">
+              <span v-if="col.is_country_hub && col.country_code" class="country-flag-icon-wrap">
+                <img :src="'/static/img/flags/' + col.country_code.toLowerCase() + '.svg'" class="country-flag-svg" :alt="col.country_code" loading="lazy" />
+              </span>
               {{ col.name }}
-              <span v-if="col.is_franchise" class="universe-card-badge" style="margin-left:6px;background:rgba(56,189,248,0.18);color:#38bdf8;border-color:rgba(56,189,248,0.35)">
+              <span v-if="col.is_country_hub" class="country-card-badge" style="margin-left:6px">
+                <i class="ph ph-globe"></i> Country Hub
+              </span>
+              <span v-else-if="col.is_franchise" class="universe-card-badge" style="margin-left:6px;background:rgba(56,189,248,0.18);color:#38bdf8;border-color:rgba(56,189,248,0.35)">
                 <i class="ph ph-film-strip"></i> Franchise
               </span>
               <span v-else-if="col.universe" class="universe-card-badge" style="margin-left:6px">
@@ -6731,7 +6821,10 @@ const CollectionsPage = {
               </span>
               <span v-else-if="col.smart" class="skip-src-badge" style="margin-left:6px">Smart</span>
             </div>
-            <div class="collection-count">{{ col.items ? col.items.length : 0 }} title{{ !col.items || col.items.length !== 1 ? 's' : '' }}</div>
+            <div class="collection-count" v-if="col.is_country_hub">
+              {{ col.movie_count || 0 }} movie{{ col.movie_count === 1 ? '' : 's' }} · {{ col.series_count || 0 }} series
+            </div>
+            <div class="collection-count" v-else>{{ col.items ? col.items.length : 0 }} title{{ !col.items || col.items.length !== 1 ? 's' : '' }}</div>
           </div>
         </div>
       </div>
@@ -6764,13 +6857,15 @@ const CollectionsPage = {
     const newName = ref("");
     const newDesc = ref("");
 
-    const universesCount = computed(() => collections.value.filter((c) => c.universe).length);
-    const smartCount = computed(() => collections.value.filter((c) => c.smart && !c.universe).length);
+    const countriesCount = computed(() => collections.value.filter((c) => c.is_country_hub).length);
+    const universesCount = computed(() => collections.value.filter((c) => c.universe || c.is_franchise).length);
+    const smartCount = computed(() => collections.value.filter((c) => c.smart && !c.universe && !c.is_franchise && !c.is_country_hub).length);
     const customCount = computed(() => collections.value.filter((c) => !c.smart).length);
 
     const filteredCollections = computed(() => {
-      if (activeTab.value === "universes") return collections.value.filter((c) => c.universe);
-      if (activeTab.value === "smart") return collections.value.filter((c) => c.smart && !c.universe);
+      if (activeTab.value === "countries") return collections.value.filter((c) => c.is_country_hub);
+      if (activeTab.value === "universes") return collections.value.filter((c) => c.universe || c.is_franchise);
+      if (activeTab.value === "smart") return collections.value.filter((c) => c.smart && !c.universe && !c.is_franchise && !c.is_country_hub);
       if (activeTab.value === "custom") return collections.value.filter((c) => !c.smart);
       return collections.value;
     });
@@ -6806,6 +6901,7 @@ const CollectionsPage = {
       store,
       collections,
       activeTab,
+      countriesCount,
       universesCount,
       smartCount,
       customCount,
@@ -6837,7 +6933,11 @@ const CollectionDetailPage = {
         <div class="collection-hero-content">
           <div class="collection-hero-main">
             <div class="collection-hero-badges">
-              <span v-if="collection.is_franchise" class="collection-hero-badge badge-universe" style="background:rgba(56,189,248,0.2);color:#38bdf8;border-color:rgba(56,189,248,0.35)">
+              <span v-if="collection.is_country_hub" class="collection-hero-badge badge-country">
+                <img v-if="collection.country_code" :src="'/static/img/flags/' + collection.country_code.toLowerCase() + '.svg'" class="country-flag-svg-hero" :alt="collection.country_code" />
+                <span>Regional Cinema Hub</span>
+              </span>
+              <span v-else-if="collection.is_franchise" class="collection-hero-badge badge-universe" style="background:rgba(56,189,248,0.2);color:#38bdf8;border-color:rgba(56,189,248,0.35)">
                 <i class="ph ph-film-strip"></i> Sequel & Prequel Franchise
               </span>
               <span v-else-if="collection.universe" class="collection-hero-badge badge-universe">
@@ -6853,10 +6953,42 @@ const CollectionDetailPage = {
                 {{ displayItems ? displayItems.length : 0 }} title{{ !displayItems || displayItems.length !== 1 ? 's' : '' }}
               </span>
             </div>
-            <h1 class="collection-hero-title">{{ collection.name }}</h1>
+            <h1 class="collection-hero-title">
+              <span v-if="collection.is_country_hub && collection.country_code" class="country-flag-icon-wrap" style="margin-right:10px">
+                <img :src="'/static/img/flags/' + collection.country_code.toLowerCase() + '.svg'" class="country-flag-svg-hero" style="width:32px;height:32px" :alt="collection.country_code" />
+              </span>
+              {{ collection.name }}
+            </h1>
             <p v-if="collection.description" class="collection-hero-desc">{{ collection.description }}</p>
           </div>
           <div class="collection-hero-actions">
+            <!-- Type filter for country hubs (All, Movies, Series) -->
+            <div v-if="collection.is_country_hub" class="timeline-toggle-group">
+              <button
+                class="timeline-toggle-btn"
+                :class="{ active: typeFilter === 'all' }"
+                @click="typeFilter = 'all'"
+              >
+                <i class="ph ph-squares-four"></i> All ({{ collection.items ? collection.items.length : 0 }})
+              </button>
+              <button
+                v-if="collection.movie_count > 0"
+                class="timeline-toggle-btn"
+                :class="{ active: typeFilter === 'movie' }"
+                @click="typeFilter = 'movie'"
+              >
+                <i class="ph ph-film-strip"></i> Movies ({{ collection.movie_count }})
+              </button>
+              <button
+                v-if="collection.series_count > 0"
+                class="timeline-toggle-btn"
+                :class="{ active: typeFilter === 'series' }"
+                @click="typeFilter = 'series'"
+              >
+                <i class="ph ph-television"></i> Series ({{ collection.series_count }})
+              </button>
+            </div>
+
             <!-- Timeline toggle for universes with chronological mapping -->
             <div v-if="collection.has_timeline" class="timeline-toggle-group">
               <button
@@ -6928,13 +7060,22 @@ const CollectionDetailPage = {
     const router = VueRouter.useRouter();
     const collection = ref(null);
     const sortMode = ref("release");
+    const typeFilter = ref("all");
 
     const displayItems = computed(() => {
       if (!collection.value) return [];
+      let items = collection.value.items || [];
       if (sortMode.value === "timeline" && collection.value.timeline_items && collection.value.timeline_items.length) {
-        return collection.value.timeline_items;
+        items = collection.value.timeline_items;
       }
-      return collection.value.items || [];
+      if (collection.value.is_country_hub && typeFilter.value !== "all") {
+        if (typeFilter.value === "movie") {
+          return items.filter((i) => (i.type || "movie") === "movie");
+        } else if (typeFilter.value === "series") {
+          return items.filter((i) => (i.type || "") === "series" || (i.type || "") === "anime");
+        }
+      }
+      return items;
     });
 
     const heroBackdrop = computed(() => {
@@ -6994,6 +7135,7 @@ const CollectionDetailPage = {
       store,
       collection,
       sortMode,
+      typeFilter,
       displayItems,
       heroBackdrop,
       imgUrl,
@@ -7569,7 +7711,7 @@ const ProfilesPage = {
                 border: profile.color ? '3px solid ' + profile.color + '88' : '3px solid transparent'
               }"
             >
-              <img v-if="profile.custom_avatar_url" :src="profile.custom_avatar_url" class="netflix-avatar-img" :alt="profile.name" />
+              <img v-if="profile.custom_avatar_url" :src="imgUrl(profile.custom_avatar_url)" class="netflix-avatar-img" :alt="profile.name" />
               <i v-else-if="profile.avatar && profile.avatar.startsWith('ph-')" :class="'ph-bold ' + profile.avatar" style="font-size:3.2rem"></i>
               <span v-else style="font-size:3.2rem">{{ profile.avatar || '🎬' }}</span>
 
@@ -7675,7 +7817,7 @@ const ProfilesPage = {
                 border: '3px solid ' + editProfile.color
               }"
             >
-              <img v-if="editProfile.custom_avatar_url" :src="editProfile.custom_avatar_url" class="netflix-avatar-img" style="border-radius:4px" />
+              <img v-if="editProfile.custom_avatar_url" :src="imgUrl(editProfile.custom_avatar_url)" class="netflix-avatar-img" style="border-radius:4px" />
               <i v-else-if="editProfile.avatar && editProfile.avatar.startsWith('ph-')" :class="'ph-bold ' + editProfile.avatar" style="font-size:3.5rem"></i>
               <span v-else style="font-size:3.5rem">{{ editProfile.avatar || '🎬' }}</span>
             </div>
@@ -8175,7 +8317,7 @@ const ProfilesPage = {
         </div>
       </div>
 
-      <!-- PIN Modal (Redesigned & Premium) -->
+      <!-- PIN Modal (Authentic Netflix Style) -->
       <div class="pin-modal-backdrop" v-if="pinTarget" @click.self="pinTarget = null">
         <div class="pin-modal-card" @click.stop>
           <button class="pin-modal-close" @click="pinTarget = null" title="Cancel">
@@ -8185,20 +8327,22 @@ const ProfilesPage = {
           <div class="pin-modal-identity">
             <div class="pin-profile-avatar-wrap">
               <img v-if="pinTarget.custom_avatar_url" :src="imgUrl(pinTarget.custom_avatar_url)" class="pin-profile-avatar-img" :alt="pinTarget.name" />
-              <div v-else class="pin-profile-avatar-icon" :style="{ background: pinTarget.color || 'var(--accent)' }">
+              <div v-else class="pin-profile-avatar-icon" :style="{ background: pinTarget.color || '#e50914' }">
                 <i :class="pinTarget.avatar ? 'ph-bold ' + pinTarget.avatar : 'ph-bold ph-user'"></i>
               </div>
               <div class="pin-profile-lock-badge">
-                <i class="ph-fill ph-lock-key"></i>
+                <i class="ph-fill ph-lock-simple"></i>
               </div>
             </div>
-            <h3 class="pin-modal-title">Enter PIN</h3>
-            <p class="pin-modal-sub">Enter the 4-digit PIN for <strong>{{ pinTarget?.name }}</strong></p>
+            <div class="pin-identity-text">
+              <div class="pin-modal-lock-label">Profile Lock is on.</div>
+              <h3 class="pin-modal-title">Enter your PIN to access <strong>{{ pinTarget?.name }}</strong></h3>
+            </div>
           </div>
 
-          <div class="pin-display-pods" :class="{ error: pinError }">
-            <div v-for="i in 4" :key="i" class="pin-dot-pod" :class="{ filled: pin.length >= i }">
-              <span class="pin-dot-pip"></span>
+          <div class="pin-display-boxes" :class="{ error: pinError }">
+            <div v-for="i in 4" :key="i" class="pin-box" :class="{ filled: pin.length >= i, active: pin.length === i - 1 }">
+              <span class="pin-box-dot" v-if="pin.length >= i">●</span>
             </div>
           </div>
 
@@ -8226,12 +8370,16 @@ const ProfilesPage = {
             <i class="ph-fill ph-warning-circle"></i>
             <span>{{ pinError }}</span>
           </div>
+
+          <div class="pin-keyboard-hint">
+            <span>Use your keyboard or the on-screen keypad</span>
+          </div>
         </div>
       </div>
 
-      <!-- Delete PIN Confirmation Modal (Redesigned & Premium) -->
+      <!-- Delete PIN Confirmation Modal (Authentic Netflix Style) -->
       <div class="pin-modal-backdrop" v-if="deletePinTarget" @click.self="deletePinTarget = null">
-        <div class="pin-modal-card" @click.stop>
+        <div class="pin-modal-card pin-modal-card-danger" @click.stop>
           <button class="pin-modal-close" @click="deletePinTarget = null" title="Cancel">
             <i class="ph ph-x"></i>
           </button>
@@ -8239,20 +8387,22 @@ const ProfilesPage = {
           <div class="pin-modal-identity">
             <div class="pin-profile-avatar-wrap">
               <img v-if="deletePinTarget.custom_avatar_url" :src="imgUrl(deletePinTarget.custom_avatar_url)" class="pin-profile-avatar-img" :alt="deletePinTarget.name" />
-              <div v-else class="pin-profile-avatar-icon" :style="{ background: deletePinTarget.color || 'var(--accent)' }">
+              <div v-else class="pin-profile-avatar-icon" :style="{ background: deletePinTarget.color || '#e50914' }">
                 <i :class="deletePinTarget.avatar ? 'ph-bold ' + deletePinTarget.avatar : 'ph-bold ph-user'"></i>
               </div>
-              <div class="pin-profile-lock-badge" style="background:#200c0c;border-color:#ef4444;color:#ef4444">
+              <div class="pin-profile-lock-badge danger-badge">
                 <i class="ph-fill ph-trash"></i>
               </div>
             </div>
-            <h3 class="pin-modal-title" style="color:#f87171">Delete Profile</h3>
-            <p class="pin-modal-sub">Enter PIN to delete <strong>{{ deletePinTarget?.name }}</strong></p>
+            <div class="pin-identity-text">
+              <div class="pin-modal-lock-label" style="color:#e50914">Delete Profile</div>
+              <h3 class="pin-modal-title">Enter PIN to permanently delete <strong>{{ deletePinTarget?.name }}</strong></h3>
+            </div>
           </div>
 
-          <div class="pin-display-pods" :class="{ error: deletePinError }">
-            <div v-for="i in 4" :key="i" class="pin-dot-pod" :class="{ filled: deletePin.length >= i }">
-              <span class="pin-dot-pip" style="background:#ef4444;box-shadow:0 0 12px #ef4444"></span>
+          <div class="pin-display-boxes" :class="{ error: deletePinError }">
+            <div v-for="i in 4" :key="i" class="pin-box danger-box" :class="{ filled: deletePin.length >= i, active: deletePin.length === i - 1 }">
+              <span class="pin-box-dot" v-if="deletePin.length >= i">●</span>
             </div>
           </div>
 
@@ -8280,10 +8430,14 @@ const ProfilesPage = {
             <i class="ph-fill ph-warning-circle"></i>
             <span>{{ deletePinError }}</span>
           </div>
+
+          <div class="pin-keyboard-hint">
+            <span>Use your keyboard or the on-screen keypad</span>
+          </div>
         </div>
       </div>
 
-      <!-- Parental Math Challenge Gate Modal (Redesigned & Premium) -->
+      <!-- Parental Math Challenge Gate Modal (Authentic Netflix Style) -->
       <div class="pin-modal-backdrop" v-if="mathGateTarget" @click.self="mathGateTarget = null">
         <div class="pin-modal-card" @click.stop>
           <button class="pin-modal-close" @click="mathGateTarget = null" title="Cancel">
@@ -8292,21 +8446,23 @@ const ProfilesPage = {
 
           <div class="pin-modal-identity">
             <div class="pin-profile-avatar-wrap">
-              <div class="pin-profile-avatar-icon" style="background:linear-gradient(135deg,#38bdf8,#0284c7)">
-                <i class="ph-bold ph-shield-check"></i>
+              <div class="pin-profile-avatar-icon" style="background:#262626">
+                <i class="ph-bold ph-shield-check" style="color:#e50914"></i>
               </div>
             </div>
-            <h3 class="pin-modal-title">Parental Exit Gate</h3>
-            <p class="pin-modal-sub">Solve math puzzle to switch to <strong>{{ mathGateTarget?.name }}</strong></p>
+            <div class="pin-identity-text">
+              <div class="pin-modal-lock-label">Parental Gate</div>
+              <h3 class="pin-modal-title">Solve to switch to <strong>{{ mathGateTarget?.name }}</strong></h3>
+            </div>
           </div>
 
-          <div class="math-question-badge" style="margin:0 auto 1.25rem;font-size:1.25rem;font-weight:800;padding:8px 20px;border-radius:14px;background:rgba(56,189,248,0.14);border:1px solid rgba(56,189,248,0.3);color:#38bdf8;display:inline-block">
-            {{ mathProblem.num1 }} + {{ mathProblem.num2 }} = ?
+          <div class="math-challenge-box">
+            <span class="math-challenge-equation">{{ mathProblem.num1 }} + {{ mathProblem.num2 }} = ?</span>
           </div>
 
-          <div class="pin-display-pods" :class="{ error: mathGateError }">
-            <div class="math-answer-display" style="font-size:1.5rem;font-weight:800;color:#fff;min-height:36px;letter-spacing:4px">
-              {{ mathAnswer || '—' }}
+          <div class="pin-display-boxes" :class="{ error: mathGateError }">
+            <div class="math-answer-box">
+              <span class="math-answer-digits">{{ mathAnswer || '—' }}</span>
             </div>
           </div>
 
@@ -8333,29 +8489,35 @@ const ProfilesPage = {
             <i class="ph-fill ph-warning-circle"></i>
             <span>{{ mathGateError }}</span>
           </div>
+
+          <div class="pin-keyboard-hint">
+            <span>Use your keyboard or the on-screen keypad</span>
+          </div>
         </div>
       </div>
 
-      <!-- Admin PIN Verification Modal (Redesigned & Premium) -->
+      <!-- Admin PIN Verification Modal (Authentic Netflix Style) -->
       <div class="pin-modal-backdrop" v-if="adminPinModalTarget" @click.self="adminPinModalTarget = false">
-        <div class="pin-modal-card" @click.stop style="border-color:rgba(255,215,0,0.3)">
+        <div class="pin-modal-card" @click.stop>
           <button class="pin-modal-close" @click="adminPinModalTarget = false" title="Cancel">
             <i class="ph ph-x"></i>
           </button>
 
           <div class="pin-modal-identity">
             <div class="pin-profile-avatar-wrap">
-              <div class="pin-profile-avatar-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706);box-shadow:0 0 25px rgba(245,158,11,0.35)">
-                <i class="ph-fill ph-crown"></i>
+              <div class="pin-profile-avatar-icon" style="background:#262626">
+                <i class="ph-fill ph-lock-key" style="color:#e50914"></i>
               </div>
             </div>
-            <h3 class="pin-modal-title" style="color:#ffd700">Admin Verification</h3>
-            <p class="pin-modal-sub">Enter Admin PIN to manage profile</p>
+            <div class="pin-identity-text">
+              <div class="pin-modal-lock-label">Admin Protection</div>
+              <h3 class="pin-modal-title">Enter Admin PIN to manage profile settings</h3>
+            </div>
           </div>
 
-          <div class="pin-display-pods" :class="{ error: adminPinError }">
-            <div v-for="i in 4" :key="i" class="pin-dot-pod" :class="{ filled: adminPin.length >= i }" style="border-color:rgba(255,215,0,0.25)">
-              <span class="pin-dot-pip" style="background:#ffd700;box-shadow:0 0 12px #ffd700"></span>
+          <div class="pin-display-boxes" :class="{ error: adminPinError }">
+            <div v-for="i in 4" :key="i" class="pin-box" :class="{ filled: adminPin.length >= i, active: adminPin.length === i - 1 }">
+              <span class="pin-box-dot" v-if="adminPin.length >= i">●</span>
             </div>
           </div>
 
@@ -8382,6 +8544,10 @@ const ProfilesPage = {
           <div class="pin-modal-error" v-if="adminPinError">
             <i class="ph-fill ph-warning-circle"></i>
             <span>{{ adminPinError }}</span>
+          </div>
+
+          <div class="pin-keyboard-hint">
+            <span>Use your keyboard or the on-screen keypad</span>
           </div>
         </div>
       </div>
@@ -9081,6 +9247,7 @@ const ProfilesPage = {
       createProfile,
       isAdminUnlocked,
       exitEditView,
+      imgUrl,
     };
   },
 };
@@ -9640,13 +9807,52 @@ function formatHeatmapMinutes(mins) {
   return `${h} hr${h === 1 ? "" : "s"} ${m} min${m === 1 ? "" : "s"}`;
 }
 
-// ─── CapsStream Wrapped Sound & Ambient Synth Engine ───────────
+// ─── CapsStream Wrapped Sound Effects & Background Music Engine ──
+
+const WRAPPED_TRACKS = [
+  {
+    id: "synthwave-pulse",
+    title: "Synthwave Pulse",
+    mood: "80s Cyber Neon",
+    artist: "CapsStream CC0",
+    src: "/static/audio/wrapped/synthwave-pulse.wav",
+    icon: "ph-lightning",
+    genres: ["Sci-Fi", "Action", "Cyberpunk", "Thriller", "Adventure"],
+    archetypes: ["Night Owl", "The Speedrunner", "Action Addict"],
+  },
+  {
+    id: "cinematic-glow",
+    title: "Cinematic Glow",
+    mood: "Lush Ambient Warmth",
+    artist: "CapsStream CC0",
+    src: "/static/audio/wrapped/cinematic-glow.wav",
+    icon: "ph-sparkle",
+    genres: ["Drama", "Fantasy", "Mystery", "Romance", "Documentary"],
+    archetypes: ["The Omnivorous Cinephile", "The Marathon Runner", "The Lore Master"],
+  },
+  {
+    id: "midnight-lofi",
+    title: "Midnight Lo-Fi",
+    mood: "Chill Mellow Keys",
+    artist: "CapsStream CC0",
+    src: "/static/audio/wrapped/midnight-lofi.wav",
+    icon: "ph-coffee",
+    genres: ["Comedy", "Animation", "Family", "Music", "Slice of Life"],
+    archetypes: ["Comfort Binger", "Weekend Warrior", "Anime Aficionado"],
+  },
+  {
+    id: "cyber-pulse",
+    title: "Cyber Pulse",
+    mood: "Driving Dark Rhythm",
+    artist: "CapsStream CC0",
+    src: "/static/audio/wrapped/cyber-pulse.wav",
+    icon: "ph-cpu",
+    genres: ["Horror", "Crime", "Action", "Science Fiction"],
+    archetypes: ["Late Night Escapist", "The Devourer", "Tech Cinephile"],
+  },
+];
 
 let wrappedAudioCtx = null;
-let ambientOsc1 = null;
-let ambientOsc2 = null;
-let ambientGain = null;
-let ambientFilter = null;
 
 function getWrappedAudioCtx() {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -9659,6 +9865,160 @@ function getWrappedAudioCtx() {
   }
   return wrappedAudioCtx;
 }
+
+const wrappedMusicPlayer = {
+  currentTrackId: null,
+  audio: null,
+  gainNode: null,
+  sourceNode: null,
+  isMuted: false,
+  isPaused: false,
+  baseVolume: 0.45,
+  duckTimeout: null,
+
+  init(ctx) {
+    if (!this.audio) {
+      this.audio = new Audio();
+      this.audio.loop = true;
+      this.audio.crossOrigin = "anonymous";
+      this.audio.volume = this.baseVolume;
+    }
+    if (ctx && !this.gainNode) {
+      try {
+        this.gainNode = ctx.createGain();
+        this.gainNode.gain.setValueAtTime(this.isMuted ? 0.0001 : 1.0, ctx.currentTime);
+        this.sourceNode = ctx.createMediaElementSource(this.audio);
+        this.sourceNode.connect(this.gainNode);
+        this.gainNode.connect(ctx.destination);
+      } catch (e) {
+        // MediaElementSource might already be attached or failed, fallback gracefully
+      }
+    }
+  },
+
+  getBestMatchingTrack(data) {
+    if (!data) return WRAPPED_TRACKS[0];
+    const archTitle = (data.archetype?.title || "").toLowerCase();
+    const topGenre = (data.content_breakdown?.top_genres?.[0]?.genre || "").toLowerCase();
+    
+    // Check genre match first
+    const genreMatch = WRAPPED_TRACKS.find((t) => t.genres.some((g) => g.toLowerCase() === topGenre));
+    if (genreMatch) return genreMatch;
+
+    // Check archetype match
+    const archMatch = WRAPPED_TRACKS.find((t) => t.archetypes.some((a) => archTitle.includes(a.toLowerCase())));
+    if (archMatch) return archMatch;
+
+    return WRAPPED_TRACKS[0];
+  },
+
+  playTrack(trackId, isMuted = false, forceRestart = false) {
+    this.isMuted = isMuted;
+    const ctx = getWrappedAudioCtx();
+    this.init(ctx);
+
+    const track = WRAPPED_TRACKS.find((t) => t.id === trackId) || WRAPPED_TRACKS[0];
+    if (!track) return;
+
+    if (this.currentTrackId === track.id && !forceRestart && this.audio && !this.audio.paused) {
+      this.setMuted(isMuted);
+      return;
+    }
+
+    this.currentTrackId = track.id;
+    if (!this.audio.src.endsWith(track.src)) {
+      this.audio.src = track.src;
+    }
+    this.audio.currentTime = 0;
+    this.setMuted(isMuted);
+
+    if (!isMuted) {
+      const p = this.audio.play();
+      if (p !== undefined) {
+        p.catch(() => {
+          // Autoplay blocked by browser policy until user interacts
+        });
+      }
+    }
+  },
+
+  duck(durationMs = 1200, duckGain = 0.2) {
+    if (this.isMuted || !this.audio || this.audio.paused) return;
+    const ctx = getWrappedAudioCtx();
+    if (this.duckTimeout) clearTimeout(this.duckTimeout);
+
+    if (this.gainNode && ctx) {
+      try {
+        const now = ctx.currentTime;
+        this.gainNode.gain.cancelScheduledValues(now);
+        this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, now);
+        this.gainNode.gain.exponentialRampToValueAtTime(Math.max(0.01, duckGain), now + 0.12);
+
+        this.duckTimeout = setTimeout(() => {
+          if (!this.gainNode || !ctx || this.isMuted) return;
+          const resumeT = ctx.currentTime;
+          this.gainNode.gain.cancelScheduledValues(resumeT);
+          this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, resumeT);
+          this.gainNode.gain.exponentialRampToValueAtTime(1.0, resumeT + 0.45);
+        }, durationMs);
+      } catch (e) {}
+    } else if (this.audio) {
+      this.audio.volume = this.baseVolume * duckGain;
+      this.duckTimeout = setTimeout(() => {
+        if (this.audio && !this.isMuted) {
+          this.audio.volume = this.baseVolume;
+        }
+      }, durationMs);
+    }
+  },
+
+  pause() {
+    this.isPaused = true;
+    if (this.audio && !this.audio.paused) {
+      this.audio.pause();
+    }
+  },
+
+  resume(isMuted = false) {
+    this.isPaused = false;
+    this.isMuted = isMuted;
+    if (!isMuted && this.audio && this.audio.paused) {
+      this.audio.play().catch(() => {});
+    }
+  },
+
+  setMuted(muted) {
+    this.isMuted = muted;
+    const ctx = getWrappedAudioCtx();
+    if (this.gainNode && ctx) {
+      try {
+        const now = ctx.currentTime;
+        this.gainNode.gain.cancelScheduledValues(now);
+        this.gainNode.gain.setValueAtTime(muted ? 0.0001 : 1.0, now);
+      } catch (e) {}
+    }
+    if (this.audio) {
+      if (muted) {
+        this.audio.volume = 0;
+        this.audio.pause();
+      } else {
+        this.audio.volume = this.baseVolume;
+        if (!this.isPaused) {
+          this.audio.play().catch(() => {});
+        }
+      }
+    }
+  },
+
+  stop() {
+    if (this.duckTimeout) clearTimeout(this.duckTimeout);
+    if (this.audio) {
+      this.audio.pause();
+      this.audio.currentTime = 0;
+    }
+    this.currentTrackId = null;
+  }
+};
 
 function playWrappedChime(freq = 587.33, isMuted = false) {
   if (isMuted) return;
@@ -9770,57 +10130,6 @@ function playWrappedFanfare(isMuted = false) {
   } catch (e) {}
 }
 
-function startAmbientSynth(slideIndex = 0, isMuted = false) {
-  stopAmbientSynth();
-  if (isMuted) return;
-  try {
-    const ctx = getWrappedAudioCtx();
-    if (!ctx) return;
-
-    const baseFreqs = [130.81, 146.83, 164.81, 174.61, 196.00, 220.00, 130.81, 164.81, 196.00, 130.81];
-    const root = baseFreqs[slideIndex % baseFreqs.length];
-
-    ambientOsc1 = ctx.createOscillator();
-    ambientOsc2 = ctx.createOscillator();
-    ambientFilter = ctx.createBiquadFilter();
-    ambientGain = ctx.createGain();
-
-    ambientOsc1.type = "triangle";
-    ambientOsc2.type = "sine";
-    ambientOsc1.frequency.setValueAtTime(root, ctx.currentTime);
-    ambientOsc2.frequency.setValueAtTime(root * 1.5, ctx.currentTime);
-
-    ambientFilter.type = "lowpass";
-    ambientFilter.frequency.setValueAtTime(600, ctx.currentTime);
-
-    ambientGain.gain.setValueAtTime(0.001, ctx.currentTime);
-    ambientGain.gain.exponentialRampToValueAtTime(0.035, ctx.currentTime + 0.6);
-
-    ambientOsc1.connect(ambientFilter);
-    ambientOsc2.connect(ambientFilter);
-    ambientFilter.connect(ambientGain);
-    ambientGain.connect(ctx.destination);
-
-    ambientOsc1.start();
-    ambientOsc2.start();
-  } catch (e) {}
-}
-
-function stopAmbientSynth() {
-  try {
-    if (ambientGain && wrappedAudioCtx) {
-      ambientGain.gain.setValueAtTime(ambientGain.gain.value, wrappedAudioCtx.currentTime);
-      ambientGain.gain.exponentialRampToValueAtTime(0.0001, wrappedAudioCtx.currentTime + 0.2);
-    }
-    setTimeout(() => {
-      if (ambientOsc1) { ambientOsc1.stop(); ambientOsc1.disconnect(); ambientOsc1 = null; }
-      if (ambientOsc2) { ambientOsc2.stop(); ambientOsc2.disconnect(); ambientOsc2 = null; }
-      ambientGain = null;
-      ambientFilter = null;
-    }, 220);
-  } catch (e) {}
-}
-
 // ─── Confetti Physics Emitter ─────────────────────────────────
 
 function triggerConfetti(canvas) {
@@ -9922,6 +10231,54 @@ const WrappedStoryModal = {
               <i class="ph-fill ph-sparkle" style="color:var(--gold)"></i>
               <span>{{ profile?.name }} · {{ data.label }} Wrapped</span>
             </div>
+
+            <!-- Music Track Pill with EQ Visualizer & Track Switcher Popover -->
+            <div class="story-music-wrapper" @click.stop>
+              <button
+                class="story-music-pill"
+                :class="{ 'is-muted': isMuted, 'is-open': showTrackMenu }"
+                @click.stop="toggleTrackMenu"
+                :title="'Soundtrack: ' + (activeTrack?.title || 'Soundtrack') + ' (Click to change)'"
+              >
+                <div class="story-music-eq" v-if="!isMuted && !isPaused">
+                  <span class="eq-bar bar-1"></span>
+                  <span class="eq-bar bar-2"></span>
+                  <span class="eq-bar bar-3"></span>
+                </div>
+                <i v-else class="ph-bold ph-music-notes" style="font-size:0.85rem"></i>
+                <span class="story-music-name">{{ activeTrack?.title || 'Soundtrack' }}</span>
+                <i class="ph ph-caret-down" style="font-size:0.75rem;opacity:0.7"></i>
+              </button>
+
+              <!-- Track Selector Popover Dropdown -->
+              <div v-if="showTrackMenu" class="wrapped-track-popover" @click.stop>
+                <div class="track-popover-header">
+                  <i class="ph-fill ph-music-notes-simple" style="color:var(--accent)"></i>
+                  <span>Soundtracks (CC0 / Royalty-Free)</span>
+                </div>
+                <div class="track-popover-list">
+                  <button
+                    v-for="trk in tracksList"
+                    :key="trk.id"
+                    class="track-popover-item"
+                    :class="{ active: activeTrack?.id === trk.id }"
+                    @click.stop="selectTrack(trk)"
+                  >
+                    <div class="track-item-left">
+                      <div class="track-item-icon">
+                        <i :class="'ph-bold ' + (trk.icon || 'ph-music-notes')"></i>
+                      </div>
+                      <div class="track-item-info">
+                        <div class="track-item-title">{{ trk.title }}</div>
+                        <div class="track-item-meta">{{ trk.mood }} · {{ trk.artist }}</div>
+                      </div>
+                    </div>
+                    <i v-if="activeTrack?.id === trk.id" class="ph-bold ph-check" style="color:var(--accent);font-size:1.1rem"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <button
               class="story-btn-circle story-audio-btn"
               :class="{ muted: isMuted }"
@@ -10321,6 +10678,9 @@ const WrappedStoryModal = {
     const confettiCanvasRef = ref(null);
 
     const isMuted = ref(localStorage.getItem("capsstream_wrapped_muted") === "true");
+    const tracksList = WRAPPED_TRACKS;
+    const activeTrack = ref(WRAPPED_TRACKS[0]);
+    const showTrackMenu = ref(false);
 
     const genreQuizAnswered = ref(false);
     const talentQuizAnswered = ref(false);
@@ -10335,13 +10695,27 @@ const WrappedStoryModal = {
 
     let progressInterval = null;
 
+    function toggleTrackMenu() {
+      showTrackMenu.value = !showTrackMenu.value;
+      if (showTrackMenu.value) {
+        playWrappedTap(isMuted.value);
+      }
+    }
+
+    function selectTrack(trk) {
+      activeTrack.value = trk;
+      showTrackMenu.value = false;
+      localStorage.setItem("capsstream_wrapped_track", trk.id);
+      wrappedMusicPlayer.playTrack(trk.id, isMuted.value, true);
+      playWrappedTap(isMuted.value);
+    }
+
     function toggleMute() {
       isMuted.value = !isMuted.value;
       localStorage.setItem("capsstream_wrapped_muted", isMuted.value ? "true" : "false");
-      if (isMuted.value) {
-        stopAmbientSynth();
-      } else {
-        startAmbientSynth(currentSlide.value, false);
+      wrappedMusicPlayer.setMuted(isMuted.value);
+      if (!isMuted.value && activeTrack.value) {
+        wrappedMusicPlayer.playTrack(activeTrack.value.id, false);
       }
     }
 
@@ -10416,13 +10790,14 @@ const WrappedStoryModal = {
 
     function onSlideEntered(idx) {
       if (idx === 8) {
-        // Archetype reveal!
+        // Archetype reveal fanfare!
+        wrappedMusicPlayer.duck(3200, 0.15);
         playWrappedFanfare(isMuted.value);
         nextTick(() => triggerConfetti(confettiCanvasRef.value));
       } else {
+        wrappedMusicPlayer.duck(750, 0.4);
         playWrappedChime(500 + idx * 40, isMuted.value);
       }
-      startAmbientSynth(idx, isMuted.value);
 
       if (idx === totalSlides - 1) {
         clearInterval(progressInterval);
@@ -10432,6 +10807,7 @@ const WrappedStoryModal = {
 
     function answerGenreQuiz(opt) {
       genreQuizAnswered.value = true;
+      wrappedMusicPlayer.duck(1800, 0.25);
       if (opt.is_correct) {
         playWrappedSuccess(isMuted.value);
         triggerConfetti(confettiCanvasRef.value);
@@ -10443,6 +10819,7 @@ const WrappedStoryModal = {
 
     function answerTalentQuiz(opt) {
       talentQuizAnswered.value = true;
+      wrappedMusicPlayer.duck(1800, 0.25);
       if (opt.is_correct) {
         playWrappedSuccess(isMuted.value);
         triggerConfetti(confettiCanvasRef.value);
@@ -10457,21 +10834,25 @@ const WrappedStoryModal = {
       slideProgress.value = 0;
       genreQuizAnswered.value = false;
       talentQuizAnswered.value = false;
+      showTrackMenu.value = false;
       onSlideEntered(0);
       startProgress();
     }
 
     function onPointerDown() {
       isPaused.value = true;
+      wrappedMusicPlayer.pause();
     }
 
     function onPointerUp() {
       isPaused.value = false;
+      wrappedMusicPlayer.resume(isMuted.value);
     }
 
     function closeStory() {
       clearInterval(progressInterval);
-      stopAmbientSynth();
+      showTrackMenu.value = false;
+      wrappedMusicPlayer.stop();
       emit("close");
     }
 
@@ -10481,12 +10862,24 @@ const WrappedStoryModal = {
 
     function handleKeydown(e) {
       if (!props.show) return;
-      if (e.key === "Escape") closeStory();
-      else if (e.key === "ArrowRight") nextSlide();
-      else if (e.key === "ArrowLeft") prevSlide();
-      else if (e.key === " ") {
+      if (e.key === "Escape") {
+        if (showTrackMenu.value) {
+          showTrackMenu.value = false;
+        } else {
+          closeStory();
+        }
+      } else if (e.key === "ArrowRight") {
+        nextSlide();
+      } else if (e.key === "ArrowLeft") {
+        prevSlide();
+      } else if (e.key === " ") {
         e.preventDefault();
         isPaused.value = !isPaused.value;
+        if (isPaused.value) {
+          wrappedMusicPlayer.pause();
+        } else {
+          wrappedMusicPlayer.resume(isMuted.value);
+        }
       }
     }
 
@@ -10504,12 +10897,22 @@ const WrappedStoryModal = {
           slideProgress.value = 0;
           genreQuizAnswered.value = false;
           talentQuizAnswered.value = false;
+          showTrackMenu.value = false;
+
+          // Resolve soundtrack: check saved selection or auto-match archetype/genre
+          const savedTrackId = localStorage.getItem("capsstream_wrapped_track");
+          const matched = savedTrackId ? (WRAPPED_TRACKS.find((t) => t.id === savedTrackId) || wrappedMusicPlayer.getBestMatchingTrack(props.data)) : wrappedMusicPlayer.getBestMatchingTrack(props.data);
+          activeTrack.value = matched;
+
+          wrappedMusicPlayer.playTrack(matched.id, isMuted.value, true);
+
           onSlideEntered(0);
           startProgress();
           window.addEventListener("keydown", handleKeydown);
         } else {
           clearInterval(progressInterval);
-          stopAmbientSynth();
+          showTrackMenu.value = false;
+          wrappedMusicPlayer.stop();
           window.removeEventListener("keydown", handleKeydown);
         }
       },
@@ -10518,7 +10921,8 @@ const WrappedStoryModal = {
 
     onUnmounted(() => {
       clearInterval(progressInterval);
-      stopAmbientSynth();
+      showTrackMenu.value = false;
+      wrappedMusicPlayer.stop();
       window.removeEventListener("keydown", handleKeydown);
     });
 
@@ -10683,6 +11087,7 @@ const WrappedStoryModal = {
     }
 
     function downloadPoster() {
+      wrappedMusicPlayer.duck(2200, 0.25);
       const canvas = document.createElement("canvas");
       drawPosterToCanvas(canvas, 1080, 1540, selectedPosterTheme.value);
       playWrappedSuccess(isMuted.value);
@@ -10711,6 +11116,11 @@ const WrappedStoryModal = {
       slideBackground,
       peakWindowLabel,
       isMuted,
+      tracksList,
+      activeTrack,
+      showTrackMenu,
+      toggleTrackMenu,
+      selectTrack,
       toggleMute,
       nextSlide,
       prevSlide,
@@ -12930,12 +13340,12 @@ const App = {
             <!-- Profile -->
             <div class="nav-profile" @click.stop="toggleProfileMenu" id="nav-profile" data-tooltip="Profile Menu"
               :style="{ background: store.profile?.color ? store.profile.color + '33' : 'var(--bg-card)', borderColor: store.profile?.color ? store.profile.color + '88' : 'transparent' }">
-              <img v-if="store.profile?.custom_avatar_url" :src="store.profile.custom_avatar_url" class="nav-profile-avatar-img" :alt="store.profile?.name" />
+              <img v-if="store.profile?.custom_avatar_url" :src="imgUrl(store.profile.custom_avatar_url)" class="nav-profile-avatar-img" :alt="store.profile?.name" />
               <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar"></i>
               <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
               <div class="profile-dropdown" v-if="showProfileMenu" @click.stop>
                 <div v-if="store?.profile" class="profile-dropdown-item" style="font-weight:600;color:var(--text-primary);cursor:default" @click.stop>
-                  <img v-if="store.profile?.custom_avatar_url" :src="store.profile.custom_avatar_url" class="dropdown-profile-avatar-img" />
+                  <img v-if="store.profile?.custom_avatar_url" :src="imgUrl(store.profile.custom_avatar_url)" class="dropdown-profile-avatar-img" />
                   <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar" style="font-size:1.15rem"></i>
                   <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
                   <span style="margin-left:6px;font-weight:700">{{ store.profile?.name }}</span>
@@ -13185,21 +13595,23 @@ const App = {
 
           <div class="pin-modal-identity">
             <div class="pin-profile-avatar-wrap">
-              <div class="pin-profile-avatar-icon" style="background:linear-gradient(135deg,#38bdf8,#0284c7)">
-                <i class="ph-bold ph-shield-check"></i>
+              <div class="pin-profile-avatar-icon" style="background:#262626">
+                <i class="ph-bold ph-shield-check" style="color:#e50914"></i>
               </div>
             </div>
-            <h3 class="pin-modal-title">Parental Exit Gate</h3>
-            <p class="pin-modal-sub">Solve math puzzle to exit Kids Mode</p>
+            <div class="pin-identity-text">
+              <div class="pin-modal-lock-label">Kids Mode Exit</div>
+              <h3 class="pin-modal-title">Solve the puzzle to exit Kids Mode</h3>
+            </div>
           </div>
 
-          <div class="math-question-badge" style="margin:0 auto 1.25rem;font-size:1.25rem;font-weight:800;padding:8px 20px;border-radius:14px;background:rgba(56,189,248,0.14);border:1px solid rgba(56,189,248,0.3);color:#38bdf8;display:inline-block">
-            {{ appMathProblem.num1 }} + {{ appMathProblem.num2 }} = ?
+          <div class="math-challenge-box">
+            <span class="math-challenge-equation">{{ appMathProblem.num1 }} + {{ appMathProblem.num2 }} = ?</span>
           </div>
 
-          <div class="pin-display-pods" :class="{ error: appMathError }">
-            <div class="math-answer-display" style="font-size:1.5rem;font-weight:800;color:#fff;min-height:36px;letter-spacing:4px">
-              {{ appMathAnswer || '—' }}
+          <div class="pin-display-boxes" :class="{ error: appMathError }">
+            <div class="math-answer-box">
+              <span class="math-answer-digits">{{ appMathAnswer || '—' }}</span>
             </div>
           </div>
 
@@ -13225,6 +13637,10 @@ const App = {
           <div class="pin-modal-error" v-if="appMathError">
             <i class="ph-fill ph-warning-circle"></i>
             <span>{{ appMathError }}</span>
+          </div>
+
+          <div class="pin-keyboard-hint">
+            <span>Use your keyboard or the on-screen keypad</span>
           </div>
         </div>
       </div>
@@ -13328,7 +13744,7 @@ const App = {
 
         <div class="context-menu-divider"></div>
 
-        <!-- Group 2: Organization (Watchlist / Collection) -->
+        <!-- Group 2: Organization (Watchlist / Collection / Playlist) -->
         <div class="context-menu-item" @click="handleContextMenuFav">
           <i :class="contextMenuState.isFavorite ? 'ph-fill ph-heart' : 'ph ph-heart'"></i>
           <span>{{ contextMenuState.isFavorite ? 'Remove from Watchlist' : 'Add to Watchlist' }}</span>
@@ -13337,6 +13753,11 @@ const App = {
         <div class="context-menu-item" @click="handleContextMenuCollection">
           <i class="ph ph-stack"></i>
           <span>Add to Collection</span>
+        </div>
+
+        <div class="context-menu-item" @click="handleContextMenuPlaylist">
+          <i class="ph-bold ph-queue"></i>
+          <span>Add to Playlist</span>
         </div>
 
         <div class="context-menu-divider"></div>
@@ -14444,6 +14865,13 @@ const App = {
       openGlobalCollectionPicker(item);
     }
 
+    function handleContextMenuPlaylist() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item) return;
+      openAddToPlaylist(item);
+    }
+
     async function handleContextMenuToggleWatched() {
       const item = contextMenuState.item;
       closeGlobalContextMenu();
@@ -14615,6 +15043,7 @@ const App = {
       handleContextMenuDetails,
       handleContextMenuFav,
       handleContextMenuCollection,
+      handleContextMenuPlaylist,
       handleContextMenuToggleWatched,
       handleContextMenuResetProgress,
       collectionPickerState,
@@ -15295,6 +15724,7 @@ const app = createApp(App);
 // Expose to ALL component templates — module-level helpers aren't visible
 // in template scope otherwise (this is why IMDb-link clicks did nothing).
 app.config.globalProperties.unlockAchievement = unlockAchievement;
+app.config.globalProperties.imgUrl = imgUrl;
 app.component("shortcuts-modal", ShortcutsModal);
 app.component("skip-timestamps-modal", SkipTimestampsModal);
 app.component("fix-match-modal", FixMatchModal);

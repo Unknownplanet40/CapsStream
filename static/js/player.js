@@ -1,4 +1,6 @@
 (function () {
+const imgUrl = (path, size) => (typeof window.imgUrl === "function" ? window.imgUrl(path, size) : (path || ""));
+
 const PlayerPage = {
   name: "PlayerPage",
   template: `
@@ -2850,7 +2852,7 @@ const PlayerPage = {
         if (c && now >= c.startTime && now <= c.endTime) {
           const active = [sanitizeCueText(c.text)];
           let i = lastCueIdx + 1;
-          while (i < len && cues[i].startTime <= now) {
+          while (i < len && cues[i] && cues[i].startTime <= now) {
             if (now <= cues[i].endTime) {
               const s = sanitizeCueText(cues[i].text);
               if (s) active.push(s);
@@ -2858,7 +2860,7 @@ const PlayerPage = {
             i++;
           }
           let j = lastCueIdx - 1;
-          while (j >= 0 && cues[j].endTime >= now) {
+          while (j >= 0 && cues[j] && cues[j].endTime >= now) {
             if (now >= cues[j].startTime) {
               const s = sanitizeCueText(cues[j].text);
               if (s) active.unshift(s);
@@ -2896,7 +2898,7 @@ const PlayerPage = {
         lastCueIdx = bestIdx;
         const active = [];
         let i = bestIdx;
-        while (i < len && cues[i].startTime <= now) {
+        while (i < len && cues[i] && cues[i].startTime <= now) {
           if (now <= cues[i].endTime) {
             const s = sanitizeCueText(cues[i].text);
             if (s) active.push(s);
@@ -2904,7 +2906,7 @@ const PlayerPage = {
           i++;
         }
         let j = bestIdx - 1;
-        while (j >= 0 && cues[j].endTime >= now) {
+        while (j >= 0 && cues[j] && cues[j].endTime >= now) {
           if (now >= cues[j].startTime) {
             const s = sanitizeCueText(cues[j].text);
             if (s) active.unshift(s);

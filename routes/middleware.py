@@ -145,6 +145,8 @@ def is_admin():
         admin_pin = request.json.get("admin_pin")
     if admin_pin is None:
         admin_pin = request.args.get("admin_pin")
+    if admin_pin is None and request.form:
+        admin_pin = request.form.get("admin_pin")
 
     if admin_pin is not None and str(admin_pin).strip() != "":
         ok, _, _ = verify_admin_pin(admin_pin)

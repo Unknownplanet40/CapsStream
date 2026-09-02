@@ -113,7 +113,7 @@ def get_continue_watching(profile_id, limit=20):
     return results
 
 
-def get_profile_recommendations(profile_id, limit=2):
+def get_profile_recommendations(profile_id, limit=2, all_shows=None):
     """
     Find recently watched seeds (in-progress or completed) for profile_id,
     and find matching unique titles in the library based on shared genres and cast.
@@ -150,7 +150,8 @@ def get_profile_recommendations(profile_id, limit=2):
     if not seed_list:
         return []
 
-    all_shows = enrich_mounted_list(get_unique_shows(None))
+    if all_shows is None:
+        all_shows = enrich_mounted_list(get_unique_shows(None))
     recommendations = []
 
     for seed in seed_list:
