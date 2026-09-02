@@ -195,12 +195,29 @@ def ensure_media_logo(media_dict):
 def _fetch_movie_detail(tmdb_id, default_title="", year=None):
     cached = _load_cache("movie", tmdb_id)
     if cached:
-        # Ensure cached items get logo if missing
+        updated = False
         if "logo_path" not in cached:
             detail = _tmdb_get(f"movie/{tmdb_id}", {"language": "en-US", "append_to_response": "images", "include_image_language": "en,null"})
             if detail:
                 cached["logo_path"] = _extract_logo(detail, "movie", tmdb_id)
-                _save_cache("movie", tmdb_id, cached)
+                updated = True
+        if "belongs_to_collection" not in cached:
+            detail = _tmdb_get(f"movie/{tmdb_id}", {"language": "en-US"})
+            if detail and detail.get("belongs_to_collection"):
+                b_col = detail.get("belongs_to_collection")
+                col_poster = _download_image(b_col.get("poster_path"), "w500")
+                col_backdrop = _download_image(b_col.get("backdrop_path"), "original")
+                cached["belongs_to_collection"] = {
+                    "id": b_col.get("id"),
+                    "name": b_col.get("name"),
+                    "poster_path": col_poster,
+                    "backdrop_path": col_backdrop,
+                }
+            else:
+                cached["belongs_to_collection"] = None
+            updated = True
+        if updated:
+            _save_cache("movie", tmdb_id, cached)
         return cached
 
     detail = _tmdb_get(f"movie/{tmdb_id}", {"language": "en-US", "append_to_response": "credits,videos,images", "include_image_language": "en,null"})
@@ -210,6 +227,20 @@ def _fetch_movie_detail(tmdb_id, default_title="", year=None):
     poster_local   = _download_image(detail.get("poster_path"), "w500")
     backdrop_local = _download_image(detail.get("backdrop_path"), "original")
     logo_local     = _extract_logo(detail, "movie", tmdb_id)
+
+    belongs_to_col = detail.get("belongs_to_collection")
+    collection_dict = None
+    if belongs_to_col and isinstance(belongs_to_col, dict) and belongs_to_col.get("id"):
+        col_id = belongs_to_col.get("id")
+        col_name = belongs_to_col.get("name")
+        col_poster = _download_image(belongs_to_col.get("poster_path"), "w500")
+        col_backdrop = _download_image(belongs_to_col.get("backdrop_path"), "original")
+        collection_dict = {
+            "id": col_id,
+            "name": col_name,
+            "poster_path": col_poster,
+            "backdrop_path": col_backdrop,
+        }
 
     genres = ", ".join(g["name"] for g in detail.get("genres", []))
     cast   = [
@@ -242,10 +273,39 @@ def _fetch_movie_detail(tmdb_id, default_title="", year=None):
         "trailer_key":   trailer,
         "cast_json":     json.dumps(cast),
         "runtime":       detail.get("runtime"),
+        "belongs_to_collection": collection_dict,
     }
     _save_cache("movie", tmdb_id, result)
     print(f"[Matcher] Matched movie: {result['title']} ({result['year']})")
     return result
+
+
+def get_movie_collection(tmdb_id):
+    """Retrieve collection info for a movie from cache or TMDb."""
+    if not tmdb_id:
+        return None
+    cached = _load_cache("movie", tmdb_id)
+    if cached and "belongs_to_collection" in cached:
+        return cached["belongs_to_collection"]
+    detail = _tmdb_get(f"movie/{tmdb_id}", {"language": "en-US"})
+    if detail and detail.get("belongs_to_collection"):
+        b_col = detail.get("belongs_to_collection")
+        col_poster = _download_image(b_col.get("poster_path"), "w500")
+        col_backdrop = _download_image(b_col.get("backdrop_path"), "original")
+        col_info = {
+            "id": b_col.get("id"),
+            "name": b_col.get("name"),
+            "poster_path": col_poster,
+            "backdrop_path": col_backdrop,
+        }
+        if cached:
+            cached["belongs_to_collection"] = col_info
+            _save_cache("movie", tmdb_id, cached)
+        return col_info
+    elif cached:
+        cached["belongs_to_collection"] = None
+        _save_cache("movie", tmdb_id, cached)
+    return None
 
 
 def get_show_seasons_list(tmdb_id, media_type="series"):

@@ -1302,98 +1302,107 @@ const MediaCard = {
         </div>
       </div>
 
-      <!-- Netflix-Style Hover Preview Popout -->
-      <div v-if="isPopoutActive" class="netflix-popout-preview" :class="popoutAlignClass" @click.stop>
-        <div class="popout-media-box">
-          <!-- High-res Backdrop/Poster Base Layer -->
-          <img
-            :src="backdropSrc"
-            class="popout-poster-img"
-            :alt="cardItem.title"
-            @error="handlePopoutImgError"
-          />
+      <!-- Netflix-Style Hover Preview Popout (Teleported to body to prevent content-row cutout) -->
+      <teleport to="body">
+        <div
+          v-if="isPopoutActive"
+          class="netflix-popout-preview"
+          :style="{ top: popoutPos.top, left: popoutPos.left, width: popoutPos.width }"
+          @mouseenter="onPopoutMouseEnter"
+          @mouseleave="onPopoutMouseLeave"
+          @click.stop
+        >
+          <div class="popout-media-box">
+            <!-- High-res Backdrop/Poster Base Layer -->
+            <img
+              :src="backdropSrc"
+              class="popout-poster-img"
+              :alt="cardItem.title"
+              @error="handlePopoutImgError"
+            />
 
-          <!-- Official TMDB Trailer Frame (Primary) -->
-          <iframe
-            v-if="trailerEmbedUrl"
-            :src="trailerEmbedUrl"
-            class="popout-trailer-frame"
-            :class="{ 'is-playing': isVideoPlaying }"
-            frameborder="0"
-            allow="autoplay; encrypted-media"
-            @load="onIframeLoaded"
-          ></iframe>
+            <!-- Official TMDB Trailer Frame (Primary) -->
+            <iframe
+              v-if="trailerEmbedUrl"
+              :src="trailerEmbedUrl"
+              class="popout-trailer-frame"
+              :class="{ 'is-playing': isVideoPlaying }"
+              frameborder="0"
+              allow="autoplay; encrypted-media"
+              @load="onIframeLoaded"
+            ></iframe>
 
-          <!-- Video Stream Overlay (Fallback for local files) -->
-          <video
-            v-else-if="previewVideoUrl"
-            :src="previewVideoUrl"
-            class="popout-video"
-            :class="{ 'is-playing': isVideoPlaying }"
-            autoplay
-            loop
-            playsinline
-            :muted="isMuted"
-            @playing="isVideoPlaying = true"
-            @canplay="isVideoPlaying = true"
-            @error="onVideoError"
-          ></video>
+            <!-- Video Stream Overlay (Fallback for local files) -->
+            <video
+              v-else-if="previewVideoUrl"
+              :src="previewVideoUrl"
+              class="popout-video"
+              :class="{ 'is-playing': isVideoPlaying }"
+              autoplay
+              loop
+              playsinline
+              :muted="isMuted"
+              @playing="isVideoPlaying = true"
+              @canplay="isVideoPlaying = true"
+              @error="onVideoError"
+            ></video>
 
-          <div class="popout-video-gradient"></div>
+            <div class="popout-video-gradient"></div>
 
-          <button
-            v-if="isVideoPlaying"
-            class="popout-sound-btn"
-            @click.stop="toggleSound"
-            :title="isMuted ? 'Unmute Audio' : 'Mute Audio'"
-          >
-            <i :class="isMuted ? 'ph-bold ph-speaker-simple-slash' : 'ph-bold ph-speaker-simple-high'"></i>
-          </button>
-        </div>
-
-        <div class="popout-info-box">
-          <div class="popout-title">{{ cardItem.title }}</div>
-          <div class="popout-actions-row">
-            <div class="popout-actions-left">
-              <button class="popout-circle-btn popout-play-btn" @click.stop="quickPlay" title="Play">
-                <i class="ph-fill ph-play"></i>
-              </button>
-              <button
-                class="popout-circle-btn"
-                :class="{ 'is-active': isFavorite }"
-                @click.stop="toggleFavorite"
-                :title="isFavorite ? 'In Watchlist' : 'Add to Watchlist'"
-              >
-                <i :class="isFavorite ? 'ph-bold ph-check' : 'ph-bold ph-plus'"></i>
-              </button>
-              <button
-                class="popout-circle-btn"
-                :class="{ 'is-active': isLiked }"
-                @click.stop="toggleLike"
-                :title="isLiked ? 'Liked' : 'Like'"
-              >
-                <i :class="isLiked ? 'ph-fill ph-thumbs-up' : 'ph-bold ph-thumbs-up'"></i>
-              </button>
-            </div>
-            <button class="popout-circle-btn popout-more-btn" @click.stop="openDetail" title="More Info">
-              <i class="ph-bold ph-caret-down"></i>
+            <button
+              v-if="isVideoPlaying"
+              class="popout-sound-btn"
+              @click.stop="toggleSound"
+              :title="isMuted ? 'Unmute Audio' : 'Mute Audio'"
+            >
+              <i :class="isMuted ? 'ph-bold ph-speaker-simple-slash' : 'ph-bold ph-speaker-simple-high'"></i>
             </button>
           </div>
 
-          <div class="popout-meta-row">
-            <span class="popout-match-badge">{{ matchScore }}% Match</span>
-            <span class="popout-pill-badge">{{ maturityRating }}</span>
-            <span class="popout-duration-text">{{ durationOrEpisodes }}</span>
-            <span class="popout-quality-pill">HD</span>
-          </div>
+          <div class="popout-info-box">
+            <div class="popout-title">{{ cardItem.title }}</div>
+            <div class="popout-actions-row">
+              <div class="popout-actions-left">
+                <button class="popout-circle-btn popout-play-btn" @click.stop="quickPlay" title="Play">
+                  <i class="ph-fill ph-play"></i>
+                </button>
+                <button
+                  class="popout-circle-btn"
+                  :class="{ 'is-active': isFavorite }"
+                  @click.stop="toggleFavorite"
+                  :title="isFavorite ? 'In Watchlist' : 'Add to Watchlist'"
+                >
+                  <i :class="isFavorite ? 'ph-bold ph-check' : 'ph-bold ph-plus'"></i>
+                </button>
+                <button
+                  class="popout-circle-btn"
+                  :class="{ 'is-active': isLiked }"
+                  @click.stop="toggleLike"
+                  :title="isLiked ? 'Liked' : 'Like'"
+                >
+                  <i :class="isLiked ? 'ph-fill ph-thumbs-up' : 'ph-bold ph-thumbs-up'"></i>
+                </button>
+              </div>
+              <button class="popout-circle-btn popout-more-btn" @click.stop="openDetail" title="More Info">
+                <i class="ph-bold ph-caret-down"></i>
+              </button>
+            </div>
 
-          <div class="popout-genres-row" v-if="genreList.length">
-            <span v-for="(g, gi) in genreList" :key="gi" class="popout-genre-tag">
-              {{ g }}<span v-if="gi < genreList.length - 1" class="popout-dot">•</span>
-            </span>
+            <div class="popout-meta-row">
+              <span class="popout-match-badge">{{ matchScore }}% Match</span>
+              <span class="popout-pill-badge">{{ maturityRating }}</span>
+              <span class="popout-duration-text">{{ durationOrEpisodes }}</span>
+              <span class="popout-quality-pill">HD</span>
+            </div>
+
+            <div class="popout-genres-row" v-if="genreList.length">
+              <span v-for="(g, gi) in genreList" :key="gi" class="popout-genre-tag">
+                {{ g }}<span v-if="gi < genreList.length - 1" class="popout-dot">•</span>
+              </span>
+            </div>
           </div>
         </div>
-      </div>
+      </teleport>
     </div>
   `,
   setup(props, { emit }) {
@@ -1510,6 +1519,31 @@ const MediaCard = {
       }
     }
 
+    const popoutPos = ref({ top: "0px", left: "0px", width: "320px" });
+    let closeTimer = null;
+
+    function scheduleClose() {
+      clearTimeout(closeTimer);
+      closeTimer = setTimeout(() => {
+        isPopoutActive.value = false;
+        isVideoPlaying.value = false;
+        trailerEmbedUrl.value = null;
+        previewVideoUrl.value = null;
+      }, 150);
+    }
+
+    function cancelClose() {
+      clearTimeout(closeTimer);
+    }
+
+    function onPopoutMouseEnter() {
+      cancelClose();
+    }
+
+    function onPopoutMouseLeave() {
+      scheduleClose();
+    }
+
     function openCardMenu(e) {
       openGlobalContextMenu(e, cardItem.value);
     }
@@ -1517,23 +1551,35 @@ const MediaCard = {
     function updatePopoutAlignment() {
       if (!cardRootRef.value) return;
       const rect = cardRootRef.value.getBoundingClientRect();
-      const popoutWidth = 310;
-      const margin = 24;
+      const popoutWidth = Math.min(320, window.innerWidth - 32);
+      const margin = 16;
 
-      const cardCenter = rect.left + rect.width / 2;
-      const popoutLeft = cardCenter - popoutWidth / 2;
-      const popoutRight = cardCenter + popoutWidth / 2;
-
-      if (popoutLeft < margin) {
-        popoutAlignClass.value = "align-left";
-      } else if (popoutRight > window.innerWidth - margin) {
-        popoutAlignClass.value = "align-right";
-      } else {
-        popoutAlignClass.value = "align-center";
+      let left = rect.left + rect.width / 2 - popoutWidth / 2;
+      if (left < margin) {
+        left = margin;
+      } else if (left + popoutWidth > window.innerWidth - margin) {
+        left = window.innerWidth - popoutWidth - margin;
       }
+
+      // Lift slightly above card, clamped inside screen viewport
+      let top = rect.top - 46;
+      if (top < margin) {
+        top = margin;
+      }
+      const estHeight = 360;
+      if (top + estHeight > window.innerHeight - margin) {
+        top = Math.max(margin, window.innerHeight - estHeight - margin);
+      }
+
+      popoutPos.value = {
+        top: `${Math.round(top)}px`,
+        left: `${Math.round(left)}px`,
+        width: `${Math.round(popoutWidth)}px`,
+      };
     }
 
     function onMouseEnter() {
+      cancelClose();
       showTooltip.value = true;
       if (window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches && !props.isContinue) {
         clearTimeout(hoverTimer);
@@ -1569,11 +1615,29 @@ const MediaCard = {
     function onMouseLeave() {
       showTooltip.value = false;
       clearTimeout(hoverTimer);
-      isPopoutActive.value = false;
-      isVideoPlaying.value = false;
-      trailerEmbedUrl.value = null;
-      previewVideoUrl.value = null;
+      scheduleClose();
     }
+
+    function handleScrollClose() {
+      if (isPopoutActive.value) {
+        clearTimeout(hoverTimer);
+        clearTimeout(closeTimer);
+        isPopoutActive.value = false;
+        isVideoPlaying.value = false;
+        trailerEmbedUrl.value = null;
+        previewVideoUrl.value = null;
+      }
+    }
+
+    onMounted(() => {
+      window.addEventListener("scroll", handleScrollClose, { passive: true });
+    });
+
+    onUnmounted(() => {
+      clearTimeout(hoverTimer);
+      clearTimeout(closeTimer);
+      window.removeEventListener("scroll", handleScrollClose);
+    });
 
     function quickPlay() {
       const item = cardItem.value;
@@ -1621,6 +1685,9 @@ const MediaCard = {
     return {
       cardRootRef,
       popoutAlignClass,
+      popoutPos,
+      onPopoutMouseEnter,
+      onPopoutMouseLeave,
       cardItem,
       posterSrc,
       backdropSrc,
@@ -2957,6 +3024,36 @@ const DetailPage = {
             </div>
           </div>
 
+          <!-- Sequels & Prequels / Franchise Shelf -->
+          <div class="detail-section" v-if="media.franchise && media.franchise.items && media.franchise.items.length > 1">
+            <div class="detail-section-header">
+              <div class="detail-section-title" style="display:flex;align-items:center;gap:8px">
+                <i class="ph ph-film-strip" style="color:var(--accent)"></i>
+                <span>Part of {{ media.franchise.name }}</span>
+                <span class="universe-card-badge" style="margin-left:6px;font-size:0.7rem;text-transform:uppercase">
+                  {{ media.franchise.item_count }} in Library
+                </span>
+              </div>
+              <div class="row-header-controls" v-if="media.franchise.items.length > 4">
+                <button class="row-control-btn" @click="scrollFranchise(-400)" title="Scroll Left">
+                  <i class="ph ph-caret-left"></i>
+                </button>
+                <button class="row-control-btn" @click="scrollFranchise(400)" title="Scroll Right">
+                  <i class="ph ph-caret-right"></i>
+                </button>
+              </div>
+            </div>
+            <div class="cards-scroller" ref="franchiseScrollerRef" style="padding:4px 0 16px">
+              <media-card
+                v-for="item in media.franchise.items"
+                :key="item.id"
+                :item="item"
+                :class="{ 'active-detail-item': item.id === media.id }"
+                @click="navigateToSibling(item)"
+              />
+            </div>
+          </div>
+
           <!-- File Details Bento Container -->
           <div class="detail-section" v-if="media.file_path">
             <div class="detail-section-title">
@@ -3590,6 +3687,18 @@ const DetailPage = {
       }
     }
 
+    const franchiseScrollerRef = ref(null);
+    function scrollFranchise(offset) {
+      if (franchiseScrollerRef.value) {
+        franchiseScrollerRef.value.scrollBy({ left: offset, behavior: "smooth" });
+      }
+    }
+
+    function navigateToSibling(item) {
+      if (!item || item.id === media.value?.id) return;
+      router.push(`/detail/${item.type || 'movie'}/${item.id}`);
+    }
+
     // Click a cast member → jump to Search pre-filled with their name.
     // The backend deep-search matches cast_json, so results are titles
     // featuring that actor across the whole library.
@@ -3671,6 +3780,9 @@ const DetailPage = {
       castScrollerRef,
       scrollCast,
       searchCast,
+      franchiseScrollerRef,
+      scrollFranchise,
+      navigateToSibling,
       backdropFailed,
       activeBackdropIdx,
       backdrops,
@@ -3705,7 +3817,6 @@ const DetailPage = {
       browseGenre,
       inCollection,
       toggleCollection,
-      copyFilePath,
       formatFileSize,
       getFileExtension,
       watchTrailer,
@@ -4235,6 +4346,199 @@ const SettingsPage = {
             <div style="margin-top:1rem">
               <div class="settings-label">Media Scanner Paths</div>
               <div class="settings-desc">Local directories scanned for video files, grouped by category. Order sets scan priority.</div>
+
+              <!-- Important Warning – Folder Selection & Accepted Naming Formats Banner -->
+              <div class="folder-warning-banner">
+                <div class="folder-warning-banner-header">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <i class="ph-fill ph-warning-diamond"></i>
+                    <span>⚠️ Important Warning – Folder Selection</span>
+                  </div>
+                  <button class="naming-guide-toggle-btn" @click="showNamingGuide = !showNamingGuide" type="button">
+                    <i :class="showNamingGuide ? 'ph ph-caret-up' : 'ph ph-book-open'"></i>
+                    <span>{{ showNamingGuide ? 'Hide Naming Formats' : 'View Accepted Naming Formats' }}</span>
+                  </button>
+                </div>
+                <div class="folder-warning-banner-content">
+                  <p class="folder-warning-intro">Always select the correct root folder that matches the content type:</p>
+                  <ul class="folder-warning-rules">
+                    <li>If the library is a <strong>TV series</strong>, the selected folder (and all its subfolders) must contain only series content.</li>
+                    <li>If the library is <strong>movies</strong>, the selected folder must contain only movie content.</li>
+                    <li><strong>Do not mix series and movies</strong> in the same selected folder.</li>
+                  </ul>
+                  <div class="folder-warning-consequence">
+                    <i class="ph-fill ph-info"></i>
+                    <div>
+                      Selecting the wrong folder type will cause incorrect metadata detection, mismatched posters/artwork, wrong titles, seasons/episodes being treated as movies (or vice versa), and other misleading results. Confirm the folder structure is clean and consistent before proceeding.
+                    </div>
+                  </div>
+
+                  <!-- Accepted Naming Formats Guide (Interactive Section) -->
+                  <div v-if="showNamingGuide" class="naming-guide-section">
+                    <div class="naming-guide-title">
+                      <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
+                      <span>Accepted Naming Formats & File Structure</span>
+                    </div>
+
+                    <!-- Category Tabs -->
+                    <div class="naming-tabs">
+                      <button
+                        type="button"
+                        class="naming-tab-btn"
+                        :class="{ active: activeNamingTab === 'movies' }"
+                        @click="activeNamingTab = 'movies'"
+                      >
+                        <i class="ph ph-film-strip"></i> Movies
+                      </button>
+                      <button
+                        type="button"
+                        class="naming-tab-btn"
+                        :class="{ active: activeNamingTab === 'series' }"
+                        @click="activeNamingTab = 'series'"
+                      >
+                        <i class="ph ph-television"></i> TV Series
+                      </button>
+                      <button
+                        type="button"
+                        class="naming-tab-btn"
+                        :class="{ active: activeNamingTab === 'anime' }"
+                        @click="activeNamingTab = 'anime'"
+                      >
+                        <i class="ph ph-sparkle"></i> Anime
+                      </button>
+                      <button
+                        type="button"
+                        class="naming-tab-btn"
+                        :class="{ active: activeNamingTab === 'extensions' }"
+                        @click="activeNamingTab = 'extensions'"
+                      >
+                        <i class="ph ph-file-code"></i> Video & Subs
+                      </button>
+                    </div>
+
+                    <!-- Tab 1: Movies -->
+                    <div v-if="activeNamingTab === 'movies'" class="naming-tab-content">
+                      <div class="naming-rule-card">
+                        <div class="naming-badge recommended">Recommended</div>
+                        <div class="naming-rule-name">Nested Movie Folder</div>
+                        <div class="naming-code-block">
+                          <code>&lt;Movies_Root&gt;/<strong>Movie Title (Year)</strong>/<strong>Movie Title (Year).ext</strong></code>
+                        </div>
+                        <div class="naming-examples">
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> D:/Movies/Inception (2010)/Inception (2010).mkv</div>
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> D:/Movies/Avatar The Way of Water (2022)/Avatar.2022.1080p.BluRay.x265.mp4</div>
+                        </div>
+                      </div>
+
+                      <div class="naming-rule-card">
+                        <div class="naming-badge">Alternative</div>
+                        <div class="naming-rule-name">Flat File in Movies Root</div>
+                        <div class="naming-code-block">
+                          <code>&lt;Movies_Root&gt;/<strong>Movie Title (Year).ext</strong></code>
+                        </div>
+                        <div class="naming-examples">
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> D:/Movies/Interstellar (2014).mp4</div>
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> D:/Movies/The Dark Knight (2008).mkv</div>
+                        </div>
+                      </div>
+
+                      <div class="naming-rule-card">
+                        <div class="naming-badge precision">Exact TMDb Match</div>
+                        <div class="naming-rule-name">IMDb ID Tagging</div>
+                        <div class="naming-code-block">
+                          <code>&lt;Movies_Root&gt;/<strong>Movie Title (Year) {imdb-tt1234567}</strong>/file.ext</code>
+                        </div>
+                        <div class="naming-examples">
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> D:/Movies/Oppenheimer (2023) {imdb-tt15398776}/Oppenheimer.mkv</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Tab 2: TV Series -->
+                    <div v-if="activeNamingTab === 'series'" class="naming-tab-content">
+                      <div class="naming-rule-card">
+                        <div class="naming-badge recommended">Recommended</div>
+                        <div class="naming-rule-name">Standard Season Folders</div>
+                        <div class="naming-code-block">
+                          <code>&lt;Series_Root&gt;/<strong>Show Title (Year)</strong>/<strong>Season 01</strong>/<strong>S01E01 - Title.ext</strong></code>
+                        </div>
+                        <div class="naming-examples">
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> D:/Series/Breaking Bad/Season 01/Breaking.Bad.S01E01.Pilot.mkv</div>
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> D:/Series/Stranger Things (2016)/Season 1/Stranger.Things.S01E01.mp4</div>
+                        </div>
+                      </div>
+
+                      <div class="naming-rule-card">
+                        <div class="naming-badge">Accepted Episode Formats</div>
+                        <div class="naming-rule-name">Episode Numbering Patterns</div>
+                        <ul class="naming-bullet-list">
+                          <li><strong>S01E02</strong> or <strong>s1e2</strong> / <strong>S01_E02</strong> (Standard industry standard)</li>
+                          <li><strong>1x02</strong> (Season x Episode format)</li>
+                          <li><strong>Episode 02</strong> / <strong>Ep 02</strong> / <strong>E02</strong></li>
+                          <li><strong>01 - Title.mkv</strong> / <strong>02. Title.mp4</strong> / <strong>[01]</strong></li>
+                        </ul>
+                      </div>
+
+                      <div class="naming-rule-card">
+                        <div class="naming-badge">Special Folders</div>
+                        <div class="naming-rule-name">Specials & Extras (Season 0)</div>
+                        <div class="naming-examples">
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> D:/Series/Show Title/<strong>Specials</strong>/S00E01.mkv</div>
+                          <div class="naming-desc-note">Folders named <em>Specials, Extras, OVAs, OADs, Bonus, SP</em> are automatically classified as Season 0.</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Tab 3: Anime -->
+                    <div v-if="activeNamingTab === 'anime'" class="naming-tab-content">
+                      <div class="naming-rule-card">
+                        <div class="naming-badge recommended">Recommended</div>
+                        <div class="naming-rule-name">Anime Series with Seasons or Absolute Numbers</div>
+                        <div class="naming-code-block">
+                          <code>&lt;Anime_Root&gt;/<strong>Anime Title</strong>/<strong>Season 01</strong>/<strong>S01E01.ext</strong></code><br/>
+                          <code>&lt;Anime_Root&gt;/<strong>Anime Title</strong>/<strong>[ReleaseGroup] Title - 01 [1080p].ext</strong></code>
+                        </div>
+                        <div class="naming-examples">
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> D:/Anime/Frieren Beyond Journey's End/Season 01/S01E01.mkv</div>
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> D:/Anime/Attack on Titan/[SubsPlease] Shingeki no Kyojin - 01 [1080p].mkv</div>
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> D:/Anime/Demon Slayer/EP01 - Cruelty.mp4</div>
+                        </div>
+                        <div class="naming-desc-note">Release group brackets (e.g. <code>[SubsPlease]</code>, <code>[Erai-raws]</code>) and quality tags are automatically stripped during TMDb / AniList matching.</div>
+                      </div>
+                    </div>
+
+                    <!-- Tab 4: Extensions & Subtitles -->
+                    <div v-if="activeNamingTab === 'extensions'" class="naming-tab-content">
+                      <div class="naming-rule-card">
+                        <div class="naming-badge">Accepted Video Formats</div>
+                        <div class="naming-tags-wrap">
+                          <span class="naming-ext-pill">.mp4</span>
+                          <span class="naming-ext-pill">.mkv</span>
+                          <span class="naming-ext-pill">.avi</span>
+                          <span class="naming-ext-pill">.webm</span>
+                          <span class="naming-ext-pill">.mov</span>
+                          <span class="naming-ext-pill">.m4v</span>
+                          <span class="naming-ext-pill">.ts</span>
+                          <span class="naming-ext-pill">.wmv</span>
+                          <span class="naming-ext-pill">.flv</span>
+                          <span class="naming-ext-pill">.m2ts</span>
+                        </div>
+                      </div>
+
+                      <div class="naming-rule-card">
+                        <div class="naming-badge">Subtitles & Multi-Audio</div>
+                        <div class="naming-rule-name">External & Embedded Subtitles</div>
+                        <div class="naming-examples">
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> <strong>Movie Title (2010).en.srt</strong> (English Subtitles)</div>
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> <strong>S01E01.forced.srt</strong> (Forced Subtitles)</div>
+                          <div class="naming-example-line"><i class="ph ph-check-circle"></i> Formats supported: <code>.srt</code>, <code>.vtt</code>, <code>.ass</code>, <code>.sub</code></div>
+                        </div>
+                        <div class="naming-desc-note">Embedded audio tracks (English, Japanese, Spanish, etc.) and internal soft subtitles inside <code>.mkv</code>/<code>.mp4</code> containers are automatically detected and switchable in player.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               <div class="paths-grid">
                 <div v-for="cat in ['movies', 'series', 'anime']" :key="cat" class="path-cat-card" :id="'paths-card-' + cat">
@@ -5128,6 +5432,10 @@ const SettingsPage = {
       }
     }
 
+    // ─── Naming Formats Guide ─────────────────────────────────
+    const showNamingGuide = ref(false);
+    const activeNamingTab = ref("movies");
+
     // ─── Updates ──────────────────────────────────────────────
     const sysInfo = ref(null);
     const updateState = ref({
@@ -5914,6 +6222,8 @@ const SettingsPage = {
       shutdownCompleted,
       executeShutdown,
       closeCurrentWindow,
+      showNamingGuide,
+      activeNamingTab,
     };
   },
 };
@@ -6341,7 +6651,7 @@ const CollectionsPage = {
               :class="{ active: activeTab === 'universes' }"
               @click="activeTab = 'universes'"
             >
-              <i class="ph ph-sparkle"></i> Universes <span class="collections-tab-count">{{ universesCount }}</span>
+              <i class="ph ph-film-strip"></i> Franchises & Universes <span class="collections-tab-count">{{ universesCount }}</span>
             </button>
             <button
               v-if="smartCount > 0"
@@ -6374,7 +6684,7 @@ const CollectionsPage = {
       <div v-else-if="collections.length === 0" class="empty-state">
         <div class="empty-icon"><i class="ph-bold ph-books"></i></div>
         <div class="empty-title">No collections yet</div>
-        <div class="empty-subtitle">Create a collection to group your favourite titles or add titles to auto-generate cinematic universes.</div>
+        <div class="empty-subtitle">Create a collection to group your favourite titles or add titles to auto-generate cinematic universes and sequel franchises.</div>
         <button v-if="!store.profile?.is_kids" class="btn btn-primary" style="margin-top:1rem" @click="showCreate = true" id="create-first-col-btn">
           <i class="ph ph-plus"></i> Create First Collection
         </button>
@@ -6413,7 +6723,10 @@ const CollectionsPage = {
           <div class="collection-info">
             <div class="collection-name">
               {{ col.name }}
-              <span v-if="col.universe" class="universe-card-badge" style="margin-left:6px">
+              <span v-if="col.is_franchise" class="universe-card-badge" style="margin-left:6px;background:rgba(56,189,248,0.18);color:#38bdf8;border-color:rgba(56,189,248,0.35)">
+                <i class="ph ph-film-strip"></i> Franchise
+              </span>
+              <span v-else-if="col.universe" class="universe-card-badge" style="margin-left:6px">
                 <i class="ph ph-sparkle"></i> Universe
               </span>
               <span v-else-if="col.smart" class="skip-src-badge" style="margin-left:6px">Smart</span>
@@ -6524,7 +6837,10 @@ const CollectionDetailPage = {
         <div class="collection-hero-content">
           <div class="collection-hero-main">
             <div class="collection-hero-badges">
-              <span v-if="collection.universe" class="collection-hero-badge badge-universe">
+              <span v-if="collection.is_franchise" class="collection-hero-badge badge-universe" style="background:rgba(56,189,248,0.2);color:#38bdf8;border-color:rgba(56,189,248,0.35)">
+                <i class="ph ph-film-strip"></i> Sequel & Prequel Franchise
+              </span>
+              <span v-else-if="collection.universe" class="collection-hero-badge badge-universe">
                 <i class="ph ph-sparkle"></i> Cinematic Universe
               </span>
               <span v-else-if="collection.smart" class="collection-hero-badge badge-smart">
@@ -7859,102 +8175,214 @@ const ProfilesPage = {
         </div>
       </div>
 
-      <!-- PIN Modal (Netflix styled) -->
-      <div class="modal-backdrop" v-if="pinTarget" @click.self="pinTarget = null" style="background:rgba(0,0,0,0.85)">
-        <div class="modal" style="background:#181818;border:1px solid #333;text-align:center;max-width:380px">
-          <h3 style="font-size:1.4rem;font-weight:600;margin-bottom:1rem">Enter PIN for {{ pinTarget?.name }}</h3>
-          <div class="pin-display" style="justify-content:center;gap:12px;margin-bottom:1.5rem">
-            <div v-for="i in 4" :key="i" class="pin-dot"
-              :class="{ filled: pin.length >= i, error: pinError }">
+      <!-- PIN Modal (Redesigned & Premium) -->
+      <div class="pin-modal-backdrop" v-if="pinTarget" @click.self="pinTarget = null">
+        <div class="pin-modal-card" @click.stop>
+          <button class="pin-modal-close" @click="pinTarget = null" title="Cancel">
+            <i class="ph ph-x"></i>
+          </button>
+
+          <div class="pin-modal-identity">
+            <div class="pin-profile-avatar-wrap">
+              <img v-if="pinTarget.custom_avatar_url" :src="imgUrl(pinTarget.custom_avatar_url)" class="pin-profile-avatar-img" :alt="pinTarget.name" />
+              <div v-else class="pin-profile-avatar-icon" :style="{ background: pinTarget.color || 'var(--accent)' }">
+                <i :class="pinTarget.avatar ? 'ph-bold ' + pinTarget.avatar : 'ph-bold ph-user'"></i>
+              </div>
+              <div class="pin-profile-lock-badge">
+                <i class="ph-fill ph-lock-key"></i>
+              </div>
+            </div>
+            <h3 class="pin-modal-title">Enter PIN</h3>
+            <p class="pin-modal-sub">Enter the 4-digit PIN for <strong>{{ pinTarget?.name }}</strong></p>
+          </div>
+
+          <div class="pin-display-pods" :class="{ error: pinError }">
+            <div v-for="i in 4" :key="i" class="pin-dot-pod" :class="{ filled: pin.length >= i }">
+              <span class="pin-dot-pip"></span>
             </div>
           </div>
-          <div class="pin-pad">
-            <button v-for="n in [1,2,3,4,5,6,7,8,9,'',0,'⌫']" :key="n"
-              class="pin-key"
-              :class="{ backspace: n === '⌫' }"
-              @click="handlePinKey(n)"
-              :id="'pin-key-' + n"
-              :disabled="n === ''"
-            >{{ n }}</button>
+
+          <div class="pin-pad-grid">
+            <button
+              v-for="k in pinKeyLayout"
+              :key="k.val"
+              class="pin-pad-btn"
+              :class="{ 'backspace-btn': k.val === '⌫', 'spacer-btn': k.val === '' }"
+              @click="handlePinKey(k.val)"
+              :id="'pin-key-' + (k.val || 'empty')"
+              :disabled="k.val === ''"
+            >
+              <template v-if="k.val === '⌫'">
+                <i class="ph-bold ph-backspace"></i>
+              </template>
+              <template v-else-if="k.val !== ''">
+                <span class="pin-btn-num">{{ k.val }}</span>
+                <span class="pin-btn-letters" v-if="k.letters">{{ k.letters }}</span>
+              </template>
+            </button>
           </div>
-          <div class="modal-error" v-if="pinError" style="margin-top:10px">{{ pinError }}</div>
-          <button class="btn btn-ghost btn-full" style="margin-top:1.25rem" @click="pinTarget = null">Cancel</button>
+
+          <div class="pin-modal-error" v-if="pinError">
+            <i class="ph-fill ph-warning-circle"></i>
+            <span>{{ pinError }}</span>
+          </div>
         </div>
       </div>
 
-      <!-- Delete PIN Confirmation Modal -->
-      <div class="modal-backdrop" v-if="deletePinTarget" @click.self="deletePinTarget = null" style="background:rgba(0,0,0,0.85)">
-        <div class="modal" style="background:#181818;border:1px solid #333;text-align:center;max-width:380px">
-          <h3 style="font-size:1.4rem;font-weight:600;margin-bottom:1rem">Enter PIN to Delete {{ deletePinTarget?.name }}</h3>
-          <div class="pin-display" style="justify-content:center;gap:12px;margin-bottom:1.5rem">
-            <div v-for="i in 4" :key="i" class="pin-dot"
-              :class="{ filled: deletePin.length >= i, error: deletePinError }">
+      <!-- Delete PIN Confirmation Modal (Redesigned & Premium) -->
+      <div class="pin-modal-backdrop" v-if="deletePinTarget" @click.self="deletePinTarget = null">
+        <div class="pin-modal-card" @click.stop>
+          <button class="pin-modal-close" @click="deletePinTarget = null" title="Cancel">
+            <i class="ph ph-x"></i>
+          </button>
+
+          <div class="pin-modal-identity">
+            <div class="pin-profile-avatar-wrap">
+              <img v-if="deletePinTarget.custom_avatar_url" :src="imgUrl(deletePinTarget.custom_avatar_url)" class="pin-profile-avatar-img" :alt="deletePinTarget.name" />
+              <div v-else class="pin-profile-avatar-icon" :style="{ background: deletePinTarget.color || 'var(--accent)' }">
+                <i :class="deletePinTarget.avatar ? 'ph-bold ' + deletePinTarget.avatar : 'ph-bold ph-user'"></i>
+              </div>
+              <div class="pin-profile-lock-badge" style="background:#200c0c;border-color:#ef4444;color:#ef4444">
+                <i class="ph-fill ph-trash"></i>
+              </div>
+            </div>
+            <h3 class="pin-modal-title" style="color:#f87171">Delete Profile</h3>
+            <p class="pin-modal-sub">Enter PIN to delete <strong>{{ deletePinTarget?.name }}</strong></p>
+          </div>
+
+          <div class="pin-display-pods" :class="{ error: deletePinError }">
+            <div v-for="i in 4" :key="i" class="pin-dot-pod" :class="{ filled: deletePin.length >= i }">
+              <span class="pin-dot-pip" style="background:#ef4444;box-shadow:0 0 12px #ef4444"></span>
             </div>
           </div>
-          <div class="pin-pad">
-            <button v-for="n in [1,2,3,4,5,6,7,8,9,'',0,'⌫']" :key="n"
-              class="pin-key"
-              :class="{ backspace: n === '⌫' }"
-              @click="handleDeletePinKey(n)"
-              :id="'delete-pin-key-' + n"
-              :disabled="n === ''"
-            >{{ n }}</button>
+
+          <div class="pin-pad-grid">
+            <button
+              v-for="k in pinKeyLayout"
+              :key="k.val"
+              class="pin-pad-btn"
+              :class="{ 'backspace-btn': k.val === '⌫', 'spacer-btn': k.val === '' }"
+              @click="handleDeletePinKey(k.val)"
+              :id="'delete-pin-key-' + (k.val || 'empty')"
+              :disabled="k.val === ''"
+            >
+              <template v-if="k.val === '⌫'">
+                <i class="ph-bold ph-backspace"></i>
+              </template>
+              <template v-else-if="k.val !== ''">
+                <span class="pin-btn-num">{{ k.val }}</span>
+                <span class="pin-btn-letters" v-if="k.letters">{{ k.letters }}</span>
+              </template>
+            </button>
           </div>
-          <div class="modal-error" v-if="deletePinError" style="margin-top:10px">{{ deletePinError }}</div>
-          <button class="btn btn-ghost btn-full" style="margin-top:1.25rem" @click="deletePinTarget = null">Cancel</button>
+
+          <div class="pin-modal-error" v-if="deletePinError">
+            <i class="ph-fill ph-warning-circle"></i>
+            <span>{{ deletePinError }}</span>
+          </div>
         </div>
       </div>
 
-      <!-- Parental Math Challenge Gate Modal -->
-      <div class="modal-backdrop" v-if="mathGateTarget" @click.self="mathGateTarget = null" style="background:rgba(0,0,0,0.88)">
-        <div class="modal parental-gate-modal" style="text-align:center;max-width:380px;border-radius:22px;padding:2rem 1.5rem">
-          <div class="parental-gate-icon"><i class="ph-bold ph-shield"></i></div>
-          <h3 style="font-size:1.35rem;font-weight:700;margin:0.5rem 0">Parental Exit Gate</h3>
-          <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.2rem">
-            Please solve the math puzzle to switch to <strong>{{ mathGateTarget?.name }}</strong>:
-          </p>
-          <div class="math-question-badge">
+      <!-- Parental Math Challenge Gate Modal (Redesigned & Premium) -->
+      <div class="pin-modal-backdrop" v-if="mathGateTarget" @click.self="mathGateTarget = null">
+        <div class="pin-modal-card" @click.stop>
+          <button class="pin-modal-close" @click="mathGateTarget = null" title="Cancel">
+            <i class="ph ph-x"></i>
+          </button>
+
+          <div class="pin-modal-identity">
+            <div class="pin-profile-avatar-wrap">
+              <div class="pin-profile-avatar-icon" style="background:linear-gradient(135deg,#38bdf8,#0284c7)">
+                <i class="ph-bold ph-shield-check"></i>
+              </div>
+            </div>
+            <h3 class="pin-modal-title">Parental Exit Gate</h3>
+            <p class="pin-modal-sub">Solve math puzzle to switch to <strong>{{ mathGateTarget?.name }}</strong></p>
+          </div>
+
+          <div class="math-question-badge" style="margin:0 auto 1.25rem;font-size:1.25rem;font-weight:800;padding:8px 20px;border-radius:14px;background:rgba(56,189,248,0.14);border:1px solid rgba(56,189,248,0.3);color:#38bdf8;display:inline-block">
             {{ mathProblem.num1 }} + {{ mathProblem.num2 }} = ?
           </div>
-          <div class="pin-display" style="justify-content:center;margin:1rem 0">
-            <div class="math-answer-display">{{ mathAnswer || '?' }}</div>
+
+          <div class="pin-display-pods" :class="{ error: mathGateError }">
+            <div class="math-answer-display" style="font-size:1.5rem;font-weight:800;color:#fff;min-height:36px;letter-spacing:4px">
+              {{ mathAnswer || '—' }}
+            </div>
           </div>
-          <div class="pin-pad">
-            <button v-for="n in [1,2,3,4,5,6,7,8,9,'',0,'⌫']" :key="n"
-              class="pin-key"
-              :class="{ backspace: n === '⌫' }"
-              @click="handleMathKey(n)"
-              :id="'math-key-' + n"
-              :disabled="n === ''"
-            >{{ n }}</button>
+
+          <div class="pin-pad-grid">
+            <button
+              v-for="k in pinKeyLayout"
+              :key="k.val"
+              class="pin-pad-btn"
+              :class="{ 'backspace-btn': k.val === '⌫', 'spacer-btn': k.val === '' }"
+              @click="handleMathKey(k.val)"
+              :id="'math-key-' + (k.val || 'empty')"
+              :disabled="k.val === ''"
+            >
+              <template v-if="k.val === '⌫'">
+                <i class="ph-bold ph-backspace"></i>
+              </template>
+              <template v-else-if="k.val !== ''">
+                <span class="pin-btn-num">{{ k.val }}</span>
+              </template>
+            </button>
           </div>
-          <div class="modal-error" v-if="mathGateError" style="margin-top:10px">{{ mathGateError }}</div>
-          <button class="btn btn-ghost btn-full" style="margin-top:1.25rem;border-radius:12px" @click="mathGateTarget = null">Cancel</button>
+
+          <div class="pin-modal-error" v-if="mathGateError">
+            <i class="ph-fill ph-warning-circle"></i>
+            <span>{{ mathGateError }}</span>
+          </div>
         </div>
       </div>
 
-      <!-- Admin PIN Verification Modal -->
-      <div class="modal-backdrop" v-if="adminPinModalTarget" @click.self="adminPinModalTarget = false" style="background:rgba(0,0,0,0.88);z-index:999">
-        <div class="modal" style="background:#181818;border:1px solid rgba(229,9,20,0.4);text-align:center;max-width:380px;border-radius:20px;padding:2rem 1.5rem">
-          <div style="font-size:2.2rem;margin-bottom:0.25rem;color:#ffd700"><i class="ph-bold ph-crown"></i></div>
-          <h3 style="font-size:1.35rem;font-weight:700;margin-bottom:0.35rem">Administrator Verification</h3>
-          <p style="font-size:0.85rem;color:#a0a0a0;margin-bottom:1.25rem">Enter Admin PIN to manage profile</p>
-          <div class="pin-display" style="justify-content:center;gap:12px;margin-bottom:1.5rem">
-            <div v-for="i in 4" :key="i" class="pin-dot"
-              :class="{ filled: adminPin.length >= i, error: adminPinError }">
+      <!-- Admin PIN Verification Modal (Redesigned & Premium) -->
+      <div class="pin-modal-backdrop" v-if="adminPinModalTarget" @click.self="adminPinModalTarget = false">
+        <div class="pin-modal-card" @click.stop style="border-color:rgba(255,215,0,0.3)">
+          <button class="pin-modal-close" @click="adminPinModalTarget = false" title="Cancel">
+            <i class="ph ph-x"></i>
+          </button>
+
+          <div class="pin-modal-identity">
+            <div class="pin-profile-avatar-wrap">
+              <div class="pin-profile-avatar-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706);box-shadow:0 0 25px rgba(245,158,11,0.35)">
+                <i class="ph-fill ph-crown"></i>
+              </div>
+            </div>
+            <h3 class="pin-modal-title" style="color:#ffd700">Admin Verification</h3>
+            <p class="pin-modal-sub">Enter Admin PIN to manage profile</p>
+          </div>
+
+          <div class="pin-display-pods" :class="{ error: adminPinError }">
+            <div v-for="i in 4" :key="i" class="pin-dot-pod" :class="{ filled: adminPin.length >= i }" style="border-color:rgba(255,215,0,0.25)">
+              <span class="pin-dot-pip" style="background:#ffd700;box-shadow:0 0 12px #ffd700"></span>
             </div>
           </div>
-          <div class="pin-pad">
-            <button v-for="n in [1,2,3,4,5,6,7,8,9,'',0,'⌫']" :key="n"
-              class="pin-key"
-              :class="{ backspace: n === '⌫' }"
-              @click="handleAdminPinKey(n)"
-              :id="'admin-pin-key-' + n"
-              :disabled="n === ''"
-            >{{ n }}</button>
+
+          <div class="pin-pad-grid">
+            <button
+              v-for="k in pinKeyLayout"
+              :key="k.val"
+              class="pin-pad-btn"
+              :class="{ 'backspace-btn': k.val === '⌫', 'spacer-btn': k.val === '' }"
+              @click="handleAdminPinKey(k.val)"
+              :id="'admin-pin-key-' + (k.val || 'empty')"
+              :disabled="k.val === ''"
+            >
+              <template v-if="k.val === '⌫'">
+                <i class="ph-bold ph-backspace"></i>
+              </template>
+              <template v-else-if="k.val !== ''">
+                <span class="pin-btn-num">{{ k.val }}</span>
+                <span class="pin-btn-letters" v-if="k.letters">{{ k.letters }}</span>
+              </template>
+            </button>
           </div>
-          <div class="modal-error" v-if="adminPinError" style="margin-top:10px">{{ adminPinError }}</div>
-          <button class="btn btn-ghost btn-full" style="margin-top:1.25rem;border-radius:12px" @click="adminPinModalTarget = false">Cancel</button>
+
+          <div class="pin-modal-error" v-if="adminPinError">
+            <i class="ph-fill ph-warning-circle"></i>
+            <span>{{ adminPinError }}</span>
+          </div>
         </div>
       </div>
 
@@ -8597,6 +9025,21 @@ const ProfilesPage = {
       window.removeEventListener("keydown", onProfilesKeyDown);
     });
 
+    const pinKeyLayout = [
+      { val: "1", letters: "" },
+      { val: "2", letters: "ABC" },
+      { val: "3", letters: "DEF" },
+      { val: "4", letters: "GHI" },
+      { val: "5", letters: "JKL" },
+      { val: "6", letters: "MNO" },
+      { val: "7", letters: "PQRS" },
+      { val: "8", letters: "TUV" },
+      { val: "9", letters: "WXYZ" },
+      { val: "", letters: "" },
+      { val: "0", letters: "" },
+      { val: "⌫", letters: "" },
+    ];
+
     return {
       store,
       profiles,
@@ -8604,10 +9047,16 @@ const ProfilesPage = {
       pinTarget,
       pin,
       pinError,
+      pinKeyLayout,
       adminPinModalTarget,
       adminPin,
       adminPinError,
       handleAdminPinKey,
+      mathGateTarget,
+      mathAnswer,
+      mathGateError,
+      mathProblem,
+      handleMathKey,
       editTarget,
       editProfile,
       newProfile,
@@ -10529,7 +10978,7 @@ const StatsPage = {
             </div>
             <div class="heatmap-stats-pills">
               <span class="streak-pill">
-                <i class="ph-fill ph-check-circle" style="color:#22d3ee"></i> {{ wrappedData.heatmap?.days_active || 0 }} Active Days
+                <i class="ph-fill ph-check-circle" style="color:var(--accent)"></i> {{ wrappedData.heatmap?.days_active || 0 }} Active Days
               </span>
               <span class="streak-pill">
                 <i class="ph-fill ph-fire" style="color:#f97316"></i> Longest Streak: {{ wrappedData.heatmap?.longest_streak || 0 }}d
@@ -12728,30 +13177,55 @@ const App = {
       </div>
 
       <!-- Parental Math Challenge Exit Gate Modal (Global from Kids Mode) -->
-      <div class="modal-backdrop" v-if="appMathGateShow" @click.self="appMathGateShow = false" style="z-index:9999999;background:rgba(0,0,0,0.88)">
-        <div class="modal parental-gate-modal" style="text-align:center;max-width:380px;border-radius:22px;padding:2rem 1.5rem">
-          <div class="parental-gate-icon"><i class="ph-bold ph-shield"></i></div>
-          <h3 style="font-size:1.35rem;font-weight:700;margin:0.5rem 0">Parental Exit Gate</h3>
-          <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.2rem">
-            Please solve the math puzzle to exit Kids Mode:
-          </p>
-          <div class="math-question-badge">
+      <div class="pin-modal-backdrop" v-if="appMathGateShow" @click.self="appMathGateShow = false" style="z-index:9999999">
+        <div class="pin-modal-card" @click.stop>
+          <button class="pin-modal-close" @click="appMathGateShow = false" title="Cancel">
+            <i class="ph ph-x"></i>
+          </button>
+
+          <div class="pin-modal-identity">
+            <div class="pin-profile-avatar-wrap">
+              <div class="pin-profile-avatar-icon" style="background:linear-gradient(135deg,#38bdf8,#0284c7)">
+                <i class="ph-bold ph-shield-check"></i>
+              </div>
+            </div>
+            <h3 class="pin-modal-title">Parental Exit Gate</h3>
+            <p class="pin-modal-sub">Solve math puzzle to exit Kids Mode</p>
+          </div>
+
+          <div class="math-question-badge" style="margin:0 auto 1.25rem;font-size:1.25rem;font-weight:800;padding:8px 20px;border-radius:14px;background:rgba(56,189,248,0.14);border:1px solid rgba(56,189,248,0.3);color:#38bdf8;display:inline-block">
             {{ appMathProblem.num1 }} + {{ appMathProblem.num2 }} = ?
           </div>
-          <div class="pin-display" style="justify-content:center;margin:1rem 0">
-            <div class="math-answer-display">{{ appMathAnswer || '?' }}</div>
+
+          <div class="pin-display-pods" :class="{ error: appMathError }">
+            <div class="math-answer-display" style="font-size:1.5rem;font-weight:800;color:#fff;min-height:36px;letter-spacing:4px">
+              {{ appMathAnswer || '—' }}
+            </div>
           </div>
-          <div class="pin-pad">
-            <button v-for="n in [1,2,3,4,5,6,7,8,9,'',0,'⌫']" :key="n"
-              class="pin-key"
-              :class="{ backspace: n === '⌫' }"
+
+          <div class="pin-pad-grid">
+            <button
+              v-for="n in [1,2,3,4,5,6,7,8,9,'',0,'⌫']"
+              :key="n"
+              class="pin-pad-btn"
+              :class="{ 'backspace-btn': n === '⌫', 'spacer-btn': n === '' }"
               @click="handleAppMathKey(n)"
-              :id="'app-math-key-' + n"
+              :id="'app-math-key-' + (n || 'empty')"
               :disabled="n === ''"
-            >{{ n }}</button>
+            >
+              <template v-if="n === '⌫'">
+                <i class="ph-bold ph-backspace"></i>
+              </template>
+              <template v-else-if="n !== ''">
+                <span class="pin-btn-num">{{ n }}</span>
+              </template>
+            </button>
           </div>
-          <div class="modal-error" v-if="appMathError" style="margin-top:10px">{{ appMathError }}</div>
-          <button class="btn btn-ghost btn-full" style="margin-top:1.25rem;border-radius:12px" @click="appMathGateShow = false">Cancel</button>
+
+          <div class="pin-modal-error" v-if="appMathError">
+            <i class="ph-fill ph-warning-circle"></i>
+            <span>{{ appMathError }}</span>
+          </div>
         </div>
       </div>
 
@@ -12841,9 +13315,10 @@ const App = {
           </div>
         </div>
 
+        <!-- Group 1: Play / Details -->
         <div class="context-menu-item" @click="handleContextMenuPlay">
           <i class="ph-fill ph-play"></i>
-          <span>{{ contextMenuState.item.position > 0 ? 'Resume Playback' : 'Play Title' }}</span>
+          <span>{{ (contextMenuState.item.position > 0 && !isItemCompleted(contextMenuState.item)) ? 'Resume Playback' : 'Play Title' }}</span>
         </div>
 
         <div class="context-menu-item" @click="handleContextMenuDetails">
@@ -12851,13 +13326,28 @@ const App = {
           <span>View Details</span>
         </div>
 
+        <div class="context-menu-divider"></div>
+
+        <!-- Group 2: Organization (Watchlist / Collection) -->
         <div class="context-menu-item" @click="handleContextMenuFav">
           <i :class="contextMenuState.isFavorite ? 'ph-fill ph-heart' : 'ph ph-heart'"></i>
           <span>{{ contextMenuState.isFavorite ? 'Remove from Watchlist' : 'Add to Watchlist' }}</span>
         </div>
 
-        <template v-if="contextMenuState.item.position > 0">
-          <div class="context-menu-divider"></div>
+        <div class="context-menu-item" @click="handleContextMenuCollection">
+          <i class="ph ph-stack"></i>
+          <span>Add to Collection</span>
+        </div>
+
+        <div class="context-menu-divider"></div>
+
+        <!-- Group 3: Progress & History -->
+        <div class="context-menu-item" @click="handleContextMenuToggleWatched">
+          <i :class="isItemCompleted(contextMenuState.item) ? 'ph ph-arrow-counter-clockwise' : 'ph ph-check-circle'"></i>
+          <span>{{ isItemCompleted(contextMenuState.item) ? 'Mark as Unwatched' : 'Mark as Watched' }}</span>
+        </div>
+
+        <template v-if="contextMenuState.item.position > 0 && !isItemCompleted(contextMenuState.item)">
           <div class="context-menu-item danger" @click="handleContextMenuResetProgress">
             <i class="ph ph-x-circle"></i>
             <span>Remove from Continue</span>
@@ -13940,6 +14430,59 @@ const App = {
       closeGlobalContextMenu();
     }
 
+    function isItemCompleted(item) {
+      if (!item) return false;
+      if (item.completed === true || item.is_completed === true) return true;
+      if (item.duration && item.duration > 0 && item.position >= item.duration * 0.95) return true;
+      return false;
+    }
+
+    function handleContextMenuCollection() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item) return;
+      openGlobalCollectionPicker(item);
+    }
+
+    async function handleContextMenuToggleWatched() {
+      const item = contextMenuState.item;
+      closeGlobalContextMenu();
+      if (!item) return;
+
+      const completed = isItemCompleted(item);
+      const mediaId = item.id;
+      const tmdbId = item.tmdb_id;
+      const mediaType = item.type;
+
+      try {
+        if (completed) {
+          await API.post("/api/progress/mark-unwatched", {
+            media_id: mediaId,
+            tmdb_id: tmdbId,
+            type: mediaType,
+          });
+          item.completed = false;
+          item.is_completed = false;
+          item.position = 0;
+          addToast(`Marked "${item.title || item.ep_title || 'Title'}" as unwatched`, "info");
+        } else {
+          await API.post("/api/progress/mark-watched", {
+            media_id: mediaId,
+            tmdb_id: tmdbId,
+            type: mediaType,
+          });
+          item.completed = true;
+          item.is_completed = true;
+          if (item.duration) {
+            item.position = item.duration;
+          }
+          addToast(`Marked "${item.title || item.ep_title || 'Title'}" as watched`, "success");
+        }
+      } catch (e) {
+        addToast("Failed to update watch status", "error");
+      }
+    }
+
     async function handleContextMenuResetProgress() {
       const item = contextMenuState.item;
       closeGlobalContextMenu();
@@ -14067,9 +14610,12 @@ const App = {
       handleGlobalFixMatchDone,
       contextMenuState,
       contextMenuPoster,
+      isItemCompleted,
       handleContextMenuPlay,
       handleContextMenuDetails,
       handleContextMenuFav,
+      handleContextMenuCollection,
+      handleContextMenuToggleWatched,
       handleContextMenuResetProgress,
       collectionPickerState,
       playlistPickerState,

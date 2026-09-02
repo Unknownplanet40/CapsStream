@@ -62,6 +62,18 @@ class TestFranchises(unittest.TestCase):
         collections = get_universe_collections(items, min_count=2)
         self.assertEqual(len(collections), 0)
 
+    def test_get_media_franchise(self):
+        """Verify get_media_franchise locates the parent collection for a sibling item."""
+        from backend.franchises import get_media_franchise
+        items = [
+            {"id": 1, "tmdb_id": 101, "title": "Iron Man", "year": 2008},
+            {"id": 2, "tmdb_id": 102, "title": "Thor", "year": 2011},
+        ]
+        franchise = get_media_franchise(items[0], library_items=items)
+        self.assertIsNotNone(franchise)
+        self.assertEqual(franchise["name"], "Marvel Cinematic Universe")
+        self.assertEqual(franchise["item_count"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -165,6 +165,79 @@ class TestAnalyticsWrapped(unittest.TestCase):
         self.assertIsNotNone(res["quizzes"]["talent"])
         self.assertGreaterEqual(len(res["quizzes"]["talent"]["options"]), 2)
 
+    @patch("backend.db.stats.get_conn")
+    @patch("backend.db.stats.is_item_mounted")
+    def test_top_cast_excludes_unmounted(self, mock_is_mounted, mock_get_conn):
+        """Verify actors from unmounted media sources are excluded from Top Cast & Talent."""
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+
+        c.execute("""
+            CREATE TABLE media (
+                id INTEGER PRIMARY KEY,
+                type TEXT,
+                tmdb_id INTEGER,
+                title TEXT,
+                original_title TEXT,
+                year INTEGER,
+                season INTEGER,
+                episode INTEGER,
+                ep_title TEXT,
+                genres TEXT,
+                rating REAL,
+                poster_path TEXT,
+                backdrop_path TEXT,
+                file_path TEXT,
+                file_size INTEGER,
+                duration INTEGER,
+                cast_json TEXT
+            )
+        """)
+        c.execute("""
+            CREATE TABLE watch_progress (
+                profile_id INTEGER,
+                media_id INTEGER,
+                position INTEGER,
+                duration INTEGER,
+                completed INTEGER,
+                updated_at TEXT
+            )
+        """)
+
+        # Item 1 on mounted drive
+        c.execute("""
+            INSERT INTO media (id, type, tmdb_id, title, year, genres, file_path, cast_json)
+            VALUES (1, 'movie', 101, 'Mounted Movie', 2020, 'Action', 'C:\\media\\movie1.mkv',
+                    '[{"name": "Mounted Actor", "character": "Hero", "profile": "/mounted.jpg"}]')
+        """)
+        # Item 2 on unmounted drive
+        c.execute("""
+            INSERT INTO media (id, type, tmdb_id, title, year, genres, file_path, cast_json)
+            VALUES (2, 'movie', 102, 'Unmounted Movie', 2021, 'Action', 'Z:\\offline\\movie2.mkv',
+                    '[{"name": "Unmounted Actor", "character": "Villain", "profile": "/unmounted.jpg"}]')
+        """)
+
+        c.execute("""
+            INSERT INTO watch_progress (profile_id, media_id, position, duration, completed, updated_at)
+            VALUES (1, 1, 3600, 3600, 1, '2026-03-15 12:00:00')
+        """)
+        c.execute("""
+            INSERT INTO watch_progress (profile_id, media_id, position, duration, completed, updated_at)
+            VALUES (1, 2, 3600, 3600, 1, '2026-03-16 12:00:00')
+        """)
+        conn.commit()
+
+        mock_get_conn.return_value = conn
+        mock_is_mounted.side_effect = lambda item: "Z:" not in (item.get("file_path") or "")
+
+        res = get_profile_wrapped_analytics(1, period="all")
+        top_actors = res["talent"]["top_actors"]
+
+        actor_names = [a["name"] for a in top_actors]
+        self.assertIn("Mounted Actor", actor_names)
+        self.assertNotIn("Unmounted Actor", actor_names)
+
 
 if __name__ == "__main__":
     unittest.main()

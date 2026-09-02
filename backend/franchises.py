@@ -487,7 +487,7 @@ def _get_timeline_rank(title: str, timeline_patterns: List[Any]) -> int:
 def get_universe_collections(library_items: List[Dict[str, Any]], min_count: int = 2) -> List[Dict[str, Any]]:
     """
     Scans library items and generates dynamic smart franchise collections
-    for any universe that meets the minimum count threshold (default: 2).
+    for any universe or TMDb movie collection that meets the minimum count threshold (default: 2).
     """
     result = []
     # Deduplicate items by unique title or tmdb_id to avoid multiple episode copies
@@ -497,7 +497,10 @@ def get_universe_collections(library_items: List[Dict[str, Any]], min_count: int
         key = item.get("tmdb_id") or item.get("id") or item.get("title")
         if key not in seen:
             seen.add(key)
-            unique_items.append(item)
+            unique_items.append(dict(item))
+
+    # Track item IDs already grouped into specific curated universes
+    matched_universe_tmdb_ids = set()
 
     for universe in UNIVERSES:
         matched = []
@@ -508,6 +511,10 @@ def get_universe_collections(library_items: List[Dict[str, Any]], min_count: int
                 matched.append(item)
 
         if len(matched) >= min_count:
+            for it in matched:
+                if it.get("tmdb_id"):
+                    matched_universe_tmdb_ids.add(it["tmdb_id"])
+
             # Sort by release year / added_at by default
             release_sorted = sorted(
                 matched,
@@ -531,11 +538,96 @@ def get_universe_collections(library_items: List[Dict[str, Any]], min_count: int
                 "name": universe["name"],
                 "description": universe["description"],
                 "icon": universe.get("icon", "ph ph-sparkle"),
+                "poster_path": release_sorted[0].get("poster_path") if release_sorted else None,
+                "backdrop_path": release_sorted[0].get("backdrop_path") if release_sorted else None,
                 "smart": True,
                 "universe": True,
                 "has_timeline": has_timeline,
                 "items": release_sorted,
+                "item_count": len(release_sorted),
                 "timeline_items": timeline_sorted,
             })
 
+    # 2. Dynamic TMDb Movie Collections (belongs_to_collection)
+    try:
+        from backend.matcher import get_movie_collection
+    except Exception:
+        get_movie_collection = None
+
+    if get_movie_collection:
+        tmdb_collections: Dict[int, Dict[str, Any]] = {}
+        for item in unique_items:
+            if item.get("type") == "movie" and item.get("tmdb_id"):
+                col = get_movie_collection(item["tmdb_id"])
+                if col and isinstance(col, dict) and col.get("id"):
+                    cid = col["id"]
+                    if cid not in tmdb_collections:
+                        tmdb_collections[cid] = {
+                            "id": f"tmdb-col-{cid}",
+                            "tmdb_collection_id": cid,
+                            "name": col.get("name") or f"Franchise #{cid}",
+                            "description": f"Official sequel & prequel collection from TMDb.",
+                            "poster_path": col.get("poster_path") or item.get("poster_path"),
+                            "backdrop_path": col.get("backdrop_path") or item.get("backdrop_path"),
+                            "icon": "ph ph-film-strip",
+                            "smart": True,
+                            "universe": True,
+                            "is_franchise": True,
+                            "has_timeline": False,
+                            "items": [],
+                        }
+                    tmdb_collections[cid]["items"].append(item)
+
+        for cid, col_data in tmdb_collections.items():
+            if len(col_data["items"]) >= min_count:
+                # Check if this collection is entirely subsumed by an existing universe
+                col_tmdb_ids = {it.get("tmdb_id") for it in col_data["items"] if it.get("tmdb_id")}
+                if col_tmdb_ids.issubset(matched_universe_tmdb_ids) and len(col_tmdb_ids) > 0:
+                    continue
+
+                col_data["items"].sort(key=lambda x: (x.get("year") or 0, x.get("title") or ""))
+                col_data["item_count"] = len(col_data["items"])
+                result.append(col_data)
+
     return result
+
+
+def get_media_franchise(media_item: Dict[str, Any], library_items: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
+    """
+    Finds the franchise/universe collection that contains this media item, if any.
+    Returns the collection dict with all sibling sequels/prequels present in library.
+    """
+    if not media_item:
+        return None
+
+    if library_items is None:
+        try:
+            from backend.db import get_all_media
+            library_items = get_all_media()
+        except Exception:
+            library_items = []
+
+    if not library_items:
+        return None
+
+    all_collections = get_universe_collections(library_items, min_count=2)
+    target_id = media_item.get("id")
+    target_tmdb = media_item.get("tmdb_id")
+
+    for col in all_collections:
+        for item in col.get("items", []):
+            if (target_id and item.get("id") == target_id) or (target_tmdb and item.get("tmdb_id") == target_tmdb):
+                return {
+                    "id": col["id"],
+                    "name": col["name"],
+                    "description": col.get("description", ""),
+                    "poster_path": col.get("poster_path"),
+                    "backdrop_path": col.get("backdrop_path"),
+                    "icon": col.get("icon", "ph ph-sparkle"),
+                    "smart": True,
+                    "universe": True,
+                    "item_count": len(col.get("items", [])),
+                    "items": col.get("items", []),
+                }
+
+    return None

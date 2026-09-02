@@ -63,6 +63,29 @@ class TestRouteLibrary(unittest.TestCase):
         data = resp.get_json()
         self.assertTrue(data["is_favorite"])
 
+    @patch("backend.routes.library.save_progress")
+    @patch("backend.routes.library.get_media_by_id")
+    def test_api_mark_watched_movie(self, mock_get_media, mock_save):
+        mock_get_media.return_value = {"id": 101, "title": "Avatar", "duration": 9600, "type": "movie"}
+        with self.client.session_transaction() as sess:
+            sess["profile_id"] = 1
+        resp = self.client.post("/api/progress/mark-watched", json={"media_id": 101})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["completed"])
+        mock_save.assert_called_once_with(1, 101, 9600, 9600, True)
+
+    @patch("backend.routes.library.delete_progress")
+    @patch("backend.routes.library.get_media_by_id")
+    def test_api_mark_unwatched_movie(self, mock_get_media, mock_del):
+        mock_get_media.return_value = {"id": 101, "title": "Avatar", "type": "movie"}
+        with self.client.session_transaction() as sess:
+            sess["profile_id"] = 1
+        resp = self.client.post("/api/progress/mark-unwatched", json={"media_id": 101})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.get_json()["completed"])
+        mock_del.assert_called_once_with(1, 101)
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -9,7 +9,7 @@ from .middleware import (
     kids_guard_media,
 )
 from backend.db import (
-    get_media_by_id, get_unique_shows, get_recently_added, get_top_rated,
+    get_media_by_id, get_media_by_tmdb, get_unique_shows, get_recently_added, get_top_rated,
     get_progress, save_progress, delete_progress, get_continue_watching,
     get_favorites, toggle_favorite, is_favorite,
     get_collections, create_collection, delete_collection,
@@ -76,20 +76,73 @@ def api_mark_watched():
     pid = require_profile()
     data = request.json or {}
     media_id = data.get("media_id")
-    if not media_id:
-        return jsonify({"error": "media_id required"}), 400
+    tmdb_id = data.get("tmdb_id")
+    media_type = data.get("type")
 
-    media = get_media_by_id(int(media_id))
-    if not media:
-        return jsonify({"error": "Not found"}), 404
+    if not media_id and not tmdb_id:
+        return jsonify({"error": "media_id or tmdb_id required"}), 400
 
-    guard = kids_guard_media(media, deep=True)
-    if guard:
-        return guard
+    if media_id:
+        media = get_media_by_id(int(media_id))
+        if not media:
+            return jsonify({"error": "Not found"}), 404
 
-    duration = int(media.get("duration") or 0)
-    save_progress(pid, media.get("id"), duration, duration, True)
+        guard = kids_guard_media(media, deep=True)
+        if guard:
+            return guard
+
+        if media.get("type") in ("series", "anime"):
+            # Mark all episodes of the series as watched
+            episodes = get_media_by_tmdb(media.get("tmdb_id"), media.get("type")) if media.get("tmdb_id") else []
+            for ep in episodes:
+                dur = int(ep.get("duration") or 0)
+                if ep.get("id"):
+                    save_progress(pid, ep["id"], dur, dur, True)
+            duration = int(media.get("duration") or 0)
+            save_progress(pid, media.get("id"), duration, duration, True)
+        else:
+            duration = int(media.get("duration") or 0)
+            save_progress(pid, media.get("id"), duration, duration, True)
+    elif tmdb_id:
+        episodes = get_media_by_tmdb(int(tmdb_id), media_type)
+        if not episodes:
+            return jsonify({"error": "Not found"}), 404
+        for ep in episodes:
+            dur = int(ep.get("duration") or 0)
+            if ep.get("id"):
+                save_progress(pid, ep["id"], dur, dur, True)
+
     return jsonify({"ok": True, "completed": True})
+
+
+@library_bp.route("/api/progress/mark-unwatched", methods=["POST"])
+def api_mark_unwatched():
+    pid = require_profile()
+    data = request.json or {}
+    media_id = data.get("media_id")
+    tmdb_id = data.get("tmdb_id")
+    media_type = data.get("type")
+
+    if not media_id and not tmdb_id:
+        return jsonify({"error": "media_id or tmdb_id required"}), 400
+
+    if media_id:
+        media = get_media_by_id(int(media_id))
+        if media and media.get("type") in ("series", "anime"):
+            episodes = get_media_by_tmdb(media.get("tmdb_id"), media.get("type")) if media.get("tmdb_id") else []
+            for ep in episodes:
+                if ep.get("id"):
+                    delete_progress(pid, ep["id"])
+            delete_progress(pid, int(media_id))
+        else:
+            delete_progress(pid, int(media_id))
+    elif tmdb_id:
+        episodes = get_media_by_tmdb(int(tmdb_id), media_type)
+        for ep in episodes:
+            if ep.get("id"):
+                delete_progress(pid, ep["id"])
+
+    return jsonify({"ok": True, "completed": False})
 
 
 # ─── Favorites ─────────────────────────────────────────────────────────────────

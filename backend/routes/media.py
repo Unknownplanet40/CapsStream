@@ -405,7 +405,23 @@ def api_media_detail(media_id):
     media["audio_tracks"] = probe_audio_tracks(media["file_path"])
     media["has_multi_audio"] = len(media["audio_tracks"]) > 1
 
+    try:
+        from backend.franchises import get_media_franchise
+        media["franchise"] = get_media_franchise(media)
+    except Exception:
+        media["franchise"] = None
+
     return jsonify(media)
+
+
+@media_bp.route("/api/media/<int:media_id>/franchise", methods=["GET"])
+def api_media_franchise(media_id):
+    media = get_media_by_id(media_id)
+    if not media:
+        return jsonify({"error": "Media not found"}), 404
+    from backend.franchises import get_media_franchise
+    franchise = get_media_franchise(media)
+    return jsonify(franchise or {})
 
 
 @media_bp.route("/api/media/<int:media_id>/trailer", methods=["GET"])

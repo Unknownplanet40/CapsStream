@@ -611,6 +611,11 @@ def get_profile_wrapped_analytics(profile_id, period="year", year=None):
     # 8. Top Cast & Talent
     actor_map = {}
     for r in rows:
+        # Exclude media if source drive/file is unmounted
+        file_path = r["file_path"] if "file_path" in r.keys() else None
+        if file_path and not is_item_mounted({"file_path": file_path}):
+            continue
+
         cast_raw = r["cast_json"]
         if not cast_raw:
             continue
