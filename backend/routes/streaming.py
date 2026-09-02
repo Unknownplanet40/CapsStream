@@ -87,10 +87,13 @@ def api_stream(media_id):
         track_idx = int(audio_track) if audio_track.isdigit() else 0
         start_time = request.args.get("start", type=float, default=0.0)
         max_height = request.args.get("max_height", type=int, default=1080)
+        force_sw = request.args.get("sw") in ("1", "true")
         from backend.streamer import stream_video_convert
+        kwargs = {"force_sw": True} if force_sw else {}
         return stream_video_convert(
             media["file_path"], audio_track_index=track_idx,
             start_time=start_time, max_height=max_height,
+            **kwargs
         )
 
     audio_track = request.args.get("audio_track")

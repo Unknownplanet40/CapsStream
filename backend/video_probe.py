@@ -183,3 +183,87 @@ def probe_video_details(file_path):
         print(f"[VideoProbe] Details probe error for {file_path}: {e}")
         return {"video_codec": "", "pix_fmt": "", "is_h264": False, "width": 0, "height": 0, "audio_tracks": []}
 
+
+def probe_encoding_health(file_path):
+    """
+    Probes video file to detect anomalous, suspicious, or poorly compressed encoding:
+    - Missing duration or invalid container timestamps
+    - Missing video stream
+    - Irregular/unparseable frame rates
+    - Non-compliant bitstream parameters
+    Returns dict:
+    {
+        "is_suspicious": bool,
+        "reasons": list of str,
+        "details": dict
+    }
+    """
+    if not file_path or not os.path.isfile(file_path) or not os.path.exists(FFPROBE_BIN):
+        return {"is_suspicious": False, "reasons": [], "details": {}}
+
+    try:
+        st = os.stat(file_path)
+        cache_key = ("encoding_health", os.path.abspath(file_path), st.st_size, st.st_mtime)
+        cached = probe_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        cmd = [
+            FFPROBE_BIN,
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            "-show_streams",
+            file_path
+        ]
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=10,
+                                      creationflags=CREATE_NO_WINDOW)
+        data = json.loads(out.decode("utf-8", errors="ignore"))
+        fmt = data.get("format", {})
+        streams = data.get("streams", [])
+
+        reasons = []
+        v_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+
+        if not v_stream:
+            reasons.append("no_video_stream")
+        else:
+            # Check duration
+            dur_str = fmt.get("duration") or v_stream.get("duration")
+            try:
+                dur = float(dur_str) if dur_str else 0.0
+                if dur <= 0:
+                    reasons.append("missing_or_zero_duration")
+            except (ValueError, TypeError):
+                reasons.append("invalid_duration")
+
+            # Check frame rate
+            r_fps = v_stream.get("r_frame_rate", "")
+            avg_fps = v_stream.get("avg_frame_rate", "")
+            if r_fps in ("0/0", "") and avg_fps in ("0/0", ""):
+                reasons.append("unspecified_framerate")
+
+            # Check dimensions
+            w = int(v_stream.get("width") or 0)
+            h = int(v_stream.get("height") or 0)
+            if w <= 0 or h <= 0:
+                reasons.append("invalid_dimensions")
+
+        is_suspicious = len(reasons) > 0
+        res = {
+            "is_suspicious": is_suspicious,
+            "reasons": reasons,
+            "details": {
+                "format_name": fmt.get("format_name", ""),
+                "codec_name": v_stream.get("codec_name", "") if v_stream else "",
+                "profile": v_stream.get("profile", "") if v_stream else "",
+                "pix_fmt": v_stream.get("pix_fmt", "") if v_stream else "",
+            }
+        }
+        probe_cache.put(cache_key, res)
+        return res
+    except Exception as e:
+        print(f"[VideoProbe] Encoding health probe error for {file_path}: {e}")
+        return {"is_suspicious": False, "reasons": [], "details": {}}
+
+

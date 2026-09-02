@@ -996,11 +996,16 @@ ol {
 }
 
 .netflix-avatar-lock-badge {
+  top: 40px;
   right: 8px;
 }
 
 .netflix-avatar-admin-badge {
-  left: 8px;
+  right: 8px;
+}
+
+.netflix-avatar-wrap:not(:has(.netflix-avatar-admin-badge)) .netflix-avatar-lock-badge {
+  top: 8px;
 }
 
 .netflix-profile-card:hover .netflix-avatar-lock-badge,
@@ -3433,6 +3438,7 @@ main::-webkit-scrollbar {
 .quality-source-badge {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 4px;
   background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(99, 102, 241, 0.15));
   color: #38bdf8;
@@ -3443,7 +3449,6 @@ main::-webkit-scrollbar {
   font-weight: 700;
   letter-spacing: 0.02em;
   box-shadow: 0 0 10px rgba(56, 189, 248, 0.15);
-  margin-left: 6px;
   cursor: help;
   transition:
     transform 0.15s ease,

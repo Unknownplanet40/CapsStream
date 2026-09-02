@@ -273,6 +273,9 @@ def _build_convert_cmd(file_path, audio_track_index, effective_start, max_height
     ff = FFMPEG_BIN
     cmd = [ff, "-hide_banner", "-loglevel", "warning"]
 
+    # Discard corrupted packets and auto-generate continuous timestamps for poorly encoded/compressed media
+    cmd.extend(["-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err"])
+
     # Use hardware decoding acceleration for full transcode modes when hardware encoder is used
     # Note: skip hwaccel auto for QSV with 10-bit input — the software decoder is more reliable
     # for HDR/10-bit HEVC→8-bit H.264 conversion and avoids 7-second pipeline stall.
@@ -344,7 +347,7 @@ def _build_convert_cmd(file_path, audio_track_index, effective_start, max_height
     return cmd
 
 
-def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_height=0, remux_video=None, boost_audio=True):
+def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_height=0, remux_video=None, boost_audio=True, force_sw=False):
     """
     High-performance real-time conversion/remuxing to widely-supported H.264/AAC MP4.
     If video stream is already H.264 compatible and no resolution scaling is requested,
@@ -357,12 +360,17 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
     from backend.video_probe import probe_video_details
     details = probe_video_details(file_path)
 
-    # Auto-detect smart remux candidacy if not explicitly specified
-    if remux_video is None:
-        remux_video = details.get("is_h264", False) and (not max_height or max_height <= 0 or details.get("height", 0) <= max_height)
+    # If force_sw is active (e.g., recovering from decoder freeze or corrupt stream), use pure libx264 software transcoding
+    if force_sw:
+        remux_video = False
+        primary_encoder = "libx264"
+    else:
+        # Auto-detect smart remux candidacy if not explicitly specified
+        if remux_video is None:
+            remux_video = details.get("is_h264", False) and (not max_height or max_height <= 0 or details.get("height", 0) <= max_height)
 
-    caps = describe_hw_encoder()
-    primary_encoder = caps.get("encoder") or "libx264"
+        caps = describe_hw_encoder()
+        primary_encoder = caps.get("encoder") or "libx264"
 
     from backend.audio_probe import probe_audio_tracks
     tracks = probe_audio_tracks(file_path)

@@ -142,10 +142,12 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_playlist_items_pl ON playlist_items(playlist_id, position);
         CREATE INDEX IF NOT EXISTS idx_watch_progress_prof_upd ON watch_progress(profile_id, updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_watch_progress_prof_med ON watch_progress(profile_id, media_id);
+        CREATE INDEX IF NOT EXISTS idx_watch_progress_prof_comp_upd ON watch_progress(profile_id, completed, updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_favorites_prof_add ON favorites(profile_id, added_at DESC);
         CREATE INDEX IF NOT EXISTS idx_media_type_rating ON media(type, rating DESC);
         CREATE INDEX IF NOT EXISTS idx_media_type_added ON media(type, added_at DESC);
         CREATE INDEX IF NOT EXISTS idx_media_added ON media(added_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_media_title_season_ep ON media(title, season, episode);
     """)
 
     # Migration guards for media table columns

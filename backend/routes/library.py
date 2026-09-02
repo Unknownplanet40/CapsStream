@@ -22,6 +22,11 @@ from backend.franchises import get_universe_collections
 library_bp = Blueprint("library", __name__)
 
 
+import time
+
+_LAST_ACHIEVEMENT_CHECK = {}
+ACHIEVEMENT_CHECK_INTERVAL = 30.0  # Throttle full achievement evaluations during frequent playback heartbeats
+
 # ─── Watch Progress ────────────────────────────────────────────────────────────
 
 @library_bp.route("/api/progress", methods=["POST"])
@@ -32,15 +37,23 @@ def api_save_progress():
     position = data.get("position", 0)
     duration = data.get("duration", 0)
     completed = data.get("completed", False)
+    check_achievements = data.get("check_achievements", False)
 
     if not media_id:
         return jsonify({"error": "media_id required"}), 400
 
     save_progress(pid, media_id, position, duration, completed)
-    from backend.db import check_and_unlock_achievements, get_profile_catalog
-    newly_unlocked_ids = check_and_unlock_achievements(pid)
-    catalog = get_profile_catalog(pid)
-    unlocked_items = [a for a in catalog if a["id"] in newly_unlocked_ids]
+    
+    unlocked_items = []
+    now = time.time()
+    if completed or check_achievements or (now - _LAST_ACHIEVEMENT_CHECK.get(pid, 0.0) >= ACHIEVEMENT_CHECK_INTERVAL):
+        _LAST_ACHIEVEMENT_CHECK[pid] = now
+        from backend.db import check_and_unlock_achievements, get_profile_catalog
+        newly_unlocked_ids = check_and_unlock_achievements(pid)
+        if newly_unlocked_ids:
+            catalog = get_profile_catalog(pid)
+            unlocked_items = [a for a in catalog if a["id"] in newly_unlocked_ids]
+
     return jsonify({"ok": True, "unlocked_achievements": unlocked_items})
 
 

@@ -969,9 +969,26 @@ const PlayerPage = {
         </div>
       </transition>
 
+      <!-- Playback Issues Non-Blocking Warning Pill (displayed after attempt limit is reached) -->
+      <transition name="fade">
+        <div
+          v-if="freezeWarningNotice && !isCodecNoticeActive && !autoSwitched4K && !stutter4KBanner"
+          class="player-codec-notice-pill"
+          style="position:absolute;bottom:90px;left:50%;transform:translateX(-50%);z-index:300;display:flex;align-items:center;gap:10px;background:rgba(18,18,26,0.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(251,191,36,0.35);border-radius:99px;padding:8px 16px 8px 12px;font-size:0.83rem;color:rgba(255,255,255,0.9);pointer-events:auto;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,0.45)"
+        >
+          <i class="ph ph-warning" style="font-size:1rem;color:#fbbf24;flex-shrink:0"></i>
+          <span>{{ freezeWarningNotice }}</span>
+          <button
+            @click="freezeWarningNotice = null"
+            style="background:none;border:none;color:rgba(255,255,255,0.45);cursor:pointer;padding:0 2px;font-size:0.9rem;flex-shrink:0;margin-left:4px"
+            title="Dismiss"
+          ><i class="ph ph-x"></i></button>
+        </div>
+      </transition>
+
       <!-- Low Memory Protection & In-Place Recovery Banner -->
       <transition name="fade">
-        <div v-if="lowMemoryBanner && !isCodecNoticeActive && !autoSwitched4K && !stutter4KBanner" class="player-low-memory-banner" @click.stop>
+        <div v-if="lowMemoryBanner && !isCodecNoticeActive && !autoSwitched4K && !stutter4KBanner && !freezeWarningNotice" class="player-low-memory-banner" @click.stop>
           <i class="ph ph-warning-circle player-low-memory-icon"></i>
           <div class="player-low-memory-msg">
             <span>{{ lowMemoryBanner.message || 'Low memory detected • Light mode active' }}</span>
@@ -1128,6 +1145,7 @@ const PlayerPage = {
       transcode: false,     // hardware-accelerated compatibility playback
       maxHeight: 1080,      // target resolution limit (1080, 720, 480)
       streamStart: 0,       // content time where the converted stream begins
+      forceSoftware: false, // force pure software transcoding when hardware decoders hang
     });
 
     // Retained for compatibility with helpers below; video is never
@@ -1155,6 +1173,9 @@ const PlayerPage = {
       }
       const maxH = streamState.maxHeight || 1080;
       let url = `/api/stream/${mediaId}?transcode=1&max_height=${maxH}&boost=1`;
+      if (streamState.forceSoftware) {
+        url += `&sw=1`;
+      }
       if (streamState.audioTrack !== null && streamState.audioTrack !== undefined) {
         url += `&audio_track=${streamState.audioTrack}`;
       }
@@ -1170,6 +1191,14 @@ const PlayerPage = {
     function swapStream(atContentTime, forceReload = false) {
       const v = videoRef.value;
       if (!v) return;
+      consecutiveRecoveryAttempts = 0;
+      stallDurationMs = 0;
+      isRecovering.value = false;
+      continuousProgressSec = 0;
+      recoveryToastSuppressed = false;
+      freezeWarningNotice.value = null;
+      lastMonitoredVideoTime = -1;
+      lastMonitoredWallTime = Date.now();
       const token = ++reloadToken;
       // Exact float position for frame-perfect continuation
       const playerPos = streamState.transcode
@@ -1846,7 +1875,7 @@ const PlayerPage = {
         .catch(() => { compatInfo.value = { available: false }; });
     }
 
-    async function enableCompatPlayback(force = false) {
+    async function enableCompatPlayback(force = false, options = {}) {
       if (!media.value) return;
       suppressResume = true;
       isBuffering.value = true;
@@ -1855,6 +1884,9 @@ const PlayerPage = {
       const startAt = await alignedStreamStart(at);
       if (token !== reloadToken) return;   // superseded
       streamState.transcode = true;
+      if (options && options.forceSoftware) {
+        streamState.forceSoftware = true;
+      }
       streamState.streamStart = startAt;
       swapStream(0, force);
     }
@@ -1862,6 +1894,7 @@ const PlayerPage = {
     function disableCompatPlayback() {
       suppressResume = true;
       streamState.transcode = false;
+      streamState.forceSoftware = false;
       streamState.streamStart = 0;
       reloadToken++;
       swapStream(currentContentTime());
@@ -2620,7 +2653,7 @@ const PlayerPage = {
 
     function checkVideoRenderingHealth() {
       const v = videoRef.value;
-      if (!v || v.paused || v.ended || v.seeking || !media.value) {
+      if (!v || v.paused || v.ended || v.seeking || !media.value || isRecovering.value) {
         consecutiveZeroFrameChecks = 0;
         return;
       }
@@ -2673,12 +2706,14 @@ const PlayerPage = {
           checkMemoryPressure();
         }
 
-        // If verified over 2 consecutive checks (~2.4s) and compat transcode not active:
-        if (consecutiveZeroFrameChecks >= 2 && !streamState.transcode && !hasAutoFallbackTriggered) {
-          hasAutoFallbackTriggered = true;
-          console.warn("[Player Health] Video not displaying while audio plays. Auto-switching to converted compatibility stream...");
-          addToast("Unsupported video codec — switching to converted playback...", "info");
-          enableCompatPlayback();
+        // If verified over 2 consecutive checks (~2.4s) and recovery is not already active:
+        if (consecutiveZeroFrameChecks >= 2 && !isRecovering.value) {
+          consecutiveZeroFrameChecks = 0;
+          if (typeof executeFreezeRecovery === "function") {
+            executeFreezeRecovery("zero_video_frames_rendered");
+          } else if (!streamState.transcode) {
+            enableCompatPlayback();
+          }
         }
       } else {
         consecutiveZeroFrameChecks = 0;
@@ -3590,8 +3625,213 @@ const PlayerPage = {
       }
     }
 
-    let consecutiveErrorCount = 0;
-    let lastErrorTimestamp = 0;
+    // ════════════════════════════════════════════════════════════════
+    // FREEZEGUARD: High-Precision Freeze Detection & Graceful Recovery
+    //
+    // Robustly detects corrupted frames, non-compliant GOPs, missing recovery points,
+    // and stuck hardware/software decoders (e.g. Solo Leveling S01E04) within 400-600ms,
+    // executing a multi-tier recovery sequence (Soft -> Hard -> Software Transcode)
+    // while strictly preventing toast spam and infinite loops.
+    // ════════════════════════════════════════════════════════════════
+
+    const isRecovering = ref(false);                     // Global concurrency lock
+    let recoveryToken = 0;                               // Monotonic token to abort superseded operations
+    let consecutiveRecoveryAttempts = 0;                 // Current streak of recovery attempts (max 3)
+    const MAX_RECOVERY_ATTEMPTS = 3;                     // Maximum automated recovery attempts
+    let recoveryToastSuppressed = false;                 // Suppress toasts after attempt limit reached
+    let continuousProgressSec = 0;                       // Continuous uninterrupted progress duration (target: 6.0s)
+    let lastMonitoredVideoTime = -1;                     // Last checked video currentTime
+    let lastMonitoredWallTime = Date.now();              // Timestamp of last position check
+    let lastDecodedFrameSnapshot = -1;                   // Decoded frame count snapshot
+    let stallDurationMs = 0;                             // Duration in milliseconds position has not advanced
+    const freezeWarningNotice = ref(null);               // Non-blocking notice for user after max retries
+
+    function getDecodedVideoFrames() {
+      const v = videoRef.value;
+      if (!v) return -1;
+      try {
+        if (typeof v.getVideoPlaybackQuality === "function") {
+          const q = v.getVideoPlaybackQuality();
+          if (q && typeof q.totalVideoFrames === "number") return q.totalVideoFrames;
+        }
+      } catch (e) {}
+      if (typeof v.webkitDecodedFrameCount === "number") return v.webkitDecodedFrameCount;
+      if (typeof v.mozDecodedFrames === "number") return v.mozDecodedFrames;
+      return lastRenderedFrameCount;
+    }
+
+    async function executeFreezeRecovery(reason = "decoder_freeze") {
+      const v = videoRef.value;
+      if (!v || !media.value) return;
+
+      // Safeguard 1: Global isRecovering lock prevents overlapping/concurrent recoveries
+      if (isRecovering.value) {
+        console.log(`[Player FreezeGuard] Recovery already in progress, skipping concurrent trigger (${reason})`);
+        return;
+      }
+
+      // Safeguard 2: Limit recovery attempts (max 3 consecutive tries)
+      if (consecutiveRecoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
+        console.warn("[Player FreezeGuard] Maximum recovery attempts reached. Halting automated retry loop to prevent freeze/toast loop.");
+        recoveryToastSuppressed = true;
+        freezeWarningNotice.value = "Playback issues detected – trying to continue";
+        return;
+      }
+
+      isRecovering.value = true;
+      const currentToken = ++recoveryToken;
+      consecutiveRecoveryAttempts++;
+      continuousProgressSec = 0;
+      stallDurationMs = 0;
+
+      const currPos = Math.max(0, currentContentTime());
+      console.warn(`[Player FreezeGuard] Freeze detected at ${currPos.toFixed(2)}s (Reason: ${reason}). Recovery attempt ${consecutiveRecoveryAttempts}/${MAX_RECOVERY_ATTEMPTS}`);
+
+      // Safeguard 3: Show recovery toast ONLY on the first attempt
+      if (consecutiveRecoveryAttempts === 1 && !recoveryToastSuppressed) {
+        addToast("Stream buffer stalled — auto-recovering...", "info", 3000);
+      }
+
+      try {
+        const isFatalError = reason.includes("error_code_3") || reason.includes("error_code_4") || reason.includes("decoder_error");
+
+        // ─── Tier 1: Soft Recovery (Attempt 1 for non-fatal stalls) ──────────────────────
+        // Micro time-shift (+0.08s to +0.12s) to step over corrupt frame/NAL unit without stream reload
+        if (consecutiveRecoveryAttempts === 1 && !isFatalError) {
+          console.log("[Player FreezeGuard] [Tier 1] Soft Recovery: micro time-shift to step past corrupt keyframe/PTS");
+          const targetPlayerPos = Math.max(0, (v.currentTime || 0) + 0.10);
+          try {
+            if (v.fastSeek) {
+              v.fastSeek(targetPlayerPos);
+            } else {
+              v.currentTime = targetPlayerPos;
+            }
+            currentTime.value = targetPlayerPos;
+          } catch (e) {}
+          await v.play().catch(() => {});
+          return;
+        }
+
+        // ─── Tier 2: Hard Recovery (Attempt 2, or Attempt 1 for fatal decode error) ──────────────────────
+        // Teardown and recreate the decoder/media element to clear hung GPU decode state
+        if (consecutiveRecoveryAttempts === 2 || (consecutiveRecoveryAttempts === 1 && isFatalError)) {
+          console.log("[Player FreezeGuard] [Tier 2] Hard Recovery: flushing GPU decoder context and re-anchoring stream");
+          await saveProgressNow();
+          const atPos = Math.max(0, currentContentTime() + 0.15);
+
+          try {
+            v.pause();
+            v.removeAttribute("src");
+            v.load();
+          } catch (e) {}
+
+          // Short pause to allow browser GC and video decoder pipeline teardown
+          await new Promise((r) => setTimeout(r, 100));
+          if (currentToken !== recoveryToken) return;
+
+          // Rebuild and re-anchor stream at position
+          swapStream(atPos, true);
+          return;
+        }
+
+        // ─── Tier 3: Fallback Recovery (Attempt 3, or Attempt 2 for fatal decode error) ──────────────────
+        // Fall back to server-side error-resilient transcode with software decoding (FFmpeg discardcorrupt)
+        if (consecutiveRecoveryAttempts >= 3 || (consecutiveRecoveryAttempts >= 2 && isFatalError)) {
+          console.log("[Player FreezeGuard] [Tier 3] Fallback Recovery: switching to error-resilient software transcoding");
+          await saveProgressNow();
+          await enableCompatPlayback(true, { forceSoftware: true });
+          return;
+        }
+      } catch (err) {
+        console.warn(`[Player FreezeGuard] Recovery attempt ${consecutiveRecoveryAttempts} error:`, err);
+      } finally {
+        isRecovering.value = false;
+        lastMonitoredVideoTime = v ? v.currentTime : -1;
+        lastMonitoredWallTime = Date.now();
+        lastDecodedFrameSnapshot = getDecodedVideoFrames();
+      }
+    }
+
+    function checkPlaybackStall() {
+      const v = videoRef.value;
+      if (!v || v.paused || v.ended || v.seeking || !media.value || showResumeModal.value || showInactivityPrompt.value || isRecovering.value || consecutiveRecoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
+        lastMonitoredVideoTime = v ? v.currentTime : -1;
+        lastMonitoredWallTime = Date.now();
+        stallDurationMs = 0;
+        return;
+      }
+
+      const now = Date.now();
+      const deltaMs = Math.max(0, now - lastMonitoredWallTime);
+      lastMonitoredWallTime = now;
+
+      const curr = v.currentTime || 0;
+      const decodedFrames = getDecodedVideoFrames();
+
+      // Check if position or rendered frames advanced
+      const posAdvanced = lastMonitoredVideoTime >= 0 && (curr - lastMonitoredVideoTime) >= 0.04;
+      const framesAdvanced = decodedFrames > 0 && lastDecodedFrameSnapshot > 0 && (decodedFrames > lastDecodedFrameSnapshot);
+
+      if (posAdvanced || framesAdvanced) {
+        // Video is actively and continuously progressing
+        continuousProgressSec += deltaMs / 1000;
+        stallDurationMs = 0;
+        lastMonitoredVideoTime = curr;
+        lastDecodedFrameSnapshot = decodedFrames;
+
+        // Reset recovery counter ONLY after 6.0 seconds of continuous healthy playback
+        if (continuousProgressSec >= 6.0) {
+          if (consecutiveRecoveryAttempts > 0) {
+            console.log(`[Player FreezeGuard] Playback stabilized for ${continuousProgressSec.toFixed(1)}s continuous. Resetting recovery attempts counter.`);
+          }
+          consecutiveRecoveryAttempts = 0;
+          recoveryToastSuppressed = false;
+          freezeWarningNotice.value = null;
+        }
+
+        if (playerError.value && (playerError.value.includes("stuck") || playerError.value.includes("Stuck") || playerError.value.includes("stalled"))) {
+          playerError.value = null;
+        }
+        return;
+      }
+
+      // Position has not advanced
+      stallDurationMs += deltaMs;
+
+      // Smart Memory check if stalling persists > 2.0s
+      if (stallDurationMs >= 2000) {
+        checkMemoryPressure();
+      }
+
+      // Inspect buffer state ahead of current position
+      let hasBufferAhead = false;
+      let bufferAheadSec = 0;
+      try {
+        const b = v.buffered;
+        for (let i = 0; i < b.length; i++) {
+          if (b.start(i) <= curr + 0.1 && b.end(i) > curr + 0.25) {
+            hasBufferAhead = true;
+            bufferAheadSec = b.end(i) - curr;
+            break;
+          }
+        }
+      } catch (e) {}
+
+      // Freeze Thresholds:
+      // 1. Decoder stuck with buffer (browser has >= 0.5s buffered data, readyState >= 3, but PTS frozen > 2500ms)
+      // 2. Network buffering / initial stream startup (no buffer ahead or readyState < 3 -> wait up to 8000ms before soft recovery)
+      const isDecoderStuck = hasBufferAhead && bufferAheadSec >= 0.5 && (v.readyState >= 3);
+      const stallThreshold = isDecoderStuck ? 2500 : 8000;
+
+      if (stallDurationMs >= stallThreshold && !isRecovering.value) {
+        const freezeReason = isDecoderStuck
+          ? `decoder_stuck_with_buffer (${bufferAheadSec.toFixed(2)}s buffered ahead)`
+          : `pts_not_advancing (${(stallDurationMs / 1000).toFixed(2)}s stall)`;
+
+        stallDurationMs = 0;
+        executeFreezeRecovery(freezeReason);
+      }
+    }
 
     function onVideoError(e) {
       const v = videoRef.value;
@@ -3604,42 +3844,7 @@ const PlayerPage = {
       }
       if (v.currentSrc && v.currentSrc.includes('/api/stream/')) {
         console.error("[HTML5 Player Error]", e, "code:", v.error.code, "msg:", v.error.message);
-
-        const now = Date.now();
-        if (now - lastErrorTimestamp < 3500) {
-          consecutiveErrorCount++;
-        } else {
-          consecutiveErrorCount = 1;
-        }
-        lastErrorTimestamp = now;
-
-        // If native direct playback encountered network (code 2), decode (code 3), or unsupported source (code 4),
-        // seamlessly switch to hardware-accelerated/smart converted playback
-        if (!streamState.transcode && (v.error.code === 2 || v.error.code === 3 || v.error.code === 4)) {
-          console.warn("[HTML5 Player] Video decode/pipeline error natively (code " + v.error.code + "). Seamlessly switching to smart converted playback...");
-          addToast("Optimizing media stream for smooth playback...", "info");
-          playerError.value = null;
-          enableCompatPlayback(true);
-          return;
-        }
-
-        // If converted stream encountered a hiccup, reconnect at keyframe
-        if (streamState.transcode && consecutiveErrorCount < 3) {
-          console.warn("[HTML5 Player] Converted stream hiccup — reconnecting at keyframe...");
-          playerError.value = null;
-          enableCompatPlayback(true);
-          return;
-        }
-
-        // If we have failed repeatedly (>= 3 times within 3.5s), stop auto-reconnecting
-        if (consecutiveErrorCount >= 3) {
-          console.warn("[HTML5 Player] Multiple consecutive playback errors encountered. Halting auto-retry loop.");
-          const p = (media.value?.file_path || "").toLowerCase();
-          const isHeavy4k = p.includes("2160") || p.includes("4k") || p.includes("uhd");
-          playerError.value = isHeavy4k
-            ? "Playback failed — 4K/HEVC content needs hardware acceleration or converted playback. Click 'Play Converted' or 'Resume' below."
-            : "The stream encountered an issue. Click 'Play Converted' or 'Resume Playback' to continue.";
-        }
+        executeFreezeRecovery("video_element_error_code_" + v.error.code);
       }
     }
 
@@ -3651,7 +3856,9 @@ const PlayerPage = {
       if (!v) return;
       recovering.value = true;
       playerError.value = null;
-      consecutiveErrorCount = 0;
+      consecutiveRecoveryAttempts = 0;
+      recoveryToastSuppressed = false;
+      freezeWarningNotice.value = null;
       try {
         await enableCompatPlayback(true);
       } catch (e) {
@@ -3744,80 +3951,6 @@ const PlayerPage = {
         console.error("[Player] freeMemoryAndRecover error:", err);
       } finally {
         recoveringMemory.value = false;
-      }
-    }
-
-    // Fast-recovery Watchdog: detects stalled decoders and buffered freezes
-    let lastStallCheckTime = Date.now();
-    let lastStallVideoTime = -1;
-    let stallDurationSec = 0;
-    let autoRecoverAttempts = 0;
-
-    function checkPlaybackStall() {
-      const v = videoRef.value;
-      if (!v || v.paused || v.ended || v.seeking || !media.value || showResumeModal.value) {
-        stallDurationSec = 0;
-        lastStallVideoTime = v ? v.currentTime : -1;
-        lastStallCheckTime = Date.now();
-        return;
-      }
-
-      const now = Date.now();
-      const deltaReal = (now - lastStallCheckTime) / 1000;
-      lastStallCheckTime = now;
-
-      const curr = v.currentTime;
-      // If playback position has advanced by at least 0.2s, video is actively progressing
-      if (lastStallVideoTime >= 0 && Math.abs(curr - lastStallVideoTime) >= 0.2) {
-        stallDurationSec = 0;
-        autoRecoverAttempts = 0;
-        lastStallVideoTime = curr;
-        if (playerError.value && (playerError.value.includes("stuck") || playerError.value.includes("Stuck") || playerError.value.includes("stalled"))) {
-          playerError.value = null; // recovered on its own
-        }
-        return;
-      }
-
-      lastStallVideoTime = curr;
-      stallDurationSec += deltaReal;
-
-      // Smart Watchdog: check memory pressure if video begins stalling
-      if (stallDurationSec >= 2.0) {
-        checkMemoryPressure();
-      }
-
-      // Smart Watchdog: if playback freezes for >= 3.5s while active, attempt auto-recovery
-      if (stallDurationSec >= 3.5 && autoRecoverAttempts < 2) {
-        autoRecoverAttempts++;
-        stallDurationSec = 0;
-        console.warn(`[Player Watchdog] Stalled stream detected (attempt ${autoRecoverAttempts}/2). Reconnecting...`);
-        addToast("Stream buffer stalled — auto-recovering...", "info");
-        if (!streamState.transcode) {
-          enableCompatPlayback(true);
-        } else {
-          const at = currentContentTime();
-          alignedStreamStart(at).then((startAt) => {
-            streamState.streamStart = startAt;
-            swapStream(0, true);
-          });
-        }
-        return;
-      }
-
-      // If stall persists after auto-recovery attempts (>= 8s continuous freeze)
-      if (stallDurationSec >= 8) {
-        const p = (media.value?.file_path || "").toLowerCase();
-        const heavy = p.includes("2160") || p.includes("4k") || p.includes("uhd") ||
-                      (codecInfo.value?.tags || []).some((t) => t.includes("HEVC"));
-        if (heavy) {
-          // For 4K/HEVC: show non-blocking stutter banner — ask before switching, don't block player
-          if (!stutter4KBanner.value) {
-            stutter4KBanner.value = true;
-          }
-        } else {
-          // For standard content: show full-screen error overlay as usual
-          playerError.value = "Playback appears stuck. Use Resume Playback to reload the stream from where you left off.";
-        }
       }
     }
 
@@ -4238,9 +4371,9 @@ const PlayerPage = {
         document.addEventListener("visibilitychange", handleVisibilityChange);
       }
 
-      // Decoder-stall watchdog runs independently of media events —
-      // a wedged 4K HEVC decoder stops firing timeupdate entirely.
-      stallTimer = setInterval(() => checkPlaybackStall(), 2000);
+      // High-precision FreezeGuard watchdog (150ms check cycle) —
+      // detects frozen frames and stuck decoders within 400-600ms
+      stallTimer = setInterval(() => checkPlaybackStall(), 150);
 
       // Active video rendering health check — ensures video frames are decoding alongside audio
       renderHealthTimer = setInterval(() => checkVideoRenderingHealth(), 1200);
@@ -4351,6 +4484,12 @@ const PlayerPage = {
       codecNoticePill.value = null;
       isCodecNoticeActive.value = false;
       autoSwitched4K.value = null;
+      freezeWarningNotice.value = null;
+      isRecovering.value = false;
+      consecutiveRecoveryAttempts = 0;
+      recoveryToastSuppressed = false;
+      continuousProgressSec = 0;
+      stallDurationMs = 0;
 
       // Clean up Web Audio graph
       if (audioCtx) {
@@ -4408,6 +4547,12 @@ const PlayerPage = {
         codecNoticePill.value = null;
         isCodecNoticeActive.value = false;
         autoSwitched4K.value = null;
+        freezeWarningNotice.value = null;
+        isRecovering.value = false;
+        consecutiveRecoveryAttempts = 0;
+        recoveryToastSuppressed = false;
+        continuousProgressSec = 0;
+        stallDurationMs = 0;
         initPlayer();
       },
     );
@@ -4584,6 +4729,8 @@ const PlayerPage = {
       freeMemoryAndRecover,
       dismissLowMemoryBanner,
       checkMemoryPressure,
+      freezeWarningNotice,
+      isRecovering,
     };
   },
 };

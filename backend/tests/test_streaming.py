@@ -254,6 +254,24 @@ class TestStreamingRouteIntegration(unittest.TestCase):
             start_time=120.0
         )
 
+    @patch("backend.routes.streaming.get_best_media_source")
+    @patch("backend.routes.streaming.kids_guard_media")
+    @patch("backend.streamer.stream_video_convert")
+    def test_api_stream_force_sw_transcode_route(self, mock_convert, mock_guard, mock_get_media):
+        """Verify GET /api/stream/<id>?transcode=1&sw=1 dispatches to stream_video_convert with force_sw=True."""
+        mock_get_media.return_value = {"id": 4, "file_path": "/path/to/corrupt.mp4"}
+        mock_guard.return_value = None
+        mock_convert.return_value = "transcode_response"
+
+        self.client.get("/api/stream/4?transcode=1&sw=1")
+        mock_convert.assert_called_once_with(
+            "/path/to/corrupt.mp4",
+            audio_track_index=0,
+            start_time=0.0,
+            max_height=1080,
+            force_sw=True
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

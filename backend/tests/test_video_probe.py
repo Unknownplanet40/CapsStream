@@ -14,7 +14,8 @@ from backend.video_probe import (
     extract_codec_tag,
     format_resolution_label,
     probe_video_resolution,
-    probe_video_details
+    probe_video_details,
+    probe_encoding_health
 )
 from backend.utils import probe_cache
 
@@ -140,12 +141,71 @@ class TestVideoProbe(unittest.TestCase):
         self.assertEqual(details["pix_fmt"], "yuv420p")
         self.assertTrue(details["is_h264"])
 
+    @patch("backend.video_probe.os.path.exists")
+    @patch("backend.video_probe.subprocess.check_output")
+    def test_probe_encoding_health_healthy(self, mock_subprocess, mock_exists):
+        """Verify probe_encoding_health reports is_suspicious=False for standard healthy media."""
+        mock_exists.return_value = True
+        fake_ffprobe_output = {
+            "format": {
+                "duration": "1420.500",
+                "format_name": "matroska,webm"
+            },
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 1920,
+                    "height": 1080,
+                    "r_frame_rate": "24/1",
+                    "avg_frame_rate": "24/1"
+                }
+            ]
+        }
+        mock_subprocess.return_value = json.dumps(fake_ffprobe_output).encode("utf-8")
+
+        health = probe_encoding_health(self.dummy_video)
+        self.assertFalse(health["is_suspicious"])
+        self.assertEqual(health["reasons"], [])
+        self.assertEqual(health["details"]["codec_name"], "h264")
+
+    @patch("backend.video_probe.os.path.exists")
+    @patch("backend.video_probe.subprocess.check_output")
+    def test_probe_encoding_health_suspicious(self, mock_subprocess, mock_exists):
+        """Verify probe_encoding_health detects missing duration and unspecified frame rate."""
+        mock_exists.return_value = True
+        fake_ffprobe_output = {
+            "format": {
+                "duration": "0",
+                "format_name": "matroska"
+            },
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "hevc",
+                    "width": 1920,
+                    "height": 1080,
+                    "r_frame_rate": "0/0",
+                    "avg_frame_rate": "0/0"
+                }
+            ]
+        }
+        mock_subprocess.return_value = json.dumps(fake_ffprobe_output).encode("utf-8")
+
+        health = probe_encoding_health(self.dummy_video)
+        self.assertTrue(health["is_suspicious"])
+        self.assertIn("missing_or_zero_duration", health["reasons"])
+        self.assertIn("unspecified_framerate", health["reasons"])
+
     def test_probe_missing_file(self):
         """Verify probing missing file returns safe defaults."""
         details = probe_video_details(os.path.join(self.test_dir, "missing.mp4"))
         self.assertEqual(details["width"], 0)
         self.assertFalse(details["is_h264"])
         self.assertEqual(details["audio_tracks"], [])
+
+        health = probe_encoding_health(os.path.join(self.test_dir, "missing.mp4"))
+        self.assertFalse(health["is_suspicious"])
 
 
 if __name__ == "__main__":
