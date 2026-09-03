@@ -680,6 +680,14 @@ if __name__ == "__main__":
     proto = "https" if ssl_context else "http"
     print(f"\n  ==========================================================")
     print(f"   CapsStream Server running at: {proto}://{host}:{port}")
+    if host in ("0.0.0.0", "::"):
+        try:
+            from backend.utils.network import get_device_ip
+            dev_ip = get_device_ip()
+            if dev_ip and dev_ip != "127.0.0.1":
+                print(f"   Local Network Access:        {proto}://{dev_ip}:{port}")
+        except Exception:
+            pass
     print(f"   TO STOP THE SERVER: Press Ctrl+C in this window")
     print(f"  ==========================================================\n")
 

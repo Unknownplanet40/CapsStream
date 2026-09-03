@@ -492,8 +492,8 @@ def api_download_auto_backup():
 @admin_bp.route("/api/system/info", methods=["GET"])
 def api_system_info():
     import sys, platform, json
-    BASE_DIR = current_app.config["BASE_DIR"]
-    SERVER_START_TIME = current_app.config["SERVER_START_TIME"]
+    BASE_DIR = current_app.config.get("BASE_DIR", "")
+    SERVER_START_TIME = current_app.config.get("SERVER_START_TIME", time.time())
     from backend.db import DB_PATH, get_conn, get_all_profiles
     from backend.updater import _read_state as _updater_state
 
@@ -650,11 +650,21 @@ def api_system_info():
         except Exception:
             continue
 
+    from backend.utils.network import get_device_ip, get_all_device_ips
+    dev_ip = get_device_ip()
+    all_dev_ips = get_all_device_ips()
+    proto = "https" if config.get("ssl") else "http"
+    srv_port = config.get("port", 8000)
+    dev_url = f"{proto}://{dev_ip}:{srv_port}"
+
     return jsonify({
         "version": get_app_version(),
         "is_dev": is_dev_mode(),
         "app_name": "CapsStream",
         "remote_exposed": (config.get("host", "127.0.0.1") not in ("127.0.0.1", "localhost", "::1")),
+        "device_ip": dev_ip,
+        "all_device_ips": all_dev_ips,
+        "device_url": dev_url,
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "platform": platform.platform(),
         "os_name": os.name,
@@ -666,7 +676,7 @@ def api_system_info():
         "db_metrics": db_metrics,
         "api_health": api_health,
         "github_profile": github_profile,
-        "server_addr": f"{config.get('host', '127.0.0.1')}:{config.get('port', 8000)}",
+        "server_addr": f"{config.get('host', '127.0.0.1')}:{srv_port}",
         "last_checked": _updater_state().get("last_checked"),
         "latest_version": _updater_state().get("latest"),
         "storage_info": storage_info,

@@ -6600,6 +6600,146 @@ video::cue {
   margin-top: 2px;
 }
 
+/* Host Address Local Network Device IP Card */
+.host-ip-card {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: rgba(34, 197, 94, 0.05);
+  border: 1px solid rgba(34, 197, 94, 0.22);
+  border-radius: var(--radius-inner, 12px);
+  transition: var(--transition-fast, 150ms ease);
+}
+
+.host-ip-card:hover {
+  background: rgba(34, 197, 94, 0.07);
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.host-ip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.host-ip-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.host-ip-val {
+  font-family: ui-monospace, SFMono-Regular, "Geist Mono", Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  color: #4ade80;
+  letter-spacing: 0.3px;
+  background: rgba(34, 197, 94, 0.12);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.host-ip-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.host-ip-badge.active {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.host-ip-badge.pending {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.host-ip-desc {
+  font-size: 0.79rem;
+  color: var(--text-secondary, #9494a8);
+  margin-bottom: 10px;
+  line-height: 1.45;
+}
+
+.host-ip-access-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.host-ip-url-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-family: ui-monospace, SFMono-Regular, "Geist Mono", Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: #ffffff;
+  user-select: all;
+}
+
+.host-ip-url-badge i {
+  color: #4ade80;
+  font-size: 0.95rem;
+}
+
+.host-ip-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  padding: 5px 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  cursor: pointer;
+  transition: var(--transition-fast, 150ms ease);
+}
+
+.host-ip-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.host-ip-extra {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.74rem;
+  color: var(--text-muted, #71717a);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.host-ip-extra-item {
+  font-family: ui-monospace, SFMono-Regular, "Geist Mono", Menlo, Consolas, monospace;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--text-secondary, #a1a1aa);
+}
+
 .settings-control {
   display: flex;
   align-items: center;

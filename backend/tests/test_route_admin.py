@@ -115,6 +115,17 @@ class TestRouteAdmin(unittest.TestCase):
         self.assertIn("count", data)
         self.assertIn("backups", data)
 
+    @patch("backend.utils.network.get_device_ip", return_value="192.168.1.55")
+    @patch("backend.utils.network.get_all_device_ips", return_value=["192.168.1.55"])
+    def test_system_info_device_ip(self, mock_all_ips, mock_ip):
+        """Verify GET /api/system/info returns device_ip, all_device_ips, and device_url."""
+        res = self.client.get("/api/system/info")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data.get("device_ip"), "192.168.1.55")
+        self.assertEqual(data.get("all_device_ips"), ["192.168.1.55"])
+        self.assertIn("192.168.1.55", data.get("device_url", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

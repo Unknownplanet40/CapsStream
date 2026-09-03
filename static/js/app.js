@@ -5037,12 +5037,79 @@ const SettingsPage = {
               <span>Server Configuration</span>
             </div>
             <div class="settings-group">
-              <div class="settings-row">
+              <div class="settings-row" :style="(isHostZero && deviceIp) ? 'align-items: flex-start;' : ''">
                 <div class="settings-label-container">
                   <div class="settings-label">Host Address</div>
                   <div class="settings-desc">Network interface the server binds to. Use 127.0.0.1 for this PC only, or 0.0.0.0 to allow other devices on your network.</div>
+
+                  <!-- Device IP Address Display Card (Visible when 0.0.0.0 is configured or active) -->
+                  <div v-if="isHostZero && deviceIp" class="host-ip-card" id="host-ip-container">
+                    <div class="host-ip-header">
+                      <div class="host-ip-title">
+                        <i class="ph ph-broadcast" style="color:#22c55e"></i>
+                        <span>Device IP Address: <strong class="host-ip-val">{{ deviceIp }}</strong></span>
+                      </div>
+                      <span v-if="isServerBoundZero" class="host-ip-badge active" title="CapsStream is currently accessible on your local network">
+                        <i class="ph-fill ph-check-circle"></i> Active on Network
+                      </span>
+                      <span v-else class="host-ip-badge pending" title="Save and restart CapsStream for network access to take effect">
+                        <i class="ph ph-clock"></i> Active After Restart
+                      </span>
+                    </div>
+
+                    <div class="host-ip-desc">
+                      Other devices (phones, tablets, smart TVs, PCs) on your Wi-Fi or local network can access CapsStream using:
+                    </div>
+
+                    <div class="host-ip-access-row">
+                      <div class="host-ip-url-badge">
+                        <i class="ph ph-link"></i>
+                        <span class="host-ip-url-text">{{ deviceAccessUrl }}</span>
+                      </div>
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-xs host-ip-copy-btn"
+                        @click="copyDeviceUrl"
+                        :title="copiedDeviceUrl ? 'Copied to clipboard!' : 'Copy access URL to clipboard'"
+                      >
+                        <i :class="copiedDeviceUrl ? 'ph-fill ph-check' : 'ph ph-copy'"></i>
+                        <span>{{ copiedDeviceUrl ? 'Copied' : 'Copy URL' }}</span>
+                      </button>
+                    </div>
+
+                    <div v-if="allDeviceIps && allDeviceIps.length > 1" class="host-ip-extra">
+                      <span class="host-ip-extra-label">Other detected interfaces:</span>
+                      <span v-for="altIp in allDeviceIps.filter(ip => ip !== deviceIp)" :key="altIp" class="host-ip-extra-item">
+                        {{ altIp }}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <input type="text" v-model="form.host" class="form-input" style="width:180px" placeholder="127.0.0.1" />
+                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+                  <input type="text" v-model="form.host" class="form-input" style="width:180px" placeholder="127.0.0.1" />
+                  <div style="display:flex;gap:4px">
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-xs"
+                      style="font-size:0.75rem;padding:2px 8px;border:1px solid var(--border);border-radius:4px"
+                      @click="form.host = '0.0.0.0'"
+                      :style="form.host === '0.0.0.0' ? 'color:#22c55e;border-color:rgba(34,197,94,0.4);background:rgba(34,197,94,0.08)' : ''"
+                      title="Set Host to 0.0.0.0 (Allow other devices)"
+                    >
+                      0.0.0.0
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-xs"
+                      style="font-size:0.75rem;padding:2px 8px;border:1px solid var(--border);border-radius:4px"
+                      @click="form.host = '127.0.0.1'"
+                      :style="form.host === '127.0.0.1' ? 'color:var(--text-secondary);border-color:var(--border-strong)' : ''"
+                      title="Set Host to 127.0.0.1 (This PC only)"
+                    >
+                      127.0.0.1
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div class="settings-row">
@@ -5770,6 +5837,58 @@ const SettingsPage = {
       } catch (e) {}
     }
 
+    const deviceIp = computed(() => {
+      return sysInfo.value?.device_ip || "";
+    });
+
+    const allDeviceIps = computed(() => {
+      return sysInfo.value?.all_device_ips || [];
+    });
+
+    const isServerBoundZero = computed(() => {
+      return (sysInfo.value?.server_addr || "").startsWith("0.0.0.0:");
+    });
+
+    const isHostZero = computed(() => {
+      const h = (form.value?.host || "").trim();
+      return h === "0.0.0.0" || isServerBoundZero.value;
+    });
+
+    const deviceAccessUrl = computed(() => {
+      if (!deviceIp.value) return "";
+      const proto = window.location.protocol || "http:";
+      const port = form.value?.port || sysInfo.value?.server_addr?.split(":")[1] || 8000;
+      return `${proto}//${deviceIp.value}:${port}`;
+    });
+
+    const copiedDeviceUrl = ref(false);
+
+    function copyDeviceUrl() {
+      const url = deviceAccessUrl.value;
+      if (!url) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(url);
+        } else {
+          const ta = document.createElement("textarea");
+          ta.value = url;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+        }
+        copiedDeviceUrl.value = true;
+        addToast("Copied access URL: " + url, "success");
+        setTimeout(() => {
+          copiedDeviceUrl.value = false;
+        }, 2500);
+      } catch (e) {
+        addToast("Failed to copy URL", "error");
+      }
+    }
+
     // ─── Changelog rendering: safe markdown → HTML ───────────
     // Escapes everything first, then re-adds a small whitelist:
     // headers, bullet lists, **bold**, *italic*, `code`.
@@ -6491,6 +6610,13 @@ const SettingsPage = {
       saveKidsProfileLimits,
       store,
       sysInfo,
+      deviceIp,
+      allDeviceIps,
+      isServerBoundZero,
+      isHostZero,
+      deviceAccessUrl,
+      copiedDeviceUrl,
+      copyDeviceUrl,
       loading,
       saving,
       testingApi,
