@@ -3,9 +3,13 @@
 Tests for Admin Route Endpoints (backend/routes/admin.py)
 Covers settings retrieval, test-api endpoint, system cache stats, and health checks.
 """
+import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from flask import Flask
+
+if "backend.scanner" not in sys.modules:
+    sys.modules["backend.scanner"] = MagicMock()
 
 from backend.routes.admin import admin_bp
 from backend.routes.middleware import has_active_profile_session
@@ -66,7 +70,7 @@ class TestRouteAdmin(unittest.TestCase):
 
     @patch("backend.routes.admin.current_profile", return_value=1)
     @patch("backend.routes.admin.has_active_profile_session", return_value=True)
-    @patch("backend.scanner.get_scan_status", return_value={"running": True, "phase": "scanning"})
+    @patch("backend.scanner.get_scan_status", create=True, return_value={"running": True, "phase": "scanning"})
     def test_api_scan_authorized_with_profile(self, mock_status, mock_has_active, mock_prof):
         """Verify POST /api/scan succeeds when a live profile session is active."""
         resp = self.client.post("/api/scan", json={})
@@ -87,7 +91,32 @@ class TestRouteAdmin(unittest.TestCase):
         self.assertTrue(data["ok"])
         mock_reset.assert_called_once_with(clear_media_files=False)
 
+    @patch("backend.updater.get_release_changelog")
+    def test_api_system_changelog(self, mock_get_changelog):
+        """Verify GET /api/system/changelog returns version changelog data."""
+        mock_get_changelog.return_value = {
+            "version": "2.25.0.0",
+            "title": "CapsStream v2.25.0.0",
+            "body": "## Added\n- Feature X",
+            "published_at": None,
+            "html_url": "https://github.com/repo"
+        }
+        resp = self.client.get("/api/system/changelog?version=2.25.0.0")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["version"], "2.25.0.0")
+        self.assertIn("Feature X", data["body"])
+
+    def test_system_backup_status(self):
+        res = self.client.get("/api/system/backup/status")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn("has_autobackup", data)
+        self.assertIn("count", data)
+        self.assertIn("backups", data)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

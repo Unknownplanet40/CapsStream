@@ -231,12 +231,19 @@ def check_for_update():
     changelog = ""
     asset_digest = None
 
+    release_title = ""
+    published_at = None
+    html_url = None
+
     # Primary: GitHub Releases API (gives changelog body + asset URL)
     try:
         raw = _http_get(RELEASES_API).decode("utf-8")
         rel = json.loads(raw)
         latest = (rel.get("tag_name") or "").lstrip("vV")
         changelog = rel.get("body") or ""
+        release_title = rel.get("name") or f"CapsStream v{latest}"
+        published_at = rel.get("published_at")
+        html_url = rel.get("html_url")
         for asset in rel.get("assets", []):
             if asset.get("name", "").startswith("CapsStream-update-") and asset.get("name", "").endswith(".zip"):
                 download_url = asset.get("browser_download_url")
@@ -254,6 +261,7 @@ def check_for_update():
             latest = (vj.get("version") or "").strip()
             download_url = vj.get("download_url") or download_url
             changelog = vj.get("changelog") or changelog
+            release_title = vj.get("title") or (f"CapsStream v{latest}" if latest else "")
         except Exception as e:
             print(f"[Updater] Raw version.json unavailable: {e}")
 
@@ -270,6 +278,9 @@ def check_for_update():
     result["download_url"] = download_url
     result["digest"] = asset_digest
     result["changelog"] = changelog
+    result["title"] = release_title
+    result["published_at"] = published_at
+    result["html_url"] = html_url
     result["restart_hint"] = bool(RESTART_HINT_RE.search(changelog or ""))
 
     if latest:
@@ -279,13 +290,97 @@ def check_for_update():
 
     result["last_checked"] = _touch_last_checked()
     result["pending_swaps"] = _pending_count()
-    _write_state({
-        **_read_state(),
+    state = _read_state()
+    changelogs = state.get("changelogs") or {}
+    if latest and changelog:
+        changelogs[latest] = {
+            "version": latest,
+            "title": release_title or f"CapsStream v{latest}",
+            "body": changelog,
+            "published_at": published_at,
+            "html_url": html_url or f"https://github.com/{GITHUB_REPO}/releases/tag/v{latest}",
+        }
+    state.update({
         "latest": latest,
         "status": result["status"],
         "restart_hint": result["restart_hint"],
+        "changelog": changelog,
+        "release_title": release_title,
+        "published_at": published_at,
+        "html_url": html_url,
+        "changelogs": changelogs,
     })
+    _write_state(state)
     return result
+
+
+def get_release_changelog(version=None):
+    """
+    Retrieve release notes / changelog for the installed or specified version.
+    Checks cached state first, falling back to GitHub Releases API.
+    """
+    v = (version or get_local_version() or "").lstrip("vV")
+    state = _read_state()
+    changelogs = state.get("changelogs") or {}
+
+    if v and v in changelogs and changelogs[v].get("body"):
+        return changelogs[v]
+
+    if v and state.get("latest") == v and state.get("changelog"):
+        return {
+            "version": v,
+            "title": state.get("release_title") or f"CapsStream v{v}",
+            "body": state.get("changelog") or "",
+            "published_at": state.get("published_at"),
+            "html_url": state.get("html_url") or f"https://github.com/{GITHUB_REPO}/releases/tag/v{v}",
+        }
+
+    # Fetch release notes by tag from GitHub API
+    try:
+        tag = f"v{v}" if v else "latest"
+        api_url = (
+            f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{tag}"
+            if v else RELEASES_API
+        )
+        raw = _http_get(api_url, timeout=8).decode("utf-8")
+        rel = json.loads(raw)
+        info_ver = (rel.get("tag_name") or "").lstrip("vV") or v
+        info = {
+            "version": info_ver,
+            "title": rel.get("name") or f"CapsStream v{info_ver}",
+            "body": rel.get("body") or "",
+            "published_at": rel.get("published_at"),
+            "html_url": rel.get("html_url") or f"https://github.com/{GITHUB_REPO}/releases/tag/v{info_ver}",
+        }
+        if info_ver and info["body"]:
+            changelogs[info_ver] = info
+            state["changelogs"] = changelogs
+            _write_state(state)
+        return info
+    except Exception as e:
+        print(f"[Updater] Could not fetch release changelog for v{v}: {e}")
+
+    # Fallback to check_for_update info
+    try:
+        chk = check_for_update()
+        if chk.get("latest") == v or chk.get("current") == v:
+            return {
+                "version": v,
+                "title": chk.get("title") or f"CapsStream v{v}",
+                "body": chk.get("changelog") or "",
+                "published_at": chk.get("published_at"),
+                "html_url": chk.get("html_url") or f"https://github.com/{GITHUB_REPO}/releases/tag/v{v}",
+            }
+    except Exception:
+        pass
+
+    return {
+        "version": v,
+        "title": f"CapsStream v{v}",
+        "body": "",
+        "published_at": None,
+        "html_url": f"https://github.com/{GITHUB_REPO}/releases",
+    }
 
 
 def _entry_allowed(name):

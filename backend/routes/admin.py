@@ -188,6 +188,18 @@ def api_update_progress():
     return jsonify(get_update_progress())
 
 
+@admin_bp.route("/api/system/changelog", methods=["GET"])
+def api_system_changelog():
+    from backend.updater import get_release_changelog
+    version = request.args.get("version")
+    try:
+        data = get_release_changelog(version=version)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"version": version or get_app_version(), "body": "", "error": str(e)}), 500
+
+
+
 # ─── Logs ─────────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/api/system/logs", methods=["GET"])
@@ -414,6 +426,63 @@ def api_system_restore():
             if restore_db else ""
         ),
     })
+
+
+@admin_bp.route("/api/system/backup/status", methods=["GET"])
+def api_system_backup_status():
+    BASE_DIR = current_app.config.get("BASE_DIR") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    backup_dir = os.path.join(BASE_DIR, "data", "backups")
+    if not os.path.isdir(backup_dir):
+        return jsonify({"has_autobackup": False, "count": 0, "latest": None, "backups": []})
+
+    files = []
+    try:
+        for f in os.listdir(backup_dir):
+            if f.startswith("autobackup-") and f.endswith(".zip"):
+                fp = os.path.join(backup_dir, f)
+                if os.path.isfile(fp):
+                    st = os.stat(fp)
+                    size_mb = round(st.st_size / (1024 * 1024), 1)
+                    size_str = f"{size_mb} MB" if size_mb >= 0.1 else f"{round(st.st_size / 1024, 1)} KB"
+                    files.append({
+                        "filename": f,
+                        "size_bytes": st.st_size,
+                        "size_formatted": size_str,
+                        "created_at": time.strftime("%b %d, %Y at %I:%M %p", time.localtime(st.st_mtime)),
+                        "timestamp": st.st_mtime,
+                    })
+    except Exception as e:
+        return jsonify({"has_autobackup": False, "count": 0, "latest": None, "backups": [], "error": str(e)})
+
+    files.sort(key=lambda x: x["timestamp"], reverse=True)
+    return jsonify({
+        "has_autobackup": len(files) > 0,
+        "count": len(files),
+        "latest": files[0] if files else None,
+        "backups": files[:5],
+    })
+
+
+@admin_bp.route("/api/system/backup/download-auto", methods=["GET"])
+def api_download_auto_backup():
+    require_admin()
+    filename = request.args.get("filename")
+    BASE_DIR = current_app.config.get("BASE_DIR") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    backup_dir = os.path.join(BASE_DIR, "data", "backups")
+    if not os.path.isdir(backup_dir):
+        return jsonify({"error": "No backup directory"}), 404
+    if filename:
+        safe_name = os.path.basename(filename)
+        target = os.path.join(backup_dir, safe_name)
+    else:
+        files = sorted([f for f in os.listdir(backup_dir) if f.startswith("autobackup-") and f.endswith(".zip")])
+        if not files:
+            return jsonify({"error": "No automated backup found"}), 404
+        safe_name = files[-1]
+        target = os.path.join(backup_dir, safe_name)
+    if not os.path.isfile(target):
+        return jsonify({"error": "Backup file not found"}), 404
+    return send_file(target, as_attachment=True, download_name=safe_name, mimetype="application/zip")
 
 
 # ─── System Info ──────────────────────────────────────────────────────────────

@@ -139,9 +139,98 @@ const store = reactive({
   queueRepeat: 'off',      // 'off' | 'all' | 'one'
   queuePlaylistId: null,   // id of playlist if playing from a saved playlist
   queuePlaylistName: "",   // name of active playlist
+  whatsNewModalOpen: false, // What's New post-update modal visibility
+  whatsNewData: null,       // Loaded release notes/changelog payload
+  whatsNewLoading: false,   // Loading state for changelog fetch
 });
 
 window.store = store;
+
+function parseChangelogToSections(rawMd) {
+  if (!rawMd) return { summary: "", categories: [] };
+
+  const esc = String(rawMd).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const inline = (s) => s
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+  const lines = esc.split(/\r?\n/);
+  let summary = "";
+  const categories = [];
+  let currentCat = null;
+
+  function ensureCat(type, title, icon) {
+    let cat = categories.find((c) => c.type === type);
+    if (!cat) {
+      cat = { type, title, icon, items: [] };
+      categories.push(cat);
+    }
+    return cat;
+  }
+
+  for (let raw of lines) {
+    const t = raw.trim();
+    if (!t) continue;
+
+    // Headings (## Added, ### Bug Fixes, etc.)
+    const h = t.match(/^(#{1,4})\s+(.*)$/);
+    if (h) {
+      const hText = h[2].trim().toLowerCase();
+      if (hText.includes("summary") || hText.includes("overview")) {
+        currentCat = "summary";
+      } else if (hText.includes("added") || hText.includes("feature")) {
+        currentCat = ensureCat("cat-added", "New Features & Additions", "ph ph-sparkle");
+      } else if (hText.includes("fixed") || hText.includes("bug")) {
+        currentCat = ensureCat("cat-fixed", "Bug Fixes & Stability", "ph ph-bug");
+      } else if (hText.includes("perf") || hText.includes("performance") || hText.includes("speed")) {
+        currentCat = ensureCat("cat-perf", "Performance & Optimization", "ph ph-lightning");
+      } else if (hText.includes("changed") || hText.includes("refactor") || hText.includes("update") || hText.includes("chore")) {
+        currentCat = ensureCat("cat-changed", "Changes & Enhancements", "ph ph-wrench");
+      } else {
+        currentCat = ensureCat("cat-general", h[2].trim(), "ph ph-check-circle");
+      }
+      continue;
+    }
+
+    // Bullet items
+    if (/^[-*•]\s+/.test(t)) {
+      const itemText = inline(t.replace(/^[-*•]\s+/, ""));
+      if (!currentCat || currentCat === "summary") {
+        currentCat = ensureCat("cat-general", "Highlights & Changes", "ph ph-sparkle");
+      }
+      currentCat.items.push(itemText);
+      continue;
+    }
+
+    // Plain text / paragraph
+    if (currentCat === "summary" || !currentCat) {
+      if (summary) summary += " ";
+      summary += inline(t);
+    } else if (currentCat && typeof currentCat === "object") {
+      currentCat.items.push(inline(t));
+    }
+  }
+
+  return { summary, categories };
+}
+
+window.parseChangelogToSections = parseChangelogToSections;
+
+window.openWhatsNewModal = async function (version = null) {
+  store.whatsNewLoading = true;
+  store.whatsNewModalOpen = true;
+  try {
+    const v = version || store.sysInfo?.version || "";
+    const res = await API.get(`/api/system/changelog${v ? `?version=${encodeURIComponent(v)}` : ""}`);
+    store.whatsNewData = res || { version: v, body: "" };
+  } catch (e) {
+    store.whatsNewData = { version: store.sysInfo?.version || "", body: "" };
+  } finally {
+    store.whatsNewLoading = false;
+  }
+};
 
 const playlistPickerState = reactive({
   show: false,
@@ -3864,14 +3953,190 @@ const SettingsPage = {
         <!-- Main Content Area (all sections visible) -->
         <main class="settings-content">
 
-            <!-- ══════ Appearance & Themes ══════ -->
+        <!-- ══════ Updates Card (Moved to Top) ══════ -->
+        <div class="settings-section" id="settings-updates-section">
+          <div class="settings-section-title">
+            <i class="ph ph-arrow-circle-up" style="color:var(--accent)"></i>
+            <span>Updates & Version</span>
+          </div>
+          <div class="settings-group" style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:4px 0 8px">
+              <div class="settings-label-container">
+                <div class="settings-label">Current version</div>
+                <div class="settings-desc">CapsStream v{{ sysInfo?.version || '…' }}</div>
+              </div>
+              <div class="settings-label-container" v-if="updateState.last_checked">
+                <div class="settings-label">Last checked</div>
+                <div class="settings-desc">{{ updateState.last_checked }}</div>
+              </div>
+              <div class="settings-label-container" v-if="updateState.latest && updateState.status !== 'up_to_date'">
+                <div class="settings-label">Latest available</div>
+                <div class="settings-desc" style="color:var(--accent);font-weight:700">v{{ updateState.latest }}</div>
+              </div>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Automatic Update Checks</div>
+                <div class="settings-desc">Periodically check for new CapsStream releases and show a banner when one is available.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.updates.auto_check" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div
+              class="update-status-line"
+              :style="{ color: updateState.status === 'available' ? 'var(--accent)' : updateState.status === 'error' ? '#ef4444' : 'var(--text-secondary)' }"
+            >
+              {{ updateState.message || 'Check for updates to see if a new version is available.' }}
+            </div>
+
+            <!-- Live update progress -->
+            <div v-if="updateInstalling && updateProgress && updateProgress.stage === 'downloading' && updateProgress.total" style="margin-top:10px">
+              <div style="height:6px;border-radius:3px;background:var(--bg-secondary);overflow:hidden">
+                <div style="height:100%;background:var(--accent);transition:width .4s" :style="{ width: Math.round(100 * (updateProgress.bytes_done || 0) / (updateProgress.total || 1)) + '%' }"></div>
+              </div>
+              <div style="font-size:.8rem;color:var(--text-secondary);margin-top:4px">
+                Downloading… {{ Math.round((updateProgress.bytes_done || 0) / 1048576 * 10) / 10 }} / {{ Math.round((updateProgress.total || 0) / 1048576 * 10) / 10 }} MB
+              </div>
+            </div>
+            <div v-else-if="updateInstalling && updateProgress && ['verifying','extracting','validating','installing'].includes(updateProgress.stage)" style="font-size:.85rem;color:var(--text-secondary);margin-top:8px">
+              <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:6px"></i>{{ updateProgress.message || (updateProgress.stage[0].toUpperCase() + updateProgress.stage.slice(1)) + '…' }}
+            </div>
+
+            <!-- One-click restart for backend updates -->
+            <div v-if="restartPending" style="margin-top:10px;padding:10px 14px;border-radius:12px;background:rgba(253,203,110,.12);border:1px solid rgba(253,203,110,.35);color:#fdcb6e;font-size:.87rem">
+              <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:6px"></i>Restarting — the server will come back online in a few seconds…
+            </div>
+
+            <div
+              v-if="updateState.changelog"
+              class="changelog-box"
+              v-html="changelogHtml"
+            ></div>
+
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
+              <button class="btn btn-secondary" @click="openWhatsNew" id="btn-view-whats-new">
+                <i class="ph ph-sparkle" style="margin-right:6px;color:#38bdf8"></i>
+                What's New
+              </button>
+              <button class="btn btn-secondary" @click="checkUpdates" :disabled="updateChecking">
+                <i :class="updateChecking ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="updateChecking ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+                {{ updateChecking ? 'Checking...' : 'Check for Updates' }}
+              </button>
+              <button
+                v-if="updateState.status === 'available'"
+                class="btn btn-primary"
+                @click="installUpdate"
+                :disabled="updateInstalling"
+                id="btn-install-update"
+              >
+                <i :class="updateInstalling ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="updateInstalling ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+                {{ updateInstalling ? 'Installing...' : 'Install Update' }}
+              </button>
+              <button
+                v-if="updateState.status === 'up_to_date' && !restartPending && !updateInstalling && /restart CapsStream/i.test(updateState.message)"
+                class="btn btn-primary"
+                @click="restartAfterUpdate"
+                id="btn-restart-update"
+              >
+                <i class="ph ph-arrow-clockwise" style="margin-right:6px"></i>
+                Restart &amp; Finish Update
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══════ Parental Controls ══════ -->
+        <div class="settings-section" id="settings-parental-section">
+          <div class="settings-section-title">
+            <i class="ph ph-shield-check" style="color:#fdcb6e"></i>
+            <span>Parental Controls & Kids Screen Time</span>
+          </div>
+          <div class="settings-group">
+            <div v-if="!kidsProfiles.length" style="padding:1.25rem;color:var(--text-muted);font-size:0.9rem">
+              No Kids profiles created yet. Create or edit a profile in <router-link to="/profiles?manage=true" style="color:var(--accent);font-weight:700">Manage Profiles</router-link> to set daily cartoon time limits and bedtime curfews.
+            </div>
+            <div v-else>
+              <div v-for="kp in kidsProfiles" :key="kp.id" class="settings-row" style="align-items:flex-start">
+                <div class="settings-label-container">
+                  <div class="settings-label" style="display:flex;align-items:center;gap:8px">
+                    <span>{{ kp.avatar }} {{ kp.name }}</span>
+                    <span style="font-size:0.75rem;background:rgba(253,203,110,0.15);color:#fdcb6e;padding:2px 8px;border-radius:12px;font-weight:700">Kids Profile</span>
+                  </div>
+                  <div class="settings-desc">Set daily watch limits and evening bedtime curfew for {{ kp.name }}. Changes save automatically when you select a value.</div>
+                </div>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+                  <div>
+                    <label style="display:block;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;font-weight:600">Daily Limit</label>
+                    <select v-model.number="kp.daily_limit_minutes" class="form-input" style="min-width:140px;font-size:0.85rem">
+                      <option :value="0">No Limit</option>
+                      <option :value="30">30 Mins / day</option>
+                      <option :value="45">45 Mins / day</option>
+                      <option :value="60">1 Hour / day</option>
+                      <option :value="90">1.5 Hours / day</option>
+                      <option :value="120">2 Hours / day</option>
+                      <option :value="180">3 Hours / day</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;font-weight:600">Bedtime Curfew</label>
+                    <select v-model="kp.bedtime_curfew" class="form-input" style="min-width:140px;font-size:0.85rem">
+                      <option value="">Off (None)</option>
+                      <option value="19:00">7:00 PM</option>
+                      <option value="19:30">7:30 PM</option>
+                      <option value="20:00">8:00 PM</option>
+                      <option value="20:30">8:30 PM</option>
+                      <option value="21:00">9:00 PM</option>
+                      <option value="21:30">9:30 PM</option>
+                      <option value="22:00">10:00 PM</option>
+                    </select>
+                  </div>
+                  <div style="display:flex;align-items:flex-end">
+                    <button
+                      class="btn btn-primary"
+                      style="font-size:0.82rem;padding:7px 14px;height:auto"
+                      @click="saveKidsProfileLimits(kp)"
+                      :id="'btn-save-kids-' + kp.id"
+                    >
+                      <i class="ph ph-floppy-disk" style="margin-right:5px"></i> Save
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Parental override rules (allow/block titles) -->
+              <div v-if="kidsOverrides.length" style="border-top:1px solid var(--border);margin-top:18px;padding-top:16px">
+                <div class="settings-label" style="margin-bottom:4px">Title Overrides for Kids Mode</div>
+                <div class="settings-desc" style="margin-bottom:10px">Rules set via right-click → "Kids Mode: Always Allow / Block Title". These win over automatic filtering.</div>
+                <div v-for="ov in kidsOverrides" :key="ov.tmdb_id"
+                     style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;font-size:0.87rem">
+                  <i :class="ov.action === 'allow' ? 'ph ph-shield-check' : 'ph ph-shield-warning'"
+                     :style="{ color: ov.action === 'allow' ? '#2ecc71' : '#e50914', fontSize: '1.1rem' }"></i>
+                  <span style="flex:1;font-weight:600">{{ ov.title || ('TMDb #' + ov.tmdb_id) }}</span>
+                  <span :style="{ color: ov.action === 'allow' ? '#2ecc71' : '#e50914', fontWeight: 700, fontSize: '0.78rem' }">
+                    {{ ov.action === 'allow' ? 'ALWAYS ALLOWED' : 'BLOCKED' }}
+                  </span>
+                  <button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 10px;height:auto"
+                          @click="removeKidsOverride(ov)" :id="'btn-del-override-' + ov.tmdb_id">
+                    <i class="ph ph-x"></i> Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══════ Appearance & Themes ══════ -->
         <div class="settings-section" id="settings-theme-section">
           <div class="settings-section-title">
             <i class="ph ph-palette" style="color:var(--accent)"></i>
             <span>Appearance & Theme Presets</span>
           </div>
           <div class="settings-group">
-            <div class="settings-label-container" style="margin-bottom:12px">
+            <div class="settings-label-container" style="margin-bottom:14px">
               <div class="settings-label">Active Theme Preset</div>
               <div class="settings-desc">Choose a curated visual theme for your profile. Changes apply instantly across the entire interface.</div>
             </div>
@@ -3882,21 +4147,84 @@ const SettingsPage = {
                 :key="t.id"
                 class="theme-preset-card"
                 :class="{ active: currentTheme === t.id }"
+                :style="{
+                  '--preset-accent': t.accent,
+                  '--preset-secondary': t.secondary || t.accent,
+                  '--preset-bg': t.bg,
+                  '--preset-border': t.border
+                }"
                 @click="selectTheme(t.id)"
               >
-                <div class="theme-card-preview" :style="{ background: t.bg, borderColor: t.border }">
-                  <div class="theme-card-accent-bar" :style="{ background: t.accent }"></div>
-                  <div class="theme-card-dots">
-                    <span class="theme-card-dot" :style="{ background: t.accent }"></span>
-                    <span class="theme-card-dot" :style="{ background: t.secondary || t.accent }"></span>
+                <!-- Mini Streaming Dashboard Preview -->
+                <div class="theme-card-preview" :style="{ background: t.bg }">
+                  <!-- Mini Topbar -->
+                  <div class="mini-ui-topbar">
+                    <div class="mini-ui-topbar-left">
+                      <span class="mini-ui-logo-dot" :style="{ background: t.accent }"></span>
+                      <span class="mini-ui-nav-pill" :style="{ background: t.accent }"></span>
+                      <span class="mini-ui-nav-dot"></span>
+                      <span class="mini-ui-nav-dot"></span>
+                    </div>
+                    <div class="mini-ui-topbar-right">
+                      <span class="mini-ui-search-pill"></span>
+                      <span class="mini-ui-avatar-dot" :style="{ borderColor: t.accent }"></span>
+                    </div>
+                  </div>
+
+                  <!-- Mini Hero Banner -->
+                  <div class="mini-ui-hero" :style="{ background: 'radial-gradient(ellipse at 85% 25%, ' + (t.accent + '26') + ' 0%, transparent 70%), linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.45) 100%)' }">
+                    <div class="mini-ui-hero-content">
+                      <div class="mini-ui-hero-tag" :style="{ background: t.accent + '33', color: t.accent }">NEW</div>
+                      <div class="mini-ui-hero-title"></div>
+                      <div class="mini-ui-hero-sub"></div>
+                      <div class="mini-ui-play-btn" :style="{ background: t.accent, color: t.accent.toLowerCase() === '#ffffff' ? '#000000' : '#ffffff' }">
+                        <i class="ph ph-play-fill"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Mini Carousel Shelf -->
+                  <div class="mini-ui-shelf">
+                    <div class="mini-ui-poster active-poster" :style="{ borderColor: t.accent + '55' }">
+                      <div class="mini-ui-poster-thumb"></div>
+                      <div class="mini-ui-progress-bar" :style="{ background: t.accent }"></div>
+                    </div>
+                    <div class="mini-ui-poster">
+                      <div class="mini-ui-poster-thumb"></div>
+                    </div>
+                    <div class="mini-ui-poster">
+                      <div class="mini-ui-poster-thumb"></div>
+                    </div>
+                    <div class="mini-ui-poster">
+                      <div class="mini-ui-poster-thumb"></div>
+                    </div>
                   </div>
                 </div>
+
+                <!-- Card Body & Metadata -->
                 <div class="theme-card-body">
-                  <div class="theme-card-name">
-                    <span>{{ t.name }}</span>
-                    <span v-if="currentTheme === t.id" class="theme-active-tag">Active</span>
+                  <div class="theme-card-header">
+                    <div class="theme-card-title-group">
+                      <div class="theme-card-icon-wrap" :style="{ background: t.accent + '1f', color: t.accent }">
+                        <i class="ph" :class="t.icon || 'ph-palette'"></i>
+                      </div>
+                      <span class="theme-card-name-text">{{ t.name }}</span>
+                    </div>
+                    <span v-if="currentTheme === t.id" class="theme-active-tag">
+                      <i class="ph ph-check-circle-fill"></i> Active
+                    </span>
                   </div>
+
                   <div class="theme-card-desc">{{ t.desc }}</div>
+
+                  <div class="theme-card-footer">
+                    <div class="theme-card-swatches">
+                      <span class="theme-swatch-chip" :style="{ background: t.accent }" :title="'Accent: ' + t.accent"></span>
+                      <span class="theme-swatch-chip" :style="{ background: t.secondary || t.accent }" :title="'Secondary: ' + (t.secondary || t.accent)"></span>
+                      <span class="theme-swatch-chip swatch-bg" :style="{ background: t.bg, borderColor: t.border }" :title="'Background: ' + t.bg"></span>
+                    </div>
+                    <span class="theme-preset-tag">{{ t.id }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3918,6 +4246,40 @@ const SettingsPage = {
               <button class="btn btn-secondary btn-sm" @click="replayTour" id="btn-replay-tour">
                 <i class="ph ph-play-circle" style="margin-right:6px"></i> Start Tour
               </button>
+            </div>
+
+            <!-- Keyboard Shortcuts & Navigation -->
+            <div class="settings-row" style="border-top:1px solid rgba(255,255,255,0.07);margin-top:6px;padding-top:12px;align-items:flex-start">
+              <div class="settings-label-container">
+                <div style="display:flex;align-items:center;justify-content:space-between;width:100%;margin-bottom:4px">
+                  <div class="settings-label" style="display:flex;align-items:center;gap:8px">
+                    <i class="ph ph-keyboard" style="color:#38bdf8"></i>
+                    <span>Player & App Hotkeys</span>
+                  </div>
+                  <button class="btn btn-secondary btn-sm" @click="openShortcutsGuide" id="btn-open-shortcuts-guide" style="font-size:0.75rem;padding:3px 9px;height:auto;white-space:nowrap">
+                    <i class="ph ph-command" style="margin-right:4px"></i> All Hotkeys
+                  </button>
+                </div>
+                <div class="settings-desc">Quick shortcuts for video playback and swift app navigation:</div>
+
+                <div class="settings-shortcuts-preview">
+                  <div class="shortcut-chip"><kbd>Space</kbd><span>Play/Pause</span></div>
+                  <div class="shortcut-chip"><kbd>←</kbd><kbd>→</kbd><span>Seek 10s</span></div>
+                  <div class="shortcut-chip"><kbd>F</kbd><span>Fullscreen</span></div>
+                  <div class="shortcut-chip"><kbd>M</kbd><span>Mute</span></div>
+                  <div class="shortcut-chip"><kbd>C</kbd><span>Subtitles</span></div>
+                  <div class="shortcut-chip"><kbd>/</kbd><span>Search</span></div>
+                  <div class="shortcut-chip"><kbd>?</kbd><span>Help</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Pro-Tip Box -->
+            <div class="settings-pro-tip">
+              <i class="ph ph-lightbulb-filament" style="color:#fdcb6e;font-size:1.1rem;flex-shrink:0;margin-top:1px"></i>
+              <div style="font-size:0.78rem;line-height:1.45;color:var(--text-secondary)">
+                <strong style="color:var(--text-primary)">Pro-Tip:</strong> Right-click any title card in your library to quickly mark as watched, manage playlists, view details, or set kids screen time rules.
+              </div>
             </div>
           </div>
         </div>
@@ -4144,7 +4506,7 @@ const SettingsPage = {
           </div>
         </div>
 
-            <!-- ══════ Media Scanner Paths ══════ -->
+        <!-- ══════ Media Scanner Paths (Full Width) ══════ -->
         <div class="settings-section" id="settings-paths-section">
           <div class="settings-section-title">
             <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
@@ -4158,11 +4520,11 @@ const SettingsPage = {
                 <div class="folder-warning-banner-header">
                   <div style="display:flex;align-items:center;gap:8px">
                     <i class="ph-fill ph-warning-diamond"></i>
-                    <span>⚠️ Important Warning – Folder Selection</span>
+                    <span>Important Warning – Folder Selection</span>
                   </div>
                   <button class="naming-guide-toggle-btn" @click="showNamingGuide = !showNamingGuide" type="button">
                     <i :class="showNamingGuide ? 'ph ph-caret-up' : 'ph ph-book-open'"></i>
-                    <span>{{ showNamingGuide ? 'Hide Naming Formats' : 'View Accepted Naming Formats' }}</span>
+                    <span>{{ showNamingGuide ? 'Hide Naming Formats' : 'View Naming Formats' }}</span>
                   </button>
                 </div>
                 <div class="folder-warning-banner-content">
@@ -4432,110 +4794,123 @@ const SettingsPage = {
               </div>
             </div>
           </div>
-                <!-- 2b. Library & Scanning -->
-        <div class="settings-section" id="settings-scanning-section">
-          <div class="settings-section-title">
-            <i class="ph ph-file-video" style="color:var(--accent)"></i>
-            <span>Library & Scanning</span>
-          </div>
-          <div class="settings-group">
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Scan Library on Startup</div>
-                <div class="settings-desc">Automatically scan your media folders for new files when you log in.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.library.scan_on_startup" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
 
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Auto-Scan Interval</div>
-                <div class="settings-desc">Automatically scan the library on a schedule while the server is running. New episodes are announced with a toast.</div>
-              </div>
-              <select v-model.number="form.library.scan_interval_hours" class="form-input" style="width:160px">
-                <option :value="0">Off</option>
-                <option :value="1">Every hour</option>
-                <option :value="6">Every 6 hours</option>
-                <option :value="12">Every 12 hours</option>
-                <option :value="24">Every 24 hours</option>
-              </select>
+        <!-- ══════ Side-by-Side: Library Scanning & Metadata Providers ══════ -->
+        <div class="settings-grid-row">
+          <!-- 2b. Library & Scanning -->
+          <div class="settings-section" id="settings-scanning-section">
+            <div class="settings-section-title">
+              <i class="ph ph-file-video" style="color:var(--accent)"></i>
+              <span>Library & Scanning</span>
             </div>
+            <div class="settings-group">
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Scan Library on Startup</div>
+                  <div class="settings-desc">Automatically scan your media folders for new files when you log in.</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="form.library.scan_on_startup" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
 
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Manual Library Scan</div>
-                <div class="settings-desc">Run a full disk scan now to pick up new files, refresh metadata, and apply any library changes.</div>
-                <div v-if="store.scanRunning" style="font-size:0.8rem;color:var(--accent);font-weight:700;margin-top:4px">
-                  Scan in progress…
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Auto-Scan Interval</div>
+                  <div class="settings-desc">Automatically scan the library on a schedule while the server is running. New episodes are announced with a toast.</div>
                 </div>
+                <select v-model.number="form.library.scan_interval_hours" class="form-input" style="width:160px">
+                  <option :value="0">Off</option>
+                  <option :value="1">Every hour</option>
+                  <option :value="6">Every 6 hours</option>
+                  <option :value="12">Every 12 hours</option>
+                  <option :value="24">Every 24 hours</option>
+                </select>
               </div>
-              <button class="btn btn-primary btn-sm" @click="manualScan" :disabled="store.scanRunning" id="btn-settings-scan">
-                <i :class="store.scanRunning ? 'ph ph-circle-notch' : 'ph ph-arrows-clockwise'" :style="store.scanRunning ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
-                {{ store.scanRunning ? 'Scanning…' : 'Scan Library Now' }}
-              </button>
-            </div>
 
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Skip Patterns</div>
-                <div class="settings-desc">Comma-separated keywords — files or folders whose name contains any of these are ignored during scans (e.g. samples, trailers, extras).</div>
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Manual Library Scan</div>
+                  <div class="settings-desc">Run a full disk scan now to pick up new files, refresh metadata, and apply any library changes.</div>
+                  <div v-if="store.scanRunning" style="font-size:0.8rem;color:var(--accent);font-weight:700;margin-top:4px">
+                    Scan in progress…
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-sm" @click="manualScan" :disabled="store.scanRunning" id="btn-settings-scan">
+                  <i :class="store.scanRunning ? 'ph ph-circle-notch' : 'ph ph-arrows-clockwise'" :style="store.scanRunning ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+                  {{ store.scanRunning ? 'Scanning…' : 'Scan Library Now' }}
+                </button>
               </div>
-              <input type="text" v-model="form.library.skip_patterns" class="form-input" style="width:280px" placeholder="sample,trailer,extras" />
-            </div>
 
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Detect Anime in Series</div>
-                <div class="settings-desc">Scans your Series library against TMDb and moves Japanese animation shows (Animation genre + Japanese origin) to the Anime page — including every episode. Safe to re-run.</div>
-                <div v-if="animeDetect.running" style="font-size:0.8rem;color:var(--accent);font-weight:700;margin-top:4px">
-                  Scanning {{ animeDetect.processed }}/{{ animeDetect.total }} shows…
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Skip Patterns</div>
+                  <div class="settings-desc">Comma-separated keywords — files or folders whose name contains any of these are ignored during scans (e.g. samples, trailers, extras).</div>
                 </div>
-                <div v-else-if="animeDetect.done && !animeDetect.error" style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
-                  Last run: {{ animeDetect.reclassified }} show(s) moved to Anime.
-                </div>
-                <div v-else-if="animeDetect.error" style="font-size:0.8rem;color:#ef4444;margin-top:4px">
-                  Error: {{ animeDetect.error }}
-                </div>
+                <input type="text" v-model="form.library.skip_patterns" class="form-input" style="width:280px" placeholder="sample,trailer,extras" />
               </div>
-              <button class="btn btn-primary btn-sm" @click="startAnimeDetect" :disabled="animeDetect.running" id="btn-detect-anime">
-                <i :class="animeDetect.running ? 'ph ph-circle-notch' : 'ph ph-magic-wand'" :style="animeDetect.running ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
-                {{ animeDetect.running ? 'Detecting…' : 'Detect Anime' }}
-              </button>
-            </div>
-          </div>
-        </div>
-                <!-- ══════ Metadata Providers ══════ -->
-        <div class="settings-section" id="settings-metadata-section">
-          <div class="settings-section-title">
-            <i class="ph ph-database" style="color:var(--accent)"></i>
-            <span>Metadata Providers & API Keys</span>
-          </div>
-          <div class="settings-group">
-            <div class="settings-row" style="flex-direction:column;align-items:flex-start">
-              <div class="settings-label-container">
-                <div class="settings-label">TMDb API Key (Main Metadata Provider)</div>
-                <div class="settings-desc">Used for fetching movie/series posters, backdrops, ratings, overviews, and cast info.</div>
-              </div>
-              <div style="display:flex;gap:8px;width:100%;margin-top:8px">
-                <input type="password" v-model="form.tmdb_api_key" class="form-input" placeholder="Enter TMDb API key..." style="flex:1" />
-                <button class="btn btn-secondary" @click="testApi('tmdb', form.tmdb_api_key)" :disabled="testingApi === 'tmdb'">
-                  {{ testingApi === 'tmdb' ? 'Testing...' : 'Test API' }}
+
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Detect Anime in Series</div>
+                  <div class="settings-desc">Scans your Series library against TMDb and moves Japanese animation shows (Animation genre + Japanese origin) to the Anime page — including every episode. Safe to re-run.</div>
+                  <div v-if="animeDetect.running" style="font-size:0.8rem;color:var(--accent);font-weight:700;margin-top:4px">
+                    Scanning {{ animeDetect.processed }}/{{ animeDetect.total }} shows…
+                  </div>
+                  <div v-else-if="animeDetect.done && !animeDetect.error" style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
+                    Last run: {{ animeDetect.reclassified }} show(s) moved to Anime.
+                  </div>
+                  <div v-else-if="animeDetect.error" style="font-size:0.8rem;color:#ef4444;margin-top:4px">
+                    Error: {{ animeDetect.error }}
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-sm" @click="startAnimeDetect" :disabled="animeDetect.running" id="btn-detect-anime">
+                  <i :class="animeDetect.running ? 'ph ph-circle-notch' : 'ph ph-magic-wand'" :style="animeDetect.running ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+                  {{ animeDetect.running ? 'Detecting…' : 'Detect Anime' }}
                 </button>
               </div>
             </div>
+          </div>
 
-            <div class="settings-row">
-              <div class="settings-label-container">
-                <div class="settings-label">Enable Jikan API (Anime Metadata Fallback)</div>
-                <div class="settings-desc">Use MyAnimeList/Jikan API for fallback anime metadata matching.</div>
+          <!-- ══════ Metadata Providers ══════ -->
+          <div class="settings-section" id="settings-metadata-section">
+            <div class="settings-section-title">
+              <i class="ph ph-database" style="color:var(--accent)"></i>
+              <span>Metadata Providers & API Keys</span>
+            </div>
+            <div class="settings-group">
+              <div class="settings-row" style="flex-direction:column;align-items:flex-start">
+                <div class="settings-label-container">
+                  <div class="settings-label">TMDb API Key (Main Metadata Provider)</div>
+                  <div class="settings-desc">Used for fetching movie/series posters, backdrops, ratings, overviews, and cast info.</div>
+                </div>
+                <div style="display:flex;gap:8px;width:100%;margin-top:8px">
+                  <input type="password" v-model="form.tmdb_api_key" class="form-input" placeholder="Enter TMDb API key..." style="flex:1" />
+                  <button class="btn btn-secondary" @click="testApi('tmdb', form.tmdb_api_key)" :disabled="testingApi === 'tmdb'">
+                    {{ testingApi === 'tmdb' ? 'Testing...' : 'Test API' }}
+                  </button>
+                </div>
               </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.metadata_sources.enable_jikan" />
-                <span class="toggle-slider"></span>
-              </label>
+
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Enable Jikan API (Anime Metadata Fallback)</div>
+                  <div class="settings-desc">Use MyAnimeList/Jikan API for fallback anime metadata matching.</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="form.metadata_sources.enable_jikan" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
+              <!-- Metadata Provider Info Note -->
+              <div style="padding:10px 14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:10px;font-size:0.78rem;color:var(--text-secondary);display:flex;align-items:flex-start;gap:8px;line-height:1.45;margin-top:2px">
+                <i class="ph ph-info" style="color:var(--accent);font-size:1rem;margin-top:1px;flex-shrink:0"></i>
+                <div>
+                  <span>TMDb provides official artwork, metadata, and cast info. AniSkip automatically syncs anime opening/ending timestamps.</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -4610,187 +4985,98 @@ const SettingsPage = {
           </div>
         </div>
 
-              <!-- ══════ Updates Card ══════ -->
-              <div class="settings-section" id="settings-updates-section">
-                <div class="settings-section-title">
-                  <i class="ph ph-arrow-circle-up" style="color:var(--accent)"></i>
-                  <span>Updates & Version</span>
+        <!-- ══════ Side-by-Side: Web Browser & System Config and Server Config ══════ -->
+        <div class="settings-grid-row">
+          <!-- Web Browser & System Config Card -->
+          <div class="settings-section" id="settings-browser-section">
+            <div class="settings-section-title">
+              <i class="ph ph-globe-hemisphere-west" style="color:var(--accent)"></i>
+              <span>Web Browser & System Configuration</span>
+            </div>
+            <div class="settings-group">
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Default Web Browser</div>
+                  <div class="settings-desc">Choose preferred browser for launching media streaming. Microsoft Edge is recommended for native 4K HEVC and Dolby AC-3 decoding.</div>
                 </div>
-                <div class="settings-group" style="display:flex;flex-direction:column;gap:12px">
-                  <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:4px 0 8px">
-                    <div class="settings-label-container">
-                      <div class="settings-label">Current version</div>
-                      <div class="settings-desc">CapsStream v{{ sysInfo?.version || '…' }}</div>
-                    </div>
-                    <div class="settings-label-container" v-if="updateState.last_checked">
-                      <div class="settings-label">Last checked</div>
-                      <div class="settings-desc">{{ updateState.last_checked }}</div>
-                    </div>
-                    <div class="settings-label-container" v-if="updateState.latest && updateState.status !== 'up_to_date'">
-                      <div class="settings-label">Latest available</div>
-                      <div class="settings-desc" style="color:var(--accent);font-weight:700">v{{ updateState.latest }}</div>
-                    </div>
-                  </div>
-
-                  <div class="settings-row">
-                    <div class="settings-label-container">
-                      <div class="settings-label">Automatic Update Checks</div>
-                      <div class="settings-desc">Periodically check for new CapsStream releases and show a banner when one is available.</div>
-                    </div>
-                    <label class="toggle-switch">
-                      <input type="checkbox" v-model="form.updates.auto_check" />
-                      <span class="toggle-slider"></span>
-                    </label>
-                  </div>
-
-                  <div
-                    class="update-status-line"
-                    :style="{ color: updateState.status === 'available' ? 'var(--accent)' : updateState.status === 'error' ? '#ef4444' : 'var(--text-secondary)' }"
-                  >
-                    {{ updateState.message || 'Check for updates to see if a new version is available.' }}
-                  </div>
-
-                  <!-- Live update progress -->
-                  <div v-if="updateInstalling && updateProgress && updateProgress.stage === 'downloading' && updateProgress.total" style="margin-top:10px">
-                    <div style="height:6px;border-radius:3px;background:var(--bg-secondary);overflow:hidden">
-                      <div style="height:100%;background:var(--accent);transition:width .4s" :style="{ width: Math.round(100 * (updateProgress.bytes_done || 0) / (updateProgress.total || 1)) + '%' }"></div>
-                    </div>
-                    <div style="font-size:.8rem;color:var(--text-secondary);margin-top:4px">
-                      Downloading… {{ Math.round((updateProgress.bytes_done || 0) / 1048576 * 10) / 10 }} / {{ Math.round((updateProgress.total || 0) / 1048576 * 10) / 10 }} MB
-                    </div>
-                  </div>
-                  <div v-else-if="updateInstalling && updateProgress && ['verifying','extracting','validating','installing'].includes(updateProgress.stage)" style="font-size:.85rem;color:var(--text-secondary);margin-top:8px">
-                    <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:6px"></i>{{ updateProgress.message || (updateProgress.stage[0].toUpperCase() + updateProgress.stage.slice(1)) + '…' }}
-                  </div>
-
-                  <!-- One-click restart for backend updates -->
-                  <div v-if="restartPending" style="margin-top:10px;padding:10px 14px;border-radius:12px;background:rgba(253,203,110,.12);border:1px solid rgba(253,203,110,.35);color:#fdcb6e;font-size:.87rem">
-                    <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:6px"></i>Restarting — the server will come back online in a few seconds…
-                  </div>
-
-                  <div
-                    v-if="updateState.changelog"
-                    class="changelog-box"
-                    v-html="changelogHtml"
-                  ></div>
-
-                  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
-                    <button class="btn btn-secondary" @click="checkUpdates" :disabled="updateChecking">
-                      <i :class="updateChecking ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="updateChecking ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
-                      {{ updateChecking ? 'Checking...' : 'Check for Updates' }}
-                    </button>
-                    <button
-                      v-if="updateState.status === 'available'"
-                      class="btn btn-primary"
-                      @click="installUpdate"
-                      :disabled="updateInstalling"
-                      id="btn-install-update"
-                    >
-                      <i :class="updateInstalling ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="updateInstalling ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
-                      {{ updateInstalling ? 'Installing...' : 'Install Update' }}
-                    </button>
-                    <button
-                      v-if="updateState.status === 'up_to_date' && !restartPending && !updateInstalling && /restart CapsStream/i.test(updateState.message)"
-                      class="btn btn-primary"
-                      @click="restartAfterUpdate"
-                      id="btn-restart-update"
-                    >
-                      <i class="ph ph-arrow-clockwise" style="margin-right:6px"></i>
-                      Restart &amp; Finish Update
-                    </button>
-                  </div>
-                </div>
+                <select v-model="form.browser" class="form-input" style="width:280px" id="setting-browser-select">
+                  <option value="edge">Microsoft Edge (Recommended)</option>
+                  <option value="chrome">Google Chrome</option>
+                  <option value="system">System Default Browser</option>
+                </select>
               </div>
 
-              <!-- Server Configuration Card -->
-              <div class="settings-section" id="settings-server-section">
-                <div class="settings-section-title">
-                  <i class="ph ph-hard-drives" style="color:var(--accent)"></i>
-                  <span>Server Configuration</span>
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Hide System Files & Folders</div>
+                  <div class="settings-desc">When enabled, hides all files and folders in the root project except media folders and start.bat.</div>
                 </div>
-                <div class="settings-group">
-                  <div class="settings-row">
-                    <div class="settings-label-container">
-                      <div class="settings-label">Host Address</div>
-                      <div class="settings-desc">Network interface the server binds to. Use 127.0.0.1 for this PC only, or 0.0.0.0 to allow other devices on your network.</div>
-                    </div>
-                    <input type="text" v-model="form.host" class="form-input" style="width:180px" placeholder="127.0.0.1" />
-                  </div>
-
-                  <div class="settings-row">
-                    <div class="settings-label-container">
-                      <div class="settings-label">Port</div>
-                      <div class="settings-desc">TCP port the server listens on (1–65535).</div>
-                    </div>
-                    <input type="number" v-model.number="form.port" min="1" max="65535" class="form-input" style="width:120px" />
-                  </div>
-
-                  <div class="settings-row">
-                    <div class="settings-label-container">
-                      <div class="settings-label">Open Browser on Launch</div>
-                      <div class="settings-desc">Automatically open CapsStream in your browser when start.bat runs.</div>
-                    </div>
-                    <label class="toggle-switch">
-                      <input type="checkbox" v-model="form.launch_browser_on_start" />
-                      <span class="toggle-slider"></span>
-                    </label>
-                  </div>
-
-                  <div class="settings-desc" style="color:#f59e0b">
-                    <i class="ph ph-warning" style="margin-right:4px"></i>
-                    Host and Port changes take effect after restarting CapsStream (close the server and run start.bat again).
-                  </div>
-
-                  <div style="margin-top:4px">
-                    <button class="btn btn-secondary btn-sm" @click="$router.push('/logs')" title="View live server log">
-                      <i class="ph ph-scroll" style="margin-right:4px"></i> View Live Logs
-                    </button>
-                  </div>
-                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="form.hide_system_files" />
+                  <span class="toggle-slider"></span>
+                </label>
               </div>
 
-              <!-- Web Browser & System Config Card -->
-              <div class="settings-section" id="settings-browser-section">
-                <div class="settings-section-title">
-                  <i class="ph ph-globe-hemisphere-west" style="color:var(--accent)"></i>
-                  <span>Web Browser & System Configuration</span>
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Hide Unmounted Media Items</div>
+                  <div class="settings-desc">When enabled, automatically hides media files located on disconnected external drives or unmounted storage paths.</div>
                 </div>
-                <div class="settings-group">
-                  <div class="settings-row">
-                    <div class="settings-label-container">
-                      <div class="settings-label">Default Web Browser</div>
-                      <div class="settings-desc">Choose preferred browser for launching media streaming. Microsoft Edge is recommended for native 4K HEVC and Dolby AC-3 decoding.</div>
-                    </div>
-                    <select v-model="form.browser" class="form-input" style="width:280px" id="setting-browser-select">
-                      <option value="edge">Microsoft Edge (Recommended)</option>
-                      <option value="chrome">Google Chrome</option>
-                      <option value="system">System Default Browser</option>
-                    </select>
-                  </div>
-
-                  <div class="settings-row">
-                    <div class="settings-label-container">
-                      <div class="settings-label">Hide System Files & Folders</div>
-                      <div class="settings-desc">When enabled, hides all files and folders in the root project except media folders and start.bat.</div>
-                    </div>
-                    <label class="toggle-switch">
-                      <input type="checkbox" v-model="form.hide_system_files" />
-                      <span class="toggle-slider"></span>
-                    </label>
-                  </div>
-
-                  <div class="settings-row">
-                    <div class="settings-label-container">
-                      <div class="settings-label">Hide Unmounted Media Items</div>
-                      <div class="settings-desc">When enabled, automatically hides media files located on disconnected external drives or unmounted storage paths.</div>
-                    </div>
-                    <label class="toggle-switch">
-                      <input type="checkbox" v-model="form.hide_unmounted_items" id="setting-hide-unmounted-toggle" />
-                      <span class="toggle-slider"></span>
-                    </label>
-                  </div>
-                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="form.hide_unmounted_items" id="setting-hide-unmounted-toggle" />
+                  <span class="toggle-slider"></span>
+                </label>
               </div>
+            </div>
+          </div>
+
+          <!-- Server Configuration Card -->
+          <div class="settings-section" id="settings-server-section">
+            <div class="settings-section-title">
+              <i class="ph ph-hard-drives" style="color:var(--accent)"></i>
+              <span>Server Configuration</span>
+            </div>
+            <div class="settings-group">
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Host Address</div>
+                  <div class="settings-desc">Network interface the server binds to. Use 127.0.0.1 for this PC only, or 0.0.0.0 to allow other devices on your network.</div>
+                </div>
+                <input type="text" v-model="form.host" class="form-input" style="width:180px" placeholder="127.0.0.1" />
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Port</div>
+                  <div class="settings-desc">TCP port the server listens on (1–65535).</div>
+                </div>
+                <input type="number" v-model.number="form.port" min="1" max="65535" class="form-input" style="width:120px" />
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Open Browser on Launch</div>
+                  <div class="settings-desc">Automatically open CapsStream in your browser when start.bat runs.</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="form.launch_browser_on_start" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
+              <div class="settings-desc" style="color:#f59e0b">
+                <i class="ph ph-warning" style="margin-right:4px"></i>
+                Host and Port changes take effect after restarting CapsStream (close the server and run start.bat again).
+              </div>
+
+              <div style="margin-top:4px">
+                <button class="btn btn-secondary btn-sm" @click="$router.push('/logs')" title="View live server log">
+                  <i class="ph ph-scroll" style="margin-right:4px"></i> View Live Logs
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
 
                 <!-- ══════ Outgoing Network Activity ══════ -->
         <div class="settings-section" id="settings-network-section">
@@ -4944,14 +5230,15 @@ const SettingsPage = {
             </div>
           </div>
         </div>
-                <!-- ══════ Cache & Storage Management ══════ -->
-        <div class="settings-section" id="settings-cache-section">
+                <!-- ══════ Storage, Cache & System Backup (Full Width) ══════ -->
+        <div class="settings-section" id="settings-backup-section">
           <div class="settings-section-title">
-            <i class="ph ph-hard-drive" style="color:var(--accent)"></i>
-            <span>Cache & Storage Management</span>
+            <i class="ph ph-archive-box" style="color:var(--accent)"></i>
+            <span>Storage, Cache & System Backup</span>
           </div>
           <div class="settings-group">
-            <div class="settings-row">
+            <!-- Cache row -->
+            <div class="settings-row" id="settings-cache-row">
               <div class="settings-label-container">
                 <div class="settings-label">Cached Metadata & Images</div>
                 <div class="settings-desc">Cached posters, backdrops, and JSON metadata stored on disk.</div>
@@ -4964,33 +5251,27 @@ const SettingsPage = {
                 {{ clearingCache ? 'Clearing...' : 'Clear Cache' }}
               </button>
             </div>
-          </div>
-        </div>
-                <!-- ══════ Backup & Restore ══════ -->
-        <div class="settings-section" id="settings-backup-section">
-          <div class="settings-section-title">
-            <i class="ph ph-archive-box" style="color:var(--accent)"></i>
-            <span>Backup & Restore</span>
-          </div>
-          <div class="settings-group">
-            <div class="settings-row">
+
+            <!-- Download Backup -->
+            <div class="settings-row" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:6px;padding-top:12px">
               <div class="settings-label-container">
                 <div class="settings-label">Download Backup</div>
-                <div class="settings-desc">Exports your settings and library database (watch history, skip markers, profiles, collections, achievements) as a zip file.</div>
+                <div class="settings-desc">Exports your settings and library database (watch history, skip markers, profiles, achievements) as a zip file.</div>
                 <label style="display:flex;align-items:center;gap:7px;margin:6px 0 0;font-size:0.75rem;color:var(--text-muted);cursor:pointer">
                   <input type="checkbox" v-model="backupIncludeMetadata" />
                   Include metadata cache (posters & artwork — can be large)
                 </label>
               </div>
               <a class="btn btn-primary btn-sm" :href="'/api/system/backup?include_metadata=' + (backupIncludeMetadata ? 1 : 0)" id="btn-download-backup">
-                <i class="ph ph-download-simple" style="margin-right:6px"></i> Download Backup
+                <i class="ph ph-download-simple" style="margin-right:6px"></i> Download
               </a>
             </div>
 
-            <div class="settings-row">
+            <!-- Restore Backup -->
+            <div class="settings-row" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:6px;padding-top:12px">
               <div class="settings-label-container">
                 <div class="settings-label">Restore From Backup</div>
-                <div class="settings-desc">Upload a backup zip to restore settings and/or the library database. The current config is kept in <code>data/pre_restore/</code>. Database restores apply on the next server start.</div>
+                <div class="settings-desc">Upload a backup zip. The current config is kept in <code>data/pre_restore/</code>. Database restores apply on next server start.</div>
                 <div v-if="restoreResult" style="font-size:0.8rem;margin-top:4px" :style="{ color: restoreResult.ok ? '#10b981' : '#ef4444' }">
                   {{ restoreResult.message }}
                 </div>
@@ -5000,97 +5281,54 @@ const SettingsPage = {
                 <input type="file" accept=".zip" style="display:none" @change="restoreFromBackup" />
               </label>
             </div>
-          </div>
-        </div>
-                <!-- ══════ Parental Controls ══════ -->
-        <div class="settings-section" id="settings-parental-section">
-          <div class="settings-section-title">
-            <i class="ph ph-shield-check" style="color:#fdcb6e"></i>
-            <span>Parental Controls & Kids Screen Time</span>
-          </div>
-          <div class="settings-group">
-            <div v-if="!kidsProfiles.length" style="padding:1.25rem;color:var(--text-muted);font-size:0.9rem">
-              No Kids profiles created yet. Create or edit a profile in <router-link to="/profiles?manage=true" style="color:var(--accent);font-weight:700">Manage Profiles</router-link> to set daily cartoon time limits and bedtime curfews.
-            </div>
-            <div v-else>
-              <div v-for="kp in kidsProfiles" :key="kp.id" class="settings-row" style="align-items:flex-start">
-                <div class="settings-label-container">
-                  <div class="settings-label" style="display:flex;align-items:center;gap:8px">
-                    <span>{{ kp.avatar }} {{ kp.name }}</span>
-                    <span style="font-size:0.75rem;background:rgba(253,203,110,0.15);color:#fdcb6e;padding:2px 8px;border-radius:12px;font-weight:700">Kids Profile</span>
-                  </div>
-                  <div class="settings-desc">Set daily watch limits and evening bedtime curfew for {{ kp.name }}. Changes save automatically when you select a value.</div>
-                </div>
-                <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
-                  <div>
-                    <label style="display:block;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;font-weight:600">Daily Limit</label>
-                    <select v-model.number="kp.daily_limit_minutes" class="form-input" style="min-width:140px;font-size:0.85rem">
-                      <option :value="0">No Limit</option>
-                      <option :value="30">30 Mins / day</option>
-                      <option :value="45">45 Mins / day</option>
-                      <option :value="60">1 Hour / day</option>
-                      <option :value="90">1.5 Hours / day</option>
-                      <option :value="120">2 Hours / day</option>
-                      <option :value="180">3 Hours / day</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style="display:block;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;font-weight:600">Bedtime Curfew</label>
-                    <select v-model="kp.bedtime_curfew" class="form-input" style="min-width:140px;font-size:0.85rem">
-                      <option value="">Off (None)</option>
-                      <option value="19:00">7:00 PM</option>
-                      <option value="19:30">7:30 PM</option>
-                      <option value="20:00">8:00 PM</option>
-                      <option value="20:30">8:30 PM</option>
-                      <option value="21:00">9:00 PM</option>
-                      <option value="21:30">9:30 PM</option>
-                      <option value="22:00">10:00 PM</option>
-                    </select>
-                  </div>
-                  <div style="display:flex;align-items:flex-end">
-                    <button
-                      class="btn btn-primary"
-                      style="font-size:0.82rem;padding:7px 14px;height:auto"
-                      @click="saveKidsProfileLimits(kp)"
-                      :id="'btn-save-kids-' + kp.id"
-                    >
-                      <i class="ph ph-floppy-disk" style="margin-right:5px"></i> Save
-                    </button>
-                  </div>
-                </div>
-              </div>
 
-              <!-- Parental override rules (allow/block titles) -->
-              <div v-if="kidsOverrides.length" style="border-top:1px solid var(--border);margin-top:18px;padding-top:16px">
-                <div class="settings-label" style="margin-bottom:4px">Title Overrides for Kids Mode</div>
-                <div class="settings-desc" style="margin-bottom:10px">Rules set via right-click → "Kids Mode: Always Allow / Block Title". These win over automatic filtering.</div>
-                <div v-for="ov in kidsOverrides" :key="ov.tmdb_id"
-                     style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;font-size:0.87rem">
-                  <i :class="ov.action === 'allow' ? 'ph ph-shield-check' : 'ph ph-shield-warning'"
-                     :style="{ color: ov.action === 'allow' ? '#2ecc71' : '#e50914', fontSize: '1.1rem' }"></i>
-                  <span style="flex:1;font-weight:600">{{ ov.title || ('TMDb #' + ov.tmdb_id) }}</span>
-                  <span :style="{ color: ov.action === 'allow' ? '#2ecc71' : '#e50914', fontWeight: 700, fontSize: '0.78rem' }">
-                    {{ ov.action === 'allow' ? 'ALWAYS ALLOWED' : 'BLOCKED' }}
+            <!-- Automated Backups Stored Indicator -->
+            <div class="settings-row" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:6px;padding-top:12px">
+              <div class="settings-label-container">
+                <div class="settings-label" style="display:flex;align-items:center;gap:8px">
+                  <span>Automated Backups</span>
+                  <span v-if="autoBackupInfo?.has_autobackup" class="server-status-pill online" style="font-size:0.7rem;padding:2px 8px">
+                    <span class="status-dot"></span> Stored ({{ autoBackupInfo.count }})
                   </span>
-                  <button class="btn btn-secondary" style="font-size:0.75rem;padding:4px 10px;height:auto"
-                          @click="removeKidsOverride(ov)" :id="'btn-del-override-' + ov.tmdb_id">
-                    <i class="ph ph-x"></i> Remove
-                  </button>
+                  <span v-else-if="autoBackupLoading" style="font-size:0.75rem;color:var(--text-muted)">
+                    Checking…
+                  </span>
+                  <span v-else class="server-status-pill" style="font-size:0.7rem;padding:2px 8px;background:rgba(255,255,255,0.08);color:var(--text-muted)">
+                    None Stored
+                  </span>
                 </div>
+                <div v-if="autoBackupInfo?.latest" class="settings-desc" style="margin-top:4px">
+                  Latest: <strong style="color:var(--text-primary)">{{ autoBackupInfo.latest.filename }}</strong> ({{ autoBackupInfo.latest.size_formatted }}) &bull; {{ autoBackupInfo.latest.created_at }}
+                </div>
+                <div v-else class="settings-desc">
+                  Periodic backups of your database and settings are saved in <code>data/backups/</code>.
+                </div>
+              </div>
+              <div v-if="autoBackupInfo?.latest" style="display:flex;align-items:flex-end">
+                <a
+                  class="btn btn-secondary btn-sm"
+                  :href="'/api/system/backup/download-auto?filename=' + autoBackupInfo.latest.filename"
+                  id="btn-download-auto-backup"
+                  title="Download latest automated backup"
+                  style="font-size:0.78rem"
+                >
+                  <i class="ph ph-download-simple" style="margin-right:4px"></i> Auto-Backup ({{ autoBackupInfo.latest.size_formatted }})
+                </a>
               </div>
             </div>
           </div>
         </div>
-                <!-- ══════ Fresh Start ══════ -->
-        <div class="settings-section" id="settings-reset-section">
+                <!-- ══════ System Maintenance & Server Control ══════ -->
+        <div class="settings-section" id="settings-danger-section">
           <div class="settings-section-title">
-            <i class="ph ph-warning-circle" style="color:var(--accent)"></i>
-            <span style="color:var(--accent)">Fresh Start & System Reset</span>
+            <i class="ph ph-warning-octagon" style="color:#ef4444"></i>
+            <span style="color:#ef4444">System Maintenance & Server Control</span>
           </div>
           <div class="settings-group">
-            <div class="settings-row">
+            <!-- Fresh Start & Reset -->
+            <div class="settings-row" id="settings-reset-section">
               <div class="settings-label-container">
-                <div class="settings-label" style="color:var(--accent)">Full Application Reset</div>
+                <div class="settings-label" style="color:var(--text-primary)">Fresh Start & System Reset</div>
                 <div class="settings-desc">Unlinks external drive locations (e.g. E:/MOVIES, D:/Entertainment), resets media paths to local defaults, clears metadata cache, and wipes database.</div>
               </div>
               <button class="btn btn-primary danger" @click="showResetModal = true" :disabled="resetting" id="btn-fresh-start">
@@ -5098,19 +5336,12 @@ const SettingsPage = {
                 Fresh Start Reset
               </button>
             </div>
-          </div>
-        </div>
-                <!-- 8. Server Control & Shutdown -->
-        <div class="settings-section" id="settings-shutdown-section">
-          <div class="settings-section-title">
-            <i class="ph ph-power" style="color:#ef4444"></i>
-            <span style="color:#ef4444">Server Control & Shutdown</span>
-          </div>
-          <div class="settings-group">
-            <div class="settings-row">
+
+            <!-- Server Control & Shutdown -->
+            <div class="settings-row" id="settings-shutdown-section" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:12px;padding-top:16px">
               <div class="settings-label-container">
                 <div class="settings-label" style="color:var(--text-primary);display:flex;align-items:center;gap:8px">
-                  <span>Shutdown CapsStream Server</span>
+                  <span>Server Control & Shutdown</span>
                   <span class="server-status-pill online" style="font-size:0.7rem;padding:2px 8px">
                     <span class="status-dot"></span> Active
                   </span>
@@ -5609,6 +5840,13 @@ const SettingsPage = {
       }
     }
 
+    function openWhatsNew() {
+      if (typeof window.openWhatsNewModal === "function") {
+        window.openWhatsNewModal(sysInfo.value?.version || "");
+      }
+    }
+
+
     const updateProgress = ref(null);
     let progressTimer = null;
 
@@ -5695,6 +5933,7 @@ const SettingsPage = {
       loadAllProfiles();
       loadUnmatched();
       loadNetworkRequests();
+      loadAutoBackupStatus();
       if (!store.profile?.is_kids) loadKidsOverrides();
       window.addEventListener("beforeunload", handleBeforeUnload);
       // Auto-run the update check when arriving from the update banner
@@ -5810,6 +6049,20 @@ const SettingsPage = {
     // ─── Backup & Restore ──────────────────────────────────────
     const backupIncludeMetadata = ref(false);
     const restoreResult = ref(null);
+    const autoBackupInfo = ref(null);
+    const autoBackupLoading = ref(false);
+
+    async function loadAutoBackupStatus() {
+      autoBackupLoading.value = true;
+      try {
+        const res = await API.get("/api/system/backup/status");
+        if (res) autoBackupInfo.value = res;
+      } catch (e) {
+        autoBackupInfo.value = { has_autobackup: false, count: 0, latest: null };
+      } finally {
+        autoBackupLoading.value = false;
+      }
+    }
 
     async function restoreFromBackup(event) {
       const file = event.target.files && event.target.files[0];
@@ -6103,6 +6356,11 @@ const SettingsPage = {
       }, 350);
     }
 
+    function openShortcutsGuide() {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }));
+    }
+
+
     // ─── Server Shutdown & Power Management ─────────────────────
     const showShutdownModal = ref(false);
     const isShuttingDown = ref(false);
@@ -6225,6 +6483,7 @@ const SettingsPage = {
       currentTheme,
       selectTheme,
       replayTour,
+      openShortcutsGuide,
       kidsProfiles,
       kidsOverrides,
       loadKidsOverrides,
@@ -6245,6 +6504,7 @@ const SettingsPage = {
       restartAfterUpdate,
       changelogHtml,
       checkUpdates,
+      openWhatsNew,
       installUpdate,
       saveSettings,
       testApi,
@@ -6258,6 +6518,9 @@ const SettingsPage = {
       backupIncludeMetadata,
       restoreResult,
       restoreFromBackup,
+      autoBackupInfo,
+      autoBackupLoading,
+      loadAutoBackupStatus,
       cacheInfo,
       clearingCache,
       resetting,
@@ -14042,6 +14305,116 @@ const App = {
           <span class="back-to-top-label">Top</span>
         </button>
       </transition>
+
+      <!-- Global What's New Post-Update Modal -->
+      <transition name="fade">
+        <div
+          v-if="store.whatsNewModalOpen"
+          class="whats-new-backdrop"
+          @click.self="closeWhatsNewModal"
+        >
+          <div class="whats-new-card" @click.stop>
+            <div class="whats-new-glow"></div>
+
+            <!-- Header -->
+            <div class="whats-new-header">
+              <div class="whats-new-header-left">
+                <div class="whats-new-badges-row">
+                  <span class="whats-new-tag-pill highlight">
+                    <i class="ph-bold ph-sparkle"></i> What's New
+                  </span>
+                  <span class="whats-new-tag-pill version">
+                    v{{ store.whatsNewData?.version || store.sysInfo?.version || 'Latest' }}
+                  </span>
+                </div>
+                <h2 class="whats-new-title">
+                  {{ store.whatsNewData?.title || ('CapsStream v' + (store.whatsNewData?.version || store.sysInfo?.version || '')) }}
+                </h2>
+                <p class="whats-new-subtitle">
+                  Here's what changed in this update
+                </p>
+              </div>
+              <button
+                class="whats-new-close-btn"
+                @click="closeWhatsNewModal"
+                aria-label="Close"
+                title="Close"
+                id="btn-close-whats-new-x"
+              >
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+
+            <!-- Body -->
+            <div class="whats-new-body">
+              <div v-if="store.whatsNewLoading" style="padding:3rem 1rem;text-align:center">
+                <div class="loading-spinner" style="margin:0 auto 12px"></div>
+                <div style="font-size:0.85rem;color:var(--text-muted)">Loading release highlights...</div>
+              </div>
+
+              <template v-else>
+                <!-- Summary Quote Box -->
+                <div v-if="whatsNewSections.summary" class="whats-new-summary-box" v-html="whatsNewSections.summary"></div>
+
+                <!-- Categorized Sections -->
+                <template v-if="whatsNewSections.categories && whatsNewSections.categories.length > 0">
+                  <div
+                    v-for="cat in whatsNewSections.categories"
+                    :key="cat.type"
+                    class="whats-new-category-card"
+                    :class="cat.type"
+                  >
+                    <div class="whats-new-category-header">
+                      <i :class="cat.icon"></i>
+                      <span>{{ cat.title }}</span>
+                    </div>
+                    <ul class="whats-new-item-list">
+                      <li
+                        v-for="(item, idx) in cat.items"
+                        :key="idx"
+                        class="whats-new-item"
+                      >
+                        <span class="whats-new-bullet-dot"></span>
+                        <span v-html="item"></span>
+                      </li>
+                    </ul>
+                  </div>
+                </template>
+
+                <!-- Fallback if no categorized items -->
+                <div v-else class="whats-new-fallback-box">
+                  <i class="ph ph-check-circle" style="font-size:2.4rem;color:#38bdf8;margin-bottom:10px;display:block"></i>
+                  <div style="font-size:1.05rem;font-weight:700;color:#fff;margin-bottom:6px">You're on the latest version!</div>
+                  <div style="font-size:0.85rem;line-height:1.5">This release brings performance enhancements, bug fixes, and stability improvements.</div>
+                </div>
+              </template>
+            </div>
+
+            <!-- Footer -->
+            <div class="whats-new-footer">
+              <a
+                :href="store.whatsNewData?.html_url || 'https://github.com/Unknownplanet40/CapsStream/releases'"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="whats-new-footer-link"
+                id="link-whats-new-github"
+              >
+                <i class="ph ph-github-logo"></i>
+                <span>View Full Changelog on GitHub</span>
+                <i class="ph ph-arrow-square-out" style="font-size:0.78rem"></i>
+              </a>
+
+              <button
+                class="btn-whats-new-primary"
+                @click="closeWhatsNewModal"
+                id="btn-whats-new-got-it"
+              >
+                Got it, Explore!
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
     </template>
   `,
   setup() {
@@ -14229,6 +14602,37 @@ const App = {
     const updateBannerDismissed = ref(false);
     const remoteBannerDismissed = ref(false);
 
+    const whatsNewSections = computed(() => {
+      const body = store.whatsNewData?.body || "";
+      return parseChangelogToSections(body);
+    });
+
+    function closeWhatsNewModal() {
+      store.whatsNewModalOpen = false;
+      const ver = store.sysInfo?.version || store.whatsNewData?.version;
+      if (ver) {
+        localStorage.setItem("cs_last_seen_version", ver);
+      }
+    }
+
+    async function checkPostUpdateWhatsNew() {
+      try {
+        const info = store.sysInfo || (await API.get("/api/system/info").catch(() => null));
+        if (info && info.version) {
+          store.sysInfo = info;
+          const currentVer = info.version;
+          const lastSeen = localStorage.getItem("cs_last_seen_version");
+          if (!lastSeen) {
+            // Initial first run — silently record current version so modal only pops on actual upgrades
+            localStorage.setItem("cs_last_seen_version", currentVer);
+          } else if (lastSeen !== currentVer) {
+            // Version changed after update — show What's New modal!
+            window.openWhatsNewModal(currentVer);
+          }
+        }
+      } catch (e) {}
+    }
+
     onMounted(() => {
       // One-click update restart completed — confirm it to the user
       try {
@@ -14241,6 +14645,7 @@ const App = {
           );
         }
       } catch (e) {}
+      checkPostUpdateWhatsNew();
     });
     let updateQuietChecked = false;
     async function checkUpdateQuiet() {
@@ -14264,7 +14669,10 @@ const App = {
     watch(
       () => store.profile,
       (p) => {
-        if (p) checkUpdateQuiet();
+        if (p) {
+          checkUpdateQuiet();
+          checkPostUpdateWhatsNew();
+        }
       }
     );
 
@@ -14618,6 +15026,10 @@ const App = {
 
     function handleGlobalKeyDown(e) {
       if (e.key === "Escape") {
+        if (store.whatsNewModalOpen) {
+          closeWhatsNewModal();
+          return;
+        }
         if (contextMenuState.show) closeGlobalContextMenu();
         if (collectionPickerState.show) collectionPickerState.show = false;
         if (globalTrailerState.show) globalTrailerState.show = false;
@@ -15092,6 +15504,8 @@ const App = {
       isPlayerRoute,
       onboardingPhaseText,
       skipOnboardingWaiting,
+      whatsNewSections,
+      closeWhatsNewModal,
     };
   },
 };

@@ -50,6 +50,25 @@ class TestUpdater(unittest.TestCase):
             self.assertIn(denied, updater.DENY)
             self.assertNotIn(denied, updater.ALLOWED_FILES)
 
+    def test_get_release_changelog_cached_state(self):
+        """Verify get_release_changelog reads from state cache without external network calls."""
+        updater.STATE_FILE = os.path.join(self.test_dir, "updater_state.json")
+        updater._write_state({
+            "changelogs": {
+                "2.25.0.0": {
+                    "version": "2.25.0.0",
+                    "title": "CapsStream v2.25.0.0",
+                    "body": "## Added\n- What's New modal",
+                    "published_at": "2026-09-03T00:00:00Z",
+                    "html_url": "https://github.com/test/repo"
+                }
+            }
+        })
+        info = updater.get_release_changelog("2.25.0.0")
+        self.assertEqual(info["version"], "2.25.0.0")
+        self.assertIn("What's New modal", info["body"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
