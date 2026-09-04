@@ -24,6 +24,15 @@ from .middleware import current_profile
 
 requests_bp = Blueprint("requests", __name__)
 
+
+@requests_bp.before_request
+def _check_requests_feature():
+    from backend.settings import load_config
+    cfg = load_config()
+    features = cfg.get("features", {})
+    if not features.get("requests", False):
+        return jsonify({"error": "Media requests feature is currently disabled"}), 403
+
 _LOCK = threading.Lock()
 REQUESTS_FILE = os.path.join(BASE_DIR, "data", "requests.json")
 

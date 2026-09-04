@@ -10,6 +10,11 @@ from flask import Flask
 
 if "backend.scanner" not in sys.modules:
     sys.modules["backend.scanner"] = MagicMock()
+if "app" not in sys.modules:
+    mock_app_module = MagicMock()
+    mock_app_module._get_api_health.return_value = {}
+    mock_app_module._get_github_profile.return_value = {}
+    sys.modules["app"] = mock_app_module
 
 from backend.routes.admin import admin_bp
 from backend.routes.middleware import has_active_profile_session
@@ -125,6 +130,38 @@ class TestRouteAdmin(unittest.TestCase):
         self.assertEqual(data.get("device_ip"), "192.168.1.55")
         self.assertEqual(data.get("all_device_ips"), ["192.168.1.55"])
         self.assertIn("192.168.1.55", data.get("device_url", ""))
+
+
+    @patch("backend.routes.admin.is_dev_mode", return_value=True)
+    def test_check_update_dev_mode(self, mock_dev):
+        """Verify GET /api/system/check-update is disabled in development mode."""
+        res = self.client.get("/api/system/check-update")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data.get("status"), "disabled")
+        self.assertTrue(data.get("disabled"))
+        self.assertIn("development mode", data.get("message", "").lower())
+
+    @patch("backend.routes.admin.require_admin")
+    @patch("backend.routes.admin.is_dev_mode", return_value=True)
+    def test_apply_update_dev_mode(self, mock_dev, mock_admin):
+        """Verify POST /api/system/apply-update returns 403 in development mode."""
+        res = self.client.post("/api/system/apply-update", json={"download_url": "https://example.com/test.zip"})
+        self.assertEqual(res.status_code, 403)
+        data = res.get_json()
+        self.assertFalse(data.get("success"))
+        self.assertIn("development mode", data.get("message", "").lower())
+
+    @patch("backend.routes.admin.is_dev_mode", return_value=False)
+    @patch("backend.updater.check_for_update")
+    def test_check_update_non_dev(self, mock_check, mock_dev):
+        """Verify GET /api/system/check-update runs updater when not in dev mode."""
+        mock_check.return_value = {"status": "available", "latest": "2.99.0.0"}
+        res = self.client.get("/api/system/check-update")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data.get("status"), "available")
+        self.assertEqual(data.get("latest"), "2.99.0.0")
 
 
 if __name__ == "__main__":

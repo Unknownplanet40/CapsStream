@@ -36,5 +36,8 @@
   },
   "profiles": {
     "max_profiles": 8
+  },
+  "features": {
+    "requests": false
   }
 }

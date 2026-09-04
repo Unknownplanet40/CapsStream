@@ -161,6 +161,13 @@ def api_restart_after_update():
 
 @admin_bp.route("/api/system/check-update", methods=["GET"])
 def api_check_update():
+    if is_dev_mode():
+        return jsonify({
+            "status": "disabled",
+            "message": "Updates are disabled in development mode.",
+            "version": get_app_version(),
+            "disabled": True
+        })
     from backend.updater import check_for_update
     try:
         result = check_for_update()
@@ -173,6 +180,8 @@ def api_check_update():
 @admin_bp.route("/api/system/apply-update", methods=["POST"])
 def api_apply_update():
     require_admin()
+    if is_dev_mode():
+        return jsonify({"success": False, "message": "Updates are disabled in development mode.", "restart_required": False, "ui_only": False}), 403
     from backend.updater import apply_update
     data = request.json or {}
     try:

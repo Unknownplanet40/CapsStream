@@ -124,6 +124,9 @@ window.API = API;
 
 const store = reactive({
   profile: null,
+  features: {
+    requests: false,
+  },
   toasts: [],
   achievementQueue: [],
   scanRunning: false,
@@ -159,9 +162,26 @@ const store = reactive({
   whatsNewModalOpen: false, // What's New post-update modal visibility
   whatsNewData: null,       // Loaded release notes/changelog payload
   whatsNewLoading: false,   // Loading state for changelog fetch
+  layoutMode: localStorage.getItem("capsstream_layout_mode") || "standard",
+  isMobileScreen: typeof window !== "undefined" ? window.innerWidth < 768 : false,
+  tvFocus: { rowIndex: 0, cardIndex: 0 },
 });
 
 window.store = store;
+
+if (typeof window !== "undefined") {
+  window.addEventListener("resize", () => {
+    store.isMobileScreen = window.innerWidth < 768;
+    if (store.layoutMode === "tv" && !store.isMobileScreen) {
+      document.body.classList.add("layout-tv-mode");
+    } else {
+      document.body.classList.remove("layout-tv-mode");
+    }
+  });
+  if (store.layoutMode === "tv" && !store.isMobileScreen) {
+    document.body.classList.add("layout-tv-mode");
+  }
+}
 
 function parseChangelogToSections(rawMd) {
   if (!rawMd) return { summary: "", categories: [] };
@@ -1835,14 +1855,853 @@ const MediaCard = {
   },
 };
 
+// ─── TV Content Row Component (TV Combination Shelf) ───────────
+
+const TvContentRow = {
+  props: ["row", "rowIndex"],
+  emits: ["card-click", "remove-continue"],
+  template: `
+    <div class="tv-content-row" :class="{ 'is-focused-shelf': isFocusedRow }" ref="rowRef" @mouseenter="onRowEnter" @mouseleave="onRowLeave">
+      <div class="tv-row-header">
+        <div class="tv-row-title-wrap">
+          <div class="tv-row-title">{{ row?.title }}</div>
+          <span v-if="row?.type === 'continue'" class="tv-row-badge">Continue</span>
+          <span v-else-if="row?.type === 'series'" class="tv-row-badge">Series</span>
+          <span v-else-if="row?.type === 'anime'" class="tv-row-badge">Anime</span>
+        </div>
+        <div class="tv-row-controls">
+          <button class="tv-row-arrow-btn" :disabled="!canScrollLeft" @click="scrollLeft" title="Scroll Left">
+            <i class="ph-bold ph-caret-left"></i>
+          </button>
+          <button class="tv-row-arrow-btn" :disabled="!canScrollRight" @click="scrollRight" title="Scroll Right">
+            <i class="ph-bold ph-caret-right"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="tv-cards-scroller" ref="scrollerRef" @scroll="onRowScroll">
+        <div
+          v-for="({ item, key }, vIdx) in displayedCards"
+          :key="key"
+          :ref="el => { if (el) cardRefs[vIdx] = el }"
+          class="tv-media-card"
+          :class="{
+            'is-selected': activeVirtualIdx === vIdx,
+            'is-poster': activeVirtualIdx !== vIdx,
+            'is-continue': row?.type === 'continue'
+          }"
+          @mouseenter="onCardHover(vIdx)"
+          @mouseleave="onCardLeave"
+          @click="onCardClick(item, vIdx)"
+        >
+          <!-- Poster View (Unselected: 2:3 Aspect Ratio) -->
+          <div v-if="activeVirtualIdx !== vIdx" class="tv-poster-wrap">
+            <img
+              v-if="getPosterUrl(item)"
+              :src="getPosterUrl(item)"
+              :alt="item.title"
+              class="tv-poster-img"
+              loading="lazy"
+              @error="markImgError(item)"
+            />
+            <div v-else class="tv-poster-fallback">
+              <i :class="item.type === 'series' || item.type === 'anime' ? 'ph-bold ph-television' : 'ph-bold ph-film-strip'"></i>
+              <span>{{ item.title }}</span>
+            </div>
+            <div class="tv-poster-overlay">
+              <span class="tv-poster-title">{{ item.title }}</span>
+            </div>
+            <div v-if="row?.type === 'continue' && item.position" class="tv-card-progress-bar">
+              <div class="tv-card-progress-fill" :style="{ width: calcProgressPercent(item) + '%' }"></div>
+            </div>
+          </div>
+
+          <!-- Landscape View (Selected: 16:9 Aspect Ratio) -->
+          <div v-else class="tv-landscape-wrap">
+            <img
+              v-if="getBackdropUrl(item)"
+              :src="getBackdropUrl(item)"
+              :alt="item.title"
+              class="tv-landscape-img"
+              @error="markBackdropError(item)"
+            />
+            <div v-else class="tv-poster-fallback">
+              <i :class="item.type === 'series' || item.type === 'anime' ? 'ph-bold ph-television' : 'ph-bold ph-film-strip'"></i>
+              <span style="font-size:1.1rem">{{ item.title }}</span>
+            </div>
+
+            <!-- Auto-Playing Trailer Embed / Video Stream (disabled in continue watching) -->
+            <template v-if="row?.type !== 'continue'">
+              <iframe
+                v-if="activeTrailerUrl"
+                :src="activeTrailerUrl"
+                class="tv-trailer-frame"
+                :class="{ 'is-playing': isTrailerPlaying }"
+                frameborder="0"
+                allow="autoplay; encrypted-media"
+                @load="isTrailerPlaying = true"
+              ></iframe>
+              <video
+                v-else-if="activePreviewVideoUrl"
+                :src="activePreviewVideoUrl"
+                class="tv-preview-video"
+                :class="{ 'is-playing': isTrailerPlaying }"
+                autoplay
+                loop
+                playsinline
+                :muted="isMuted"
+                @playing="isTrailerPlaying = true"
+                @canplay="isTrailerPlaying = true"
+              ></video>
+
+              <!-- Mute/Unmute Button for Trailer -->
+              <button
+                v-if="activeTrailerUrl || activePreviewVideoUrl"
+                class="tv-trailer-mute-btn"
+                @click.stop="toggleMute"
+                :title="isMuted ? 'Unmute Trailer' : 'Mute Trailer'"
+              >
+                <i :class="isMuted ? 'ph-bold ph-speaker-slash' : 'ph-bold ph-speaker-high'"></i>
+              </button>
+            </template>
+
+            <div class="tv-landscape-gradient"></div>
+
+            <div class="tv-landscape-content">
+              <div class="tv-brand-tag">
+                <span class="tv-n-badge">{{ (item.type || 'Media').toUpperCase() }}</span>
+                <span v-if="row?.type === 'continue' && (item.season != null || item.episode != null)" class="tv-n-badge" style="background:rgba(229,9,20,0.28);border-color:rgba(229,9,20,0.55);color:#ff6b6b">
+                  S{{ item.season || 1 }}:E{{ item.episode || 1 }}
+                </span>
+                <span v-if="row?.type === 'continue' && item.ep_title" style="font-size:0.75rem;font-weight:700;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px">
+                  {{ item.title }}
+                </span>
+              </div>
+              <div class="tv-landscape-title">{{ (row?.type === 'continue' && item.ep_title) ? item.ep_title : item.title }}</div>
+              <div class="tv-landscape-badges">
+                <span v-if="item.is_kids" class="tv-badge-pill season">Kids</span>
+                <span v-else-if="row?.type === 'continue' && (item.season != null || item.episode != null)" class="tv-badge-pill season">
+                  <i class="ph-fill ph-film-strip"></i> Episode {{ item.episode || 1 }}
+                </span>
+                <span v-else-if="item.type === 'series' || item.type === 'anime'" class="tv-badge-pill season">
+                  <i class="ph-fill ph-megaphone-simple"></i> {{ item.season_count ? item.season_count + ' Seasons' : 'Series' }}
+                </span>
+                <span v-if="item.rating >= 7.5" class="tv-badge-pill award">
+                  <i class="ph-fill ph-trophy"></i> Top Rated
+                </span>
+                <span class="tv-badge-pill quality">{{ formatQualityBadge(item) }}</span>
+              </div>
+            </div>
+
+            <div v-if="row?.type === 'continue' && item.position" class="tv-card-progress-bar">
+              <div class="tv-card-progress-fill" :style="{ width: calcProgressPercent(item) + '%' }"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Under-Card Detail Strip -->
+      <transition name="fade" mode="out-in">
+        <div v-if="activeItem" :key="getItemKey(activeItem)" class="tv-row-detail-strip">
+          <div class="tv-detail-meta">
+            <span class="tv-meta-genre">{{ formatGenres(activeItem) }}</span>
+            <span class="tv-meta-dot">•</span>
+            <span class="tv-meta-year">{{ activeItem.year || '' }}</span>
+            <template v-if="durationOrSeasons(activeItem)">
+              <span class="tv-meta-dot">•</span>
+              <span class="tv-meta-seasons">{{ durationOrSeasons(activeItem) }}</span>
+            </template>
+            <span class="tv-meta-dot">•</span>
+            <span class="tv-meta-rating-badge">{{ maturityRating(activeItem) }}</span>
+            <span class="tv-meta-match" v-if="activeItem.rating">{{ Math.min(99, Math.round(activeItem.rating * 10 + 8)) }}% Match</span>
+          </div>
+
+          <div class="tv-detail-overview" v-if="activeItem.overview">
+            {{ activeItem.overview }}
+          </div>
+
+          <div class="tv-detail-actions">
+            <button class="tv-action-btn tv-btn-play" @click="quickPlay(activeItem)">
+              <i class="ph-fill ph-play"></i> Play
+            </button>
+            <button
+              class="tv-action-btn tv-btn-secondary"
+              :class="{ active: isFavorite(activeItem) }"
+              @click="toggleFavorite(activeItem)"
+              title="Watchlist"
+            >
+              <i :class="isFavorite(activeItem) ? 'ph-bold ph-check' : 'ph-bold ph-plus'"></i>
+              {{ isFavorite(activeItem) ? 'In Watchlist' : 'Watchlist' }}
+            </button>
+            <button
+              v-if="activeItem.id || activeItem.tmdb_id"
+              class="tv-action-btn tv-btn-secondary"
+              @click="quickTrailer(activeItem)"
+              title="Watch Trailer"
+            >
+              <i class="ph-bold ph-film-strip"></i> Trailer
+            </button>
+            <button class="tv-action-btn tv-btn-secondary" @click="openDetail(activeItem)" title="Details">
+              <i class="ph-bold ph-info"></i> More Info
+            </button>
+            <button
+              v-if="row?.type === 'continue'"
+              class="tv-action-btn tv-btn-secondary"
+              style="color:#fb7185"
+              @click="$emit('remove-continue', activeItem)"
+              title="Remove from Continue Watching"
+            >
+              <i class="ph-bold ph-trash"></i> Remove
+            </button>
+          </div>
+        </div>
+      </transition>
+    </div>
+  `,
+  setup(props, { emit }) {
+    const scrollerRef = ref(null);
+    const rowRef = ref(null);
+    const cardRefs = ref([]);
+    const activeVirtualIdx = ref(0);
+    const canScrollLeft = ref(false);
+    const canScrollRight = ref(false);
+    const imgErrors = ref(new Set());
+    const backdropErrors = ref(new Set());
+    let hoverTimer = null;
+    const CARD_PITCH = 187;
+    let isProgrammaticScrolling = false;
+    let scrollLockTimer = null;
+    let manualScrollTimer = null;
+    let hasInitializedPosition = false;
+    const activeTrailerUrl = ref(null);
+    const activePreviewVideoUrl = ref(null);
+    const isTrailerPlaying = ref(false);
+    const isMuted = ref(true);
+    const isRowHovered = ref(false);
+    let trailerTimer = null;
+
+    const NUM_CYCLES = 5;
+    const CENTER_CYCLE = 2;
+
+    function getMediaDedupKey(item, rowType) {
+      if (!item) return null;
+      const type = (item.type || "movie").toLowerCase();
+      if (type === "series" || type === "anime") {
+        if (item.tmdb_id) return `${type}:tmdb:${item.tmdb_id}`;
+        const title = (item.title || "").toLowerCase().trim();
+        if (title) return `${type}:title:${title}`;
+      }
+      if (item.tmdb_id) return `${type}:tmdb:${item.tmdb_id}`;
+      if (item.id) return `id:${item.id}`;
+      const title = (item.title || "").toLowerCase().trim();
+      const year = item.year || "";
+      if (title) return `${type}:${title}:${year}`;
+      return null;
+    }
+
+    const deduplicatedItems = computed(() => {
+      const raw = props.row?.items || [];
+      if (!Array.isArray(raw)) return [];
+      const seen = new Set();
+      const result = [];
+      const rowType = props.row?.type;
+      for (const item of raw) {
+        if (!item) continue;
+        const key = getMediaDedupKey(item, rowType);
+        if (key) {
+          if (seen.has(key)) continue;
+          seen.add(key);
+        }
+        result.push(item);
+      }
+      return result;
+    });
+
+    const isInfinite = computed(() => deduplicatedItems.value.length > 5);
+
+    const cycleItems = computed(() => {
+      const raw = deduplicatedItems.value;
+      if (!raw.length) return [];
+      if (!isInfinite.value) return raw;
+      let items = [...raw];
+      while (items.length < 8) {
+        items = items.concat(raw);
+      }
+      return items;
+    });
+
+    function getItemKey(item) {
+      if (!item) return Math.random();
+      return item.id ? `tv-m-${item.id}` : (item.tmdb_id ? `tv-t-${item.tmdb_id}` : `tv-x-${item.title}`);
+    }
+
+    const displayedCards = computed(() => {
+      const raw = deduplicatedItems.value;
+      if (!raw.length) return [];
+      if (!isInfinite.value) {
+        return raw.map((it, idx) => ({
+          item: it,
+          key: `tv-card-${idx}-${getItemKey(it)}`
+        }));
+      }
+      const cycle = cycleItems.value;
+      const list = [];
+      for (let c = 0; c < NUM_CYCLES; c++) {
+        for (let i = 0; i < cycle.length; i++) {
+          const it = cycle[i];
+          list.push({
+            item: it,
+            key: `c${c}-i${i}-${getItemKey(it)}`
+          });
+        }
+      }
+      return list;
+    });
+
+    const logicalCardIndex = computed(() => {
+      const n = deduplicatedItems.value.length;
+      if (n <= 1) return 0;
+      if (!isInfinite.value) {
+        return activeVirtualIdx.value;
+      }
+      const m = cycleItems.value.length;
+      if (m <= 0) return 0;
+      const idxInCycle = activeVirtualIdx.value % m;
+      return idxInCycle % n;
+    });
+
+    const activeIdx = computed(() => logicalCardIndex.value);
+
+    const activeItem = computed(() => {
+      const cards = displayedCards.value;
+      if (!cards.length) return null;
+      const current = cards[activeVirtualIdx.value];
+      return current ? current.item : (cards[0]?.item || null);
+    });
+
+    const isFocusedRow = computed(() => {
+      return store.tvFocus && store.tvFocus.rowIndex === (props.rowIndex ?? 0);
+    });
+
+    function getPosterUrl(item) {
+      if (!item) return null;
+      const k = getItemKey(item);
+      if (imgErrors.value.has(k)) return null;
+      if (item.poster_path) return imgUrl(item.poster_path, "poster");
+      if (item.backdrop_path) return imgUrl(item.backdrop_path, "poster");
+      if (item.still_path) return imgUrl(item.still_path, "poster");
+      return null;
+    }
+
+    function getBackdropUrl(item) {
+      if (!item) return null;
+      const k = getItemKey(item);
+      if (backdropErrors.value.has(k)) return getPosterUrl(item);
+
+      const isSeriesLike = ["series", "anime", "show"].includes((item.type || "").toLowerCase()) || item.season != null || item.episode != null;
+      const isContinue = props.row?.type === "continue";
+
+      // In continue watching for series media, make the landscape thumbnail use the episode thumbnail
+      if (isContinue && isSeriesLike) {
+        if (item.still_path) return imgUrl(item.still_path, "original");
+        if (item.thumbnail_path) return imgUrl(item.thumbnail_path, "original");
+        if (item.episode_still_path) return imgUrl(item.episode_still_path, "original");
+      }
+
+      if (item.backdrop_path) return imgUrl(item.backdrop_path, "original");
+      if (item.still_path) return imgUrl(item.still_path, "original");
+      if (item.thumbnail_path) return imgUrl(item.thumbnail_path, "original");
+      if (item.poster_path) return imgUrl(item.poster_path, "original");
+      return null;
+    }
+
+    function markImgError(item) {
+      if (item) imgErrors.value.add(getItemKey(item));
+    }
+
+    function markBackdropError(item) {
+      if (item) backdropErrors.value.add(getItemKey(item));
+    }
+
+    function maturityRating(item) {
+      if (!item) return "PG-13";
+      if (item.is_kids) return "TV-Y7";
+      if (item.rating >= 8) return "TV-MA";
+      if (item.rating >= 6.5) return "TV-14";
+      return "PG-13";
+    }
+
+    function durationOrSeasons(item) {
+      if (!item) return "";
+      if (props.row?.type === "continue" && (item.season != null || item.episode != null)) {
+        return `Season ${item.season || 1}, Ep ${item.episode || 1}`;
+      }
+      if (item.type === "series" || item.type === "anime") {
+        if (item.season_count) return `${item.season_count} Season${item.season_count > 1 ? 's' : ''}`;
+        if (item.episode_count) return `${item.episode_count} Episodes`;
+        return "Series";
+      }
+      if (item.duration) {
+        const h = Math.floor(item.duration / 60);
+        const m = item.duration % 60;
+        return h > 0 ? `${h}h ${m}m` : `${m}m`;
+      }
+      return "Movie";
+    }
+
+    function formatQualityBadge(item) {
+      if (!item) return "HD";
+      const rawQ = (item.quality || item.resolution || item.base_label || "").toString().toLowerCase();
+      const fp = (item.file_path || "").toLowerCase();
+
+      if (rawQ.includes("4k") || rawQ.includes("2160") || rawQ.includes("uhd") || fp.includes("2160p") || fp.includes("4k") || fp.includes("uhd")) {
+        return "4K Ultra HD";
+      }
+      if (rawQ.includes("1440") || rawQ.includes("qhd") || fp.includes("1440p") || fp.includes("2k")) {
+        return "1440p";
+      }
+      if (rawQ.includes("1080") || rawQ.includes("fhd") || fp.includes("1080p") || fp.includes("1080i")) {
+        return "1080p HD";
+      }
+      if (rawQ.includes("720") || fp.includes("720p")) {
+        return "720p HD";
+      }
+      if (rawQ.includes("480") || rawQ.includes("sd") || fp.includes("480p") || fp.includes("dvdrip")) {
+        return "SD";
+      }
+      if (item.height) {
+        if (item.height >= 2160 || (item.width && item.width >= 3840)) return "4K Ultra HD";
+        if (item.height >= 1440 || (item.width && item.width >= 2560)) return "1440p";
+        if (item.height >= 1080 || (item.width && item.width >= 1920)) return "1080p HD";
+        if (item.height >= 720 || (item.width && item.width >= 1280)) return "720p HD";
+        if (item.height < 720) return "SD";
+      }
+      return "HD";
+    }
+
+    function formatGenres(item) {
+      if (!item || !item.genres) return "Featured";
+      return item.genres.split(",").map(g => g.trim()).slice(0, 3).join(" • ");
+    }
+
+    function calcProgressPercent(item) {
+      if (!item || !item.position) return 0;
+      const dur = item.duration ? item.duration * 60 : 5400;
+      return Math.min(100, Math.round((item.position / dur) * 100));
+    }
+
+    function isFavorite(item) {
+      return !!item?.is_favorite;
+    }
+
+    function updateScrollArrows() {
+      const total = deduplicatedItems.value.length;
+      if (isInfinite.value) {
+        canScrollLeft.value = total > 1;
+        canScrollRight.value = total > 1;
+      } else {
+        canScrollLeft.value = activeVirtualIdx.value > 0;
+        canScrollRight.value = activeVirtualIdx.value < total - 1;
+      }
+    }
+
+    function checkAndRecenter() {
+      if (!isInfinite.value || !scrollerRef.value) return;
+      const m = cycleItems.value.length;
+      if (m <= 0) return;
+
+      const currentV = activeVirtualIdx.value;
+      const cycleStart = CENTER_CYCLE * m;
+      const cycleEnd = (CENTER_CYCLE + 1) * m - 1;
+
+      if (currentV < cycleStart || currentV > cycleEnd) {
+        const normV = cycleStart + (((currentV % m) + m) % m);
+        const diff = normV - currentV;
+        const diffPx = diff * CARD_PITCH;
+
+        activeVirtualIdx.value = normV;
+        if (store.tvFocus && store.tvFocus.rowIndex === (props.rowIndex ?? 0)) {
+          store.tvFocus.cardIndex = logicalCardIndex.value;
+        }
+
+        scrollerRef.value.style.scrollBehavior = "auto";
+        scrollerRef.value.scrollLeft += diffPx;
+        void scrollerRef.value.offsetWidth;
+        scrollerRef.value.style.scrollBehavior = "";
+      }
+    }
+
+    function scrollActiveToLeft(vIdx, smooth = true) {
+      if (!scrollerRef.value) return;
+      const targetLeft = Math.max(0, vIdx * CARD_PITCH);
+      isProgrammaticScrolling = true;
+
+      if (smooth) {
+        scrollerRef.value.scrollTo({ left: targetLeft, behavior: "smooth" });
+      } else {
+        scrollerRef.value.style.scrollBehavior = "auto";
+        scrollerRef.value.scrollLeft = targetLeft;
+        void scrollerRef.value.offsetWidth;
+        scrollerRef.value.style.scrollBehavior = "";
+      }
+
+      clearTimeout(scrollLockTimer);
+      scrollLockTimer = setTimeout(() => {
+        isProgrammaticScrolling = false;
+        checkAndRecenter();
+        updateScrollArrows();
+      }, smooth ? 380 : 50);
+
+      updateScrollArrows();
+    }
+
+    function selectVirtualCard(targetVIdx, smooth = true) {
+      const cards = displayedCards.value;
+      const total = cards.length;
+      if (total <= 0) return;
+
+      const clamped = Math.max(0, Math.min(total - 1, targetVIdx));
+      activeVirtualIdx.value = clamped;
+
+      if (store.tvFocus) {
+        store.tvFocus.rowIndex = props.rowIndex ?? 0;
+        store.tvFocus.cardIndex = logicalCardIndex.value;
+      }
+
+      scrollActiveToLeft(clamped, smooth);
+    }
+
+    function selectLogicalIndex(targetLogicalIdx) {
+      const n = deduplicatedItems.value.length;
+      if (n <= 0) return;
+      if (!isInfinite.value) {
+        const clamped = Math.max(0, Math.min(n - 1, targetLogicalIdx));
+        selectVirtualCard(clamped, true);
+        return;
+      }
+      const m = cycleItems.value.length;
+      if (m <= 0) return;
+      const safeLogical = ((targetLogicalIdx % n) + n) % n;
+      const targetV = CENTER_CYCLE * m + safeLogical;
+      selectVirtualCard(targetV, true);
+    }
+
+    function selectCard(idx) {
+      selectLogicalIndex(idx);
+    }
+
+    function onCardHover(vIdx) {
+      if (isProgrammaticScrolling) return;
+      if (activeVirtualIdx.value === vIdx) return;
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => {
+        if (isProgrammaticScrolling) return;
+        selectVirtualCard(vIdx, true);
+      }, 120);
+    }
+
+    function onCardLeave() {
+      clearTimeout(hoverTimer);
+    }
+
+    function onCardClick(item, vIdx) {
+      if (activeVirtualIdx.value === vIdx) {
+        quickPlay(item);
+      } else {
+        selectVirtualCard(vIdx, true);
+      }
+    }
+
+    function quickPlay(item) {
+      if (!item) return;
+      if (item.is_mounted === false) {
+        addToast("Source drive not mounted. Connect storage drive to play.", "error");
+        return;
+      }
+      if (item.id) {
+        window.location.hash = `#/watch/${item.id}`;
+      } else {
+        emit("card-click", item, props.row);
+      }
+    }
+
+    async function toggleFavorite(item) {
+      const idToFav = item.id || item.tmdb_id;
+      if (!idToFav) return;
+      try {
+        const res = await API.post("/api/favorites/toggle", { media_id: idToFav });
+        item.is_favorite = res.is_favorite;
+        addToast(res.is_favorite ? "Added to Watchlist" : "Removed from Watchlist", "info");
+      } catch (e) {
+        addToast("Failed to update watchlist", "error");
+      }
+    }
+
+    function quickTrailer(item) {
+      emit("card-click", item, props.row);
+    }
+
+    function openDetail(item) {
+      if (!item) return;
+      if (item.type === "movie" && item.id) {
+        window.location.hash = `#/title/movie/${item.id}`;
+      } else if (item.id) {
+        window.location.hash = `#/title/${item.type || "series"}/${item.id}`;
+      } else {
+        emit("card-click", item, props.row);
+      }
+    }
+
+    function onRowScroll() {
+      if (!scrollerRef.value) return;
+      updateScrollArrows();
+      if (isProgrammaticScrolling) return;
+
+      clearTimeout(manualScrollTimer);
+      manualScrollTimer = setTimeout(() => {
+        if (isProgrammaticScrolling || !scrollerRef.value) return;
+        const sl = scrollerRef.value.scrollLeft;
+        const targetV = Math.max(0, Math.min(displayedCards.value.length - 1, Math.round(sl / CARD_PITCH)));
+        if (targetV !== activeVirtualIdx.value) {
+          selectVirtualCard(targetV, false);
+        } else {
+          checkAndRecenter();
+        }
+      }, 150);
+    }
+
+    function scrollLeft() {
+      if (isInfinite.value) {
+        selectVirtualCard(activeVirtualIdx.value - 1, true);
+      } else if (activeVirtualIdx.value > 0) {
+        selectVirtualCard(activeVirtualIdx.value - 1, true);
+      }
+    }
+
+    function scrollRight() {
+      if (isInfinite.value) {
+        selectVirtualCard(activeVirtualIdx.value + 1, true);
+      } else if (activeVirtualIdx.value < deduplicatedItems.value.length - 1) {
+        selectVirtualCard(activeVirtualIdx.value + 1, true);
+      }
+    }
+
+    function handleTvCardFocus(e) {
+      const { rowIndex, cardIndex, direction } = e.detail || {};
+      if (rowIndex === (props.rowIndex ?? 0)) {
+        if (direction === 1) {
+          scrollRight();
+        } else if (direction === -1) {
+          scrollLeft();
+        } else if (cardIndex != null) {
+          selectLogicalIndex(cardIndex);
+        }
+      }
+    }
+
+    function handleTvCardSelect(e) {
+      const { rowIndex } = e.detail || {};
+      if (rowIndex === (props.rowIndex ?? 0)) {
+        if (activeItem.value) quickPlay(activeItem.value);
+      }
+    }
+
+    function stopTrailer() {
+      clearTimeout(trailerTimer);
+      activeTrailerUrl.value = null;
+      activePreviewVideoUrl.value = null;
+      isTrailerPlaying.value = false;
+    }
+
+    function scheduleTrailer(item) {
+      stopTrailer();
+      if (!item) return;
+      if (props.row?.type === "continue") return;
+      if (store.profile?.is_kids) return;
+      if (!isFocusedRow.value && !isRowHovered.value) return;
+
+      trailerTimer = setTimeout(async () => {
+        if (activeItem.value !== item) return;
+        if (!isFocusedRow.value && !isRowHovered.value) return;
+
+        const id = item.id || item.tmdb_id;
+        if (id) {
+          try {
+            const res = await API.get(`/api/media/${id}/trailer`);
+            if (res && (res.key || res.embed_url) && activeItem.value === item) {
+              const key = res.key;
+              const embedBase = key ? `https://www.youtube.com/embed/${key}` : (res.embed_url ? res.embed_url.split("?")[0] : null);
+              if (embedBase) {
+                activeTrailerUrl.value = `${embedBase}?autoplay=1&mute=${isMuted.value ? 1 : 0}&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&showinfo=0&fs=0&playsinline=1&enablejsapi=1&loop=1${key ? `&playlist=${key}` : ''}`;
+                return;
+              }
+            }
+          } catch (e) {}
+        }
+
+        // Local video stream preview fallback
+        if (item.id && (item.type === "movie" || !item.type) && activeItem.value === item) {
+          activePreviewVideoUrl.value = `/api/stream/${item.id}?start=90&transcode=1`;
+        }
+      }, 550);
+    }
+
+    function toggleMute() {
+      isMuted.value = !isMuted.value;
+      if (activeTrailerUrl.value) {
+        if (isMuted.value) {
+          activeTrailerUrl.value = activeTrailerUrl.value.replace(/mute=\d/, "mute=1");
+        } else {
+          activeTrailerUrl.value = activeTrailerUrl.value.replace(/mute=\d/, "mute=0");
+        }
+      }
+    }
+
+    function onRowEnter() {
+      isRowHovered.value = true;
+      if (props.row?.type === "continue") return;
+      if (!activeTrailerUrl.value && !activePreviewVideoUrl.value) {
+        scheduleTrailer(activeItem.value);
+      }
+    }
+
+    function onRowLeave() {
+      isRowHovered.value = false;
+      if (!isFocusedRow.value) {
+        stopTrailer();
+      }
+    }
+
+    function initPosition() {
+      if (!scrollerRef.value) return;
+      if (!isInfinite.value) {
+        activeVirtualIdx.value = 0;
+        nextTick(() => {
+          if (!scrollerRef.value) return;
+          scrollerRef.value.style.scrollBehavior = "auto";
+          scrollerRef.value.scrollLeft = 0;
+          void scrollerRef.value.offsetWidth;
+          scrollerRef.value.style.scrollBehavior = "";
+          hasInitializedPosition = true;
+          updateScrollArrows();
+        });
+        return;
+      }
+      const m = cycleItems.value.length;
+      if (m <= 0) return;
+      const initialV = CENTER_CYCLE * m;
+      activeVirtualIdx.value = initialV;
+      nextTick(() => {
+        if (!scrollerRef.value) return;
+        scrollerRef.value.style.scrollBehavior = "auto";
+        scrollerRef.value.scrollLeft = initialV * CARD_PITCH;
+        void scrollerRef.value.offsetWidth;
+        scrollerRef.value.style.scrollBehavior = "";
+        hasInitializedPosition = true;
+        updateScrollArrows();
+      });
+    }
+
+    watch(activeItem, (newItem) => {
+      scheduleTrailer(newItem);
+    });
+
+    watch(() => deduplicatedItems.value.length, (newLen) => {
+      if (newLen > 0 && !hasInitializedPosition) {
+        initPosition();
+      }
+      updateScrollArrows();
+    });
+
+    watch(isFocusedRow, (focused) => {
+      if (focused) {
+        scheduleTrailer(activeItem.value);
+      } else if (!isRowHovered.value) {
+        stopTrailer();
+      }
+    });
+
+    onMounted(() => {
+      window.addEventListener("capsstream:tv-card-focus", handleTvCardFocus);
+      window.addEventListener("capsstream:tv-card-select", handleTvCardSelect);
+      updateScrollArrows();
+      if (deduplicatedItems.value.length > 0 && !hasInitializedPosition) {
+        initPosition();
+      }
+      if (isFocusedRow.value) {
+        scheduleTrailer(activeItem.value);
+      }
+    });
+
+    onUnmounted(() => {
+      clearTimeout(hoverTimer);
+      clearTimeout(scrollLockTimer);
+      clearTimeout(manualScrollTimer);
+      stopTrailer();
+      window.removeEventListener("capsstream:tv-card-focus", handleTvCardFocus);
+      window.removeEventListener("capsstream:tv-card-select", handleTvCardSelect);
+    });
+
+    return {
+      scrollerRef,
+      rowRef,
+      cardRefs,
+      activeVirtualIdx,
+      activeIdx,
+      activeItem,
+      isFocusedRow,
+      deduplicatedItems,
+      displayedCards,
+      isInfinite,
+      canScrollLeft,
+      canScrollRight,
+      getItemKey,
+      getPosterUrl,
+      getBackdropUrl,
+      markImgError,
+      markBackdropError,
+      maturityRating,
+      durationOrSeasons,
+      formatQualityBadge,
+      formatGenres,
+      calcProgressPercent,
+      isFavorite,
+      onCardHover,
+      onCardLeave,
+      onCardClick,
+      quickPlay,
+      toggleFavorite,
+      quickTrailer,
+      openDetail,
+      onRowScroll,
+      scrollLeft,
+      scrollRight,
+      activeTrailerUrl,
+      activePreviewVideoUrl,
+      isTrailerPlaying,
+      isMuted,
+      toggleMute,
+      onRowEnter,
+      onRowLeave,
+    };
+  }
+};
+
 // ─── Content Row Component ────────────────────────────────────
 
 const ContentRow = {
-  props: ["row"],
+  props: ["row", "rowIndex"],
   emits: ["card-click", "remove-continue"],
-  components: { MediaCard },
+  components: { MediaCard, TvContentRow },
   template: `
-    <div :class="row?.type === 'continue' ? 'continue-watching-section' : 'content-row'">
+    <tv-content-row
+      v-if="isTvLayout"
+      :row="row"
+      :row-index="rowIndex"
+      @card-click="(item, r) => $emit('card-click', item, r)"
+      @remove-continue="(item) => $emit('remove-continue', item)"
+    />
+    <div v-else :class="row?.type === 'continue' ? 'continue-watching-section' : 'content-row'">
       <!-- Custom header for continue watching -->
       <div v-if="row?.type === 'continue'" class="continue-watching-header">
         <div class="continue-watching-title">
@@ -2000,7 +2859,10 @@ const ContentRow = {
       { deep: true }
     );
 
+    const isTvLayout = computed(() => store.layoutMode === "tv" && !store.isMobileScreen);
+
     return {
+      isTvLayout,
       scrollerRef,
       canScrollLeft,
       canScrollRight,
@@ -2510,7 +3372,7 @@ const HeroBanner = {
 // ─── Home Page ────────────────────────────────────────────────
 
 const HomePage = {
-  components: { HeroBanner, ContentRow, MediaCard, TrailerModal },
+  components: { HeroBanner, ContentRow, TvContentRow, MediaCard, TrailerModal },
   template: `
     <div>
       <trailer-modal
@@ -2645,9 +3507,10 @@ const HomePage = {
 
         <template v-else>
           <content-row
-            v-for="row in displayRows"
+            v-for="(row, rIdx) in displayRows"
             :key="row.title || row.id"
             :row="row"
+            :row-index="rIdx"
             @card-click="handleCardClick"
             @remove-continue="handleRemoveContinue"
           />
@@ -3981,47 +4844,55 @@ const SettingsPage = {
         <main class="settings-content">
 
         <!-- ══════ Updates Card (Moved to Top) ══════ -->
-        <div class="settings-section" id="settings-updates-section">
+        <div class="settings-section" id="settings-updates-section" :class="{ 'update-section-disabled': sysInfo?.is_dev }">
           <div class="settings-section-title">
-            <i class="ph ph-arrow-circle-up" style="color:var(--accent)"></i>
-            <span>Updates & Version</span>
+            <i class="ph ph-arrow-circle-up" :style="{ color: sysInfo?.is_dev ? '#fbbf24' : 'var(--accent)' }"></i>
+            <span>Updates &amp; Version</span>
+            <span v-if="sysInfo?.is_dev" class="about-dev-badge" style="margin-left:8px;font-size:0.72rem;padding:2px 8px;border-radius:6px;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);font-weight:700">DISABLED (DEV MODE)</span>
           </div>
-          <div class="settings-group" style="display:flex;flex-direction:column;gap:12px">
+
+          <!-- Dev Mode Callout Banner -->
+          <div v-if="sysInfo?.is_dev" class="dev-mode-disabled-banner">
+            <i class="ph ph-code"></i>
+            <span>Development mode is active (DEV flag). Self-updates and version checks are disabled in this environment to protect local workspace code.</span>
+          </div>
+
+          <div class="settings-group" :style="sysInfo?.is_dev ? 'opacity:0.65;' : ''" style="display:flex;flex-direction:column;gap:12px">
             <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:4px 0 8px">
               <div class="settings-label-container">
                 <div class="settings-label">Current version</div>
                 <div class="settings-desc">CapsStream v{{ sysInfo?.version || '…' }}</div>
               </div>
-              <div class="settings-label-container" v-if="updateState.last_checked">
+              <div class="settings-label-container" v-if="updateState.last_checked && !sysInfo?.is_dev">
                 <div class="settings-label">Last checked</div>
                 <div class="settings-desc">{{ updateState.last_checked }}</div>
               </div>
-              <div class="settings-label-container" v-if="updateState.latest && updateState.status !== 'up_to_date'">
+              <div class="settings-label-container" v-if="updateState.latest && updateState.status !== 'up_to_date' && !sysInfo?.is_dev">
                 <div class="settings-label">Latest available</div>
                 <div class="settings-desc" style="color:var(--accent);font-weight:700">v{{ updateState.latest }}</div>
               </div>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" :style="sysInfo?.is_dev ? 'cursor:not-allowed;' : ''">
               <div class="settings-label-container">
                 <div class="settings-label">Automatic Update Checks</div>
                 <div class="settings-desc">Periodically check for new CapsStream releases and show a banner when one is available.</div>
               </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.updates.auto_check" />
-                <span class="toggle-slider"></span>
+              <label class="toggle-switch" :style="sysInfo?.is_dev ? 'cursor:not-allowed;' : ''">
+                <input type="checkbox" v-model="form.updates.auto_check" :disabled="sysInfo?.is_dev" />
+                <span class="toggle-slider" :style="sysInfo?.is_dev ? 'opacity:0.5;cursor:not-allowed;' : ''"></span>
               </label>
             </div>
 
             <div
               class="update-status-line"
-              :style="{ color: updateState.status === 'available' ? 'var(--accent)' : updateState.status === 'error' ? '#ef4444' : 'var(--text-secondary)' }"
+              :style="{ color: sysInfo?.is_dev ? '#fbbf24' : updateState.status === 'available' ? 'var(--accent)' : updateState.status === 'error' ? '#ef4444' : 'var(--text-secondary)' }"
             >
-              {{ updateState.message || 'Check for updates to see if a new version is available.' }}
+              {{ sysInfo?.is_dev ? 'Updates are disabled in development mode.' : (updateState.message || 'Check for updates to see if a new version is available.') }}
             </div>
 
             <!-- Live update progress -->
-            <div v-if="updateInstalling && updateProgress && updateProgress.stage === 'downloading' && updateProgress.total" style="margin-top:10px">
+            <div v-if="!sysInfo?.is_dev && updateInstalling && updateProgress && updateProgress.stage === 'downloading' && updateProgress.total" style="margin-top:10px">
               <div style="height:6px;border-radius:3px;background:var(--bg-secondary);overflow:hidden">
                 <div style="height:100%;background:var(--accent);transition:width .4s" :style="{ width: Math.round(100 * (updateProgress.bytes_done || 0) / (updateProgress.total || 1)) + '%' }"></div>
               </div>
@@ -4029,17 +4900,17 @@ const SettingsPage = {
                 Downloading… {{ Math.round((updateProgress.bytes_done || 0) / 1048576 * 10) / 10 }} / {{ Math.round((updateProgress.total || 0) / 1048576 * 10) / 10 }} MB
               </div>
             </div>
-            <div v-else-if="updateInstalling && updateProgress && ['verifying','extracting','validating','installing'].includes(updateProgress.stage)" style="font-size:.85rem;color:var(--text-secondary);margin-top:8px">
+            <div v-else-if="!sysInfo?.is_dev && updateInstalling && updateProgress && ['verifying','extracting','validating','installing'].includes(updateProgress.stage)" style="font-size:.85rem;color:var(--text-secondary);margin-top:8px">
               <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:6px"></i>{{ updateProgress.message || (updateProgress.stage[0].toUpperCase() + updateProgress.stage.slice(1)) + '…' }}
             </div>
 
             <!-- One-click restart for backend updates -->
-            <div v-if="restartPending" style="margin-top:10px;padding:10px 14px;border-radius:12px;background:rgba(253,203,110,.12);border:1px solid rgba(253,203,110,.35);color:#fdcb6e;font-size:.87rem">
+            <div v-if="!sysInfo?.is_dev && restartPending" style="margin-top:10px;padding:10px 14px;border-radius:12px;background:rgba(253,203,110,.12);border:1px solid rgba(253,203,110,.35);color:#fdcb6e;font-size:.87rem">
               <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:6px"></i>Restarting — the server will come back online in a few seconds…
             </div>
 
             <div
-              v-if="updateState.changelog"
+              v-if="!sysInfo?.is_dev && updateState.changelog"
               class="changelog-box"
               v-html="changelogHtml"
             ></div>
@@ -4049,22 +4920,22 @@ const SettingsPage = {
                 <i class="ph ph-sparkle" style="margin-right:6px;color:#38bdf8"></i>
                 What's New
               </button>
-              <button class="btn btn-secondary" @click="checkUpdates" :disabled="updateChecking">
+              <button class="btn btn-secondary" @click="checkUpdates" :disabled="updateChecking || sysInfo?.is_dev" :title="sysInfo?.is_dev ? 'Updates disabled in development mode' : ''">
                 <i :class="updateChecking ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="updateChecking ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
                 {{ updateChecking ? 'Checking...' : 'Check for Updates' }}
               </button>
               <button
-                v-if="updateState.status === 'available'"
+                v-if="!sysInfo?.is_dev && updateState.status === 'available'"
                 class="btn btn-primary"
                 @click="installUpdate"
-                :disabled="updateInstalling"
+                :disabled="updateInstalling || sysInfo?.is_dev"
                 id="btn-install-update"
               >
                 <i :class="updateInstalling ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="updateInstalling ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
                 {{ updateInstalling ? 'Installing...' : 'Install Update' }}
               </button>
               <button
-                v-if="updateState.status === 'up_to_date' && !restartPending && !updateInstalling && /restart CapsStream/i.test(updateState.message)"
+                v-if="!sysInfo?.is_dev && updateState.status === 'up_to_date' && !restartPending && !updateInstalling && /restart CapsStream/i.test(updateState.message)"
                 class="btn btn-primary"
                 @click="restartAfterUpdate"
                 id="btn-restart-update"
@@ -4163,6 +5034,76 @@ const SettingsPage = {
             <span>Appearance & Theme Presets</span>
           </div>
           <div class="settings-group">
+            <!-- Interface Layout Mode (Standard vs TV Layout) -->
+            <div class="settings-label-container" style="margin-bottom:12px">
+              <div class="settings-label">Interface Layout Mode</div>
+              <div class="settings-desc">Choose between standard responsive web browsing and the cinematic TV 10-foot experience.</div>
+            </div>
+
+            <div class="layout-mode-selector">
+              <!-- Standard Layout Card -->
+              <div
+                class="layout-mode-card"
+                :class="{ active: store.layoutMode !== 'tv' }"
+                @click="setLayoutMode('standard')"
+                id="layout-mode-standard"
+              >
+                <div class="layout-mode-badge" v-if="store.layoutMode !== 'tv'">
+                  <i class="ph-bold ph-check"></i> Active
+                </div>
+                <div class="layout-mode-preview">
+                  <div class="mini-std-topbar"></div>
+                  <div class="mini-std-hero"></div>
+                  <div class="mini-std-grid">
+                    <span></span><span></span><span></span><span></span>
+                  </div>
+                </div>
+                <div class="layout-mode-title">
+                  <i class="ph-bold ph-browsers"></i> Standard Web Layout
+                </div>
+                <div class="layout-mode-desc">
+                  Responsive browsing with carousels and grids optimized for desktop, laptops, and mobile screens.
+                </div>
+              </div>
+
+              <!-- TV Layout Card -->
+              <div
+                class="layout-mode-card"
+                :class="{ active: store.layoutMode === 'tv', disabled: isMobileScreen }"
+                @click="setLayoutMode('tv')"
+                id="layout-mode-tv"
+              >
+                <div class="layout-mode-badge" v-if="store.layoutMode === 'tv' && !isMobileScreen">
+                  <i class="ph-bold ph-check"></i> Active
+                </div>
+                <div class="layout-mode-badge tv-restricted" v-else-if="isMobileScreen">
+                  <i class="ph-bold ph-device-mobile-slash"></i> Desktop & TV Only
+                </div>
+                <div class="layout-mode-preview">
+                  <div class="mini-tv-topbar">
+                    <span class="mini-tv-avatar"></span>
+                    <span class="mini-tv-pill active"></span>
+                    <span class="mini-tv-pill"></span>
+                    <span class="mini-tv-pill"></span>
+                  </div>
+                  <div class="mini-tv-row">
+                    <span class="mini-tv-landscape"></span>
+                    <span class="mini-tv-poster"></span>
+                    <span class="mini-tv-poster"></span>
+                  </div>
+                </div>
+                <div class="layout-mode-title">
+                  <i class="ph-bold ph-television"></i> TV Layout
+                </div>
+                <div class="layout-mode-desc">
+                  Cinematic 10-foot experience featuring combination poster-to-landscape morphing cards, TV pill header, and remote D-pad navigation.
+                  <span v-if="isMobileScreen" class="tv-mobile-warn"><br><em>Not accessible on mobile viewports. Only available on desktop and TV displays (width ≥ 768px).</em></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-divider" style="margin: 20px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
+
             <div class="settings-label-container" style="margin-bottom:14px">
               <div class="settings-label">Active Theme Preset</div>
               <div class="settings-desc">Choose a curated visual theme for your profile. Changes apply instantly across the entire interface.</div>
@@ -5845,7 +6786,7 @@ const SettingsPage = {
     const activeNamingTab = ref("movies");
 
     // ─── Updates ──────────────────────────────────────────────
-    const sysInfo = ref(null);
+    const sysInfo = ref(store.sysInfo || null);
     const updateState = ref({
       status: "idle",
       current: "",
@@ -5860,7 +6801,11 @@ const SettingsPage = {
 
     async function loadSystemInfo() {
       try {
-        sysInfo.value = await API.get("/api/system/info");
+        const info = await API.get("/api/system/info");
+        if (info) {
+          sysInfo.value = info;
+          store.sysInfo = info;
+        }
       } catch (e) {}
     }
 
@@ -5959,11 +6904,23 @@ const SettingsPage = {
     const changelogHtml = computed(() => renderChangelog(updateState.value.changelog));
 
     async function checkUpdates() {
+      if (sysInfo.value?.is_dev) {
+        addToast("Updates are disabled in development mode", "info");
+        return;
+      }
       updateChecking.value = true;
       updateState.value = { ...updateState.value, status: "checking", message: "Checking for updates..." };
       try {
         await loadSystemInfo();
+        if (sysInfo.value?.is_dev) {
+          updateState.value = { ...updateState.value, status: "disabled", message: "Updates are disabled in development mode." };
+          return;
+        }
         const r = await API.get("/api/system/check-update");
+        if (r.disabled || r.status === "disabled") {
+          updateState.value = { ...updateState.value, status: "disabled", message: r.message || "Updates are disabled in development mode." };
+          return;
+        }
         const pend = r.pending_swaps || 0;
         const pendNote = pend
           ? ` ${pend} updated file(s) will be finalized next time you run start.bat.`
@@ -6039,6 +6996,10 @@ const SettingsPage = {
     }
 
     async function installUpdate() {
+      if (sysInfo.value?.is_dev) {
+        addToast("Updates are disabled in development mode", "warning");
+        return;
+      }
       updateInstalling.value = true;
       updateProgress.value = null;
       pollUpdateProgress();
@@ -6085,7 +7046,9 @@ const SettingsPage = {
       // Auto-run the update check when arriving from the update banner
       if (store.pendingUpdateCheck) {
         store.pendingUpdateCheck = false;
-        checkUpdates();
+        if (!sysInfo.value?.is_dev) {
+          checkUpdates();
+        }
       }
     });
 
@@ -6493,6 +7456,24 @@ const SettingsPage = {
       applyTheme(themeId, true);
     }
 
+    const isMobileScreen = computed(() => store.isMobileScreen);
+
+    function setLayoutMode(mode) {
+      if (mode === "tv" && isMobileScreen.value) {
+        addToast("TV layout is only available on Desktop and TV displays (width ≥ 768px).", "warning");
+        return;
+      }
+      store.layoutMode = mode;
+      localStorage.setItem("capsstream_layout_mode", mode);
+      if (mode === "tv") {
+        document.body.classList.add("layout-tv-mode");
+        addToast("TV Layout activated!", "info");
+      } else {
+        document.body.classList.remove("layout-tv-mode");
+        addToast("Standard Web Layout activated", "info");
+      }
+    }
+
     function replayTour() {
       router.push("/");
       setTimeout(() => {
@@ -6628,6 +7609,8 @@ const SettingsPage = {
       THEME_PRESETS,
       currentTheme,
       selectTheme,
+      isMobileScreen,
+      setLayoutMode,
       replayTour,
       openShortcutsGuide,
       kidsProfiles,
@@ -6817,7 +7800,7 @@ const PlayerPage = window.PlayerPage;
 // ─── Browse Page ──────────────────────────────────────────────
 
 const BrowsePage = {
-  components: { MediaCard },
+  components: { MediaCard, TvContentRow },
   template: `
     <div class="browse-page">
       <div class="browse-header">
@@ -6877,6 +7860,16 @@ const BrowsePage = {
         <div class="empty-subtitle">Add media to your folders or reconnect unmounted storage drives.</div>
       </div>
 
+      <div v-else-if="isTvLayout" class="tv-browse-rows">
+        <tv-content-row
+          v-for="(row, rIdx) in tvRows"
+          :key="row.title"
+          :row="row"
+          :row-index="rIdx"
+          @card-click="handleClick"
+        />
+      </div>
+
       <div v-else class="media-grid">
         <media-card
           v-for="item in paginatedItems"
@@ -6887,7 +7880,7 @@ const BrowsePage = {
       </div>
 
       <!-- Classic Page Number Bar Pagination -->
-      <div v-if="filteredItems.length > 0" class="pagination-bar">
+      <div v-if="filteredItems.length > 0 && !isTvLayout" class="pagination-bar">
         <button class="pagination-btn" :disabled="currentPage === 1" @click="setPage(1)" title="First Page">
           « First
         </button>
@@ -7093,8 +8086,39 @@ const BrowsePage = {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
+    const isTvLayout = computed(() => store.layoutMode === "tv" && !store.isMobileScreen);
+
+    const tvRows = computed(() => {
+      if (!isTvLayout.value) return [];
+      const list = filteredItems.value || [];
+      if (!list.length) return [];
+
+      const genreMap = new Map();
+      for (const it of list) {
+        const raw = (it.genres || "").split(",").map(g => g.trim()).filter(Boolean);
+        const gName = raw[0] || "Featured";
+        if (!genreMap.has(gName)) genreMap.set(gName, []);
+        genreMap.get(gName).push(it);
+      }
+
+      const rowsArr = [];
+      const topRated = [...list].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      if (topRated.length > 4) {
+        rowsArr.push({ title: "Top Rated & Trending", items: topRated.slice(0, 16) });
+      }
+
+      for (const [genre, gItems] of genreMap.entries()) {
+        if (gItems.length) {
+          rowsArr.push({ title: genre, items: gItems });
+        }
+      }
+      return rowsArr;
+    });
+
     return {
       store,
+      isTvLayout,
+      tvRows,
       items,
       filteredItems,
       paginatedItems,
@@ -14255,9 +15279,11 @@ const RequestsPage = {
       isSearching: false,
     });
 
-    // Guard: Request media page is temporarily disabled
-    router.replace("/");
-    return;
+    // Guard: Redirect if requests feature is disabled or Kids mode profile
+    if (!store.features?.requests || store.profile?.is_kids) {
+      router.replace("/");
+      return;
+    }
 
     const pendingList = computed(() => items.value.filter((i) => i.status !== "completed"));
     const completedList = computed(() => items.value.filter((i) => i.status === "completed"));
@@ -14769,7 +15795,7 @@ const router = createRouter({
     { path: "/collections", component: CollectionsPage },
     { path: "/collection/:id", component: CollectionDetailPage },
     { path: "/favorites", component: FavoritesPage },
-    { path: "/requests", redirect: "/" },
+    { path: "/requests", component: RequestsPage },
     { path: "/stats", component: StatsPage },
     { path: "/settings", component: SettingsPage },
     { path: "/logs", component: LogViewerPage },
@@ -14779,6 +15805,13 @@ const router = createRouter({
     if (to.path === from.path) return null;
     return { top: 0 };
   },
+});
+
+router.beforeEach((to, from, next) => {
+  if (to.path === "/requests" && !store.features?.requests) {
+    return next("/");
+  }
+  next();
 });
 
 // ─── Floating Scan Progress Widget ───────────────────────────
@@ -14957,7 +15990,7 @@ const ScanProgressWidget = {
 // ─── Root App ─────────────────────────────────────────────────
 
 const App = {
-  components: { MediaCard, ScanProgressWidget, ShortcutsModal },
+  components: { MediaCard, TvContentRow, ScanProgressWidget, ShortcutsModal },
   template: `
     <!-- Loading screen -->
     <div class="loading-screen" v-if="appLoading">
@@ -14969,8 +16002,89 @@ const App = {
     </div>
 
     <template v-else>
-      <!-- Navbar (hidden on player/profile pages) -->
-      <nav class="navbar" :class="{ scrolled: navScrolled }" v-if="showNav" id="navbar">
+      <!-- TV Layout Navbar (TV Pill Header) -->
+      <nav class="navbar-tv" :class="{ scrolled: navScrolled }" v-if="showNav && isTvLayout" id="navbar-tv">
+        <div class="tv-navbar-inner">
+          <!-- Profile Avatar with dropdown -->
+          <div class="tv-nav-profile" @click.stop="toggleProfileMenu" id="tv-nav-profile" tabindex="0" title="Profile Menu">
+            <div class="tv-avatar-badge" :style="{ background: store.profile?.color || '#e50914' }">
+              <img v-if="store.profile?.custom_avatar_url" :src="imgUrl(store.profile.custom_avatar_url)" class="tv-avatar-img" :alt="store.profile?.name" />
+              <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar"></i>
+              <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
+            </div>
+            <i class="ph-bold ph-caret-down tv-profile-caret"></i>
+
+            <!-- Profile Dropdown -->
+            <div class="profile-dropdown tv-dropdown" v-if="showProfileMenu" :style="tvDropdownStyle" ref="tvDropdownRef" @click.stop>
+              <div v-if="store?.profile" class="profile-dropdown-item" style="font-weight:700;color:var(--text-primary);cursor:default" @click.stop>
+                <img v-if="store.profile?.custom_avatar_url" :src="imgUrl(store.profile.custom_avatar_url)" class="dropdown-profile-avatar-img" />
+                <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar" style="font-size:1.15rem"></i>
+                <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
+                <span style="margin-left:6px;font-weight:700">{{ store.profile?.name }}</span>
+              </div>
+              <div class="profile-dropdown-divider" v-if="store?.profile"></div>
+              <div class="profile-dropdown-item" @click.stop="goFavorites" id="tv-dd-watchlist">
+                <i class="ph-bold ph-bookmark-simple" style="font-size:1.1rem;color:var(--accent)"></i>
+                <span>Watchlist</span>
+              </div>
+              <div class="profile-dropdown-item" @click.stop="goPlaylists" id="tv-dd-playlists">
+                <i class="ph-bold ph-queue" style="font-size:1.1rem;color:#38bdf8"></i>
+                <span>Playlists</span>
+              </div>
+              <div class="profile-dropdown-item" @click.stop="goCollections" id="tv-dd-collections">
+                <i class="ph-bold ph-squares-four" style="font-size:1.1rem;color:#a78bfa"></i>
+                <span>Collections</span>
+              </div>
+              <div class="profile-dropdown-item" @click.stop="goStats" id="tv-dd-stats">
+                <i class="ph-bold ph-chart-polar" style="font-size:1.1rem;color:#f59e0b"></i>
+                <span>Analytics</span>
+              </div>
+              <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="tv-dd-settings">
+                <i class="ph-bold ph-gear-six" style="font-size:1.1rem;color:#94a3b8"></i>
+                <span>Settings</span>
+              </div>
+              <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="switchProfile" id="tv-dd-switch">
+                <i class="ph-bold ph-arrows-left-right" style="font-size:1.1rem;color:#f472b6"></i>
+                <span>Switch Profile</span>
+              </div>
+              <div class="profile-dropdown-divider"></div>
+              <div class="profile-dropdown-item danger" @click.stop="logout" v-if="store.profile" id="tv-dd-logout">
+                <i class="ph-bold ph-sign-out" style="font-size:1.1rem"></i>
+                <span>Sign Out</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Search button -->
+          <button class="tv-nav-btn" @click="router.push('/search')" id="tv-nav-search" title="Search">
+            <i class="ph-bold ph-magnifying-glass"></i>
+          </button>
+
+          <!-- Pill Navigation -->
+          <div class="tv-nav-pills">
+            <button
+              v-for="item in tvNavItems"
+              :key="item.id"
+              class="tv-nav-pill-btn"
+              :class="{ active: isNavActive(item) }"
+              @click="router.push(item.path)"
+              :id="'tv-' + item.id"
+            >
+              {{ item.name }}
+            </button>
+          </div>
+
+          <div class="tv-nav-spacer"></div>
+
+          <!-- Settings button -->
+          <button v-if="!store.profile?.is_kids" class="tv-nav-btn" @click="router.push('/settings')" id="tv-nav-settings" title="Settings">
+            <i class="ph-bold ph-gear"></i>
+          </button>
+        </div>
+      </nav>
+
+      <!-- Navbar (hidden on player/profile pages, or when TV layout is active) -->
+      <nav class="navbar" :class="{ scrolled: navScrolled }" v-if="showNav && !isTvLayout" id="navbar">
         <div class="navbar-island">
           <div class="nav-logo" @click="router.push('/')" id="nav-logo">
             <img src="/static/img/favicon.png" alt="CapsStream Logo" class="app-logo-img">
@@ -15053,7 +16167,7 @@ const App = {
                   <i class="ph-bold ph-squares-four" style="font-size:1.1rem;color:#a78bfa"></i>
                   <span>Collections</span>
                 </div>
-                <div v-if="false" class="profile-dropdown-item" @click.stop="goRequests" id="dd-requests">
+                <div v-if="store.features?.requests && !store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goRequests" id="dd-requests">
                   <i class="ph-bold ph-paper-plane-tilt" style="font-size:1.1rem;color:#38bdf8"></i>
                   <span>Request Media</span>
                 </div>
@@ -15094,7 +16208,7 @@ const App = {
         <transition name="fade">
           <div
             class="update-banner update-available-banner"
-            v-if="store.updateInfo?.status === 'available' && !updateBannerDismissed && (store.profile?.is_admin || !store.profile)"
+            v-if="store.updateInfo?.status === 'available' && !updateBannerDismissed && (store.profile?.is_admin || !store.profile) && !store.sysInfo?.is_dev"
           >
             <i class="ph ph-arrow-circle-up"></i>
             <span>
@@ -16081,16 +17195,20 @@ const App = {
       updateQuietChecked = true;
       try {
         const cfg = await API.get("/api/settings");
+        if (cfg && cfg.features) {
+          store.features = { ...store.features, ...cfg.features };
+        }
         if (cfg && cfg.updates && cfg.updates.auto_check === false) return;
+      } catch (e) {}
+      try {
+        // Used by the remote-exposure warning banner and dev-mode gating
+        const info = store.sysInfo || (await API.get("/api/system/info"));
+        if (info) store.sysInfo = info;
+        if (info?.is_dev) return; // Skip update check in dev mode
       } catch (e) {}
       try {
         const r = await API.get("/api/system/check-update");
         if (r && r.status === "available") store.updateInfo = r;
-      } catch (e) {}
-      try {
-        // Used by the remote-exposure warning banner
-        const info = await API.get("/api/system/info");
-        if (info) store.sysInfo = info;
       } catch (e) {}
     }
 
@@ -16182,6 +17300,68 @@ const App = {
       ];
     });
 
+    const isTvLayout = computed(() => store.layoutMode === "tv" && !store.isMobileScreen);
+
+    const tvNavItems = computed(() => {
+      return [
+        { name: "Home", path: "/", id: "tv-nav-home", isMatch: (r) => r.path === "/" },
+        { name: "Shows", path: "/browse?type=series", id: "tv-nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
+        { name: "Movies", path: "/browse?type=movie", id: "tv-nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
+        { name: "Anime", path: "/browse?type=anime", id: "tv-nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
+        { name: "My List", path: "/favorites", id: "tv-nav-favorites", isMatch: (r) => r.path === "/favorites" },
+      ];
+    });
+
+    function handleTvRemoteKey(e) {
+      if (!isTvLayout.value) return;
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+
+      const tvRows = document.querySelectorAll(".tv-content-row");
+      if (!tvRows || !tvRows.length) return;
+
+      const maxRows = tvRows.length;
+
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        store.tvFocus.cardIndex = (store.tvFocus.cardIndex || 0) + 1;
+        window.dispatchEvent(new CustomEvent("capsstream:tv-card-focus", {
+          detail: { rowIndex: store.tvFocus.rowIndex, cardIndex: store.tvFocus.cardIndex, direction: 1 }
+        }));
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        store.tvFocus.cardIndex = (store.tvFocus.cardIndex || 0) - 1;
+        window.dispatchEvent(new CustomEvent("capsstream:tv-card-focus", {
+          detail: { rowIndex: store.tvFocus.rowIndex, cardIndex: store.tvFocus.cardIndex, direction: -1 }
+        }));
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (store.tvFocus.rowIndex < maxRows - 1) {
+          store.tvFocus.rowIndex++;
+          store.tvFocus.cardIndex = 0;
+          const nextRow = tvRows[store.tvFocus.rowIndex];
+          if (nextRow) nextRow.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (store.tvFocus.rowIndex > 0) {
+          store.tvFocus.rowIndex--;
+          store.tvFocus.cardIndex = 0;
+          const prevRow = tvRows[store.tvFocus.rowIndex];
+          if (prevRow) prevRow.scrollIntoView({ behavior: "smooth", block: "center" });
+        } else {
+          const firstPill = document.querySelector(".tv-nav-pill-btn.active") || document.querySelector(".tv-nav-pill-btn");
+          if (firstPill) firstPill.focus();
+        }
+      } else if (e.key === "Enter") {
+        if (!["button", "a"].includes(tag)) {
+          window.dispatchEvent(new CustomEvent("capsstream:tv-card-select", {
+            detail: { rowIndex: store.tvFocus.rowIndex, cardIndex: store.tvFocus.cardIndex }
+          }));
+        }
+      }
+    }
+
     const navLinksRef = ref(null);
     const linkRefs = ref([]);
     const hoveredLinkIndex = ref(null);
@@ -16215,8 +17395,61 @@ const App = {
       updatePillPosition();
     });
 
+    const tvDropdownStyle = ref({});
+    const tvDropdownRef = ref(null);
+
+    function updateTvDropdownPosition() {
+      if (!showProfileMenu.value || !isTvLayout.value) return;
+      nextTick(() => {
+        const trigger = document.getElementById("tv-nav-profile") || document.querySelector(".tv-nav-profile");
+        const dropdown = tvDropdownRef.value || document.querySelector(".profile-dropdown.tv-dropdown");
+        if (!trigger || !dropdown) return;
+
+        const tRect = trigger.getBoundingClientRect();
+        const dRect = dropdown.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
+        // Horizontally: align with left of trigger, clamp to at least 16px from screen edge
+        let left = Math.max(16, tRect.left);
+        const dropdownWidth = dRect.width || 240;
+        if (left + dropdownWidth > vw - 16) {
+          left = Math.max(16, vw - dropdownWidth - 16);
+        }
+
+        // Vertically: position directly below avatar trigger
+        let top = tRect.bottom + 10;
+        let maxHeight = vh - top - 16;
+
+        // If not enough vertical space below (< 220px) and trigger is low down, flip above
+        if (maxHeight < 220 && tRect.top > 260) {
+          top = Math.max(16, tRect.top - (dRect.height || 320) - 10);
+          maxHeight = tRect.top - 24;
+        }
+
+        tvDropdownStyle.value = {
+          position: "fixed",
+          left: `${Math.round(left)}px`,
+          top: `${Math.round(top)}px`,
+          maxHeight: `${Math.round(Math.max(180, maxHeight))}px`,
+          zIndex: "100050"
+        };
+      });
+    }
+
+    watch(showProfileMenu, (open) => {
+      if (open && isTvLayout.value) {
+        updateTvDropdownPosition();
+      } else {
+        tvDropdownStyle.value = {};
+      }
+    });
+
     function toggleProfileMenu() {
       showProfileMenu.value = !showProfileMenu.value;
+      if (showProfileMenu.value && isTvLayout.value) {
+        updateTvDropdownPosition();
+      }
     }
 
     function goFavorites() {
@@ -16236,7 +17469,11 @@ const App = {
 
     function goRequests() {
       showProfileMenu.value = false;
-      router.push("/");
+      if (!store.features?.requests) {
+        router.push("/");
+        return;
+      }
+      router.push("/requests");
     }
 
     function goSettings() {
@@ -16441,7 +17678,7 @@ const App = {
 
     // Close profile menu and floating context menu on outside click
     function handleOutsideClick(e) {
-      if (!e.target.closest("#nav-profile")) {
+      if (!e.target.closest("#nav-profile") && !e.target.closest("#tv-nav-profile") && !e.target.closest(".profile-dropdown")) {
         showProfileMenu.value = false;
       }
       if (contextMenuState.show) {
@@ -16463,6 +17700,7 @@ const App = {
         if (collectionPickerState.show) collectionPickerState.show = false;
         if (globalTrailerState.show) globalTrailerState.show = false;
       }
+      handleTvRemoteKey(e);
       handleGlobalShortcutsKey(e);
     }
 
@@ -16497,6 +17735,11 @@ const App = {
       window.addEventListener("mouseover", handleTooltipMouseOver);
       window.addEventListener("keydown", handleGlobalKeyDown);
       window.addEventListener("scroll", handleScroll, { passive: true });
+
+      try {
+        const feats = await API.get("/api/features").catch(() => null);
+        if (feats) store.features = { ...store.features, ...feats };
+      } catch (e) {}
 
       try {
         // Restore a persisted session (survives page refresh) before anything else
@@ -16606,6 +17849,8 @@ const App = {
       } catch (e) {
         /* ignore */
       }
+      window.addEventListener("resize", updateTvDropdownPosition);
+      window.addEventListener("scroll", updateTvDropdownPosition, true);
     });
 
     onUnmounted(() => {
@@ -16616,6 +17861,8 @@ const App = {
       window.removeEventListener("mouseover", handleTooltipMouseOver);
       window.removeEventListener("keydown", handleGlobalKeyDown);
       window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("resize", updateTvDropdownPosition);
+      window.removeEventListener("scroll", updateTvDropdownPosition, true);
       clearInterval(scanPollTimer);
     });
 
@@ -16840,6 +18087,8 @@ const App = {
       route,
       navItems,
       mobileNavItems,
+      isTvLayout,
+      tvNavItems,
       isNavActive,
       navScrolled,
       showProfileMenu,
@@ -16936,6 +18185,8 @@ const App = {
       skipOnboardingWaiting,
       whatsNewSections,
       closeWhatsNewModal,
+      tvDropdownStyle,
+      tvDropdownRef,
     };
   },
 };

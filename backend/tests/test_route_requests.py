@@ -27,9 +27,22 @@ class TestRouteRequests(unittest.TestCase):
         self.file_patcher = patch("backend.routes.requests.REQUESTS_FILE", self.test_file)
         self.file_patcher.start()
 
+        # Patch load_config in backend.settings to enable requests by default
+        self.config_patcher = patch("backend.settings.load_config", return_value={"features": {"requests": True}})
+        self.config_patcher.start()
+
     def tearDown(self):
         self.file_patcher.stop()
+        self.config_patcher.stop()
         self.temp_dir.cleanup()
+
+    def test_feature_disabled_returns_403(self):
+        """When features.requests is False, /api/requests endpoints return 403."""
+        with patch("backend.settings.load_config", return_value={"features": {"requests": False}}):
+            resp = self.client.get("/api/requests")
+            self.assertEqual(resp.status_code, 403)
+            data = resp.get_json()
+            self.assertIn("disabled", data.get("error", "").lower())
 
     @patch("backend.routes.requests.is_dev_mode", return_value=True)
     def test_get_empty_requests(self, mock_dev):
