@@ -216,6 +216,7 @@ html {
 }
 
 body {
+  position: relative;
   font-family:
     "Geist",
     "Plus Jakarta Sans",
@@ -229,6 +230,78 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Subtle Brand Watermark Background with Theme Glow ─── */
+body::before {
+  content: "";
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, 75vw);
+  height: min(520px, 75vw);
+  -webkit-mask: url("/static/img/icon-512.png") no-repeat center center / contain;
+  mask: url("/static/img/icon-512.png") no-repeat center center / contain;
+  background-color: var(--accent, #e50914);
+  pointer-events: none;
+  z-index: 0;
+  user-select: none;
+  animation: brandWatermarkGlow 8s ease-in-out infinite;
+  will-change: opacity, transform, filter;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(680px, 90vw);
+  height: min(680px, 90vw);
+  background: radial-gradient(circle, var(--accent-dim, rgba(229, 9, 20, 0.2)) 0%, transparent 68%);
+  pointer-events: none;
+  z-index: 0;
+  user-select: none;
+  animation: brandAuraGlow 8s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+@keyframes brandWatermarkGlow {
+  0%, 100% {
+    opacity: 0.035;
+    transform: translate(-50%, -50%) scale(1);
+    filter: drop-shadow(0 0 20px var(--accent, #e50914));
+  }
+  50% {
+    opacity: 0.075;
+    transform: translate(-50%, -50%) scale(1.03);
+    filter: drop-shadow(0 0 45px var(--accent, #e50914));
+  }
+}
+
+@keyframes brandAuraGlow {
+  0%, 100% {
+    opacity: 0.2;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+  50% {
+    opacity: 0.5;
+    transform: translate(-50%, -50%) scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after {
+    animation: none;
+  }
+  body::before {
+    opacity: 0.045;
+  }
+  body::after {
+    opacity: 0.3;
+  }
 }
 
 h1,
@@ -306,6 +379,8 @@ ol {
 
 /* ─── App Shell ──────────────────────────────────────────── */
 #app {
+  position: relative;
+  z-index: 1;
   min-height: 100vh;
   display: flex;
   flex-direction: column;

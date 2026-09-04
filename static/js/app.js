@@ -690,18 +690,21 @@ function openGlobalContextMenu(e, item) {
   let clickX = (e && e.clientX) || 100;
   let clickY = (e && e.clientY) || 100;
 
-  // Anchor to the 3-dot button if triggered from a card or the button itself
+  // Anchor to the 3-dot button if triggered from a click on the button or card
   let anchorEl = null;
-  if (e && e.currentTarget && typeof e.currentTarget.querySelector === "function") {
-    if (e.currentTarget.classList?.contains("card-menu-btn")) {
-      anchorEl = e.currentTarget;
-    } else {
-      anchorEl = e.currentTarget.querySelector(".card-menu-btn") || e.currentTarget;
-    }
-  } else if (e && e.target && typeof e.target.closest === "function") {
-    const card = e.target.closest(".media-card");
-    if (card) {
-      anchorEl = card.querySelector(".card-menu-btn") || card;
+  const isRightClick = (e && e.type === "contextmenu") || (e && e.button === 2);
+  if (!isRightClick) {
+    if (e && e.currentTarget && typeof e.currentTarget.querySelector === "function") {
+      if (e.currentTarget.classList?.contains("card-menu-btn")) {
+        anchorEl = e.currentTarget;
+      } else {
+        anchorEl = e.currentTarget.querySelector(".card-menu-btn");
+      }
+    } else if (e && e.target && typeof e.target.closest === "function") {
+      const card = e.target.closest(".media-card");
+      if (card) {
+        anchorEl = card.querySelector(".card-menu-btn");
+      }
     }
   }
 
@@ -1443,8 +1446,9 @@ const MediaCard = {
           @mouseenter="onPopoutMouseEnter"
           @mouseleave="onPopoutMouseLeave"
           @click.stop
+          @contextmenu.prevent.stop="openCardMenu($event)"
         >
-          <div class="popout-media-box">
+          <div class="popout-media-box" @contextmenu.prevent.stop="openCardMenu($event)">
             <!-- High-res Backdrop/Poster Base Layer -->
             <img
               :src="backdropSrc"
