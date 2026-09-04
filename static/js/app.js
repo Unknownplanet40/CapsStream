@@ -3542,7 +3542,12 @@ const DetailPage = {
         activeBackdropIdx.value = 0;
         startBackdropCycle();
         if (sortedSeasons.value.length) {
-          activeSeason.value = sortedSeasons.value[0];
+          const reqSeason = route.query.season ? String(route.query.season) : null;
+          if (reqSeason && sortedSeasons.value.includes(reqSeason)) {
+            activeSeason.value = reqSeason;
+          } else {
+            activeSeason.value = sortedSeasons.value[0];
+          }
         }
         if (store.profile) {
           collections.value = await API.get("/api/collections");
@@ -3565,6 +3570,11 @@ const DetailPage = {
     watch(() => route.params.id, () => {
       activeBackdropIdx.value = 0;
       load();
+    });
+    watch(() => route.query.season, (newSeason) => {
+      if (newSeason && sortedSeasons.value.includes(String(newSeason))) {
+        activeSeason.value = String(newSeason);
+      }
     });
 
     function copyFilePath() {
@@ -13631,6 +13641,56 @@ const RequestsPage = {
               </div>
             </transition>
 
+            <!-- Duplicate / Existing Series Inventory Hint (when TMDb is locked) -->
+            <transition name="fade">
+              <div v-if="selectedTmdb && ((seriesInventory && seriesInventory.in_library) || duplicateMatch)" class="duplicate-hint-card" style="margin-top: 12px; margin-bottom: 12px;">
+                <i class="ph-fill ph-check-circle" style="color:var(--success, #4ade80)"></i>
+                <div class="duplicate-hint-content">
+                  <template v-if="seriesInventory && seriesInventory.in_library">
+                    <span><strong>In library:</strong> {{ seriesInventory.seasons_display }}</span>
+                    <span class="library-inventory-sub">Need a missing season or episode? Specify it below.</span>
+                  </template>
+                  <template v-else-if="duplicateMatch">
+                    <span><strong>Already in library:</strong> {{ duplicateMatch.title }} <template v-if="duplicateMatch.year">({{ duplicateMatch.year }})</template></span>
+                    <a href="#" @click.prevent="goToTitle(duplicateMatch)">View in Library →</a>
+                  </template>
+                </div>
+              </div>
+            </transition>
+
+            <!-- Season & Episode inputs for Series/Anime when locked on TMDb -->
+            <div v-if="selectedTmdb && (form.type === 'TV Show' || form.type === 'Anime')" class="form-grid-top" style="margin-bottom: 16px;">
+              <div class="form-group flex-1">
+                <label for="req-season-locked">Request Specific Season <span class="opt-label">(optional)</span></label>
+                <div class="input-with-icon">
+                  <i class="ph ph-hash"></i>
+                  <input
+                    id="req-season-locked"
+                    v-model="form.season"
+                    type="number"
+                    min="1"
+                    placeholder="e.g. 4 (leave blank for entire show)"
+                    class="request-input"
+                  />
+                </div>
+              </div>
+
+              <div class="form-group flex-1">
+                <label for="req-episode-locked">Request Specific Episode <span class="opt-label">(optional)</span></label>
+                <div class="input-with-icon">
+                  <i class="ph ph-film-strip"></i>
+                  <input
+                    id="req-episode-locked"
+                    v-model="form.episode"
+                    type="number"
+                    min="1"
+                    placeholder="e.g. 1"
+                    class="request-input"
+                  />
+                </div>
+              </div>
+            </div>
+
             <!-- Title & Autocomplete Search (when not locked on selected TMDb) -->
             <div v-if="!selectedTmdb" class="form-grid-top">
               <div class="form-group flex-2 search-input-group">
@@ -13720,11 +13780,17 @@ const RequestsPage = {
 
                 <!-- Duplicate / Existing Library Hint -->
                 <transition name="fade">
-                  <div v-if="duplicateMatch" class="duplicate-hint-card">
+                  <div v-if="(seriesInventory && seriesInventory.in_library) || duplicateMatch" class="duplicate-hint-card">
                     <i class="ph-fill ph-check-circle" style="color:var(--success, #4ade80)"></i>
                     <div class="duplicate-hint-content">
-                      <span><strong>Already in library:</strong> {{ duplicateMatch.title }} <template v-if="duplicateMatch.year">({{ duplicateMatch.year }})</template></span>
-                      <a href="#" @click.prevent="goToTitle(duplicateMatch)">View in Library →</a>
+                      <template v-if="seriesInventory && seriesInventory.in_library">
+                        <span><strong>In library:</strong> {{ seriesInventory.seasons_display }}</span>
+                        <span class="library-inventory-sub">Need a missing season or episode? Specify it below.</span>
+                      </template>
+                      <template v-else-if="duplicateMatch">
+                        <span><strong>Already in library:</strong> {{ duplicateMatch.title }} <template v-if="duplicateMatch.year">({{ duplicateMatch.year }})</template></span>
+                        <a href="#" @click.prevent="goToTitle(duplicateMatch)">View in Library →</a>
+                      </template>
                     </div>
                   </div>
                 </transition>
@@ -13754,6 +13820,38 @@ const RequestsPage = {
                     type="text"
                     maxlength="4"
                     placeholder="e.g. 2024"
+                    class="request-input"
+                  />
+                </div>
+              </div>
+
+              <!-- Season (TV Show / Anime) -->
+              <div v-if="form.type === 'TV Show' || form.type === 'Anime'" class="form-group flex-1">
+                <label for="req-season">Season <span class="opt-label">(optional)</span></label>
+                <div class="input-with-icon">
+                  <i class="ph ph-hash"></i>
+                  <input
+                    id="req-season"
+                    v-model="form.season"
+                    type="number"
+                    min="1"
+                    placeholder="e.g. 2"
+                    class="request-input"
+                  />
+                </div>
+              </div>
+
+              <!-- Episode (TV Show / Anime) -->
+              <div v-if="form.type === 'TV Show' || form.type === 'Anime'" class="form-group flex-1">
+                <label for="req-episode">Episode <span class="opt-label">(optional)</span></label>
+                <div class="input-with-icon">
+                  <i class="ph ph-film-strip"></i>
+                  <input
+                    id="req-episode"
+                    v-model="form.episode"
+                    type="number"
+                    min="1"
+                    placeholder="e.g. 5"
                     class="request-input"
                   />
                 </div>
@@ -13859,8 +13957,16 @@ const RequestsPage = {
               v-for="req in currentTabList"
               :key="req.id"
               class="req-item-card"
-              :class="['status-' + req.status, { 'has-poster': !!req.poster_path }]"
+              :class="['status-' + req.status, { 'has-poster': !!req.poster_path, 'has-backdrop': !!req.backdrop_path }]"
             >
+              <!-- Subtle backdrop background layer -->
+              <div
+                v-if="req.backdrop_path"
+                class="req-card-backdrop"
+                :style="{ backgroundImage: 'url(' + req.backdrop_path + ')' }"
+              ></div>
+              <div v-if="req.backdrop_path" class="req-card-backdrop-overlay"></div>
+
               <div class="req-card-body-horizontal">
                 <!-- Poster artwork on the left -->
                 <div class="req-poster-wrap">
@@ -13880,9 +13986,14 @@ const RequestsPage = {
                 <div class="req-card-main">
                   <div class="req-card-header">
                     <div class="req-badges-cluster">
-                      <div class="req-type-pill" :class="req.type ? req.type.toLowerCase().replace(/\\s+/g, '-') : 'movie'">
+                      <div class="req-type-pill" :class="req.type ? req.type.toLowerCase().replace(/\s+/g, '-') : 'movie'">
                         <i :class="getTypeIcon(req.type)"></i>
                         <span>{{ req.type || 'Movie' }}</span>
+                      </div>
+
+                      <div v-if="req.season" class="req-season-pill" :title="'Requested Season ' + req.season + (req.episode ? ' Episode ' + req.episode : '')">
+                        <i class="ph-bold ph-stack"></i>
+                        <span>Season {{ req.season }}<template v-if="req.episode"> • Ep {{ req.episode }}</template></span>
                       </div>
 
                       <div v-if="req.vote_average" class="req-rating-pill" title="TMDb Score">
@@ -13933,6 +14044,18 @@ const RequestsPage = {
 
               <!-- Action Buttons -->
               <div class="req-card-actions">
+                <!-- Delete / Cancel Button (Left Side) -->
+                <button
+                  v-if="devMode || req.status === 'pending'"
+                  class="req-action-btn delete-btn"
+                  @click="deleteRequest(req)"
+                  :title="devMode ? 'Delete this request' : 'Cancel or delete this request'"
+                >
+                  <i class="ph ph-trash"></i>
+                  <span v-if="!devMode">Cancel Request</span>
+                </button>
+
+                <!-- Watch Now Button -->
                 <button
                   v-if="req.status === 'completed' || req.detected_media_id"
                   class="req-action-btn watch-btn"
@@ -13971,27 +14094,6 @@ const RequestsPage = {
                   >
                     <i class="ph ph-pencil-simple"></i>
                     <span>Edit</span>
-                  </button>
-
-                  <button
-                    class="req-action-btn delete-btn"
-                    @click="deleteRequest(req)"
-                    title="Delete this request"
-                  >
-                    <i class="ph ph-trash"></i>
-                  </button>
-                </template>
-
-                <!-- Uncle / Standard Mode Controls -->
-                <template v-else>
-                  <button
-                    v-if="req.status === 'pending'"
-                    class="req-action-btn delete-btn"
-                    @click="deleteRequest(req)"
-                    title="Cancel or delete this request"
-                  >
-                    <i class="ph ph-trash"></i>
-                    <span>Cancel Request</span>
                   </button>
                 </template>
               </div>
@@ -14073,6 +14175,17 @@ const RequestsPage = {
                   </div>
                 </div>
 
+                <div v-if="editModal.form.type === 'TV Show' || editModal.form.type === 'Anime'" class="form-grid-top" style="margin-top:10px;">
+                  <div class="form-group flex-1">
+                    <label>Season <span class="opt-label">(optional)</span></label>
+                    <input v-model="editModal.form.season" type="number" min="1" placeholder="e.g. 2" class="request-input" />
+                  </div>
+                  <div class="form-group flex-1">
+                    <label>Episode <span class="opt-label">(optional)</span></label>
+                    <input v-model="editModal.form.episode" type="number" min="1" placeholder="e.g. 5" class="request-input" />
+                  </div>
+                </div>
+
                 <div class="form-group">
                   <label>Notes</label>
                   <textarea v-model="editModal.form.notes" rows="3" class="request-input request-textarea"></textarea>
@@ -14104,8 +14217,13 @@ const RequestsPage = {
       title: "",
       type: "Movie",
       year: "",
+      season: "",
+      episode: "",
       notes: "",
     });
+
+    // Series library inventory state (existing seasons/episodes)
+    const seriesInventory = ref(null);
 
     // TMDb state
     const selectedTmdb = ref(null);
@@ -14127,6 +14245,8 @@ const RequestsPage = {
         title: "",
         type: "Movie",
         year: "",
+        season: "",
+        episode: "",
         notes: "",
       },
       tmdb: null,
@@ -14135,11 +14255,9 @@ const RequestsPage = {
       isSearching: false,
     });
 
-    // Guard: Redirect Kids mode profiles
-    if (store.profile?.is_kids) {
-      router.replace("/");
-      return;
-    }
+    // Guard: Request media page is temporarily disabled
+    router.replace("/");
+    return;
 
     const pendingList = computed(() => items.value.filter((i) => i.status !== "completed"));
     const completedList = computed(() => items.value.filter((i) => i.status === "completed"));
@@ -14167,7 +14285,36 @@ const RequestsPage = {
       }
     }
 
+    async function fetchSeriesInventory(title, tmdbId = null) {
+      const q = (title || "").trim();
+      if (!q) {
+        seriesInventory.value = null;
+        return;
+      }
+      try {
+        let url = `/api/requests/series-inventory?title=${encodeURIComponent(q)}`;
+        if (tmdbId) url += `&tmdb_id=${encodeURIComponent(tmdbId)}`;
+        const res = await API.get(url);
+        if (res?.ok && res?.inventory?.in_library) {
+          seriesInventory.value = res.inventory;
+        } else {
+          seriesInventory.value = null;
+        }
+      } catch (e) {
+        seriesInventory.value = null;
+      }
+    }
+
     function onTypeChange() {
+      if (form.type === "TV Show" || form.type === "Anime") {
+        if (form.title.trim().length >= 2) {
+          fetchSeriesInventory(form.title.trim(), selectedTmdb.value?.tmdb_id);
+        }
+      } else {
+        seriesInventory.value = null;
+        form.season = "";
+        form.episode = "";
+      }
       // Re-trigger TMDb search if user changed type while typing
       if (form.title.trim().length >= 2 && !selectedTmdb.value) {
         triggerTmdbSearch();
@@ -14182,6 +14329,7 @@ const RequestsPage = {
         tmdbResults.value = [];
         showDropdown.value = false;
         duplicateMatch.value = null;
+        seriesInventory.value = null;
         isSearching.value = false;
         return;
       }
@@ -14216,6 +14364,13 @@ const RequestsPage = {
         duplicateMatch.value = null;
       });
 
+      // Parallel: check series inventory if type is TV Show / Anime
+      if (form.type === "TV Show" || form.type === "Anime") {
+        fetchSeriesInventory(q, null);
+      } else {
+        seriesInventory.value = null;
+      }
+
       // 2. Parallel: Search TMDb API via backend
       try {
         const mtype = form.type === "TV Show" ? "tv" : "multi";
@@ -14239,6 +14394,11 @@ const RequestsPage = {
       } else if (item.media_type === "movie") {
         if (form.type !== "Anime") form.type = "Movie";
       }
+      if (item.media_type === "tv" || form.type === "TV Show" || form.type === "Anime") {
+        fetchSeriesInventory(item.title, item.tmdb_id);
+      } else {
+        seriesInventory.value = null;
+      }
       showDropdown.value = false;
       tmdbResults.value = [];
     }
@@ -14254,10 +14414,13 @@ const RequestsPage = {
     function clearSearchInput() {
       form.title = "";
       form.year = "";
+      form.season = "";
+      form.episode = "";
       selectedTmdb.value = null;
       tmdbResults.value = [];
       showDropdown.value = false;
       duplicateMatch.value = null;
+      seriesInventory.value = null;
     }
 
     function useCustomTitle() {
@@ -14274,10 +14437,15 @@ const RequestsPage = {
       if (!form.title.trim()) return;
       submitting.value = true;
 
+      const seasonVal = (form.type === "TV Show" || form.type === "Anime") && form.season ? parseInt(form.season, 10) : null;
+      const episodeVal = (form.type === "TV Show" || form.type === "Anime") && form.episode ? parseInt(form.episode, 10) : null;
+
       const payload = {
         title: form.title.trim(),
         type: form.type,
         year: form.year ? form.year.trim() : null,
+        season: isNaN(seasonVal) ? null : seasonVal,
+        episode: isNaN(episodeVal) ? null : episodeVal,
         notes: form.notes ? form.notes.trim() : null,
         profile_id: store.profile?.id || null,
       };
@@ -14320,8 +14488,14 @@ const RequestsPage = {
     }
 
     async function deleteRequest(req) {
-      const msg = `Are you sure you want to delete the request for "${req.title}"?`;
-      if (!window.confirm(msg)) return;
+      const ok = await customConfirm({
+        title: devMode.value ? "Delete Request?" : "Cancel Request?",
+        message: `Are you sure you want to delete the request for "${req.title}"${req.season ? ' (Season ' + req.season + ')' : ''}?`,
+        icon: "ph ph-trash",
+        okText: devMode.value ? "Delete" : "Yes, Cancel Request",
+        danger: true,
+      });
+      if (!ok) return;
       try {
         const res = await API.del(`/api/requests/${req.id}`);
         if (res.ok) {
@@ -14334,7 +14508,14 @@ const RequestsPage = {
     }
 
     async function clearCompleted() {
-      if (!window.confirm("Clear all completed/added requests from the drive?")) return;
+      const ok = await customConfirm({
+        title: "Clear Completed Requests?",
+        message: "Are you sure you want to clear all completed requests from the list? Pending requests will remain untouched.",
+        icon: "ph ph-trash",
+        okText: "Clear Completed",
+        danger: true,
+      });
+      if (!ok) return;
       try {
         const res = await API.post("/api/requests/clear-completed");
         if (res.ok) {
@@ -14351,6 +14532,8 @@ const RequestsPage = {
       editModal.form.title = req.title || "";
       editModal.form.type = req.type || "Movie";
       editModal.form.year = req.year || "";
+      editModal.form.season = req.season != null ? req.season : "";
+      editModal.form.episode = req.episode != null ? req.episode : "";
       editModal.form.notes = req.notes || "";
       editModal.tmdb = req.tmdb_id ? {
         tmdb_id: req.tmdb_id,
@@ -14407,10 +14590,15 @@ const RequestsPage = {
 
     async function saveEditModal() {
       if (!editModal.targetId || !editModal.form.title.trim()) return;
+      const editSeason = (editModal.form.type === "TV Show" || editModal.form.type === "Anime") && editModal.form.season ? parseInt(editModal.form.season, 10) : null;
+      const editEpisode = (editModal.form.type === "TV Show" || editModal.form.type === "Anime") && editModal.form.episode ? parseInt(editModal.form.episode, 10) : null;
+
       const payload = {
         title: editModal.form.title.trim(),
         type: editModal.form.type,
         year: editModal.form.year.trim() || null,
+        season: isNaN(editSeason) ? null : editSeason,
+        episode: isNaN(editEpisode) ? null : editEpisode,
         notes: editModal.form.notes.trim() || null,
       };
 
@@ -14505,14 +14693,15 @@ const RequestsPage = {
     function goToLibraryMedia(req) {
       const mtype = req.detected_media_type || (req.type === "Movie" ? "movie" : "series");
       const mid = req.detected_media_id;
+      const seasonQuery = req.season ? `?season=${req.season}` : "";
       if (mid) {
         if (mtype === "movie") {
           router.push(`/title/movie/${mid}`);
         } else {
-          router.push(`/title/${mtype}/${req.detected_tmdb_id || mid}`);
+          router.push(`/title/${mtype}/${req.detected_tmdb_id || mid}${seasonQuery}`);
         }
       } else if (req.tmdb_id) {
-        router.push(`/title/${mtype}/${req.tmdb_id}`);
+        router.push(`/title/${mtype}/${req.tmdb_id}${seasonQuery}`);
       }
     }
 
@@ -14524,6 +14713,7 @@ const RequestsPage = {
       submitting,
       activeTab,
       form,
+      seriesInventory,
       selectedTmdb,
       tmdbResults,
       isSearching,
@@ -14579,7 +14769,7 @@ const router = createRouter({
     { path: "/collections", component: CollectionsPage },
     { path: "/collection/:id", component: CollectionDetailPage },
     { path: "/favorites", component: FavoritesPage },
-    { path: "/requests", component: RequestsPage },
+    { path: "/requests", redirect: "/" },
     { path: "/stats", component: StatsPage },
     { path: "/settings", component: SettingsPage },
     { path: "/logs", component: LogViewerPage },
@@ -14863,7 +15053,7 @@ const App = {
                   <i class="ph-bold ph-squares-four" style="font-size:1.1rem;color:#a78bfa"></i>
                   <span>Collections</span>
                 </div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goRequests" id="dd-requests">
+                <div v-if="false" class="profile-dropdown-item" @click.stop="goRequests" id="dd-requests">
                   <i class="ph-bold ph-paper-plane-tilt" style="font-size:1.1rem;color:#38bdf8"></i>
                   <span>Request Media</span>
                 </div>
@@ -16046,7 +16236,7 @@ const App = {
 
     function goRequests() {
       showProfileMenu.value = false;
-      router.push("/requests");
+      router.push("/");
     }
 
     function goSettings() {

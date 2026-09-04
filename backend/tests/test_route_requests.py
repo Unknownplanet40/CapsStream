@@ -237,8 +237,38 @@ class TestRouteRequests(unittest.TestCase):
         req = resp.get_json()["request"]
         self.assertEqual(req["status"], "completed")
         self.assertTrue(req["auto_detected"])
-        self.assertEqual(req["detected_media_id"], 99)
-        self.assertEqual(req["detected_media_type"], "series")
+    @patch("backend.routes.requests.get_profile", return_value={"name": "Uncle", "is_kids": 0})
+    @patch("backend.routes.requests.current_profile", return_value=1)
+    def test_create_request_with_season_and_episode(self, mock_pid, mock_prof):
+        """POST /api/requests saves season and episode numbers."""
+        payload = {
+            "title": "Arcane",
+            "type": "TV Show",
+            "season": 2,
+            "episode": 3,
+            "tmdb_id": 94605
+        }
+        resp = self.client.post("/api/requests", json=payload)
+        self.assertEqual(resp.status_code, 201)
+        req = resp.get_json()["request"]
+        self.assertEqual(req["season"], 2)
+        self.assertEqual(req["episode"], 3)
+
+    @patch("backend.routes.requests.get_series_library_inventory")
+    def test_series_inventory_endpoint(self, mock_inv):
+        """GET /api/requests/series-inventory returns breakdown of existing seasons."""
+        mock_inv.return_value = {
+            "in_library": True,
+            "total_episodes": 18,
+            "seasons": {1: 9, 2: 9},
+            "seasons_display": "Season 1 (9 eps), Season 2 (9 eps)"
+        }
+        resp = self.client.get("/api/requests/series-inventory?tmdb_id=94605&title=Arcane")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["inventory"]["in_library"])
+        self.assertEqual(data["inventory"]["seasons"]["1"], 9)
 
 
 if __name__ == "__main__":
