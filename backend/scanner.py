@@ -532,6 +532,13 @@ def scan_library(callback=None):
             start_intro_detection_pass()
         except Exception as e:
             print(f"[Scanner] Intro detection pass failed to start: {e}")
+        try:
+            from backend.routes.requests import sync_requests_with_library
+            _, auto_count = sync_requests_with_library()
+            if auto_count:
+                print(f"[Scanner] Auto-detected {auto_count} requested media added to library.")
+        except Exception as e:
+            print(f"[Scanner] Auto-detect requests failed: {e}")
 
     return {"new_files": count, "matched": matched_count, "errors": _scan_status["errors"]}
 

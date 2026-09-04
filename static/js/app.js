@@ -21,26 +21,43 @@ const API = {
     }
   },
   async get(url, options = {}) {
-    const isCacheable = url.startsWith("/api/media") || url.startsWith("/api/genres") || url.startsWith("/api/favorites") || url.startsWith("/api/collections");
+    let finalUrl = url;
+    if (options && typeof options === "object") {
+      const { cache, maxAge, headers, signal, ...queryParams } = options;
+      const keys = Object.keys(queryParams);
+      if (keys.length > 0) {
+        const params = new URLSearchParams();
+        for (const k of keys) {
+          if (queryParams[k] !== undefined && queryParams[k] !== null) {
+            params.append(k, queryParams[k]);
+          }
+        }
+        const qs = params.toString();
+        if (qs) {
+          finalUrl += (finalUrl.includes("?") ? "&" : "?") + qs;
+        }
+      }
+    }
+    const isCacheable = finalUrl.startsWith("/api/media") || finalUrl.startsWith("/api/genres") || finalUrl.startsWith("/api/favorites") || finalUrl.startsWith("/api/collections");
     const useCache = options.cache !== false && (isCacheable || options.cache === true);
     const maxAge = options.maxAge || 60000;
     const now = Date.now();
-    const entry = _API_CACHE.get(url);
+    const entry = _API_CACHE.get(finalUrl);
 
     if (useCache && entry) {
       // SWR: return cached entry immediately and revalidate in background if older than maxAge / 2
       if (now - entry.timestamp > maxAge / 2) {
-        fetch(url)
+        fetch(finalUrl)
           .then((r) => (r.ok ? r.json() : null))
           .then((fresh) => {
-            if (fresh) _API_CACHE.set(url, { data: fresh, timestamp: Date.now() });
+            if (fresh) _API_CACHE.set(finalUrl, { data: fresh, timestamp: Date.now() });
           })
           .catch(() => {});
       }
       return entry.data;
     }
 
-    const r = await fetch(url);
+    const r = await fetch(finalUrl);
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       throw new Error(err.error || `API error: ${r.status}`);
@@ -8717,7 +8734,8 @@ const ProfilesPage = {
             <div class="pin-profile-avatar-wrap">
               <img v-if="pinTarget.custom_avatar_url" :src="imgUrl(pinTarget.custom_avatar_url)" class="pin-profile-avatar-img" :alt="pinTarget.name" />
               <div v-else class="pin-profile-avatar-icon" :style="{ background: pinTarget.color || '#e50914' }">
-                <i :class="pinTarget.avatar ? 'ph-bold ' + pinTarget.avatar : 'ph-bold ph-user'"></i>
+                <i v-if="pinTarget.avatar && pinTarget.avatar.startsWith('ph-')" :class="'ph-bold ' + pinTarget.avatar"></i>
+                <span v-else>{{ pinTarget.avatar || '🎬' }}</span>
               </div>
               <div class="pin-profile-lock-badge">
                 <i class="ph-fill ph-lock-simple"></i>
@@ -8777,7 +8795,8 @@ const ProfilesPage = {
             <div class="pin-profile-avatar-wrap">
               <img v-if="deletePinTarget.custom_avatar_url" :src="imgUrl(deletePinTarget.custom_avatar_url)" class="pin-profile-avatar-img" :alt="deletePinTarget.name" />
               <div v-else class="pin-profile-avatar-icon" :style="{ background: deletePinTarget.color || '#e50914' }">
-                <i :class="deletePinTarget.avatar ? 'ph-bold ' + deletePinTarget.avatar : 'ph-bold ph-user'"></i>
+                <i v-if="deletePinTarget.avatar && deletePinTarget.avatar.startsWith('ph-')" :class="'ph-bold ' + deletePinTarget.avatar"></i>
+                <span v-else>{{ deletePinTarget.avatar || '🎬' }}</span>
               </div>
               <div class="pin-profile-lock-badge danger-badge">
                 <i class="ph-fill ph-trash"></i>
@@ -10584,6 +10603,24 @@ const WrappedStoryModal = {
   emits: ["close"],
   template: `
     <div v-if="show && data" class="wrapped-modal-backdrop" @click.self="closeStory">
+      <!-- Desktop Side Quick Navigation -->
+      <button
+        v-if="currentSlide > 0"
+        class="story-nav-desktop story-nav-desktop-prev"
+        @click.stop="prevSlide"
+        title="Previous Slide (Left Arrow)"
+      >
+        <i class="ph-bold ph-caret-left"></i>
+      </button>
+      <button
+        v-if="currentSlide < totalSlides - 1"
+        class="story-nav-desktop story-nav-desktop-next"
+        @click.stop="nextSlide"
+        title="Next Slide (Right Arrow)"
+      >
+        <i class="ph-bold ph-caret-right"></i>
+      </button>
+
       <div
         class="wrapped-story-card"
         :style="{ background: slideBackground }"
@@ -10616,9 +10653,10 @@ const WrappedStoryModal = {
         <!-- Top Actions Bar -->
         <div class="story-top-actions">
           <div class="story-top-left-chips">
-            <div class="story-profile-chip">
+            <div class="story-profile-chip" :title="(profile?.name || 'Viewer') + ' · ' + data.label + ' Wrapped'">
               <i class="ph-fill ph-sparkle" style="color:var(--gold)"></i>
-              <span>{{ profile?.name }} · {{ data.label }} Wrapped</span>
+              <span class="story-profile-name">{{ profile?.name || 'Viewer' }}</span>
+              <span class="story-profile-sub">· {{ data.label }} Wrapped</span>
             </div>
 
             <!-- Music Track Pill with EQ Visualizer & Track Switcher Popover -->
@@ -10667,7 +10705,9 @@ const WrappedStoryModal = {
                 </div>
               </div>
             </div>
+          </div>
 
+          <div class="story-top-right-btns">
             <button
               class="story-btn-circle story-audio-btn"
               :class="{ muted: isMuted }"
@@ -10676,382 +10716,408 @@ const WrappedStoryModal = {
             >
               <i class="ph-bold" :class="isMuted ? 'ph-speaker-simple-slash' : 'ph-speaker-simple-high'"></i>
             </button>
+            <button class="story-btn-circle story-close-btn" @click.stop="closeStory" title="Close (Esc)">
+              <i class="ph ph-x"></i>
+            </button>
           </div>
-
-          <button class="story-btn-circle story-close-btn" @click.stop="closeStory" title="Close (Esc)">
-            <i class="ph ph-x"></i>
-          </button>
         </div>
 
-        <!-- Tap Hitboxes for Prev / Next Navigation -->
-        <div class="story-tap-area story-tap-prev" @click="prevSlide" title="Previous Slide"></div>
-        <div class="story-tap-area story-tap-next" @click="nextSlide" title="Next Slide"></div>
-
         <!-- Slide 0: Welcome & Total Watch Time -->
-        <div v-if="currentSlide === 0" class="story-slide-content">
-          <div class="wrapped-hero-badge" style="margin-bottom:1.25rem">
-            <i class="ph-fill ph-popcorn"></i> CapsStream Wrapped {{ data.year || data.label }}
-          </div>
-          <h2 style="font-size:clamp(2rem, 5vw, 2.6rem);font-weight:900;line-height:1.15;margin-bottom:0.75rem;font-family:'Cabinet Grotesk',sans-serif">
-            {{ profile?.name ? profile.name + ', what a journey.' : 'What a journey.' }}
-          </h2>
-          <p style="font-size:1rem;color:rgba(255,255,255,0.78);margin-bottom:2rem;max-width:320px">
-            You hit play, escaped reality, and explored countless worlds.
-          </p>
-          <div style="background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.18);border-radius:24px;padding:2rem 1.5rem;width:100%;max-width:330px;backdrop-filter:blur(18px);box-shadow:0 16px 40px rgba(0,0,0,0.55)">
-            <div style="font-size:0.8rem;color:rgba(255,255,255,0.65);text-transform:uppercase;font-weight:700;letter-spacing:0.06em">Total Watch Time</div>
-            <div style="font-size:3.3rem;font-weight:900;color:#fff;margin:0.25rem 0 0.5rem;font-family:'Cabinet Grotesk',sans-serif">
-              {{ data.overview?.total_hours || 0 }} <span style="font-size:1.4rem;font-weight:700">hrs</span>
+        <div v-if="currentSlide === 0" class="story-slide-content" @click="onSlideClick">
+          <div class="story-slide-inner">
+            <div class="wrapped-hero-badge" style="margin-bottom:1.1rem">
+              <i class="ph-fill ph-popcorn"></i> CapsStream Wrapped {{ data.year || data.label }}
             </div>
-            <div style="font-size:0.92rem;color:rgba(255,255,255,0.85);font-weight:600">
-              Across {{ data.overview?.total_items || 0 }} titles & episodes
+            <h2 class="story-slide-title">
+              {{ profile?.name ? profile.name + ', what a journey.' : 'What a journey.' }}
+            </h2>
+            <p class="story-slide-subtitle">
+              You hit play, escaped reality, and explored countless worlds.
+            </p>
+            <div class="story-stat-hero-card">
+              <div class="story-stat-hero-label">Total Watch Time</div>
+              <div class="story-stat-hero-value">
+                {{ data.overview?.total_hours || 0 }} <span class="story-stat-hero-unit">hrs</span>
+              </div>
+              <div class="story-stat-hero-sub">
+                Across {{ data.overview?.total_items || 0 }} titles & episodes
+              </div>
             </div>
           </div>
         </div>
 
         <!-- Slide 1: Top Obsession ("The One You Couldn't Stop Watching") -->
-        <div v-else-if="currentSlide === 1" class="story-slide-content">
-          <div class="wrapped-hero-badge" style="margin-bottom:1rem">
-            <i class="ph-fill ph-flame" style="color:#f59e0b"></i> Your #1 Obsession
-          </div>
-          <h2 style="font-size:2.1rem;font-weight:900;line-height:1.2;margin-bottom:0.5rem">
-            The One You Couldn't Stop
-          </h2>
-          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
-            When this started playing, time stopped existing.
-          </p>
-          <div v-if="data.top_obsession" class="obsession-spotlight-card">
-            <div class="obsession-backdrop-wrap">
-              <img
-                v-if="data.top_obsession.backdrop_path"
-                :src="imgUrl(data.top_obsession.backdrop_path, 'w780')"
-                class="obsession-backdrop-img"
-              />
-              <div class="obsession-backdrop-gradient"></div>
-              <img
-                v-if="data.top_obsession.poster_path"
-                :src="imgUrl(data.top_obsession.poster_path, 'w185')"
-                class="obsession-poster-thumb"
-              />
+        <div v-else-if="currentSlide === 1" class="story-slide-content" @click="onSlideClick">
+          <div class="story-slide-inner">
+            <div class="wrapped-hero-badge" style="margin-bottom:0.85rem">
+              <i class="ph-fill ph-flame" style="color:#f59e0b"></i> Your #1 Obsession
             </div>
-            <div class="obsession-info-body">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-                <span class="rarity-badge gold">{{ data.top_obsession.badge }}</span>
-                <span style="font-size:0.75rem;color:var(--text-muted);font-weight:600">{{ data.top_obsession.year || '' }}</span>
-              </div>
-              <h3 style="font-size:1.35rem;font-weight:900;color:#fff;margin:4px 0">{{ data.top_obsession.title }}</h3>
-              <div style="display:flex;gap:16px;margin-top:10px;font-size:0.85rem">
-                <div>
-                  <span style="color:rgba(255,255,255,0.55);font-size:0.72rem;display:block">TIME STREAMED</span>
-                  <strong style="color:var(--gold);font-size:1.05rem">{{ data.top_obsession.hours }} hrs</strong>
+            <h2 class="story-slide-title">
+              The One You Couldn't Stop
+            </h2>
+            <p class="story-slide-subtitle">
+              When this started playing, time stopped existing.
+            </p>
+            <div v-if="data.top_obsession" class="obsession-spotlight-card">
+              <div class="obsession-backdrop-wrap">
+                <img
+                  v-if="data.top_obsession.backdrop_path"
+                  :src="imgUrl(data.top_obsession.backdrop_path, 'w780')"
+                  class="obsession-backdrop-img"
+                  alt="Backdrop"
+                />
+                <div v-else class="obsession-backdrop-fallback">
+                  <i class="ph-fill ph-film-strip"></i>
                 </div>
-                <div v-if="data.top_obsession.plays > 1">
-                  <span style="color:rgba(255,255,255,0.55);font-size:0.72rem;display:block">EPISODES WATCHED</span>
-                  <strong style="color:#fff;font-size:1.05rem">{{ data.top_obsession.plays }}</strong>
+                <div class="obsession-backdrop-gradient"></div>
+                <img
+                  v-if="data.top_obsession.poster_path"
+                  :src="imgUrl(data.top_obsession.poster_path, 'w185')"
+                  class="obsession-poster-thumb"
+                  alt="Poster"
+                />
+              </div>
+              <div class="obsession-info-body">
+                <div class="obsession-meta-row">
+                  <span class="rarity-badge gold">{{ data.top_obsession.badge }}</span>
+                  <span class="obsession-year">{{ data.top_obsession.year || '' }}</span>
+                </div>
+                <h3 class="obsession-title" :title="data.top_obsession.title">{{ data.top_obsession.title }}</h3>
+                <div class="obsession-metrics-grid">
+                  <div class="obsession-metric-col">
+                    <span class="obsession-metric-lbl">TIME STREAMED</span>
+                    <strong class="obsession-metric-val gold">{{ data.top_obsession.hours }} hrs</strong>
+                  </div>
+                  <div v-if="data.top_obsession.plays > 1" class="obsession-metric-col">
+                    <span class="obsession-metric-lbl">EPISODES WATCHED</span>
+                    <strong class="obsession-metric-val">{{ data.top_obsession.plays }}</strong>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          <div v-else style="color:rgba(255,255,255,0.7);font-size:1rem">
-            Keep watching to reveal your #1 obsession!
+            <div v-else class="story-empty-hint">
+              Keep watching to reveal your #1 obsession!
+            </div>
           </div>
         </div>
 
         <!-- Slide 2: Interactive Genre Quiz & Leaderboard -->
-        <div v-else-if="currentSlide === 2" class="story-slide-content">
-          <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
-            <i class="ph-fill ph-compass"></i> Musical Rhythm of Cinema
-          </div>
-          <h2 style="font-size:2rem;font-weight:900;line-height:1.2;margin-bottom:0.4rem">
-            {{ genreQuizAnswered ? 'Your Top Genres' : 'Test Your Intuition' }}
-          </h2>
-          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
-            {{ genreQuizAnswered ? 'These worlds claimed the highest share of your screen.' : (data.quizzes?.genre?.question || 'Which genre claimed your year?') }}
-          </p>
-
-          <!-- Interactive Quiz Stage -->
-          <div v-if="!genreQuizAnswered && data.quizzes?.genre" class="wrapped-quiz-box">
-            <div
-              v-for="opt in data.quizzes.genre.options"
-              :key="opt.id"
-              class="wrapped-quiz-option"
-              @click.stop="answerGenreQuiz(opt)"
-            >
-              <span>{{ opt.text }}</span>
-              <i class="ph-bold ph-arrow-right" style="opacity:0.6"></i>
+        <div v-else-if="currentSlide === 2" class="story-slide-content" @click="onSlideClick">
+          <div class="story-slide-inner">
+            <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
+              <i class="ph-fill ph-compass"></i> Musical Rhythm of Cinema
             </div>
-          </div>
+            <h2 class="story-slide-title">
+              {{ genreQuizAnswered ? 'Your Top Genres' : 'Test Your Intuition' }}
+            </h2>
+            <p class="story-slide-subtitle">
+              {{ genreQuizAnswered ? 'These worlds claimed the highest share of your screen.' : (data.quizzes?.genre?.question || 'Which genre claimed your year?') }}
+            </p>
 
-          <!-- Revealed Leaderboard -->
-          <div v-else style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:340px">
-            <div
-              v-for="(g, idx) in (data.content_breakdown?.top_genres || []).slice(0, 4)"
-              :key="g.genre"
-              style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-radius:16px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);backdrop-filter:blur(12px)"
-            >
-              <div style="display:flex;align-items:center;gap:12px">
-                <span style="font-size:1.15rem;font-weight:900;color:rgba(255,255,255,0.4)">#{{ idx + 1 }}</span>
-                <span style="font-size:1.05rem;font-weight:800;color:#fff">{{ g.genre }}</span>
+            <!-- Interactive Quiz Stage -->
+            <div v-if="!genreQuizAnswered && data.quizzes?.genre" class="wrapped-quiz-box">
+              <div
+                v-for="opt in data.quizzes.genre.options"
+                :key="opt.id"
+                class="wrapped-quiz-option"
+                @click.stop="answerGenreQuiz(opt)"
+              >
+                <span>{{ opt.text }}</span>
+                <i class="ph-bold ph-arrow-right" style="opacity:0.6"></i>
               </div>
-              <span :style="{ color: g.color || 'var(--accent)', fontWeight: 800, fontSize: '1rem' }">{{ g.percent }}%</span>
+            </div>
+
+            <!-- Revealed Leaderboard with Visual Bars -->
+            <div v-else class="wrapped-leaderboard-list">
+              <div
+                v-for="(g, idx) in (data.content_breakdown?.top_genres || []).slice(0, 4)"
+                :key="g.genre"
+                class="wrapped-leaderboard-item"
+              >
+                <div
+                  class="wrapped-leaderboard-bar"
+                  :style="{ width: Math.min(100, Math.max(8, g.percent || 0)) + '%', background: (g.color || 'var(--accent)') + '25', borderColor: (g.color || 'var(--accent)') + '40' }"
+                ></div>
+                <div class="wrapped-leaderboard-left">
+                  <span class="wrapped-leaderboard-rank">#{{ idx + 1 }}</span>
+                  <span class="wrapped-leaderboard-name" :title="g.genre">{{ g.genre }}</span>
+                </div>
+                <span class="wrapped-leaderboard-pct" :style="{ color: g.color || 'var(--accent)' }">{{ g.percent }}%</span>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- Slide 3: Speed Binge & Streaks -->
-        <div v-else-if="currentSlide === 3" class="story-slide-content">
-          <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
-            <i class="ph-fill ph-fire" style="color:#f97316"></i> Unstoppable Momentum
-          </div>
-          <h2 style="font-size:2.1rem;font-weight:900;line-height:1.2;margin-bottom:0.4rem">
-            The Speed Binge
-          </h2>
-          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
-            When a cliffhanger hit, there was no going back.
-          </p>
-
-          <div style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);border-radius:24px;padding:1.75rem 1.5rem;width:100%;max-width:340px;backdrop-filter:blur(16px)">
-            <div v-if="data.speed_binge?.fastest_season" style="margin-bottom:1.25rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,0.12);text-align:left">
-              <span style="font-size:0.7rem;text-transform:uppercase;color:var(--gold);font-weight:800;letter-spacing:0.06em">FASTEST SEASON COMPLETED</span>
-              <div style="font-size:1.15rem;font-weight:800;color:#fff;margin:3px 0">{{ data.speed_binge.fastest_season.title }} · Season {{ data.speed_binge.fastest_season.season }}</div>
-              <div style="font-size:0.85rem;color:rgba(255,255,255,0.8)">
-                {{ data.speed_binge.fastest_season.episodes_count }} episodes devoured in <strong>{{ data.speed_binge.fastest_season.time_label }}</strong>!
-              </div>
+        <div v-else-if="currentSlide === 3" class="story-slide-content" @click="onSlideClick">
+          <div class="story-slide-inner">
+            <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
+              <i class="ph-fill ph-fire" style="color:#f97316"></i> Unstoppable Momentum
             </div>
+            <h2 class="story-slide-title">
+              The Speed Binge
+            </h2>
+            <p class="story-slide-subtitle">
+              When a cliffhanger hit, there was no going back.
+            </p>
 
-            <template v-if="data.binge_records?.biggest_binge_day">
-              <div style="font-size:0.72rem;text-transform:uppercase;color:rgba(255,255,255,0.6);font-weight:700">PEAK SINGLE-DAY MARATHON</div>
-              <div style="font-size:2.3rem;font-weight:900;color:#fff;margin:0.2rem 0">{{ data.binge_records.biggest_binge_day.hours }} hrs</div>
-              <div style="font-size:0.85rem;color:rgba(255,255,255,0.85);font-weight:600">
-                {{ formatDateShort(data.binge_records.biggest_binge_day.date) }} · {{ data.binge_records.biggest_binge_day.items_count }} items streamed
+            <div class="story-binge-card">
+              <div v-if="data.speed_binge?.fastest_season" class="story-binge-section">
+                <span class="story-binge-tag">FASTEST SEASON COMPLETED</span>
+                <div class="story-binge-name">{{ data.speed_binge.fastest_season.title }} · Season {{ data.speed_binge.fastest_season.season }}</div>
+                <div class="story-binge-desc">
+                  {{ data.speed_binge.fastest_season.episodes_count }} episodes devoured in <strong>{{ data.speed_binge.fastest_season.time_label }}</strong>!
+                </div>
               </div>
-            </template>
 
-            <div style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:space-around">
-              <div>
-                <div style="font-size:0.72rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">Longest Streak</div>
-                <div style="font-size:1.5rem;font-weight:900;color:#f97316">🔥 {{ data.heatmap?.longest_streak || 0 }} <span style="font-size:0.8rem">days</span></div>
-              </div>
-              <div style="width:1px;height:32px;background:rgba(255,255,255,0.15)"></div>
-              <div>
-                <div style="font-size:0.72rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">Active Days</div>
-                <div style="font-size:1.5rem;font-weight:900;color:#38bdf8">📅 {{ data.heatmap?.days_active || 0 }}</div>
+              <template v-if="data.binge_records?.biggest_binge_day">
+                <div class="story-binge-marathon">
+                  <div class="story-binge-tag">PEAK SINGLE-DAY MARATHON</div>
+                  <div class="story-binge-val">{{ data.binge_records.biggest_binge_day.hours }} hrs</div>
+                  <div class="story-binge-desc">
+                    {{ formatDateShort(data.binge_records.biggest_binge_day.date) }} · {{ data.binge_records.biggest_binge_day.items_count }} items streamed
+                  </div>
+                </div>
+              </template>
+
+              <div class="story-binge-footer">
+                <div class="story-binge-stat">
+                  <div class="story-binge-stat-lbl">Longest Streak</div>
+                  <div class="story-binge-stat-num orange">🔥 {{ data.heatmap?.longest_streak || 0 }} <span class="unit">days</span></div>
+                </div>
+                <div class="story-binge-divider"></div>
+                <div class="story-binge-stat">
+                  <div class="story-binge-stat-lbl">Active Days</div>
+                  <div class="story-binge-stat-num blue">📅 {{ data.heatmap?.days_active || 0 }}</div>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
         <!-- Slide 4: Audio & Subtitle DNA -->
-        <div v-else-if="currentSlide === 4" class="story-slide-content">
-          <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
-            <i class="ph-fill ph-headphones"></i> Audio & Subtitle DNA
-          </div>
-          <h2 style="font-size:2.1rem;font-weight:900;line-height:1.2;margin-bottom:0.4rem">
-            How You Listen & Read
-          </h2>
-          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
-            Dialogue, accents, and soundscapes tailored to your ears.
-          </p>
-
-          <div style="width:100%;max-width:340px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);border-radius:24px;padding:1.75rem 1.5rem;backdrop-filter:blur(16px)">
-            <div style="display:inline-block;padding:4px 12px;border-radius:99px;background:rgba(168,85,247,0.25);border:1px solid #a855f7;color:#c084fc;font-size:0.8rem;font-weight:800;margin-bottom:12px">
-              {{ data.audio_sub_dna?.sub_style || 'Cinema Purist' }}
+        <div v-else-if="currentSlide === 4" class="story-slide-content" @click="onSlideClick">
+          <div class="story-slide-inner">
+            <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
+              <i class="ph-fill ph-headphones"></i> Audio & Subtitle DNA
             </div>
-            <p style="font-size:0.9rem;color:rgba(255,255,255,0.9);line-height:1.4;margin-bottom:1.5rem">
-              "{{ data.audio_sub_dna?.sub_desc || 'You enjoy cinema with crystal-clear dialogue and authentic audio.' }}"
+            <h2 class="story-slide-title">
+              How You Listen & Read
+            </h2>
+            <p class="story-slide-subtitle">
+              Dialogue, accents, and soundscapes tailored to your ears.
             </p>
 
-            <div class="dna-specs-grid">
-              <div class="dna-spec-card">
-                <span style="font-size:0.7rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">Audio Dial</span>
-                <strong style="display:block;font-size:0.95rem;color:#fff;margin-top:4px">{{ data.audio_sub_dna?.preferred_audio || 'Original' }}</strong>
+            <div class="story-dna-card">
+              <div class="story-dna-badge">
+                {{ data.audio_sub_dna?.sub_style || 'Cinema Purist' }}
               </div>
-              <div class="dna-spec-card">
-                <span style="font-size:0.7rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">Subtitles</span>
-                <strong style="display:block;font-size:0.95rem;color:#fff;margin-top:4px">{{ data.audio_sub_dna?.preferred_subtitle || 'English' }}</strong>
+              <p class="story-dna-quote">
+                "{{ data.audio_sub_dna?.sub_desc || 'You enjoy cinema with crystal-clear dialogue and authentic audio.' }}"
+              </p>
+
+              <div class="dna-specs-grid">
+                <div class="dna-spec-card">
+                  <span class="dna-spec-lbl">Audio Dial</span>
+                  <strong class="dna-spec-val" :title="data.audio_sub_dna?.preferred_audio || 'Original'">{{ data.audio_sub_dna?.preferred_audio || 'Original' }}</strong>
+                </div>
+                <div class="dna-spec-card">
+                  <span class="dna-spec-lbl">Subtitles</span>
+                  <strong class="dna-spec-val" :title="data.audio_sub_dna?.preferred_subtitle || 'English'">{{ data.audio_sub_dna?.preferred_subtitle || 'English' }}</strong>
+                </div>
               </div>
-            </div>
-            <div v-if="data.audio_sub_dna?.anime_ratio_pct > 0" style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1);font-size:0.82rem;color:rgba(255,255,255,0.75)">
-              🌸 Anime share of viewing: <strong style="color:#ec4899">{{ data.audio_sub_dna.anime_ratio_pct }}%</strong>
+              <div v-if="data.audio_sub_dna?.anime_ratio_pct > 0" class="story-dna-footer">
+                🌸 Anime share of viewing: <strong style="color:#ec4899">{{ data.audio_sub_dna.anime_ratio_pct }}%</strong>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- Slide 5: Viewing Clock & Peak Habit -->
-        <div v-else-if="currentSlide === 5" class="story-slide-content">
-          <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
-            <i class="ph-fill ph-clock"></i> Your Natural Rhythm
-          </div>
-          <h2 style="font-size:2.1rem;font-weight:900;line-height:1.2;margin-bottom:0.4rem">
-            When The Screen Glows
-          </h2>
-          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
-            Your schedule has an unmistakable signature fingerprint.
-          </p>
+        <div v-else-if="currentSlide === 5" class="story-slide-content" @click="onSlideClick">
+          <div class="story-slide-inner">
+            <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
+              <i class="ph-fill ph-clock"></i> Your Natural Rhythm
+            </div>
+            <h2 class="story-slide-title">
+              When The Screen Glows
+            </h2>
+            <p class="story-slide-subtitle">
+              Your schedule has an unmistakable signature fingerprint.
+            </p>
 
-          <div style="width:100%;max-width:340px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);border-radius:24px;padding:1.75rem 1.5rem;backdrop-filter:blur(16px)">
-            <div style="font-size:0.75rem;text-transform:uppercase;color:rgba(255,255,255,0.6);font-weight:700">Weekday vs. Weekend</div>
-            <div class="split-pill-track" style="margin:10px 0 6px">
-              <div class="split-weekday-fill" :style="{ width: data.habits?.weekday_pct + '%' }"></div>
-              <div class="split-weekend-fill" :style="{ width: data.habits?.weekend_pct + '%' }"></div>
-            </div>
-            <div style="display:flex;justify-content:space-between;font-size:0.82rem;font-weight:700;color:#fff;margin-bottom:1.25rem">
-              <span>Weekdays: {{ data.habits?.weekday_pct }}%</span>
-              <span>Weekends: {{ data.habits?.weekend_pct }}%</span>
-            </div>
-            <div style="background:rgba(255,255,255,0.06);border-radius:14px;padding:12px;display:flex;align-items:center;justify-content:space-between">
-              <span style="font-size:0.85rem;color:rgba(255,255,255,0.7);font-weight:600">Peak Window</span>
-              <span style="font-size:0.95rem;color:#fff;font-weight:800">{{ peakWindowLabel }}</span>
+            <div class="story-rhythm-card">
+              <div class="story-rhythm-lbl">Weekday vs. Weekend</div>
+              <div class="split-pill-track" style="margin:10px 0 8px">
+                <div class="split-weekday-fill" :style="{ width: (data.habits?.weekday_pct || 50) + '%' }"></div>
+                <div class="split-weekend-fill" :style="{ width: (data.habits?.weekend_pct || 50) + '%' }"></div>
+              </div>
+              <div class="story-rhythm-split-text">
+                <span>Weekdays: {{ data.habits?.weekday_pct ?? 0 }}%</span>
+                <span>Weekends: {{ data.habits?.weekend_pct ?? 0 }}%</span>
+              </div>
+              <div class="story-peak-window-box">
+                <span class="story-peak-window-lbl">Peak Window</span>
+                <span class="story-peak-window-val">{{ peakWindowLabel }}</span>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- Slide 6: Interactive Cast Quiz & Screen Stars -->
-        <div v-else-if="currentSlide === 6" class="story-slide-content">
-          <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
-            <i class="ph-fill ph-film-strip"></i> Familiar Faces
-          </div>
-          <h2 style="font-size:2rem;font-weight:900;line-height:1.2;margin-bottom:0.4rem">
-            {{ talentQuizAnswered ? 'Your Screen Stars' : 'Star Guesser' }}
-          </h2>
-          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
-            {{ talentQuizAnswered ? 'The talent that accompanied your greatest adventures.' : (data.quizzes?.talent?.question || 'Who was your most-watched star?') }}
-          </p>
-
-          <!-- Interactive Star Quiz -->
-          <div v-if="!talentQuizAnswered && data.quizzes?.talent" class="wrapped-quiz-box">
-            <div
-              v-for="opt in data.quizzes.talent.options"
-              :key="opt.id"
-              class="wrapped-quiz-option"
-              @click.stop="answerTalentQuiz(opt)"
-            >
-              <span>{{ opt.text }}</span>
-              <i class="ph-bold ph-star" style="opacity:0.6"></i>
+        <div v-else-if="currentSlide === 6" class="story-slide-content" @click="onSlideClick">
+          <div class="story-slide-inner">
+            <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
+              <i class="ph-fill ph-film-strip"></i> Familiar Faces
             </div>
-          </div>
+            <h2 class="story-slide-title">
+              {{ talentQuizAnswered ? 'Your Screen Stars' : 'Star Guesser' }}
+            </h2>
+            <p class="story-slide-subtitle">
+              {{ talentQuizAnswered ? 'The talent that accompanied your greatest adventures.' : (data.quizzes?.talent?.question || 'Who was your most-watched star?') }}
+            </p>
 
-          <!-- Revealed Talent Grid -->
-          <div v-else style="display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:340px">
-            <div
-              v-for="actor in (data.talent?.top_actors || []).slice(0, 4)"
-              :key="actor.name"
-              style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:18px;padding:12px 10px;text-align:center;cursor:pointer;position:relative;z-index:25;transition:transform 0.18s ease"
-              @click.stop="openCastSearch(actor.name)"
-              :title="'Search library for ' + actor.name"
-            >
-              <img
-                v-if="actor.profile_path"
-                :src="'https://image.tmdb.org/t/p/w185' + actor.profile_path"
-                class="talent-avatar"
-                style="width:52px;height:52px;border:2px solid rgba(255,255,255,0.2)"
-              />
-              <div v-else style="width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,0.1);margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-size:1.5rem">
-                🎭
+            <!-- Interactive Star Quiz -->
+            <div v-if="!talentQuizAnswered && data.quizzes?.talent" class="wrapped-quiz-box">
+              <div
+                v-for="opt in data.quizzes.talent.options"
+                :key="opt.id"
+                class="wrapped-quiz-option"
+                @click.stop="answerTalentQuiz(opt)"
+              >
+                <span>{{ opt.text }}</span>
+                <i class="ph-bold ph-star" style="opacity:0.6"></i>
               </div>
-              <div style="font-size:0.85rem;font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ actor.name }}</div>
-              <div style="font-size:0.72rem;color:var(--accent);font-weight:700;margin-top:2px">{{ actor.titles_count }} titles</div>
+            </div>
+
+            <!-- Revealed Talent Grid -->
+            <div v-else class="wrapped-talent-grid">
+              <div
+                v-for="actor in (data.talent?.top_actors || []).slice(0, 4)"
+                :key="actor.name"
+                class="wrapped-talent-card"
+                @click.stop="openCastSearch(actor.name)"
+                :title="'Search library for ' + actor.name"
+              >
+                <img
+                  v-if="actor.profile_path"
+                  :src="'https://image.tmdb.org/t/p/w185' + actor.profile_path"
+                  class="talent-avatar"
+                  alt="Actor"
+                />
+                <div v-else class="talent-avatar-fallback">
+                  🎭
+                </div>
+                <div class="wrapped-talent-name">{{ actor.name }}</div>
+                <div class="wrapped-talent-count">{{ actor.titles_count }} titles</div>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- Slide 7: Ultra-HD Tech Specs -->
-        <div v-else-if="currentSlide === 7" class="story-slide-content">
-          <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
-            <i class="ph-fill ph-monitor-play" style="color:#38bdf8"></i> Cinema Tech Specs
-          </div>
-          <h2 style="font-size:2.1rem;font-weight:900;line-height:1.2;margin-bottom:0.4rem">
-            Pixels & Bitrates
-          </h2>
-          <p style="font-size:0.92rem;color:rgba(255,255,255,0.75);margin-bottom:1.5rem">
-            Your personal server worked overtime rendering pristine quality.
-          </p>
-
-          <div style="width:100%;max-width:340px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);border-radius:24px;padding:1.75rem 1.5rem;backdrop-filter:blur(16px)">
-            <div style="font-size:0.75rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">ESTIMATED DATA STREAMED</div>
-            <div style="font-size:2.8rem;font-weight:900;color:#38bdf8;margin:0.2rem 0;font-family:'Cabinet Grotesk',sans-serif">
-              {{ data.tech_specs?.total_gb_streamed || 0 }} <span style="font-size:1.3rem;font-weight:700">GB</span>
+        <div v-else-if="currentSlide === 7" class="story-slide-content" @click="onSlideClick">
+          <div class="story-slide-inner">
+            <div class="wrapped-hero-badge" style="margin-bottom:0.75rem">
+              <i class="ph-fill ph-monitor-play" style="color:#38bdf8"></i> Cinema Tech Specs
             </div>
+            <h2 class="story-slide-title">
+              Pixels & Bitrates
+            </h2>
+            <p class="story-slide-subtitle">
+              Your personal server worked overtime rendering pristine quality.
+            </p>
 
-            <div class="dna-specs-grid" style="margin-top:14px">
-              <div class="dna-spec-card">
-                <span style="font-size:0.7rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">4K Ultra HD</span>
-                <strong style="display:block;font-size:1.15rem;color:#f59e0b;margin-top:3px">{{ data.tech_specs?.k4_percentage || 0 }}%</strong>
+            <div class="story-tech-card">
+              <div class="story-tech-lbl">ESTIMATED DATA STREAMED</div>
+              <div class="story-tech-val">
+                {{ data.tech_specs?.total_gb_streamed || 0 }} <span class="unit">GB</span>
               </div>
-              <div class="dna-spec-card">
-                <span style="font-size:0.7rem;color:rgba(255,255,255,0.6);text-transform:uppercase;font-weight:700">Direct Play</span>
-                <strong style="display:block;font-size:1.15rem;color:#10b981;margin-top:3px">{{ data.tech_specs?.direct_play_pct || 98.4 }}%</strong>
+
+              <div class="dna-specs-grid" style="margin-top:14px">
+                <div class="dna-spec-card">
+                  <span class="dna-spec-lbl">4K Ultra HD</span>
+                  <strong class="dna-spec-val gold">{{ data.tech_specs?.k4_percentage || 0 }}%</strong>
+                </div>
+                <div class="dna-spec-card">
+                  <span class="dna-spec-lbl">Direct Play</span>
+                  <strong class="dna-spec-val green">{{ data.tech_specs?.direct_play_pct || 98.4 }}%</strong>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
         <!-- Slide 8: Viewer Archetype Grand Reveal -->
-        <div v-else-if="currentSlide === 8" class="story-slide-content">
-          <div class="wrapped-hero-badge" style="margin-bottom:1.25rem">
-            <i class="ph-fill ph-crown" style="color:#ffd700"></i> Persona Unlocked
-          </div>
-          <h2 style="font-size:2.2rem;font-weight:900;line-height:1.2;margin-bottom:0.75rem">
-            Your Viewer Archetype
-          </h2>
-          <div
-            style="background:rgba(255,255,255,0.08);border-radius:28px;padding:2.25rem 1.75rem;width:100%;max-width:340px;backdrop-filter:blur(20px);margin-top:0.75rem;box-shadow:0 16px 40px rgba(0,0,0,0.6)"
-            :style="{ borderColor: (data.archetype?.color || 'var(--accent)') + '88', borderWidth: '2px', borderStyle: 'solid' }"
-          >
+        <div v-else-if="currentSlide === 8" class="story-slide-content" @click="onSlideClick">
+          <div class="story-slide-inner">
+            <div class="wrapped-hero-badge" style="margin-bottom:1rem">
+              <i class="ph-fill ph-crown" style="color:#ffd700"></i> Persona Unlocked
+            </div>
+            <h2 class="story-slide-title">
+              Your Viewer Archetype
+            </h2>
             <div
-              class="archetype-preview-icon"
-              :style="{ background: (data.archetype?.color || 'var(--accent)') + '33', color: data.archetype?.color || 'var(--accent)', margin: '0 auto 1.25rem' }"
+              class="story-archetype-card"
+              :style="{ borderColor: (data.archetype?.color || 'var(--accent)') + '88' }"
             >
-              <i :class="'ph-bold ' + (data.archetype?.badge || 'ph-film-strip')"></i>
+              <div
+                class="archetype-preview-icon"
+                :style="{ background: (data.archetype?.color || 'var(--accent)') + '33', color: data.archetype?.color || 'var(--accent)', margin: '0 auto 1.1rem' }"
+              >
+                <i :class="'ph-bold ' + (data.archetype?.badge || 'ph-film-strip')"></i>
+              </div>
+              <div class="story-archetype-title">
+                {{ data.archetype?.title }}
+              </div>
+              <p class="story-archetype-tagline">
+                "{{ data.archetype?.tagline }}"
+              </p>
+              <p class="story-archetype-desc">
+                {{ data.archetype?.description }}
+              </p>
             </div>
-            <div style="font-size:1.6rem;font-weight:900;color:#fff;margin-bottom:0.5rem;font-family:'Cabinet Grotesk',sans-serif">
-              {{ data.archetype?.title }}
-            </div>
-            <p style="font-size:0.95rem;font-style:italic;color:rgba(255,255,255,0.9);line-height:1.4;margin-bottom:1rem">
-              "{{ data.archetype?.tagline }}"
-            </p>
-            <p style="font-size:0.82rem;color:rgba(255,255,255,0.65);line-height:1.4">
-              {{ data.archetype?.description }}
-            </p>
           </div>
         </div>
 
         <!-- Slide 9: Multi-Theme Poster Generator & HD Export -->
-        <div v-else-if="currentSlide === 9" class="story-slide-content" style="padding-top:68px">
-          <h3 style="font-size:1.35rem;font-weight:900;margin-bottom:0.5rem;color:#fff">
-            Your {{ data.label }} Snapshot
-          </h3>
+        <div v-else-if="currentSlide === 9" class="story-slide-content" @click="onSlideClick">
+          <div class="story-slide-inner story-poster-inner">
+            <h3 class="story-poster-title">
+              Your {{ data.label }} Snapshot
+            </h3>
 
-          <!-- Theme Selector Pills -->
-          <div class="poster-theme-selector">
-            <button
-              v-for="th in posterThemes"
-              :key="th.id"
-              class="poster-theme-pill"
-              :class="{ active: selectedPosterTheme === th.id }"
-              @click.stop="setPosterTheme(th.id)"
-            >
-              {{ th.label }}
-            </button>
-          </div>
+            <!-- Theme Selector Pills -->
+            <div class="poster-theme-selector">
+              <button
+                v-for="th in posterThemes"
+                :key="th.id"
+                class="poster-theme-pill"
+                :class="{ active: selectedPosterTheme === th.id }"
+                @click.stop="setPosterTheme(th.id)"
+              >
+                {{ th.label }}
+              </button>
+            </div>
 
-          <!-- Live Preview Canvas -->
-          <div class="poster-preview-canvas-wrap" style="margin-bottom:1.25rem">
-            <canvas ref="posterCanvasRef" class="poster-preview-canvas"></canvas>
-          </div>
+            <!-- Live Preview Canvas -->
+            <div class="poster-preview-canvas-wrap">
+              <canvas ref="posterCanvasRef" class="poster-preview-canvas"></canvas>
+            </div>
 
-          <div style="display:flex;gap:10px;width:100%;max-width:340px;justify-content:center;z-index:30;position:relative">
-            <button class="btn btn-primary" @click.stop="downloadPoster" style="flex:1;padding:12px;font-weight:800">
-              <i class="ph-bold ph-download-simple" style="margin-right:6px"></i> Download Poster (HD)
-            </button>
-            <button class="btn btn-secondary" @click.stop="replayStory" title="Replay Story">
-              <i class="ph ph-arrow-counter-clockwise"></i>
-            </button>
+            <div class="story-poster-actions">
+              <button class="btn btn-primary story-poster-dl-btn" @click.stop="downloadPoster">
+                <i class="ph-bold ph-download-simple" style="margin-right:6px"></i> Download Poster (HD)
+              </button>
+              <button class="btn btn-secondary story-poster-replay-btn" @click.stop="replayStory" title="Replay Story">
+                <i class="ph ph-arrow-counter-clockwise"></i>
+              </button>
+            </div>
           </div>
         </div>
 
         <!-- Slide Footer Indicator -->
-        <div style="position:absolute;bottom:12px;left:0;right:0;text-align:center;font-size:0.72rem;color:rgba(255,255,255,0.4);pointer-events:none;z-index:20">
+        <div class="story-footer-hint">
           Tap left/right to navigate · Hold to pause
         </div>
       </div>
@@ -11236,6 +11302,19 @@ const WrappedStoryModal = {
     function onPointerUp() {
       isPaused.value = false;
       wrappedMusicPlayer.resume(isMuted.value);
+    }
+
+    function onSlideClick(e) {
+      if (e.target.closest("button, a, .wrapped-quiz-option, .wrapped-talent-card, .poster-theme-pill, .story-music-wrapper, .track-popover-item")) {
+        return;
+      }
+      const rect = e.currentTarget.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      if (clickX < rect.width * 0.3) {
+        prevSlide();
+      } else {
+        nextSlide();
+      }
     }
 
     function closeStory() {
@@ -11516,6 +11595,7 @@ const WrappedStoryModal = {
       replayStory,
       onPointerDown,
       onPointerUp,
+      onSlideClick,
       closeStory,
       formatDateShort,
       formatHeatmapDate,
@@ -13455,6 +13535,1033 @@ const LogViewerPage = {
   }
 };
 
+// ─── Requests Page (Offline / Drive-Based) ────────────────────
+
+const RequestsPage = {
+  template: `
+    <div class="requests-page">
+      <div class="requests-container">
+        <!-- Header -->
+        <div class="requests-header">
+          <div class="requests-header-left">
+            <div class="requests-badge-title">
+              <i class="ph-fill ph-paper-plane-tilt"></i>
+              <span>OFFLINE DRIVE MEDIA REQUESTS</span>
+            </div>
+            <h1 class="requests-main-title">Request a Movie or Show</h1>
+            <p class="requests-subtitle">
+              Search any title via TMDb or submit a custom request. Items are saved directly to this drive for review and loading.
+            </p>
+          </div>
+
+          <div class="requests-header-badges">
+            <div v-if="devMode" class="dev-badge-indicator" title="Root DEV file detected">
+              <i class="ph-bold ph-code"></i>
+              <span>DEV MODE (Maintainer)</span>
+            </div>
+            <div v-else class="drive-badge-indicator" title="Offline storage on hard drive">
+              <i class="ph-bold ph-hard-drive"></i>
+              <span>LOCAL DRIVE STORAGE</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Request Submission Form -->
+        <div class="request-form-card">
+          <div class="request-form-header">
+            <div class="request-form-icon">
+              <i class="ph-bold ph-plus"></i>
+            </div>
+            <div>
+              <h3>New Media Request</h3>
+              <p>Search by title to find exact movie, show, or anime artwork and details</p>
+            </div>
+          </div>
+
+          <form @submit.prevent="submitRequest" class="request-form-body">
+            <!-- If TMDb item selected: show rich preview chip -->
+            <transition name="fade">
+              <div v-if="selectedTmdb" class="selected-tmdb-card">
+                <div class="selected-tmdb-poster-wrap">
+                  <img
+                    v-if="selectedTmdb.poster_path"
+                    :src="selectedTmdb.poster_path"
+                    :alt="selectedTmdb.title"
+                    class="selected-tmdb-poster"
+                  />
+                  <div v-else class="selected-tmdb-poster-fallback">
+                    <i :class="getTypeIcon(form.type)"></i>
+                  </div>
+                </div>
+
+                <div class="selected-tmdb-details">
+                  <div class="selected-tmdb-top-tags">
+                    <span class="tmdb-verified-badge">
+                      <i class="ph-bold ph-seal-check"></i> TMDb Matched
+                    </span>
+                    <span class="req-type-pill" :class="form.type ? form.type.toLowerCase().replace(/\\s+/g, '-') : 'movie'">
+                      <i :class="getTypeIcon(form.type)"></i>
+                      <span>{{ form.type }}</span>
+                    </span>
+                    <span v-if="selectedTmdb.vote_average" class="req-rating-pill">
+                      <i class="ph-fill ph-star" style="color:var(--gold)"></i>
+                      <span>{{ selectedTmdb.vote_average }}</span>
+                    </span>
+                  </div>
+
+                  <h3 class="selected-tmdb-title">
+                    {{ selectedTmdb.title }}
+                    <span v-if="selectedTmdb.year" class="selected-tmdb-year">({{ selectedTmdb.year }})</span>
+                  </h3>
+
+                  <p v-if="selectedTmdb.overview" class="selected-tmdb-overview">
+                    {{ selectedTmdb.overview }}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm selected-tmdb-change-btn"
+                  @click="clearSelectedTmdb"
+                  title="Search for a different title"
+                >
+                  <i class="ph-bold ph-arrows-clockwise"></i>
+                  <span>Change</span>
+                </button>
+              </div>
+            </transition>
+
+            <!-- Title & Autocomplete Search (when not locked on selected TMDb) -->
+            <div v-if="!selectedTmdb" class="form-grid-top">
+              <div class="form-group flex-2 search-input-group">
+                <label for="req-title">Title <span class="required-star">*</span></label>
+                <div class="input-with-icon">
+                  <i v-if="isSearching" class="ph-bold ph-spinner ph-spin" style="color:#38bdf8"></i>
+                  <i v-else class="ph ph-magnifying-glass"></i>
+                  <input
+                    id="req-title"
+                    ref="titleInputRef"
+                    v-model="form.title"
+                    type="text"
+                    placeholder="Search movie, show, or anime title (e.g. Inception, Severance)..."
+                    required
+                    autocomplete="off"
+                    class="request-input"
+                    @input="onTitleInput"
+                    @focus="onTitleFocus"
+                  />
+                  <button
+                    v-if="form.title"
+                    type="button"
+                    class="clear-title-btn"
+                    @click="clearSearchInput"
+                    title="Clear search"
+                  >
+                    <i class="ph-bold ph-x"></i>
+                  </button>
+                </div>
+
+                <!-- Autocomplete Floating Dropdown -->
+                <transition name="fade">
+                  <div
+                    v-if="showDropdown && (tmdbResults.length > 0 || isSearching || searchError)"
+                    class="tmdb-autocomplete-dropdown"
+                  >
+                    <div v-if="isSearching" class="tmdb-dropdown-status">
+                      <div class="loading-spinner-sm"></div>
+                      <span>Searching TMDb database...</span>
+                    </div>
+
+                    <template v-else-if="tmdbResults.length > 0">
+                      <div
+                        v-for="item in tmdbResults"
+                        :key="item.tmdb_id"
+                        class="tmdb-dropdown-item"
+                        @mousedown.prevent="selectTmdb(item)"
+                      >
+                        <div class="tmdb-dropdown-poster">
+                          <img v-if="item.poster_path" :src="item.poster_path" :alt="item.title" loading="lazy" />
+                          <div v-else class="tmdb-poster-none"><i class="ph ph-film-strip"></i></div>
+                        </div>
+                        <div class="tmdb-dropdown-info">
+                          <div class="tmdb-dropdown-title-row">
+                            <span class="tmdb-dropdown-title">{{ item.title }}</span>
+                            <span v-if="item.year" class="tmdb-dropdown-year">({{ item.year }})</span>
+                            <span class="tmdb-dropdown-badge" :class="item.media_type">
+                              {{ item.media_type === 'tv' ? 'Series' : 'Movie' }}
+                            </span>
+                          </div>
+                          <div class="tmdb-dropdown-meta-row">
+                            <span v-if="item.vote_average" class="tmdb-dropdown-rating">
+                              <i class="ph-fill ph-star"></i> {{ item.vote_average }}
+                            </span>
+                            <span v-if="item.overview" class="tmdb-dropdown-synopsis">
+                              {{ item.overview }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="tmdb-dropdown-footer" @mousedown.prevent="useCustomTitle">
+                        <i class="ph-bold ph-pencil-simple"></i>
+                        <span>Can't find it or offline? <strong>Submit "{{ form.title }}" as custom request</strong></span>
+                      </div>
+                    </template>
+
+                    <div v-else-if="searchError || tmdbResults.length === 0" class="tmdb-dropdown-status">
+                      <i class="ph-bold ph-wifi-slash" style="font-size:1.1rem;color:var(--text-muted)"></i>
+                      <span>No TMDb matches found or offline &bull;</span>
+                      <button type="button" class="btn-link-action" @mousedown.prevent="useCustomTitle">
+                        Use custom title
+                      </button>
+                    </div>
+                  </div>
+                </transition>
+
+                <!-- Duplicate / Existing Library Hint -->
+                <transition name="fade">
+                  <div v-if="duplicateMatch" class="duplicate-hint-card">
+                    <i class="ph-fill ph-check-circle" style="color:var(--success, #4ade80)"></i>
+                    <div class="duplicate-hint-content">
+                      <span><strong>Already in library:</strong> {{ duplicateMatch.title }} <template v-if="duplicateMatch.year">({{ duplicateMatch.year }})</template></span>
+                      <a href="#" @click.prevent="goToTitle(duplicateMatch)">View in Library →</a>
+                    </div>
+                  </div>
+                </transition>
+              </div>
+
+              <!-- Media Type Dropdown -->
+              <div class="form-group flex-1">
+                <label for="req-type">Media Type</label>
+                <div class="input-with-icon">
+                  <i class="ph ph-tag"></i>
+                  <select id="req-type" v-model="form.type" class="request-input request-select" @change="onTypeChange">
+                    <option value="Movie">Movie</option>
+                    <option value="TV Show">TV Show / Series</option>
+                    <option value="Anime">Anime</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Release Year -->
+              <div class="form-group flex-1">
+                <label for="req-year">Release Year <span class="opt-label">(optional)</span></label>
+                <div class="input-with-icon">
+                  <i class="ph ph-calendar-blank"></i>
+                  <input
+                    id="req-year"
+                    v-model="form.year"
+                    type="text"
+                    maxlength="4"
+                    placeholder="e.g. 2024"
+                    class="request-input"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <!-- Notes Field -->
+            <div class="form-group">
+              <label for="req-notes">Notes or Preferences <span class="opt-label">(optional)</span></label>
+              <div class="input-with-icon textarea-wrap">
+                <i class="ph ph-chat-text"></i>
+                <textarea
+                  id="req-notes"
+                  v-model="form.notes"
+                  rows="2"
+                  placeholder="e.g. Season 2 only, English dub, 4K if possible, etc."
+                  class="request-input request-textarea"
+                ></textarea>
+              </div>
+            </div>
+
+            <div class="form-footer">
+              <span class="offline-note">
+                <i class="ph-bold ph-shield-check"></i> Saved directly to data/requests.json &bull; 100% offline
+              </span>
+              <button type="submit" class="btn btn-primary submit-req-btn" :disabled="submitting || !form.title.trim()">
+                <i v-if="submitting" class="ph-bold ph-spinner ph-spin"></i>
+                <i v-else class="ph-bold ph-paper-plane-tilt"></i>
+                <span>{{ submitting ? 'Submitting...' : 'Submit Request' }}</span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Requests List Section -->
+        <div class="requests-list-container">
+          <div class="requests-tabs-bar">
+            <div class="requests-tabs">
+              <button
+                class="requests-tab-btn"
+                :class="{ active: activeTab === 'pending' }"
+                @click="activeTab = 'pending'"
+              >
+                <i class="ph-bold ph-clock"></i>
+                <span>Pending</span>
+                <span class="tab-count-badge">{{ pendingList.length }}</span>
+              </button>
+              <button
+                class="requests-tab-btn"
+                :class="{ active: activeTab === 'completed' }"
+                @click="activeTab = 'completed'"
+              >
+                <i class="ph-bold ph-check-circle"></i>
+                <span>Added to Drive</span>
+                <span class="tab-count-badge completed-badge">{{ completedList.length }}</span>
+              </button>
+            </div>
+
+            <div class="requests-tab-actions">
+              <button
+                class="btn btn-secondary btn-sm sync-library-btn"
+                @click="syncLibrary"
+                :disabled="isSyncing"
+                title="Scan library to auto-detect if requested media has been added"
+              >
+                <i :class="isSyncing ? 'ph-bold ph-spinner ph-spin' : 'ph-bold ph-arrows-clockwise'"></i>
+                <span>Check Library</span>
+              </button>
+              <button
+                v-if="devMode && activeTab === 'completed' && completedList.length > 0"
+                class="btn btn-secondary btn-sm clear-btn"
+                @click="clearCompleted"
+              >
+                <i class="ph-bold ph-trash"></i>
+                <span>Clear Completed</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Loading State -->
+          <div v-if="loading" class="requests-loading">
+            <div class="loading-spinner"></div>
+            <span>Loading media requests...</span>
+          </div>
+
+          <!-- Empty State -->
+          <div v-else-if="currentTabList.length === 0" class="requests-empty">
+            <div class="empty-icon-bubble">
+              <i :class="activeTab === 'pending' ? 'ph-bold ph-check-circle' : 'ph-bold ph-tray'"></i>
+            </div>
+            <h3>{{ activeTab === 'pending' ? 'No Pending Requests' : 'No Completed Requests Yet' }}</h3>
+            <p>
+              {{ activeTab === 'pending'
+                ? 'All requested media has been added to the drive, or no requests have been submitted yet.'
+                : 'When requests are loaded onto the drive and marked as added, they will appear here.'
+              }}
+            </p>
+          </div>
+
+          <!-- Requests Grid -->
+          <div v-else class="requests-cards-grid">
+            <div
+              v-for="req in currentTabList"
+              :key="req.id"
+              class="req-item-card"
+              :class="['status-' + req.status, { 'has-poster': !!req.poster_path }]"
+            >
+              <div class="req-card-body-horizontal">
+                <!-- Poster artwork on the left -->
+                <div class="req-poster-wrap">
+                  <img
+                    v-if="req.poster_path"
+                    :src="req.poster_path"
+                    :alt="req.title"
+                    class="req-poster-img"
+                    loading="lazy"
+                  />
+                  <div v-else class="req-poster-fallback">
+                    <i :class="getTypeIcon(req.type)"></i>
+                  </div>
+                </div>
+
+                <!-- Card details on the right -->
+                <div class="req-card-main">
+                  <div class="req-card-header">
+                    <div class="req-badges-cluster">
+                      <div class="req-type-pill" :class="req.type ? req.type.toLowerCase().replace(/\\s+/g, '-') : 'movie'">
+                        <i :class="getTypeIcon(req.type)"></i>
+                        <span>{{ req.type || 'Movie' }}</span>
+                      </div>
+
+                      <div v-if="req.vote_average" class="req-rating-pill" title="TMDb Score">
+                        <i class="ph-fill ph-star" style="color:var(--gold)"></i>
+                        <span>{{ req.vote_average }}</span>
+                      </div>
+                    </div>
+
+                    <div class="req-status-pill" :class="[req.status, req.auto_detected ? 'in-library' : '']">
+                      <i :class="req.auto_detected ? 'ph-fill ph-check-circle' : req.status === 'completed' ? 'ph-fill ph-check-circle' : 'ph-fill ph-clock'"></i>
+                      <span>{{ req.auto_detected ? 'In Library' : req.status === 'completed' ? 'Added to Drive' : 'Pending Review' }}</span>
+                    </div>
+                  </div>
+
+                  <div class="req-title-row">
+                    <h2 class="req-title">{{ req.title }}</h2>
+                    <span v-if="req.year" class="req-year">({{ req.year }})</span>
+                    <span v-if="req.tmdb_id" class="tmdb-verified-badge" title="Matched on TMDb">
+                      <i class="ph-bold ph-seal-check"></i> TMDb
+                    </span>
+                  </div>
+
+                  <p v-if="req.overview" class="req-overview-text" :title="req.overview">
+                    {{ req.overview }}
+                  </p>
+
+                  <div v-if="req.notes" class="req-notes-box">
+                    <i class="ph ph-chat-text"></i>
+                    <span>{{ req.notes }}</span>
+                  </div>
+
+                  <div class="req-meta-row">
+                    <div class="req-requester" :title="'Requested by ' + (req.requested_by || 'User')">
+                      <div class="req-avatar" :style="{ background: req.profile_color || '#e50914' }">
+                        <img v-if="req.custom_avatar_url" :src="imgUrl(req.custom_avatar_url)" class="req-avatar-img" :alt="req.requested_by" />
+                        <i v-else-if="req.profile_avatar && req.profile_avatar.startsWith('ph-')" :class="'ph-bold ' + req.profile_avatar"></i>
+                        <span v-else>{{ req.profile_avatar || '🎬' }}</span>
+                      </div>
+                      <span class="req-name">{{ req.requested_by || 'CapsStream User' }}</span>
+                    </div>
+                    <div class="req-time">
+                      <i class="ph ph-calendar"></i>
+                      <span>{{ formatDate(req.created_at) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Action Buttons -->
+              <div class="req-card-actions">
+                <button
+                  v-if="req.status === 'completed' || req.detected_media_id"
+                  class="req-action-btn watch-btn"
+                  @click="goToLibraryMedia(req)"
+                  title="Open this title in CapsStream"
+                >
+                  <i class="ph-bold ph-play"></i>
+                  <span>Watch Now</span>
+                </button>
+
+                <!-- DEV Mode Controls -->
+                <template v-if="devMode">
+                  <button
+                    v-if="req.status === 'pending'"
+                    class="req-action-btn complete-btn"
+                    @click="updateStatus(req, 'completed')"
+                    title="Mark this request as Added to the drive"
+                  >
+                    <i class="ph-bold ph-check"></i>
+                    <span>Mark as Added</span>
+                  </button>
+                  <button
+                    v-else
+                    class="req-action-btn revert-btn"
+                    @click="updateStatus(req, 'pending')"
+                    title="Revert back to Pending"
+                  >
+                    <i class="ph-bold ph-arrow-counter-clockwise"></i>
+                    <span>Reopen</span>
+                  </button>
+
+                  <button
+                    class="req-action-btn edit-btn"
+                    @click="openEditModal(req)"
+                    title="Edit request details & TMDb match"
+                  >
+                    <i class="ph ph-pencil-simple"></i>
+                    <span>Edit</span>
+                  </button>
+
+                  <button
+                    class="req-action-btn delete-btn"
+                    @click="deleteRequest(req)"
+                    title="Delete this request"
+                  >
+                    <i class="ph ph-trash"></i>
+                  </button>
+                </template>
+
+                <!-- Uncle / Standard Mode Controls -->
+                <template v-else>
+                  <button
+                    v-if="req.status === 'pending'"
+                    class="req-action-btn delete-btn"
+                    @click="deleteRequest(req)"
+                    title="Cancel or delete this request"
+                  >
+                    <i class="ph ph-trash"></i>
+                    <span>Cancel Request</span>
+                  </button>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Edit Request Modal (DEV Mode) -->
+        <transition name="fade">
+          <div v-if="editModal.show" class="modal-backdrop" @click.self="editModal.show = false">
+            <div class="edit-request-modal-card" @click.stop>
+              <div class="modal-header">
+                <h3><i class="ph ph-pencil-simple"></i> Edit Request</h3>
+                <button class="modal-close-btn" @click="editModal.show = false"><i class="ph ph-x"></i></button>
+              </div>
+
+              <div class="modal-body">
+                <!-- TMDb Match Section in DEV Modal -->
+                <div class="edit-tmdb-section">
+                  <label class="edit-section-label">TMDb Metadata Match</label>
+                  <div v-if="editModal.tmdb" class="edit-tmdb-preview-card">
+                    <img v-if="editModal.tmdb.poster_path" :src="editModal.tmdb.poster_path" class="edit-tmdb-thumb" />
+                    <div class="edit-tmdb-info">
+                      <strong>{{ editModal.tmdb.title }} <span v-if="editModal.tmdb.year">({{ editModal.tmdb.year }})</span></strong>
+                      <span class="tmdb-id-chip">TMDb ID: {{ editModal.tmdb.tmdb_id }}</span>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-sm" @click="unlinkEditTmdb">
+                      <i class="ph-bold ph-unlink"></i> Unlink
+                    </button>
+                  </div>
+
+                  <div v-else class="edit-tmdb-search-wrap">
+                    <div class="input-with-icon">
+                      <i v-if="editModal.isSearching" class="ph-bold ph-spinner ph-spin" style="color:#38bdf8"></i>
+                      <i v-else class="ph ph-magnifying-glass"></i>
+                      <input
+                        v-model="editModal.searchQuery"
+                        type="text"
+                        placeholder="Search TMDb to attach official poster & metadata..."
+                        class="request-input"
+                        @input="onEditSearchInput"
+                      />
+                    </div>
+                    <div v-if="editModal.searchResults.length > 0" class="edit-tmdb-results-list">
+                      <div
+                        v-for="r in editModal.searchResults"
+                        :key="r.tmdb_id"
+                        class="edit-tmdb-result-row"
+                        @click="selectEditTmdb(r)"
+                      >
+                        <img v-if="r.poster_path" :src="r.poster_path" class="edit-result-thumb" />
+                        <div class="edit-result-thumb-fallback" v-else><i class="ph ph-film-strip"></i></div>
+                        <div class="edit-result-info">
+                          <strong>{{ r.title }}</strong> <span v-if="r.year">({{ r.year }})</span>
+                          <span class="edit-result-type-tag">{{ r.media_type === 'tv' ? 'Series' : 'Movie' }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label>Title</label>
+                  <input v-model="editModal.form.title" type="text" class="request-input" />
+                </div>
+
+                <div class="form-grid-top">
+                  <div class="form-group flex-1">
+                    <label>Media Type</label>
+                    <select v-model="editModal.form.type" class="request-input request-select">
+                      <option value="Movie">Movie</option>
+                      <option value="TV Show">TV Show</option>
+                      <option value="Anime">Anime</option>
+                    </select>
+                  </div>
+                  <div class="form-group flex-1">
+                    <label>Year</label>
+                    <input v-model="editModal.form.year" type="text" maxlength="4" class="request-input" />
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label>Notes</label>
+                  <textarea v-model="editModal.form.notes" rows="3" class="request-input request-textarea"></textarea>
+                </div>
+              </div>
+
+              <div class="modal-footer">
+                <button class="btn btn-secondary" @click="editModal.show = false">Cancel</button>
+                <button class="btn btn-primary" @click="saveEditModal" :disabled="!editModal.form.title.trim()">
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        </transition>
+      </div>
+    </div>
+  `,
+  setup() {
+    const router = VueRouter.useRouter();
+    const items = ref([]);
+    const devMode = ref(false);
+    const loading = ref(true);
+    const submitting = ref(false);
+    const activeTab = ref("pending");
+
+    // Form state
+    const form = reactive({
+      title: "",
+      type: "Movie",
+      year: "",
+      notes: "",
+    });
+
+    // TMDb state
+    const selectedTmdb = ref(null);
+    const tmdbResults = ref([]);
+    const isSearching = ref(false);
+    const showDropdown = ref(false);
+    const searchError = ref(false);
+    const duplicateMatch = ref(null);
+    const titleInputRef = ref(null);
+
+    let searchDebounce = null;
+    let editSearchDebounce = null;
+
+    // DEV Edit modal state
+    const editModal = reactive({
+      show: false,
+      targetId: null,
+      form: {
+        title: "",
+        type: "Movie",
+        year: "",
+        notes: "",
+      },
+      tmdb: null,
+      searchQuery: "",
+      searchResults: [],
+      isSearching: false,
+    });
+
+    // Guard: Redirect Kids mode profiles
+    if (store.profile?.is_kids) {
+      router.replace("/");
+      return;
+    }
+
+    const pendingList = computed(() => items.value.filter((i) => i.status !== "completed"));
+    const completedList = computed(() => items.value.filter((i) => i.status === "completed"));
+    const currentTabList = computed(() => activeTab.value === "pending" ? pendingList.value : completedList.value);
+
+    async function loadRequests() {
+      loading.value = true;
+      try {
+        const res = await API.get("/api/requests");
+        items.value = res.requests || [];
+        devMode.value = !!res.dev_mode;
+      } catch (err) {
+        addToast(err.message || "Failed to load requests", "error");
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    function onTitleFocus() {
+      if (form.title.trim().length >= 2) {
+        showDropdown.value = true;
+        if (tmdbResults.value.length === 0 && !isSearching.value) {
+          triggerTmdbSearch();
+        }
+      }
+    }
+
+    function onTypeChange() {
+      // Re-trigger TMDb search if user changed type while typing
+      if (form.title.trim().length >= 2 && !selectedTmdb.value) {
+        triggerTmdbSearch();
+      }
+    }
+
+    function onTitleInput() {
+      selectedTmdb.value = null;
+      if (searchDebounce) clearTimeout(searchDebounce);
+      const q = form.title.trim();
+      if (q.length < 2) {
+        tmdbResults.value = [];
+        showDropdown.value = false;
+        duplicateMatch.value = null;
+        isSearching.value = false;
+        return;
+      }
+      showDropdown.value = true;
+      isSearching.value = true;
+      searchDebounce = setTimeout(triggerTmdbSearch, 250);
+    }
+
+    async function triggerTmdbSearch() {
+      const q = form.title.trim();
+      if (q.length < 2) {
+        isSearching.value = false;
+        return;
+      }
+      isSearching.value = true;
+      searchError.value = false;
+      showDropdown.value = true;
+
+      // 1. Parallel: Search local library for duplicate hint
+      API.get("/api/search?q=" + encodeURIComponent(q)).then((res) => {
+        const list = Array.isArray(res) ? res : (res?.items || []);
+        if (list.length > 0) {
+          const lowerQ = q.toLowerCase();
+          const matched = list.find((m) => (m.title || "").toLowerCase() === lowerQ) ||
+                          list.find((m) => (m.title || "").toLowerCase().includes(lowerQ)) ||
+                          list[0];
+          duplicateMatch.value = matched;
+        } else {
+          duplicateMatch.value = null;
+        }
+      }).catch(() => {
+        duplicateMatch.value = null;
+      });
+
+      // 2. Parallel: Search TMDb API via backend
+      try {
+        const mtype = form.type === "TV Show" ? "tv" : "multi";
+        const url = `/api/tmdb/search?query=${encodeURIComponent(q)}&type=${encodeURIComponent(mtype)}`;
+        const results = await API.get(url);
+        tmdbResults.value = Array.isArray(results) ? results : [];
+      } catch (e) {
+        searchError.value = true;
+        tmdbResults.value = [];
+      } finally {
+        isSearching.value = false;
+      }
+    }
+
+    function selectTmdb(item) {
+      selectedTmdb.value = item;
+      form.title = item.title;
+      form.year = item.year || "";
+      if (item.media_type === "tv") {
+        if (form.type !== "Anime") form.type = "TV Show";
+      } else if (item.media_type === "movie") {
+        if (form.type !== "Anime") form.type = "Movie";
+      }
+      showDropdown.value = false;
+      tmdbResults.value = [];
+    }
+
+    function clearSelectedTmdb() {
+      selectedTmdb.value = null;
+      showDropdown.value = false;
+      nextTick(() => {
+        if (titleInputRef.value) titleInputRef.value.focus();
+      });
+    }
+
+    function clearSearchInput() {
+      form.title = "";
+      form.year = "";
+      selectedTmdb.value = null;
+      tmdbResults.value = [];
+      showDropdown.value = false;
+      duplicateMatch.value = null;
+    }
+
+    function useCustomTitle() {
+      showDropdown.value = false;
+      selectedTmdb.value = null;
+    }
+
+    function goToTitle(item) {
+      if (item.type === "movie") router.push(`/title/movie/${item.id}`);
+      else router.push(`/title/${item.type}/${item.tmdb_id || item.id}`);
+    }
+
+    async function submitRequest() {
+      if (!form.title.trim()) return;
+      submitting.value = true;
+
+      const payload = {
+        title: form.title.trim(),
+        type: form.type,
+        year: form.year ? form.year.trim() : null,
+        notes: form.notes ? form.notes.trim() : null,
+        profile_id: store.profile?.id || null,
+      };
+
+      if (selectedTmdb.value) {
+        payload.tmdb_id = selectedTmdb.value.tmdb_id || null;
+        payload.poster_path = selectedTmdb.value.poster_path || null;
+        payload.backdrop_path = selectedTmdb.value.backdrop_path || null;
+        payload.overview = selectedTmdb.value.overview || null;
+        payload.vote_average = selectedTmdb.value.vote_average || null;
+      }
+
+      try {
+        const res = await API.post("/api/requests", payload);
+        if (res.ok && res.request) {
+          items.value.unshift(res.request);
+          clearSearchInput();
+          form.notes = "";
+          form.type = "Movie";
+          activeTab.value = "pending";
+          addToast("Request submitted successfully!", "success");
+        }
+      } catch (err) {
+        addToast(err.message || "Failed to submit request", "error");
+      } finally {
+        submitting.value = false;
+      }
+    }
+
+    async function updateStatus(req, newStatus) {
+      try {
+        const res = await API.patch(`/api/requests/${req.id}`, { status: newStatus });
+        if (res.ok && res.request) {
+          req.status = newStatus;
+          addToast(newStatus === "completed" ? "Marked as Added to Drive!" : "Reverted back to Pending", "success");
+        }
+      } catch (err) {
+        addToast(err.message || "Failed to update status", "error");
+      }
+    }
+
+    async function deleteRequest(req) {
+      const msg = `Are you sure you want to delete the request for "${req.title}"?`;
+      if (!window.confirm(msg)) return;
+      try {
+        const res = await API.del(`/api/requests/${req.id}`);
+        if (res.ok) {
+          items.value = items.value.filter((i) => i.id !== req.id);
+          addToast("Request deleted", "info");
+        }
+      } catch (err) {
+        addToast(err.message || "Failed to delete request", "error");
+      }
+    }
+
+    async function clearCompleted() {
+      if (!window.confirm("Clear all completed/added requests from the drive?")) return;
+      try {
+        const res = await API.post("/api/requests/clear-completed");
+        if (res.ok) {
+          items.value = items.value.filter((i) => i.status !== "completed");
+          addToast("Completed requests cleared", "info");
+        }
+      } catch (err) {
+        addToast(err.message || "Failed to clear completed requests", "error");
+      }
+    }
+
+    function openEditModal(req) {
+      editModal.targetId = req.id;
+      editModal.form.title = req.title || "";
+      editModal.form.type = req.type || "Movie";
+      editModal.form.year = req.year || "";
+      editModal.form.notes = req.notes || "";
+      editModal.tmdb = req.tmdb_id ? {
+        tmdb_id: req.tmdb_id,
+        title: req.title,
+        year: req.year,
+        poster_path: req.poster_path,
+        backdrop_path: req.backdrop_path,
+        overview: req.overview,
+        vote_average: req.vote_average
+      } : null;
+      editModal.searchQuery = "";
+      editModal.searchResults = [];
+      editModal.show = true;
+    }
+
+    function onEditSearchInput() {
+      if (editSearchDebounce) clearTimeout(editSearchDebounce);
+      const q = editModal.searchQuery.trim();
+      if (q.length < 2) {
+        editModal.searchResults = [];
+        return;
+      }
+      editSearchDebounce = setTimeout(async () => {
+        editModal.isSearching = true;
+        try {
+          const url = `/api/tmdb/search?query=${encodeURIComponent(q)}&type=multi`;
+          const res = await API.get(url);
+          editModal.searchResults = Array.isArray(res) ? res : [];
+        } catch (e) {
+          editModal.searchResults = [];
+        } finally {
+          editModal.isSearching = false;
+        }
+      }, 300);
+    }
+
+    function selectEditTmdb(item) {
+      editModal.tmdb = item;
+      editModal.form.title = item.title;
+      editModal.form.year = item.year || "";
+      if (item.media_type === "tv" && editModal.form.type !== "Anime") {
+        editModal.form.type = "TV Show";
+      } else if (item.media_type === "movie" && editModal.form.type !== "Anime") {
+        editModal.form.type = "Movie";
+      }
+      editModal.searchResults = [];
+      editModal.searchQuery = "";
+    }
+
+    function unlinkEditTmdb() {
+      editModal.tmdb = null;
+      editModal.searchResults = [];
+    }
+
+    async function saveEditModal() {
+      if (!editModal.targetId || !editModal.form.title.trim()) return;
+      const payload = {
+        title: editModal.form.title.trim(),
+        type: editModal.form.type,
+        year: editModal.form.year.trim() || null,
+        notes: editModal.form.notes.trim() || null,
+      };
+
+      if (editModal.tmdb) {
+        payload.tmdb_id = editModal.tmdb.tmdb_id || null;
+        payload.poster_path = editModal.tmdb.poster_path || null;
+        payload.backdrop_path = editModal.tmdb.backdrop_path || null;
+        payload.overview = editModal.tmdb.overview || null;
+        payload.vote_average = editModal.tmdb.vote_average || null;
+      } else {
+        payload.tmdb_id = null;
+        payload.poster_path = null;
+        payload.backdrop_path = null;
+        payload.overview = null;
+        payload.vote_average = null;
+      }
+
+      try {
+        const res = await API.patch(`/api/requests/${editModal.targetId}`, payload);
+        if (res.ok && res.request) {
+          const idx = items.value.findIndex((i) => i.id === editModal.targetId);
+          if (idx !== -1) {
+            items.value[idx] = { ...items.value[idx], ...res.request };
+          }
+          editModal.show = false;
+          addToast("Request updated", "success");
+        }
+      } catch (err) {
+        addToast(err.message || "Failed to update request", "error");
+      }
+    }
+
+    function getTypeIcon(type) {
+      if (type === "TV Show") return "ph-bold ph-television";
+      if (type === "Anime") return "ph-bold ph-sparkle";
+      return "ph-bold ph-film-strip";
+    }
+
+    function formatDate(str) {
+      if (!str) return "";
+      try {
+        const d = new Date(str.replace(" ", "T"));
+        return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      } catch (e) {
+        return str;
+      }
+    }
+
+    function handleDocClick(e) {
+      if (!e.target.closest(".search-input-group")) {
+        showDropdown.value = false;
+      }
+    }
+
+    onMounted(() => {
+      loadRequests();
+      document.addEventListener("click", handleDocClick);
+    });
+
+    onUnmounted(() => {
+      document.removeEventListener("click", handleDocClick);
+    });
+
+    watch(() => store.profile, (newProf) => {
+      if (newProf?.is_kids) {
+        router.replace("/");
+      }
+    });
+
+    const isSyncing = ref(false);
+
+    async function syncLibrary() {
+      isSyncing.value = true;
+      try {
+        const res = await API.post("/api/requests/sync-library");
+        if (res.ok) {
+          items.value = res.requests || [];
+          if (res.detected_count > 0) {
+            addToast(`Auto-detected ${res.detected_count} requested title(s) in your library!`, "success");
+            activeTab.value = "completed";
+          } else {
+            addToast("Library checked. No new requested media found.", "info");
+          }
+        }
+      } catch (err) {
+        addToast(err.message || "Failed to check library", "error");
+      } finally {
+        isSyncing.value = false;
+      }
+    }
+
+    function goToLibraryMedia(req) {
+      const mtype = req.detected_media_type || (req.type === "Movie" ? "movie" : "series");
+      const mid = req.detected_media_id;
+      if (mid) {
+        if (mtype === "movie") {
+          router.push(`/title/movie/${mid}`);
+        } else {
+          router.push(`/title/${mtype}/${req.detected_tmdb_id || mid}`);
+        }
+      } else if (req.tmdb_id) {
+        router.push(`/title/${mtype}/${req.tmdb_id}`);
+      }
+    }
+
+    return {
+      store,
+      items,
+      devMode,
+      loading,
+      submitting,
+      activeTab,
+      form,
+      selectedTmdb,
+      tmdbResults,
+      isSearching,
+      showDropdown,
+      searchError,
+      duplicateMatch,
+      titleInputRef,
+      editModal,
+      pendingList,
+      completedList,
+      currentTabList,
+      isSyncing,
+      syncLibrary,
+      goToLibraryMedia,
+      onTitleInput,
+      onTitleFocus,
+      onTypeChange,
+      clearSelectedTmdb,
+      clearSearchInput,
+      useCustomTitle,
+      selectTmdb,
+      goToTitle,
+      submitRequest,
+      updateStatus,
+      deleteRequest,
+      clearCompleted,
+      openEditModal,
+      onEditSearchInput,
+      selectEditTmdb,
+      unlinkEditTmdb,
+      saveEditModal,
+      getTypeIcon,
+      formatDate,
+      imgUrl,
+    };
+  },
+};
+
 // ─── Router ───────────────────────────────────────────────────
 
 const router = createRouter({
@@ -13472,6 +14579,7 @@ const router = createRouter({
     { path: "/collections", component: CollectionsPage },
     { path: "/collection/:id", component: CollectionDetailPage },
     { path: "/favorites", component: FavoritesPage },
+    { path: "/requests", component: RequestsPage },
     { path: "/stats", component: StatsPage },
     { path: "/settings", component: SettingsPage },
     { path: "/logs", component: LogViewerPage },
@@ -13754,6 +14862,10 @@ const App = {
                 <div class="profile-dropdown-item" @click.stop="goCollections" id="dd-collections">
                   <i class="ph-bold ph-squares-four" style="font-size:1.1rem;color:#a78bfa"></i>
                   <span>Collections</span>
+                </div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goRequests" id="dd-requests">
+                  <i class="ph-bold ph-paper-plane-tilt" style="font-size:1.1rem;color:#38bdf8"></i>
+                  <span>Request Media</span>
                 </div>
                 <div class="profile-dropdown-item" @click.stop="goStats" id="dd-stats">
                   <i class="ph-bold ph-chart-polar" style="font-size:1.1rem;color:#f59e0b"></i>
@@ -14849,9 +15961,7 @@ const App = {
           { name: "Shows & Cartoons", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
           { name: "Movies", path: "/browse?type=movie", id: "nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
           { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
-          { name: "Playlists", path: "/playlists", id: "nav-playlists", isMatch: (r) => r.path.startsWith("/playlists") },
           { name: "Analytics & Wrapped", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
-          { name: "About", path: "/about", id: "nav-about", isMatch: (r) => r.path === "/about" },
         ];
       }
       return [
@@ -14859,9 +15969,7 @@ const App = {
         { name: "Movies", path: "/browse?type=movie", id: "nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
         { name: "Series", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
         { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
-        { name: "Playlists", path: "/playlists", id: "nav-playlists", isMatch: (r) => r.path.startsWith("/playlists") },
         { name: "Analytics & Wrapped", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
-        { name: "About", path: "/about", id: "nav-about", isMatch: (r) => r.path === "/about" },
       ];
     });
 
@@ -14880,7 +15988,7 @@ const App = {
         { name: "Movies", path: "/browse?type=movie", id: "nav-movies", icon: "ph-fill ph-film-strip", isMatch: (r) => r.fullPath === "/browse?type=movie" },
         { name: "Series", path: "/browse?type=series", id: "nav-series", icon: "ph-fill ph-television", isMatch: (r) => r.fullPath === "/browse?type=series" },
         { name: "Anime", path: "/browse?type=anime", id: "nav-anime", icon: "ph-fill ph-sparkle", isMatch: (r) => r.fullPath === "/browse?type=anime" },
-        { name: "Playlists", path: "/playlists", id: "nav-playlists", icon: "ph-fill ph-queue", isMatch: (r) => r.path.startsWith("/playlists") },
+        { name: "Watchlist", path: "/favorites", id: "nav-favorites", icon: "ph-fill ph-heart", isMatch: (r) => r.path === "/favorites" },
       ];
     });
 
@@ -14934,6 +16042,11 @@ const App = {
     function goCollections() {
       showProfileMenu.value = false;
       router.push("/collections");
+    }
+
+    function goRequests() {
+      showProfileMenu.value = false;
+      router.push("/requests");
     }
 
     function goSettings() {
@@ -15552,6 +16665,7 @@ const App = {
       toggleProfileMenu,
       goFavorites,
       goCollections,
+      goRequests,
       goStats,
       goSettings,
       goAbout,

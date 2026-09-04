@@ -776,17 +776,25 @@ def fetch_media_backdrops(tmdb_id, media_type="movie"):
 def search_tmdb(query, media_type="movie", year=None):
     """
     Search TMDb for movies or TV shows and return formatted list of candidates.
+    Supports media_type="movie", "tv", or "multi".
     """
     if not query:
         return []
-    endpoint = "search/movie" if media_type == "movie" else "search/tv"
+    is_multi = media_type in ("multi", "all")
+    if is_multi:
+        endpoint = "search/multi"
+    elif media_type == "tv":
+        endpoint = "search/tv"
+    else:
+        endpoint = "search/movie"
+
     params = {"query": str(query).strip(), "language": "en-US"}
     if year:
         try:
             y = int(year)
-            if media_type == "movie":
+            if endpoint == "search/movie":
                 params["year"] = str(y)
-            else:
+            elif endpoint == "search/tv":
                 params["first_air_date_year"] = str(y)
         except Exception:
             pass
@@ -802,9 +810,13 @@ def search_tmdb(query, media_type="movie", year=None):
 
     results = []
     for r in res.get("results", [])[:15]:
-        title = r.get("title") if media_type == "movie" else r.get("name")
-        orig_title = r.get("original_title") if media_type == "movie" else r.get("original_name")
-        release_date = r.get("release_date") if media_type == "movie" else r.get("first_air_date")
+        r_type = r.get("media_type", "movie") if is_multi else media_type
+        if r_type not in ("movie", "tv"):
+            continue
+        is_movie = (r_type == "movie")
+        title = r.get("title") if is_movie else r.get("name")
+        orig_title = r.get("original_title") if is_movie else r.get("original_name")
+        release_date = r.get("release_date") if is_movie else r.get("first_air_date")
         y = release_date[:4] if release_date else ""
         poster_path = r.get("poster_path")
         backdrop_path = r.get("backdrop_path")
@@ -818,7 +830,7 @@ def search_tmdb(query, media_type="movie", year=None):
             "poster_path": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None,
             "backdrop_path": f"https://image.tmdb.org/t/p/original{backdrop_path}" if backdrop_path else None,
             "vote_average": round(float(r.get("vote_average", 0)), 1),
-            "media_type": media_type
+            "media_type": r_type
         })
     return results
 

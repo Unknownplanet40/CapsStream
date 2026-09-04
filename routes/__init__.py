@@ -23,6 +23,7 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
     from routes.library import library_bp
     from routes.social import social_bp
     from routes.admin import admin_bp
+    from routes.requests import requests_bp
 
     # ── Register Blueprints ─────────────────────────────────────────────────
     app.register_blueprint(profiles_bp)
@@ -31,6 +32,7 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
     app.register_blueprint(library_bp)
     app.register_blueprint(social_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(requests_bp)
 
     # ── Auth / PIN — 5 per minute ───────────────────────────────────────────
     for view_func_name in [
