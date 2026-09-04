@@ -27,6 +27,7 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
         from .library import library_bp
         from .social import social_bp
         from .admin import admin_bp
+        from .music import music_bp
     except ImportError:
         from routes.profiles import profiles_bp
         from routes.media import media_bp
@@ -34,6 +35,7 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
         from routes.library import library_bp
         from routes.social import social_bp
         from routes.admin import admin_bp
+        from routes.music import music_bp
 
     # ── Register Blueprints ─────────────────────────────────────────────────
     app.register_blueprint(profiles_bp)
@@ -42,6 +44,7 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
     app.register_blueprint(library_bp)
     app.register_blueprint(social_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(music_bp)
 
     # ── Auth / PIN — 5 per minute ───────────────────────────────────────────
     for view_func_name in [
@@ -51,13 +54,21 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
         limiter.limit("5 per minute")(app.view_functions[view_func_name])
 
     # ── Scan — 1 per minute ─────────────────────────────────────────────────
-    limiter.limit("1 per minute")(app.view_functions["admin.api_scan"])
+    if "admin.api_scan" in app.view_functions:
+        limiter.limit("1 per minute")(app.view_functions["admin.api_scan"])
+    if "music.api_scan" in app.view_functions:
+        limiter.limit("1 per minute")(app.view_functions["music.api_scan"])
 
     # ── Search — 30 per minute ──────────────────────────────────────────────
-    limiter.limit("30 per minute")(app.view_functions["media.api_search"])
+    if "media.api_search" in app.view_functions:
+        limiter.limit("30 per minute")(app.view_functions["media.api_search"])
+    if "music.api_search" in app.view_functions:
+        limiter.limit("30 per minute")(app.view_functions["music.api_search"])
 
     # ── Streaming, Playback & High-Frequency endpoints — Unlimited (exempt) ─
     exempt_views = [
+        "music.api_stream",
+        "music.api_cover",
         "streaming.api_stream",
         "streaming.api_stream_start",
         "streaming.api_transcode_caps",

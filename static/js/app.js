@@ -4709,17 +4709,17 @@ const SettingsPage = {
               </div>
 
               <div class="paths-grid">
-                <div v-for="cat in ['movies', 'series', 'anime']" :key="cat" class="path-cat-card" :id="'paths-card-' + cat">
+                <div v-for="cat in ['movies', 'series', 'anime', 'music']" :key="cat" class="path-cat-card" :id="'paths-card-' + cat">
                   <!-- Category header -->
                   <div class="path-cat-header">
                     <div
                       class="path-cat-icon"
                       :class="'cat-' + cat"
                     >
-                      <i :class="cat === 'movies' ? 'ph ph-film-strip' : cat === 'series' ? 'ph ph-television' : 'ph ph-sparkle'"></i>
+                      <i :class="cat === 'movies' ? 'ph ph-film-strip' : cat === 'series' ? 'ph ph-television' : cat === 'anime' ? 'ph ph-sparkle' : 'ph ph-music-notes'"></i>
                     </div>
                     <div class="path-cat-title">
-                      <span class="path-cat-name">{{ cat === 'anime' ? 'Anime' : cat.charAt(0).toUpperCase() + cat.slice(1) }}</span>
+                      <span class="path-cat-name">{{ cat === 'anime' ? 'Anime' : cat === 'music' ? 'Music' : cat.charAt(0).toUpperCase() + cat.slice(1) }}</span>
                       <span class="path-cat-count">
                         {{ (form.media_paths[cat] || []).length }} {{ (form.media_paths[cat] || []).length === 1 ? 'path' : 'paths' }}
                           <span v-if="(form.disabled_paths[cat] || []).length" style="color:var(--text-muted,#888);font-size:0.78em;margin-left:4px">({{ (form.disabled_paths[cat] || []).length }} disabled)</span>
@@ -5642,11 +5642,13 @@ const SettingsPage = {
         movies: [],
         series: [],
         anime: [],
+        music: [],
       },
       disabled_paths: {
         movies: [],
         series: [],
         anime: [],
+        music: [],
       },
       library: {
         scan_on_startup: true,
@@ -5695,6 +5697,7 @@ const SettingsPage = {
         ...(form.value.media_paths.movies || []),
         ...(form.value.media_paths.series || []),
         ...(form.value.media_paths.anime || []),
+        ...(form.value.media_paths.music || []),
       ];
       if (!allPaths.length) return;
       try {
@@ -13473,6 +13476,8 @@ const router = createRouter({
     { path: "/collection/:id", component: CollectionDetailPage },
     { path: "/favorites", component: FavoritesPage },
     { path: "/stats", component: StatsPage },
+    { path: "/music", component: MusicPage },
+    { path: "/music/:tab", component: MusicPage },
     { path: "/settings", component: SettingsPage },
     { path: "/logs", component: LogViewerPage },
     { path: "/about", component: AboutPage },
@@ -13659,7 +13664,7 @@ const ScanProgressWidget = {
 // ─── Root App ─────────────────────────────────────────────────
 
 const App = {
-  components: { MediaCard, ScanProgressWidget, ShortcutsModal },
+  components: { MediaCard, ScanProgressWidget, ShortcutsModal, GlobalMusicDock, NowPlayingModal },
   template: `
     <!-- Loading screen -->
     <div class="loading-screen" v-if="appLoading">
@@ -13918,6 +13923,10 @@ const App = {
 
       <!-- Bottom-Left Floating Scan Progress Widget -->
       <scan-progress-widget />
+
+      <!-- Spotify Music Player Dock & Cinema Karaoke Overlay -->
+      <global-music-dock />
+      <now-playing-modal />
 
       <!-- Onboarding Preparation Overlay (First Run Setup) -->
       <div class="onboarding-overlay" v-if="store.onboardingWaiting">
@@ -14859,6 +14868,7 @@ const App = {
         { name: "Movies", path: "/browse?type=movie", id: "nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
         { name: "Series", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
         { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
+        { name: "Music", path: "/music", id: "nav-music", isMatch: (r) => r.path.startsWith("/music") },
         { name: "Playlists", path: "/playlists", id: "nav-playlists", isMatch: (r) => r.path.startsWith("/playlists") },
         { name: "Analytics & Wrapped", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
         { name: "About", path: "/about", id: "nav-about", isMatch: (r) => r.path === "/about" },
@@ -14880,6 +14890,7 @@ const App = {
         { name: "Movies", path: "/browse?type=movie", id: "nav-movies", icon: "ph-fill ph-film-strip", isMatch: (r) => r.fullPath === "/browse?type=movie" },
         { name: "Series", path: "/browse?type=series", id: "nav-series", icon: "ph-fill ph-television", isMatch: (r) => r.fullPath === "/browse?type=series" },
         { name: "Anime", path: "/browse?type=anime", id: "nav-anime", icon: "ph-fill ph-sparkle", isMatch: (r) => r.fullPath === "/browse?type=anime" },
+        { name: "Music", path: "/music", id: "nav-music", icon: "ph-fill ph-music-notes", isMatch: (r) => r.path.startsWith("/music") },
         { name: "Playlists", path: "/playlists", id: "nav-playlists", icon: "ph-fill ph-queue", isMatch: (r) => r.path.startsWith("/playlists") },
       ];
     });

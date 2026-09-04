@@ -88,7 +88,10 @@ def current_profile():
 def has_active_profile_session(pid=None):
     """True only when the profile session is both selected and still active."""
     if pid is None:
-        pid = current_profile()
+        try:
+            pid = current_profile()
+        except RuntimeError:
+            return False
     if not pid:
         return False
 
@@ -101,6 +104,18 @@ def has_active_profile_session(pid=None):
             ACTIVE_PROFILE_SESSIONS.pop(pid, None)
             return False
         return True
+
+
+def has_any_active_profile_session():
+    """True if ANY profile session is currently active (safe for background threads)."""
+    now = time.time()
+    with ACTIVE_PROFILE_LOCK:
+        for pid, sess in list(ACTIVE_PROFILE_SESSIONS.items()):
+            if sess and not sess.get("evicted") and now - sess.get("last_seen", 0) <= 45:
+                return True
+            if sess and now - sess.get("last_seen", 0) > 45:
+                ACTIVE_PROFILE_SESSIONS.pop(pid, None)
+        return False
 
 
 def require_profile():

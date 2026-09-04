@@ -17,6 +17,8 @@ from .schema import (
     init_db,
 )
 
+from . import music as music_db
+
 from .media import (
     is_drive_mounted,
     is_item_mounted,

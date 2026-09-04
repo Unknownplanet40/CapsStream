@@ -148,6 +148,99 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_media_type_added ON media(type, added_at DESC);
         CREATE INDEX IF NOT EXISTS idx_media_added ON media(added_at DESC);
         CREATE INDEX IF NOT EXISTS idx_media_title_season_ep ON media(title, season, episode);
+
+        -- ─── Music Library ───────────────────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS music_artists (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            sort_name   TEXT,
+            cover_path  TEXT,
+            added_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name COLLATE NOCASE)
+        );
+
+        CREATE TABLE IF NOT EXISTS music_albums (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            artist_id       INTEGER,
+            album_artist    TEXT,
+            title           TEXT NOT NULL,
+            year            INTEGER,
+            cover_path      TEXT,
+            genre           TEXT,
+            added_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(artist_id) REFERENCES music_artists(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS music_tracks (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            album_id        INTEGER,
+            artist_id       INTEGER,
+            title           TEXT NOT NULL,
+            track_number    INTEGER DEFAULT 0,
+            disc_number     INTEGER DEFAULT 1,
+            duration        INTEGER DEFAULT 0,
+            file_path       TEXT NOT NULL UNIQUE,
+            file_size       INTEGER DEFAULT 0,
+            bitrate         INTEGER,
+            sample_rate     INTEGER,
+            format          TEXT,
+            genre           TEXT,
+            year            INTEGER,
+            lyrics_path     TEXT,
+            play_count      INTEGER DEFAULT 0,
+            last_played     DATETIME,
+            added_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(album_id)  REFERENCES music_albums(id)  ON DELETE SET NULL,
+            FOREIGN KEY(artist_id) REFERENCES music_artists(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS music_playlists (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id  INTEGER NOT NULL,
+            name        TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            cover_path  TEXT,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS music_playlist_tracks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            playlist_id INTEGER NOT NULL,
+            track_id    INTEGER NOT NULL,
+            position    INTEGER NOT NULL DEFAULT 0,
+            added_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(playlist_id) REFERENCES music_playlists(id) ON DELETE CASCADE,
+            FOREIGN KEY(track_id)    REFERENCES music_tracks(id)    ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS music_favorites (
+            profile_id INTEGER NOT NULL,
+            track_id   INTEGER NOT NULL,
+            added_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (profile_id, track_id),
+            FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE,
+            FOREIGN KEY(track_id)   REFERENCES music_tracks(id)   ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS music_history (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id      INTEGER NOT NULL,
+            track_id        INTEGER NOT NULL,
+            played_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+            duration_played INTEGER DEFAULT 0,
+            FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE,
+            FOREIGN KEY(track_id)   REFERENCES music_tracks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_music_tracks_artist ON music_tracks(artist_id);
+        CREATE INDEX IF NOT EXISTS idx_music_tracks_album  ON music_tracks(album_id);
+        CREATE INDEX IF NOT EXISTS idx_music_tracks_title  ON music_tracks(title);
+        CREATE INDEX IF NOT EXISTS idx_music_albums_artist ON music_albums(artist_id);
+        CREATE INDEX IF NOT EXISTS idx_music_history_prof  ON music_history(profile_id, played_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_music_pl_tracks     ON music_playlist_tracks(playlist_id, position);
+        CREATE INDEX IF NOT EXISTS idx_music_fav_prof      ON music_favorites(profile_id, added_at DESC);
     """)
 
     # Migration guards for media table columns
@@ -236,6 +329,25 @@ def init_db():
         """)
     except Exception as e:
         print("[DB] Migration notice:", e)
+
+    # Migration guard for music library
+    try:
+        ar_cols = [r["name"] for r in conn.execute("PRAGMA table_info(music_artists)").fetchall()]
+        if "biography" not in ar_cols:
+            conn.execute("ALTER TABLE music_artists ADD COLUMN biography TEXT")
+        if "mbid" not in ar_cols:
+            conn.execute("ALTER TABLE music_artists ADD COLUMN mbid TEXT")
+
+        al_cols = [r["name"] for r in conn.execute("PRAGMA table_info(music_albums)").fetchall()]
+        if "mbid" not in al_cols:
+            conn.execute("ALTER TABLE music_albums ADD COLUMN mbid TEXT")
+
+        tr_cols = [r["name"] for r in conn.execute("PRAGMA table_info(music_tracks)").fetchall()]
+        if "mbid" not in tr_cols:
+            conn.execute("ALTER TABLE music_tracks ADD COLUMN mbid TEXT")
+    except Exception as e:
+        print("[DB] Music migration notice:", e)
+
 
 
     conn.commit()

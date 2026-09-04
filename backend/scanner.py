@@ -532,6 +532,13 @@ def scan_library(callback=None):
             start_intro_detection_pass()
         except Exception as e:
             print(f"[Scanner] Intro detection pass failed to start: {e}")
+        try:
+            from backend.music_scanner import scan_music_library
+            music_paths = (cfg.get("media_paths") or {}).get("music", [])
+            if music_paths:
+                threading.Thread(target=scan_music_library, daemon=True).start()
+        except Exception as e:
+            print(f"[Scanner] Music scan pass failed to start: {e}")
 
     return {"new_files": count, "matched": matched_count, "errors": _scan_status["errors"]}
 

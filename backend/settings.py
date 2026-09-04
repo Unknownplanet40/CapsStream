@@ -29,12 +29,14 @@ DEFAULT_CONFIG = {
     "media_paths": {
         "movies": [],
         "series": [],
-        "anime": []
+        "anime": [],
+        "music": []
     },
     "disabled_paths": {
         "movies": [],
         "series": [],
-        "anime": []
+        "anime": [],
+        "music": []
     },
     "library": {
         "scan_on_startup": True,
@@ -671,12 +673,14 @@ def reset_application(clear_media_files=False):
     config["media_paths"] = {
         "movies": [],
         "series": [],
-        "anime": []
+        "anime": [],
+        "music": []
     }
     config["disabled_paths"] = {
         "movies": [],
         "series": [],
-        "anime": []
+        "anime": [],
+        "music": []
     }
     config["library"] = dict(DEFAULT_CONFIG.get("library", {}))
     save_config(config)

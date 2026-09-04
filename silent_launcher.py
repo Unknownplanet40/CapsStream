@@ -251,6 +251,12 @@ def start_server(cfg):
         stderr=subprocess.STDOUT,
         creationflags=creationflags,
     )
+    try:
+        os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)
+        with open(os.path.join(ROOT, "data", "server.pid"), "w", encoding="utf-8") as pf:
+            pf.write(str(proc.pid))
+    except Exception:
+        pass
     return proc
 
 
@@ -277,13 +283,10 @@ def find_browser_exe(choice):
     return None
 
 
-def is_capsstream_window_visible(url, browser_proc=None):
-    """
-    Check if any visible or minimized browser window or PWA window is displaying CapsStream.
-    Returns True if at least one CapsStream window exists (active or minimized).
-    """
+def get_capsstream_window_hwnd(url, browser_proc=None):
+    """Find hwnd of CapsStream window, or None."""
     if os.name != "nt":
-        return False
+        return None
     try:
         import urllib.parse
         parsed = urllib.parse.urlparse(url)
@@ -308,7 +311,7 @@ def is_capsstream_window_visible(url, browser_proc=None):
         PROCESS_QUERY_INFORMATION = 0x0400
         PROCESS_VM_READ = 0x0010
 
-        found = [False]
+        target_hwnd = [None]
 
         known_browsers = (
             "msedge", "chrome", "brave", "opera", "vivaldi",
@@ -316,7 +319,6 @@ def is_capsstream_window_visible(url, browser_proc=None):
         )
 
         def foreach_window(hwnd, lParam):
-            # Window must be visible or minimized (iconic)
             if IsWindowVisible(hwnd) or IsIconic(hwnd):
                 length = GetWindowTextLengthW(hwnd)
                 if length > 0:
@@ -328,7 +330,7 @@ def is_capsstream_window_visible(url, browser_proc=None):
                     GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
 
                     if browser_proc is not None and browser_proc.poll() is None and pid.value == browser_proc.pid:
-                        found[0] = True
+                        target_hwnd[0] = hwnd
                         return False
 
                     pname = ""
@@ -340,17 +342,53 @@ def is_capsstream_window_visible(url, browser_proc=None):
                         CloseHandle(hProcess)
 
                     if any(b in pname for b in known_browsers):
-                        if "capsstream" in title or url_clean in title or url_alt in title or port_str in title:
-                            found[0] = True
+                        is_match = (
+                            title == "capsstream" or
+                            title.startswith("capsstream ") or
+                            title.startswith("capsstream -") or
+                            title.startswith("capsstream —") or
+                            title.endswith(" - capsstream") or
+                            title.endswith(" — capsstream") or
+                            url_clean in title or
+                            url_alt in title
+                        )
+                        # Exclude code repos, search pages, or tools that happen to have 'capsstream' in title
+                        if any(x in title for x in ("github", "google search", "bing", "visual studio", "vscode")):
+                            is_match = False
+
+                        if is_match:
+                            target_hwnd[0] = hwnd
                             return False
             return True
 
         WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
         user32.EnumWindows(WNDENUMPROC(foreach_window), 0)
-        return found[0]
+        return target_hwnd[0]
     except Exception as e:
-        log(f"Window detection notice: {e}")
-        return False
+        log(f"Window search notice: {e}")
+        return None
+
+
+def is_capsstream_window_visible(url, browser_proc=None):
+    """
+    Check if any visible or minimized browser window or PWA window is displaying CapsStream.
+    Returns True if at least one CapsStream window exists (active or minimized).
+    """
+    return get_capsstream_window_hwnd(url, browser_proc) is not None
+
+
+def focus_capsstream_window(url, browser_proc=None):
+    """Bring any open CapsStream window to the foreground."""
+    hwnd = get_capsstream_window_hwnd(url, browser_proc)
+    if hwnd:
+        try:
+            user32 = ctypes.windll.user32
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            user32.SetForegroundWindow(hwnd)
+            return True
+        except Exception:
+            pass
+    return False
 
 
 def launch_app_window(cfg, url):
@@ -415,6 +453,21 @@ def main():
     log("=" * 50)
     log("CapsStream silent launcher starting")
 
+    # Single-instance mutex check to prevent multiple silent_launcher processes piling up
+    launcher_mutex = None
+    if os.name == "nt":
+        try:
+            launcher_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "CapsStream_SilentLauncher_Instance")
+            if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+                log("Another silent launcher is already running — focusing window and exiting")
+                cfg = read_config()
+                url, _, _ = server_url(cfg)
+                if not focus_capsstream_window(url):
+                    launch_app_window(cfg, url)
+                return
+        except Exception as e:
+            log(f"Mutex check notice: {e}")
+
     from_restart = "--restarted" in sys.argv or "--from-restart" in sys.argv or "--no-browser" in sys.argv
 
     if not os.path.isfile(PYTHONW):
@@ -430,10 +483,19 @@ def main():
     # Re-run safety: if a server is already up, just attach to it
     already_up = server_responding(url)
     server = None
+    server_pid = None
     if already_up:
         log(f"Server already responding at {url} — attaching to it")
+        try:
+            pid_file = os.path.join(ROOT, "data", "server.pid")
+            if os.path.isfile(pid_file):
+                with open(pid_file, encoding="utf-8") as pf:
+                    server_pid = int(pf.read().strip())
+        except Exception:
+            pass
     else:
         server = start_server(cfg)
+        server_pid = server.pid
         log(f"Server PID {server.pid} — waiting for {url} to come up")
 
         deadline = time.time() + HEALTH_TIMEOUT_SEC
@@ -464,8 +526,11 @@ def main():
     browser_proc = None
     window_already_open = is_capsstream_window_visible(url)
 
-    if from_restart or window_already_open:
-        log(f"CapsStream window detected (from_restart={from_restart}, window_open={window_already_open}) — attaching to existing window")
+    if from_restart:
+        log("CapsStream server restart detected — monitoring window reload")
+    elif window_already_open:
+        log("CapsStream window detected (window_open=True) — bringing to foreground")
+        focus_capsstream_window(url)
     else:
         browser_proc = launch_app_window(cfg, url)
         send_toast("CapsStream is running", f"Serving at {url}")
@@ -480,9 +545,9 @@ def main():
             break
         time.sleep(0.5)
     else:
-        # If launched from restart and no window was found after grace, launch browser as fallback
-        if from_restart and not is_capsstream_window_visible(url, browser_proc):
-            log("No existing window detected after restart grace period — launching app window")
+        # If no window was detected after grace period, launch browser as fallback
+        if not is_capsstream_window_visible(url, browser_proc):
+            log("No existing window detected after grace period — launching app window")
             browser_proc = launch_app_window(cfg, url)
 
     no_window_since = None
@@ -499,8 +564,9 @@ def main():
                     no_window_since = time.time()
                 elif time.time() - no_window_since > 5:
                     log(f"CapsStream window for {url} closed by user — shutting down server")
-                    if server is not None:
-                        kill_tree(server.pid)
+                    target_kill_pid = server.pid if server is not None else server_pid
+                    if target_kill_pid is not None:
+                        kill_tree(target_kill_pid)
                     send_toast("CapsStream stopped", "Server shut down cleanly")
                     break
             else:
@@ -508,6 +574,11 @@ def main():
 
             time.sleep(1.5)
     finally:
+        if launcher_mutex:
+            try:
+                ctypes.windll.kernel32.CloseHandle(launcher_mutex)
+            except Exception:
+                pass
         log("Launcher exiting")
 
 
