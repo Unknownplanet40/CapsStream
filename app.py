@@ -562,6 +562,26 @@ def _process_cmdline(pid):
         return ""
 
 
+_SERVER_MUTEX = None
+
+
+def _acquire_server_mutex():
+    """Acquire a Windows named mutex to guarantee only one server process runs at a time."""
+    global _SERVER_MUTEX
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        ERROR_ALREADY_EXISTS = 183
+        _SERVER_MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "CapsStream_Server_Instance_Mutex")
+        last_error = ctypes.windll.kernel32.GetLastError()
+        if last_error == ERROR_ALREADY_EXISTS:
+            return False
+        return True
+    except Exception:
+        return True
+
+
 def _ensure_single_instance(host, port):
     owner = _port_owner_pid(port)
     if not owner or owner == os.getpid():
@@ -573,7 +593,12 @@ def _ensure_single_instance(host, port):
         and "python" in cmdline
     )
     if is_ours:
-        print(f"[Startup] Port {port} is held by a leftover CapsStream instance (pid {owner}) — terminating it.")
+        from backend.settings import is_server_running
+        if is_server_running(f"http://127.0.0.1:{port}"):
+            print(f"\n  [NOTICE] CapsStream server is already running on port {port} (pid {owner}).")
+            print(f"  Existing instance is active and responding. Exiting new startup process.\n")
+            sys.exit(0)
+        print(f"[Startup] Port {port} is held by an unresponsive leftover CapsStream instance (pid {owner}) — terminating it.")
         subprocess.run(["taskkill", "/PID", str(owner), "/F"], capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
         for _ in range(10):
             time.sleep(0.5)
@@ -637,6 +662,25 @@ if __name__ == "__main__":
     print("  CapsStream — Starting up")
     print("=" * 50)
 
+    cfg = load_config()
+    host = cfg.get("host", "127.0.0.1")
+    port = cfg.get("port", 8000)
+
+    # 1. Guard against duplicate server execution immediately
+    if not _acquire_server_mutex():
+        print("\n  ==========================================================")
+        print("   [NOTICE] CapsStream server is ALREADY RUNNING!")
+        print("   Preventing duplicate server instance. Exiting.")
+        print("  ==========================================================\n")
+        try:
+            from backend.settings import launch_browser
+            launch_browser()
+        except Exception:
+            pass
+        sys.exit(0)
+
+    _ensure_single_instance(host, port)
+
     init_db()
     start_scan_scheduler()
 
@@ -648,12 +692,7 @@ if __name__ == "__main__":
     _prune_old_logs()
     threading.Thread(target=_db_maintenance_daemon, daemon=True, name="db-maintenance").start()
 
-    cfg = load_config()
     apply_system_file_hiding()
-    host = cfg.get("host", "127.0.0.1")
-    port = cfg.get("port", 8000)
-
-    _ensure_single_instance(host, port)
     try:
         with open(os.path.join(BASE_DIR, "data", "server.pid"), "w", encoding="utf-8") as f:
             f.write(str(os.getpid()))

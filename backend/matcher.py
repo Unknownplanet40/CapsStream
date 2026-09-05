@@ -15,6 +15,7 @@ import json
 import time
 import difflib
 import hashlib
+from datetime import datetime, timezone
 import requests
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
@@ -833,4 +834,213 @@ def search_tmdb(query, media_type="movie", year=None):
             "media_type": r_type
         })
     return results
+
+
+def get_tmdb_digital_release_status(tmdb_id, media_type="movie", season=None, episode=None):
+    """
+    Check TMDb release dates / show status to determine if media has a digital copy available yet.
+    Returns:
+    {
+        "has_digital_release": bool,
+        "digital_status_label": str,
+        "status_code": str,
+        "digital_release_date": str or None,
+        "theatrical_release_date": str or None,
+        "raw_status": str or None
+    }
+    """
+    today = datetime.now(timezone.utc).date()
+    mtype = "tv" if media_type in ("tv", "series", "anime", "TV Show", "Anime") else "movie"
+
+    # 1. Movie handling
+    if mtype == "movie":
+        # Query movie release dates (all countries)
+        rd_data = _tmdb_get(f"movie/{tmdb_id}/release_dates") or {}
+        # Also query movie basic details for status & fallback release_date
+        movie_detail = _tmdb_get(f"movie/{tmdb_id}") or {}
+        raw_status = movie_detail.get("status")
+
+        digital_dates = []
+        theatrical_dates = []
+
+        for country in rd_data.get("results", []):
+            for entry in country.get("release_dates", []):
+                rel_type = entry.get("type")
+                raw_d = entry.get("release_date")
+                if not raw_d:
+                    continue
+                try:
+                    d_parsed = datetime.strptime(raw_d[:10], "%Y-%m-%d").date()
+                except Exception:
+                    continue
+
+                # Type 4 = Digital, Type 5 = Physical (Home media)
+                if rel_type in (4, 5):
+                    digital_dates.append(d_parsed)
+                # Type 2 = Theatrical (limited), Type 3 = Theatrical
+                elif rel_type in (2, 3):
+                    theatrical_dates.append(d_parsed)
+
+        earliest_digital = min(digital_dates) if digital_dates else None
+        earliest_theatrical = min(theatrical_dates) if theatrical_dates else None
+
+        earliest_digital_str = earliest_digital.strftime("%Y-%m-%d") if earliest_digital else None
+        earliest_theatrical_str = earliest_theatrical.strftime("%Y-%m-%d") if earliest_theatrical else None
+
+        # Determine digital status
+        if earliest_digital:
+            if earliest_digital <= today:
+                return {
+                    "has_digital_release": True,
+                    "digital_status_label": "Available Digitally",
+                    "status_code": "digital_available",
+                    "digital_release_date": earliest_digital_str,
+                    "theatrical_release_date": earliest_theatrical_str,
+                    "raw_status": raw_status or "Released"
+                }
+            else:
+                return {
+                    "has_digital_release": False,
+                    "digital_status_label": f"Digital: {earliest_digital_str}",
+                    "status_code": "upcoming_digital",
+                    "digital_release_date": earliest_digital_str,
+                    "theatrical_release_date": earliest_theatrical_str,
+                    "raw_status": raw_status or "Upcoming"
+                }
+
+        # No digital release date logged in TMDb release_dates
+        if earliest_theatrical:
+            if earliest_theatrical > today:
+                return {
+                    "has_digital_release": False,
+                    "digital_status_label": f"In Theaters: {earliest_theatrical_str}",
+                    "status_code": "unaired",
+                    "digital_release_date": None,
+                    "theatrical_release_date": earliest_theatrical_str,
+                    "raw_status": raw_status or "Upcoming"
+                }
+            else:
+                # Theatrical release was in the past.
+                days_since = (today - earliest_theatrical).days
+                if days_since <= 150:
+                    # Released recently in theaters with no digital copy yet
+                    return {
+                        "has_digital_release": False,
+                        "digital_status_label": "Theatrical Only (No Digital Copy)",
+                        "status_code": "theatrical_only",
+                        "digital_release_date": None,
+                        "theatrical_release_date": earliest_theatrical_str,
+                        "raw_status": raw_status or "In Theaters"
+                    }
+                else:
+                    # Older movie where TMDb contributors didn't log a type 4/5 release date
+                    return {
+                        "has_digital_release": True,
+                        "digital_status_label": "Released (Likely Available)",
+                        "status_code": "digital_available",
+                        "digital_release_date": None,
+                        "theatrical_release_date": earliest_theatrical_str,
+                        "raw_status": raw_status or "Released"
+                    }
+
+        # Neither digital nor theatrical date found in release_dates endpoint
+        gen_rel = movie_detail.get("release_date")
+        if raw_status in ("In Production", "Post Production", "Planned", "Rumored"):
+            return {
+                "has_digital_release": False,
+                "digital_status_label": f"Unreleased ({raw_status})",
+                "status_code": "unaired",
+                "digital_release_date": None,
+                "theatrical_release_date": gen_rel,
+                "raw_status": raw_status
+            }
+        elif gen_rel:
+            try:
+                gen_date = datetime.strptime(gen_rel[:10], "%Y-%m-%d").date()
+                if gen_date > today:
+                    return {
+                        "has_digital_release": False,
+                        "digital_status_label": f"Unreleased ({gen_rel[:10]})",
+                        "status_code": "unaired",
+                        "digital_release_date": None,
+                        "theatrical_release_date": gen_rel[:10],
+                        "raw_status": raw_status or "Upcoming"
+                    }
+            except Exception:
+                pass
+
+        return {
+            "has_digital_release": True,
+            "digital_status_label": "Available",
+            "status_code": "digital_available",
+            "digital_release_date": None,
+            "theatrical_release_date": gen_rel,
+            "raw_status": raw_status
+        }
+
+    # 2. TV / Anime handling
+    tv_detail = _tmdb_get(f"tv/{tmdb_id}") or {}
+    first_air = tv_detail.get("first_air_date")
+    raw_status = tv_detail.get("status")
+
+    if not first_air:
+        return {
+            "has_digital_release": False,
+            "digital_status_label": f"Unaired ({raw_status or 'Upcoming'})",
+            "status_code": "unaired",
+            "digital_release_date": None,
+            "theatrical_release_date": None,
+            "raw_status": raw_status
+        }
+
+    try:
+        first_date = datetime.strptime(first_air[:10], "%Y-%m-%d").date()
+        if first_date > today:
+            return {
+                "has_digital_release": False,
+                "digital_status_label": f"Unaired (Premiering {first_air[:10]})",
+                "status_code": "unaired",
+                "digital_release_date": first_air[:10],
+                "theatrical_release_date": None,
+                "raw_status": raw_status or "Upcoming"
+            }
+    except Exception:
+        pass
+
+    # Check specific season/episode if provided
+    if season and episode:
+        ep_info = _tmdb_get(f"tv/{tmdb_id}/season/{season}/episode/{episode}") or {}
+        ep_air = ep_info.get("air_date")
+        if ep_air:
+            try:
+                ep_date = datetime.strptime(ep_air[:10], "%Y-%m-%d").date()
+                if ep_date > today:
+                    return {
+                        "has_digital_release": False,
+                        "digital_status_label": f"Episode S{season:02d}E{episode:02d} Airs on {ep_air[:10]}",
+                        "status_code": "unaired",
+                        "digital_release_date": ep_air[:10],
+                        "theatrical_release_date": None,
+                        "raw_status": raw_status
+                    }
+                else:
+                    return {
+                        "has_digital_release": True,
+                        "digital_status_label": f"Aired ({ep_air[:10]})",
+                        "status_code": "digital_available",
+                        "digital_release_date": ep_air[:10],
+                        "theatrical_release_date": None,
+                        "raw_status": raw_status
+                    }
+            except Exception:
+                pass
+
+    return {
+        "has_digital_release": True,
+        "digital_status_label": "Aired / Streaming",
+        "status_code": "digital_available",
+        "digital_release_date": first_air,
+        "theatrical_release_date": None,
+        "raw_status": raw_status
+    }
 

@@ -149,6 +149,7 @@ const store = reactive({
   pendingUpdateCheck: false,           // triggers auto-check for updates when Settings opens from the banner
   onboardingWaiting: false,            // triggers preparation overlay on first-run setup
   tourActive: false,                   // true when Driver.js tour is running
+  hasFloatingSaveBar: false,           // true when settings floating save bar is visible
   sleepTimerMinutes: 0,
   sleepTimerEndsAt: null,
   bedtimeActive: false,
@@ -1411,7 +1412,7 @@ const MediaCard = {
          :class="{ 'continue-card': isContinue, 'is-unmounted': cardItem.is_mounted === false, 'has-popout': isPopoutActive }"
          @mouseenter="onMouseEnter"
          @mouseleave="onMouseLeave"
-         @click="$emit('click', cardItem)"
+         @click="handleCardClick"
          @contextmenu.prevent="openCardMenu($event)"
          :id="'card-' + (cardItem.id || 'card')">
 
@@ -1530,7 +1531,7 @@ const MediaCard = {
           :style="{ top: popoutPos.top, left: popoutPos.left, width: popoutPos.width }"
           @mouseenter="onPopoutMouseEnter"
           @mouseleave="onPopoutMouseLeave"
-          @click.stop
+          @click.stop="openDetail"
           @contextmenu.prevent.stop="openCardMenu($event)"
         >
           <div class="popout-media-box" @contextmenu.prevent.stop="openCardMenu($event)">
@@ -1641,6 +1642,7 @@ const MediaCard = {
     const isLiked = ref(false);
     const isFavorite = ref(false);
     let hoverTimer = null;
+    let trailerTimer = null;
 
     const posterSrc = computed(() => {
       if (imgError.value) return null;
@@ -1749,11 +1751,12 @@ const MediaCard = {
         if (contextMenuState.show && contextMenuState.item && (contextMenuState.item.id === cardItem.value?.id || contextMenuState.item.file_path === cardItem.value?.file_path)) {
           return;
         }
+        clearTimeout(trailerTimer);
         isPopoutActive.value = false;
         isVideoPlaying.value = false;
         trailerEmbedUrl.value = null;
         previewVideoUrl.value = null;
-      }, 150);
+      }, 200);
     }
 
     watch(() => contextMenuState.show, (showing) => {
@@ -1813,44 +1816,52 @@ const MediaCard = {
       showTooltip.value = true;
       if (window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches && !props.isContinue) {
         clearTimeout(hoverTimer);
-        hoverTimer = setTimeout(async () => {
+        hoverTimer = setTimeout(() => {
           updatePopoutAlignment();
           isPopoutActive.value = true;
           isVideoPlaying.value = false;
           isMuted.value = true;
-          const item = cardItem.value;
-          const id = item.id || item.tmdb_id;
 
-          // Attempt TMDB trailer first
-          if (id) {
-            try {
-              const res = await API.get(`/api/media/${id}/trailer`);
-              if (res && res.embed_url) {
-                let url = res.embed_url;
-                const sep = url.includes("?") ? "&" : "?";
-                trailerEmbedUrl.value = `${url}${sep}autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&showinfo=0&fs=0&playsinline=1&enablejsapi=1&loop=1&playlist=${res.key || ""}`;
-                return;
-              }
-            } catch (e) {}
-          }
+          clearTimeout(trailerTimer);
+          trailerTimer = setTimeout(async () => {
+            if (!isPopoutActive.value) return;
+            const item = cardItem.value;
+            const id = item.id || item.tmdb_id;
 
-          // Fallback to local video stream if available
-          if (item.id && item.type === "movie") {
-            previewVideoUrl.value = `/api/stream/${item.id}?start=90&transcode=1`;
-          }
-        }, 320);
+            // Attempt TMDB trailer first
+            if (id) {
+              try {
+                const res = await API.get(`/api/media/${id}/trailer`);
+                if (!isPopoutActive.value) return;
+                if (res && res.embed_url) {
+                  let url = res.embed_url;
+                  const sep = url.includes("?") ? "&" : "?";
+                  trailerEmbedUrl.value = `${url}${sep}autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&showinfo=0&fs=0&playsinline=1&enablejsapi=1&loop=1&playlist=${res.key || ""}`;
+                  return;
+                }
+              } catch (e) {}
+            }
+
+            // Fallback to local video stream if available
+            if (item.id && item.type === "movie" && isPopoutActive.value) {
+              previewVideoUrl.value = `/api/stream/${item.id}?start=90&transcode=1`;
+            }
+          }, 450);
+        }, 650);
       }
     }
 
     function onMouseLeave() {
       showTooltip.value = false;
       clearTimeout(hoverTimer);
+      clearTimeout(trailerTimer);
       scheduleClose();
     }
 
     function handleScrollClose() {
       if (isPopoutActive.value) {
         clearTimeout(hoverTimer);
+        clearTimeout(trailerTimer);
         clearTimeout(closeTimer);
         isPopoutActive.value = false;
         isVideoPlaying.value = false;
@@ -1865,6 +1876,7 @@ const MediaCard = {
 
     onUnmounted(() => {
       clearTimeout(hoverTimer);
+      clearTimeout(trailerTimer);
       clearTimeout(closeTimer);
       window.removeEventListener("scroll", handleScrollClose);
     });
@@ -1901,12 +1913,25 @@ const MediaCard = {
       addToast(isLiked.value ? "Added to your favorites!" : "Removed from favorites", "info");
     }
 
+    function handleCardClick() {
+      clearTimeout(hoverTimer);
+      clearTimeout(trailerTimer);
+      clearTimeout(closeTimer);
+      isPopoutActive.value = false;
+      emit("click", cardItem.value);
+    }
+
     function openDetail() {
       const item = cardItem.value;
+      clearTimeout(hoverTimer);
+      clearTimeout(trailerTimer);
+      clearTimeout(closeTimer);
+      isPopoutActive.value = false;
+      const targetId = (item.type !== "movie" && item.tmdb_id) ? item.tmdb_id : item.id;
       if (item.type === "movie" && item.id) {
         window.location.hash = `#/title/movie/${item.id}`;
-      } else if (item.id) {
-        window.location.hash = `#/title/${item.type || "series"}/${item.id}`;
+      } else if (targetId) {
+        window.location.hash = `#/title/${item.type || "series"}/${targetId}`;
       } else {
         emit("click", item);
       }
@@ -1948,7 +1973,8 @@ const MediaCard = {
       quickPlay,
       toggleFavorite,
       toggleLike,
-      openDetail
+      openDetail,
+      handleCardClick
     };
   },
 };
@@ -4159,13 +4185,18 @@ const DetailPage = {
                 v-for="item in displayedFranchiseItems"
                 :key="item.id"
                 class="franchise-card-container"
+                :class="{ 'is-current-title': item.id === media.id || item.is_current }"
+                @click="navigateToSibling(item)"
               >
-                <div v-if="item.sequence_number" class="franchise-seq-badge">#{{ item.sequence_number }}</div>
-                <div v-if="item.id === media.id || item.is_current" class="franchise-current-indicator">
-                  <i class="ph ph-check-circle" style="font-size:0.75rem"></i> Current
+                <div class="franchise-card-badges">
+                  <span v-if="item.sequence_number" class="franchise-seq-badge">#{{ item.sequence_number }}</span>
+                  <span v-if="item.id === media.id || item.is_current" class="franchise-current-indicator">
+                    <i class="ph-fill ph-check-circle"></i> Current
+                  </span>
                 </div>
                 <media-card
                   :item="item"
+                  :show-badge="false"
                   :class="{ 'active-detail-item': item.id === media.id || item.is_current }"
                   @click="navigateToSibling(item)"
                 />
@@ -4295,12 +4326,28 @@ const DetailPage = {
               </button>
             </div>
 
+            <!-- Season Episode Status Summary Breakdown -->
+            <div v-if="activeSeasonMeta && (activeSeasonMeta.missingCount > 0 || activeSeasonMeta.unairedCount > 0)" class="season-ep-summary-chip">
+              <span class="summary-stat stat-available" :title="activeSeasonMeta.localCount + ' episodes downloaded and ready to stream'">
+                <i class="ph-bold ph-check"></i> {{ activeSeasonMeta.localCount }} Available
+              </span>
+              <span v-if="activeSeasonMeta.missingCount > 0" class="summary-stat stat-missing" :title="activeSeasonMeta.missingCount + ' episodes already aired but missing from your drive'">
+                <i class="ph-bold ph-warning-circle"></i> {{ activeSeasonMeta.missingCount }} Missing
+              </span>
+              <span v-if="activeSeasonMeta.unairedCount > 0" class="summary-stat stat-unaired" :title="activeSeasonMeta.unairedCount + ' episodes have not aired yet'">
+                <i class="ph-bold ph-clock"></i> {{ activeSeasonMeta.unairedCount }} Unaired
+              </span>
+            </div>
+
             <div class="episodes-list">
               <div
                 v-for="ep in media.seasons[activeSeason]"
                 :key="ep.id || ('missing-' + ep.season + '-' + ep.episode)"
                 class="episode-card"
-                :class="{ 'missing-episode': ep.is_local === false || ep.is_mounted === false }"
+                :class="{
+                  'missing-episode': ep.is_local === false || ep.is_mounted === false,
+                  'unaired-episode': ep.is_local === false && ep.is_unaired
+                }"
                 @click="playEpisode(ep)"
                 :id="'ep-' + (ep.id || ('missing-' + ep.episode))"
               >
@@ -4320,9 +4367,10 @@ const DetailPage = {
                   <div class="episode-thumb-overlay" v-if="ep.is_local !== false && ep.is_mounted !== false">
                     <i class="ph-fill ph-play episode-play-icon"></i>
                   </div>
-                  <!-- Missing / Unmounted Overlay Badge -->
-                  <div class="episode-thumb-overlay" v-else style="opacity:1;background:rgba(10,10,15,0.65)">
-                    <span class="missing-badge">{{ ep.is_mounted === false ? 'Unmounted' : 'Not Downloaded' }}</span>
+                  <!-- Missing / Unmounted / Unaired Overlay Badge -->
+                  <div class="episode-thumb-overlay" v-else style="opacity:1;background:rgba(10,10,15,0.68)">
+                    <span v-if="ep.is_local === false && ep.is_unaired" class="unaired-badge">Unaired</span>
+                    <span v-else class="missing-badge">{{ ep.is_mounted === false ? 'Unmounted' : 'Not Downloaded' }}</span>
                   </div>
                   <!-- Red watch progress bar -->
                   <div v-if="calcProgressPercent(ep) > 0" class="episode-thumb-progress">
@@ -4336,12 +4384,29 @@ const DetailPage = {
                     <div class="episode-card-number">
                       S{{ activeSeason.toString().padStart(2,'0') }}E{{ (ep.episode || '?').toString().padStart(2,'0') }}
                       <span class="episode-card-title">• {{ ep.ep_title || ep.title }}</span>
-                      <span v-if="ep.is_local === false" class="missing-badge" style="margin-left:8px">Missing</span>
+                      <span v-if="ep.is_local === false && ep.is_unaired" class="unaired-badge" style="margin-left:8px">
+                        <i class="ph-bold ph-calendar"></i> {{ formatAirDate(ep.air_date) }}
+                      </span>
+                      <span v-else-if="ep.is_local === false" class="missing-badge" style="margin-left:8px">
+                        Missing<template v-if="ep.air_date"> • Aired {{ formatAiredDate(ep.air_date) }}</template>
+                      </span>
                     </div>
                     <div class="episode-card-actions">
                       <div class="episode-card-runtime" v-if="ep.duration">
                         {{ formatDuration(ep.duration) }}
                       </div>
+
+                      <!-- Request Episode Button for missing aired episodes -->
+                      <button
+                        v-if="ep.is_local === false && !ep.is_unaired && store.features?.requests && !store.profile?.is_kids"
+                        class="episode-request-btn"
+                        @click.stop="requestMissingEpisode(ep)"
+                        :title="'Request Season ' + activeSeason + ' Episode ' + ep.episode"
+                      >
+                        <i class="ph-bold ph-paper-plane-tilt"></i>
+                        <span>Request</span>
+                      </button>
+
                       <!-- Per-episode skip marker editor -->
                       <button
                         v-if="ep.id && !store.profile?.is_kids"
@@ -4550,10 +4615,13 @@ const DetailPage = {
     }
 
     async function load() {
-      loading.value = true;
+      const { type, id } = route.params;
+      // Only show skeleton if we don't already have media data (e.g. from optimistic sibling navigation)
+      if (!media.value || (String(media.value.id) !== String(id) && String(media.value.tmdb_id) !== String(id))) {
+        loading.value = true;
+      }
       backdropFailed.value = false;   // reset fallback when loading a title
       try {
-        const { type, id } = route.params;
         let url;
         if (type === "movie") {
           url = `/api/media/${id}`;
@@ -4579,10 +4647,14 @@ const DetailPage = {
           }
         }
         if (store.profile) {
-          collections.value = await API.get("/api/collections");
+          API.get("/api/collections").then((res) => {
+            collections.value = res || [];
+          }).catch(() => {});
         }
       } catch (e) {
-        media.value = null;
+        if (!media.value) {
+          media.value = null;
+        }
       } finally {
         loading.value = false;
       }
@@ -4596,10 +4668,12 @@ const DetailPage = {
       if (backdropCycleTimer) clearInterval(backdropCycleTimer);
       window.removeEventListener("scroll", onScroll);
     });
-    watch(() => route.params.id, () => {
-      activeBackdropIdx.value = 0;
-      franchiseOrder.value = 'release';
-      load();
+    watch(() => [route.params.id, route.params.type], ([newId, newType], [oldId, oldType]) => {
+      if (newId !== oldId || newType !== oldType) {
+        activeBackdropIdx.value = 0;
+        franchiseOrder.value = 'release';
+        load();
+      }
     });
     watch(() => route.query.season, (newSeason) => {
       if (newSeason && sortedSeasons.value.includes(String(newSeason))) {
@@ -4661,9 +4735,46 @@ const DetailPage = {
       }
     }
 
+    function formatAirDate(dStr) {
+      if (!dStr) return "Unaired";
+      try {
+        const parts = dStr.split("-");
+        if (parts.length === 3) {
+          const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+          return "Airs " + d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+        }
+      } catch (e) {}
+      return "Airs " + dStr;
+    }
+
+    function formatAiredDate(dStr) {
+      if (!dStr) return "";
+      try {
+        const parts = dStr.split("-");
+        if (parts.length === 3) {
+          const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+          return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+        }
+      } catch (e) {}
+      return dStr;
+    }
+
+    function requestMissingEpisode(ep) {
+      const showTitle = media.value?.title || "";
+      const s = ep.season || activeSeason.value;
+      const e = ep.episode;
+      router.push(`/requests?title=${encodeURIComponent(showTitle)}&type=TV Show&season=${s}&episode=${e}&tmdb_id=${media.value?.tmdb_id || ''}`);
+    }
+
     function playEpisode(ep) {
       if (ep.is_local === false) {
-        addToast("Episode not downloaded in library", "info");
+        if (ep.is_unaired) {
+          const dateStr = ep.air_date ? ` (${formatAirDate(ep.air_date)})` : "";
+          addToast(`This episode has not aired yet${dateStr}`, "info");
+        } else {
+          const dateStr = ep.air_date ? ` (Aired ${formatAiredDate(ep.air_date)})` : "";
+          addToast(`Episode not downloaded in library${dateStr}`, "info");
+        }
         return;
       }
       if (ep.is_mounted === false) {
@@ -4749,9 +4860,16 @@ const DetailPage = {
     function getSeasonMeta(seasonNum) {
       const eps = media.value?.seasons?.[seasonNum] || [];
       const localCount = eps.filter(e => e.is_local !== false && e.is_mounted !== false).length;
+      const unairedCount = eps.filter(e => e.is_local === false && e.is_unaired).length;
+      const missingCount = eps.filter(e => e.is_local === false && !e.is_unaired).length;
       const totalCount = eps.length;
-      return { localCount, totalCount, isMissing: localCount === 0 };
+      return { localCount, totalCount, unairedCount, missingCount, isMissing: localCount === 0 };
     }
+
+    const activeSeasonMeta = computed(() => {
+      if (!activeSeason.value || !media.value?.seasons) return null;
+      return getSeasonMeta(activeSeason.value);
+    });
 
     const trailerModalUrl = ref(null);
     const trailerModalTitle = ref("");
@@ -4874,8 +4992,33 @@ const DetailPage = {
     }
 
     function navigateToSibling(item) {
-      if (!item || item.id === media.value?.id) return;
-      router.push(`/detail/${item.type || 'movie'}/${item.id}`);
+      if (!item) return;
+      const targetId = item.type === "movie" ? item.id : (item.tmdb_id || item.id);
+      if (targetId == media.value?.id || targetId == media.value?.tmdb_id) return;
+
+      // Optimistically populate media so title, banner, overview, badges render INSTANTLY
+      media.value = {
+        ...item,
+        id: item.id || targetId,
+        tmdb_id: item.tmdb_id || (item.type !== "movie" ? targetId : null),
+        title: item.title || item.name || "Loading...",
+        overview: item.overview || "",
+        backdrop_path: item.backdrop_path || item.still_path || item.poster_path,
+        poster_path: item.poster_path || item.backdrop_path,
+        rating: item.rating,
+        year: item.year,
+        genres: item.genres || "",
+        runtime: item.runtime || item.duration,
+        similar_items: media.value?.similar_items || [],
+        franchise: media.value?.franchise || null,
+        is_optimistic: true,
+      };
+
+      // Instantly scroll back to top of detail page
+      window.scrollTo({ top: 0, behavior: "instant" });
+
+      // Navigate using the canonical /title/:type/:id route
+      router.push(`/title/${item.type || 'movie'}/${targetId}`);
     }
 
     // Click a cast member → jump to Search pre-filled with their name.
@@ -5008,6 +5151,10 @@ const DetailPage = {
       showSkipModal,
       handleSkipSaved,
       openAddToPlaylist,
+      activeSeasonMeta,
+      formatAirDate,
+      formatAiredDate,
+      requestMissingEpisode,
     };
   },
 };
@@ -6158,9 +6305,31 @@ const SettingsPage = {
                   <span>TMDb provides official artwork, metadata, and cast info. AniSkip automatically syncs anime opening/ending timestamps.</span>
                 </div>
               </div>
+
+              <!-- ══════ Supabase Cloud Relay for Online Requests ══════ -->
+              <div class="settings-divider" style="margin: 16px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
+              <div class="settings-row" style="flex-direction:column;align-items:flex-start">
+                <div class="settings-label-container">
+                  <div class="settings-label" style="display:flex;align-items:center;gap:8px">
+                    <i class="ph-bold ph-cloud" style="color:#38bdf8"></i>
+                    <span>Supabase Cloud Relay (Online Media Requests)</span>
+                  </div>
+                  <div class="settings-desc">Allows Desktop 2 (outside your home network) to submit requests to Desktop 1 over the internet via Supabase REST API without port forwarding or VPNs.</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:10px">
+                  <input type="text" v-model="form.supabase_url" class="form-input" placeholder="Supabase Project URL (https://xyz.supabase.co)..." style="width:100%" />
+                  <div style="display:flex;gap:8px;width:100%">
+                    <input type="password" v-model="form.supabase_anon_key" class="form-input" placeholder="Supabase Anon Public API Key..." style="flex:1" />
+                    <button class="btn btn-secondary" @click="testApi('supabase', form.supabase_anon_key)" :disabled="testingApi === 'supabase'">
+                      {{ testingApi === 'supabase' ? 'Testing...' : 'Test Connection' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
+
                 <!-- 2c. Unmatched Media & Fix Match Inspector -->
         <div class="settings-section" id="settings-unmatched-section">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -6670,12 +6839,6 @@ const SettingsPage = {
           </div>
         </div>
 
-      <!-- Floating Save Button -->
-      <button v-if="isDirty" class="settings-save-fab" @click="saveSettings" :disabled="saving" id="btn-save-settings-fab">
-        <i :class="saving ? 'ph ph-circle-notch' : 'ph ph-floppy-disk'" :style="saving ? 'animation:spin 1s linear infinite' : ''"></i>
-        {{ saving ? 'Saving...' : 'Save Settings' }}
-      </button>
-
     </main>
   </template>
 
@@ -6933,6 +7096,14 @@ const SettingsPage = {
     const isDirty = computed(() => {
       if (loading.value || !initialFormJson.value) return false;
       return JSON.stringify(form.value) !== initialFormJson.value;
+    });
+
+    watch([isDirty, saving], ([dirty, isSaving]) => {
+      store.hasFloatingSaveBar = Boolean(dirty || isSaving);
+    }, { immediate: true });
+
+    onUnmounted(() => {
+      store.hasFloatingSaveBar = false;
     });
 
     const browsingFolder = ref(null);
@@ -7350,7 +7521,11 @@ const SettingsPage = {
       }
       testingApi.value = provider;
       try {
-        const res = await API.post("/api/settings/test-api", { provider, key: key.trim() });
+        const payload = { provider, key: key.trim() };
+        if (provider === "supabase" && form.value?.supabase_url) {
+          payload.url = form.value.supabase_url.trim();
+        }
+        const res = await API.post("/api/settings/test-api", payload);
         if (res.ok) {
           addToast(res.message, "success");
         } else {
@@ -7361,6 +7536,7 @@ const SettingsPage = {
       } finally {
         testingApi.value = null;
       }
+
     }
 
     async function addPath(cat) {
@@ -8764,6 +8940,15 @@ const CollectionDetailPage = {
               <i class="ph ph-shuffle"></i> Shuffle
             </button>
             <button
+              v-if="displayItems && displayItems.length > 0 && !store.profile?.is_kids"
+              class="btn btn-secondary"
+              @click="openConvertModal"
+              id="collection-convert-playlist-btn"
+              title="Convert collection to playlist"
+            >
+              <i class="ph ph-queue"></i> Convert to Playlist
+            </button>
+            <button
               v-if="!collection.smart && !store.profile?.is_kids"
               class="btn btn-ghost"
               @click="deleteCollection"
@@ -8790,6 +8975,53 @@ const CollectionDetailPage = {
           @click="handleClick"
         />
       </div>
+
+      <!-- Convert to Playlist Modal -->
+      <div class="modal-backdrop" v-if="showConvertModal" @click.self="showConvertModal = false">
+        <div class="modal convert-playlist-modal">
+          <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+            <h3 style="margin:0;display:flex;align-items:center;gap:8px">
+              <i class="ph ph-queue" style="color:var(--accent)"></i> Convert to Playlist
+            </h3>
+            <button class="btn btn-ghost btn-icon" @click="showConvertModal = false" style="padding:4px"><i class="ph ph-x"></i></button>
+          </div>
+          <p style="font-size:0.875rem;color:var(--text-muted);margin-bottom:1.25rem">
+            Create a custom playlist from the {{ displayItems ? displayItems.length : 0 }} title(s) in this collection.
+          </p>
+          <div class="form-group">
+            <label class="form-label">Playlist Name</label>
+            <input id="convert-playlist-name" class="form-input" v-model="convertName" placeholder="Playlist name..." @keyup.enter="submitConvertToPlaylist" autofocus />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description (optional)</label>
+            <textarea id="convert-playlist-desc" class="form-input" v-model="convertDesc" placeholder="Playlist description..." rows="2" style="resize:vertical"></textarea>
+          </div>
+          <div v-if="hasSeriesInCollection" class="form-group" style="margin-top:0.75rem">
+            <label class="convert-checkbox-card">
+              <input type="checkbox" v-model="convertIncludeAllEpisodes" id="convert-include-all-episodes" />
+              <div>
+                <div class="convert-checkbox-title">Include all episodes for series</div>
+                <div class="convert-checkbox-desc">If unchecked, series will start with their first available episode.</div>
+              </div>
+            </label>
+          </div>
+          <div class="form-group" style="margin-top:0.75rem">
+            <label class="convert-checkbox-card">
+              <input type="checkbox" v-model="convertIsShared" id="convert-is-shared" />
+              <div>
+                <div class="convert-checkbox-title">Share with family profiles</div>
+                <div class="convert-checkbox-desc">Make this playlist visible and playable across all household profiles.</div>
+              </div>
+            </label>
+          </div>
+          <div style="display:flex;gap:0.75rem;margin-top:1.5rem">
+            <button class="btn btn-primary btn-full" :disabled="!convertName.trim() || isConverting" @click="submitConvertToPlaylist" id="submit-convert-playlist-btn">
+              <i class="ph ph-check"></i> {{ isConverting ? 'Creating...' : 'Create Playlist' }}
+            </button>
+            <button class="btn btn-ghost btn-full" @click="showConvertModal = false" :disabled="isConverting">Cancel</button>
+          </div>
+        </div>
+      </div>
     </div>
   `,
   setup() {
@@ -8798,6 +9030,59 @@ const CollectionDetailPage = {
     const collection = ref(null);
     const sortMode = ref("release");
     const typeFilter = ref("all");
+    const showConvertModal = ref(false);
+    const convertName = ref("");
+    const convertDesc = ref("");
+    const convertIncludeAllEpisodes = ref(true);
+    const convertIsShared = ref(false);
+    const isConverting = ref(false);
+
+    const hasSeriesInCollection = computed(() => {
+      return (displayItems.value || []).some((item) => (item.type || "") === "series" || (item.type || "") === "anime");
+    });
+
+    function openConvertModal() {
+      if (!collection.value) return;
+      convertName.value = collection.value.name || "";
+      convertDesc.value = collection.value.description || "";
+      convertIncludeAllEpisodes.value = true;
+      convertIsShared.value = false;
+      showConvertModal.value = true;
+    }
+
+    async function submitConvertToPlaylist() {
+      if (!convertName.value.trim() || isConverting.value) return;
+      if (!displayItems.value || displayItems.value.length === 0) {
+        addToast("No items in collection to convert", "error");
+        return;
+      }
+      isConverting.value = true;
+      try {
+        const payload = {
+          name: convertName.value.trim(),
+          description: convertDesc.value.trim(),
+          items: displayItems.value,
+          include_all_episodes: convertIncludeAllEpisodes.value,
+          is_shared: convertIsShared.value
+        };
+        const res = await API.post("/api/collections/convert-to-playlist", payload);
+        showConvertModal.value = false;
+        const newPl = res;
+        addToast(`Playlist "${newPl.name || convertName.value.trim()}" created!`, "success", 6000, {
+          label: "View Playlist",
+          onClick: (t) => {
+            if (t && t.id) {
+              store.toasts = store.toasts.filter((x) => x.id !== t.id);
+            }
+            router.push(`/playlists/${newPl.id}`);
+          }
+        });
+      } catch (err) {
+        addToast(err?.message || "Failed to convert collection to playlist", "error");
+      } finally {
+        isConverting.value = false;
+      }
+    }
 
     const displayItems = computed(() => {
       if (!collection.value) return [];
@@ -8879,7 +9164,16 @@ const CollectionDetailPage = {
       handleClick,
       playFirst,
       playRandom,
-      deleteCollection
+      deleteCollection,
+      showConvertModal,
+      convertName,
+      convertDesc,
+      convertIncludeAllEpisodes,
+      convertIsShared,
+      isConverting,
+      hasSeriesInCollection,
+      openConvertModal,
+      submitConvertToPlaylist
     };
   },
 };
@@ -9180,6 +9474,7 @@ const PlaylistDetailPage = {
                 v-if="playlist.can_edit"
                 class="btn btn-ghost"
                 @click="openEdit"
+                id="edit-playlist-btn"
                 title="Edit Playlist Info"
               >
                 <i class="ph ph-pencil-simple"></i> Edit
@@ -9272,11 +9567,11 @@ const PlaylistDetailPage = {
             <h3>Edit Playlist</h3>
             <div class="form-group">
               <label class="form-label">Playlist Name</label>
-              <input class="form-input" v-model="editName" placeholder="Playlist Name">
+              <input id="edit-playlist-name" class="form-input" v-model="editName" placeholder="Playlist Name" @keyup.enter="handleUpdate" autofocus>
             </div>
             <div class="form-group">
               <label class="form-label">Description</label>
-              <input class="form-input" v-model="editDesc" placeholder="Description">
+              <input id="edit-playlist-desc" class="form-input" v-model="editDesc" placeholder="Description" @keyup.enter="handleUpdate">
             </div>
             <div class="form-group" style="margin-top:10px">
               <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:10px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;user-select:none">
@@ -9291,7 +9586,7 @@ const PlaylistDetailPage = {
               </label>
             </div>
             <div style="display:flex;gap:0.75rem;margin-top:1.25rem">
-              <button class="btn btn-primary btn-full" @click="handleUpdate">Save Changes</button>
+              <button class="btn btn-primary btn-full" @click="handleUpdate" id="save-edit-playlist-btn">Save Changes</button>
               <button class="btn btn-ghost btn-full" @click="showEdit = false">Cancel</button>
             </div>
           </div>
@@ -9464,6 +9759,8 @@ const PlaylistDetailPage = {
       showEdit,
       editName,
       editDesc,
+      editShared,
+      openEdit,
       heroBackdrop,
       totalDurationFormatted,
       playAll,
@@ -15074,6 +15371,23 @@ const RequestsPage = {
                   <p v-if="selectedTmdb.overview" class="selected-tmdb-overview">
                     {{ selectedTmdb.overview }}
                   </p>
+
+                  <!-- Digital Copy Availability Notice -->
+                  <div v-if="isCheckingDigital" class="req-digital-checking">
+                    <i class="ph-bold ph-spinner ph-spin"></i>
+                    <span>Checking digital release availability on TMDb...</span>
+                  </div>
+                  <div v-else-if="digitalStatus && !digitalStatus.has_digital_release" class="req-digital-warning-banner">
+                    <i class="ph-bold ph-warning-circle"></i>
+                    <div class="req-digital-warning-content">
+                      <strong>No Digital Copy Detected</strong>
+                      <span>{{ digitalStatus.digital_status_label || 'This title is not yet available digitally.' }} You can still submit this request for when it becomes available.</span>
+                    </div>
+                  </div>
+                  <div v-else-if="digitalStatus && digitalStatus.has_digital_release && digitalStatus.digital_status_label" class="req-digital-ok-banner">
+                    <i class="ph-bold ph-check-circle"></i>
+                    <span>{{ digitalStatus.digital_status_label }}</span>
+                  </div>
                 </div>
 
                 <button
@@ -15321,8 +15635,9 @@ const RequestsPage = {
             </div>
 
             <div class="form-footer">
-              <span class="offline-note">
-                <i class="ph-bold ph-shield-check"></i> Saved directly to data/requests.json &bull; 100% offline
+              <span class="offline-note" :style="{ color: onlineSynced ? '#38bdf8' : 'var(--text-muted)' }">
+                <i :class="onlineSynced ? 'ph-bold ph-cloud-check' : 'ph-bold ph-shield-check'"></i>
+                {{ onlineSynced ? 'Online Sync Active (Supabase Cloud Relay)' : 'Saved locally in data/requests.json • Local mode' }}
               </span>
               <button type="submit" class="btn btn-primary submit-req-btn" :disabled="submitting || !form.title.trim()">
                 <i v-if="submitting" class="ph-bold ph-spinner ph-spin"></i>
@@ -15355,9 +15670,28 @@ const RequestsPage = {
                 <span>Added to Drive</span>
                 <span class="tab-count-badge completed-badge">{{ completedList.length }}</span>
               </button>
+              <button
+                v-if="rejectedList.length > 0"
+                class="requests-tab-btn"
+                :class="{ active: activeTab === 'rejected' }"
+                @click="activeTab = 'rejected'"
+              >
+                <i class="ph-bold ph-x-circle"></i>
+                <span>Declined</span>
+                <span class="tab-count-badge" style="background: rgba(239, 68, 68, 0.2); color: #ef4444;">{{ rejectedList.length }}</span>
+              </button>
             </div>
 
             <div class="requests-tab-actions">
+              <button
+                class="btn btn-secondary btn-sm sync-online-btn"
+                @click="syncOnline"
+                :disabled="isSyncingOnline"
+                title="Synchronize requests with online cloud relay"
+              >
+                <i :class="isSyncingOnline ? 'ph-bold ph-spinner ph-spin' : 'ph-bold ph-cloud-arrow-down'"></i>
+                <span>{{ isSyncingOnline ? 'Syncing...' : 'Sync Online' }}</span>
+              </button>
               <button
                 class="btn btn-secondary btn-sm sync-library-btn"
                 @click="syncLibrary"
@@ -15404,146 +15738,210 @@ const RequestsPage = {
               v-for="req in currentTabList"
               :key="req.id"
               class="req-item-card"
-              :class="['status-' + req.status, { 'has-poster': !!req.poster_path, 'has-backdrop': !!req.backdrop_path }]"
+              :class="['status-' + req.status, { 'has-poster': !!req.poster_path, 'has-backdrop': !!req.backdrop_path, 'in-library': !!req.auto_detected }]"
             >
-              <!-- Subtle backdrop background layer -->
+              <!-- Ambient backdrop background layer -->
               <div
                 v-if="req.backdrop_path"
                 class="req-card-backdrop"
                 :style="{ backgroundImage: 'url(' + req.backdrop_path + ')' }"
               ></div>
-              <div v-if="req.backdrop_path" class="req-card-backdrop-overlay"></div>
+              <div class="req-card-backdrop-overlay"></div>
 
-              <div class="req-card-body-horizontal">
-                <!-- Poster artwork on the left -->
-                <div class="req-poster-wrap">
-                  <img
-                    v-if="req.poster_path"
-                    :src="req.poster_path"
-                    :alt="req.title"
-                    class="req-poster-img"
-                    loading="lazy"
-                  />
-                  <div v-else class="req-poster-fallback">
-                    <i :class="getTypeIcon(req.type)"></i>
-                  </div>
+              <!-- Left Column: The Poster Frame -->
+              <div class="req-poster-wrap">
+                <img
+                  v-if="req.poster_path"
+                  :src="req.poster_path"
+                  :alt="req.title"
+                  class="req-poster-img"
+                  loading="lazy"
+                />
+                <div v-else class="req-poster-fallback">
+                  <i :class="getTypeIcon(req.type)"></i>
                 </div>
+                <div class="req-poster-type-badge" :class="req.type ? req.type.toLowerCase().replace(/\s+/g, '-') : 'movie'">
+                  <i :class="getTypeIcon(req.type)"></i>
+                </div>
+              </div>
 
-                <!-- Card details on the right -->
-                <div class="req-card-main">
-                  <div class="req-card-header">
-                    <div class="req-badges-cluster">
-                      <div class="req-type-pill" :class="req.type ? req.type.toLowerCase().replace(/\s+/g, '-') : 'movie'">
-                        <i :class="getTypeIcon(req.type)"></i>
-                        <span>{{ req.type || 'Movie' }}</span>
-                      </div>
-
-                      <div v-if="req.season" class="req-season-pill" :title="'Requested Season ' + req.season + (req.episode ? ' Episode ' + req.episode : '')">
-                        <i class="ph-bold ph-stack"></i>
-                        <span>Season {{ req.season }}<template v-if="req.episode"> • Ep {{ req.episode }}</template></span>
-                      </div>
-
-                      <div v-if="req.vote_average" class="req-rating-pill" title="TMDb Score">
-                        <i class="ph-fill ph-star" style="color:var(--gold)"></i>
-                        <span>{{ req.vote_average }}</span>
-                      </div>
-                    </div>
-
-                    <div class="req-status-pill" :class="[req.status, req.auto_detected ? 'in-library' : '']">
-                      <i :class="req.auto_detected ? 'ph-fill ph-check-circle' : req.status === 'completed' ? 'ph-fill ph-check-circle' : 'ph-fill ph-clock'"></i>
-                      <span>{{ req.auto_detected ? 'In Library' : req.status === 'completed' ? 'Added to Drive' : 'Pending Review' }}</span>
-                    </div>
-                  </div>
-
-                  <div class="req-title-row">
-                    <h2 class="req-title">{{ req.title }}</h2>
-                    <span v-if="req.year" class="req-year">({{ req.year }})</span>
-                    <span v-if="req.tmdb_id" class="tmdb-verified-badge" title="Matched on TMDb">
-                      <i class="ph-bold ph-seal-check"></i> TMDb
+              <!-- Right Column: Card Content -->
+              <div class="req-card-content">
+                <!-- Top Row: Eyebrow chips on left, Status badge on right -->
+                <div class="req-card-top-row">
+                  <div class="req-eyebrow-left">
+                    <span class="req-media-type-chip" :class="req.type ? req.type.toLowerCase().replace(/\s+/g, '-') : 'movie'">
+                      {{ req.type || 'Movie' }}
+                    </span>
+                    <span v-if="req.season" class="req-season-chip" :title="'Season ' + req.season + (req.episode ? ' Episode ' + req.episode : '')">
+                      S{{ req.season }}<template v-if="req.episode"> • E{{ req.episode }}</template>
+                    </span>
+                    <span
+                      v-if="req.digital_status_label || req.has_digital_release === false || req.has_digital_release === true"
+                      class="req-digital-chip"
+                      :class="[
+                        req.has_digital_release === true || (req.digital_status_label && req.digital_status_label.toLowerCase().includes('available')) ? 'available' :
+                        (req.digital_status_label && (req.digital_status_label.includes('Theaters') || req.digital_status_label.includes('Theatrical'))) ? 'theatrical' : 'warning'
+                      ]"
+                      :title="'Digital Status: ' + (req.digital_status_label || (req.has_digital_release ? 'Available Digitally' : 'No Digital Copy Detected'))"
+                    >
+                      <i :class="req.has_digital_release === true || (req.digital_status_label && req.digital_status_label.toLowerCase().includes('available')) ? 'ph-bold ph-check-circle' : ((req.digital_status_label && (req.digital_status_label.includes('Theaters') || req.digital_status_label.includes('Theatrical'))) ? 'ph-bold ph-ticket' : 'ph-bold ph-film-slate')"></i>
+                      <span>{{ req.digital_status_label || (req.has_digital_release === false ? 'No Digital Copy' : 'Digital Available') }}</span>
                     </span>
                   </div>
 
-                  <p v-if="req.overview" class="req-overview-text" :title="req.overview">
-                    {{ req.overview }}
-                  </p>
+                  <div class="req-status-pill" :class="[req.status, req.auto_detected ? 'in-library' : '']">
+                    <span class="status-indicator-dot"></span>
+                    <span>{{
+                      req.auto_detected ? 'In Library' :
+                      req.status === 'completed' ? 'Added' :
+                      req.status === 'in_progress' ? 'In Progress' :
+                      req.status === 'rejected' ? 'Declined' :
+                      'Pending'
+                    }}</span>
+                  </div>
+                </div>
 
-                  <div v-if="req.notes" class="req-notes-box">
-                    <i class="ph ph-chat-text"></i>
-                    <span>{{ req.notes }}</span>
+                <!-- Title & Clean Sub-Metadata Row -->
+                <div class="req-title-block">
+                  <h3 class="req-title" :title="req.title">{{ req.title }}</h3>
+                  <div class="req-sub-meta">
+                    <span v-if="req.year" class="req-meta-year">{{ req.year }}</span>
+                    <span v-if="req.year && req.vote_average" class="req-meta-dot">•</span>
+                    <span v-if="req.vote_average" class="req-meta-score" title="TMDb Score">
+                      <i class="ph-fill ph-star"></i> {{ Number(req.vote_average).toFixed(1) }}
+                    </span>
+                    <span v-if="req.tmdb_id" class="req-meta-dot">•</span>
+                    <span v-if="req.tmdb_id" class="req-meta-tmdb" title="Matched on TMDb">
+                      <i class="ph-bold ph-seal-check"></i> TMDb
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Overview Synopsis -->
+                <p v-if="req.overview" class="req-overview-text" :title="req.overview">
+                  {{ req.overview }}
+                </p>
+
+                <!-- Requester Notes -->
+                <div v-if="req.notes" class="req-speech-note req-user-note">
+                  <i class="ph-fill ph-chat-circle-dots"></i>
+                  <div class="req-note-body">
+                    <span class="req-note-text">“{{ req.notes }}”</span>
+                  </div>
+                </div>
+
+                <!-- Server Response Note -->
+                <div v-if="req.admin_note" class="req-speech-note req-server-response">
+                  <i class="ph-bold ph-chats-circle"></i>
+                  <div class="req-note-body">
+                    <span class="req-note-tag">Server Response</span>
+                    <span class="req-note-text">{{ req.admin_note }}</span>
+                  </div>
+                </div>
+
+                <!-- Requester Identity Row (Separate Line to prevent button collision) -->
+                <div class="req-card-meta-row">
+                  <div class="req-requester-info" :title="'Requested by ' + (req.requested_by || 'User')">
+                    <div class="req-avatar" :style="{ background: req.profile_color || '#e50914' }">
+                      <img v-if="req.custom_avatar_url" :src="imgUrl(req.custom_avatar_url)" class="req-avatar-img" :alt="req.requested_by" />
+                      <i v-else-if="req.profile_avatar && req.profile_avatar.startsWith('ph-')" :class="'ph-bold ' + req.profile_avatar"></i>
+                      <span v-else>{{ req.profile_avatar || '🎬' }}</span>
+                    </div>
+                    <div class="req-requester-meta">
+                      <span class="req-user-name">{{ req.requested_by || 'CapsStream User' }}</span>
+                      <span class="req-meta-dot">•</span>
+                      <span class="req-time-txt">{{ formatDate(req.created_at) }}</span>
+                    </div>
                   </div>
 
-                  <div class="req-meta-row">
-                    <div class="req-requester" :title="'Requested by ' + (req.requested_by || 'User')">
-                      <div class="req-avatar" :style="{ background: req.profile_color || '#e50914' }">
-                        <img v-if="req.custom_avatar_url" :src="imgUrl(req.custom_avatar_url)" class="req-avatar-img" :alt="req.requested_by" />
-                        <i v-else-if="req.profile_avatar && req.profile_avatar.startsWith('ph-')" :class="'ph-bold ' + req.profile_avatar"></i>
-                        <span v-else>{{ req.profile_avatar || '🎬' }}</span>
-                      </div>
-                      <span class="req-name">{{ req.requested_by || 'CapsStream User' }}</span>
-                    </div>
-                    <div class="req-time">
-                      <i class="ph ph-calendar"></i>
-                      <span>{{ formatDate(req.created_at) }}</span>
-                    </div>
+                  <div v-if="req.supabase_id" class="req-cloud-indicator" title="Synced via Online Cloud">
+                    <i class="ph-bold ph-cloud-check"></i> Cloud
+                  </div>
+                </div>
+
+                <!-- Actions Toolbar Row -->
+                <div class="req-card-actions-row">
+                  <div class="req-actions-group-left">
+                    <!-- Watch Now -->
+                    <button
+                      v-if="req.status === 'completed' || req.detected_media_id"
+                      class="req-btn req-btn-watch"
+                      @click="goToLibraryMedia(req)"
+                      title="Open this title in CapsStream"
+                    >
+                      <i class="ph-bold ph-play"></i>
+                      <span>Watch</span>
+                    </button>
+
+                    <!-- DEV Actions -->
+                    <template v-if="devMode">
+                      <button
+                        v-if="req.status === 'pending'"
+                        class="req-btn req-btn-in-progress"
+                        @click="updateStatus(req, 'in_progress')"
+                        title="Mark as In Progress"
+                      >
+                        <i class="ph-bold ph-hourglass-high"></i>
+                        <span>In Progress</span>
+                      </button>
+
+                      <button
+                        v-if="req.status === 'pending' || req.status === 'in_progress'"
+                        class="req-btn req-btn-complete"
+                        @click="updateStatus(req, 'completed')"
+                        title="Mark as Added to drive"
+                      >
+                        <i class="ph-bold ph-check"></i>
+                        <span>Added</span>
+                      </button>
+
+                      <button
+                        v-if="req.status === 'pending' || req.status === 'in_progress'"
+                        class="req-btn req-btn-reject"
+                        @click="updateStatus(req, 'rejected')"
+                        title="Decline this request"
+                      >
+                        <i class="ph-bold ph-x"></i>
+                        <span>Decline</span>
+                      </button>
+
+                      <button
+                        v-if="req.status === 'completed' || req.status === 'rejected'"
+                        class="req-btn req-btn-reopen"
+                        @click="updateStatus(req, 'pending')"
+                        title="Reopen request"
+                      >
+                        <i class="ph-bold ph-arrow-counter-clockwise"></i>
+                        <span>Reopen</span>
+                      </button>
+                    </template>
+                  </div>
+
+                  <div class="req-actions-group-right">
+                    <!-- Edit Button -->
+                    <button
+                      v-if="devMode"
+                      class="req-btn req-btn-icon req-btn-edit"
+                      @click="openEditModal(req)"
+                      title="Edit details & response note"
+                    >
+                      <i class="ph ph-pencil-simple"></i>
+                    </button>
+
+                    <!-- Delete / Cancel Button -->
+                    <button
+                      v-if="devMode || req.status === 'pending'"
+                      class="req-btn req-btn-icon req-btn-delete"
+                      @click="deleteRequest(req)"
+                      :title="devMode ? 'Delete request' : 'Cancel request'"
+                    >
+                      <i class="ph ph-trash"></i>
+                    </button>
                   </div>
                 </div>
               </div>
-
-              <!-- Action Buttons -->
-              <div class="req-card-actions">
-                <!-- Delete / Cancel Button (Left Side) -->
-                <button
-                  v-if="devMode || req.status === 'pending'"
-                  class="req-action-btn delete-btn"
-                  @click="deleteRequest(req)"
-                  :title="devMode ? 'Delete this request' : 'Cancel or delete this request'"
-                >
-                  <i class="ph ph-trash"></i>
-                  <span v-if="!devMode">Cancel Request</span>
-                </button>
-
-                <!-- Watch Now Button -->
-                <button
-                  v-if="req.status === 'completed' || req.detected_media_id"
-                  class="req-action-btn watch-btn"
-                  @click="goToLibraryMedia(req)"
-                  title="Open this title in CapsStream"
-                >
-                  <i class="ph-bold ph-play"></i>
-                  <span>Watch Now</span>
-                </button>
-
-                <!-- DEV Mode Controls -->
-                <template v-if="devMode">
-                  <button
-                    v-if="req.status === 'pending'"
-                    class="req-action-btn complete-btn"
-                    @click="updateStatus(req, 'completed')"
-                    title="Mark this request as Added to the drive"
-                  >
-                    <i class="ph-bold ph-check"></i>
-                    <span>Mark as Added</span>
-                  </button>
-                  <button
-                    v-else
-                    class="req-action-btn revert-btn"
-                    @click="updateStatus(req, 'pending')"
-                    title="Revert back to Pending"
-                  >
-                    <i class="ph-bold ph-arrow-counter-clockwise"></i>
-                    <span>Reopen</span>
-                  </button>
-
-                  <button
-                    class="req-action-btn edit-btn"
-                    @click="openEditModal(req)"
-                    title="Edit request details & TMDb match"
-                  >
-                    <i class="ph ph-pencil-simple"></i>
-                    <span>Edit</span>
-                  </button>
-                </template>
-              </div>
+            </div>
             </div>
           </div>
         </div>
@@ -15637,6 +16035,23 @@ const RequestsPage = {
                   <label>Notes</label>
                   <textarea v-model="editModal.form.notes" rows="3" class="request-input request-textarea"></textarea>
                 </div>
+
+                <div v-if="devMode" class="form-grid-top" style="margin-top:10px;">
+                  <div class="form-group flex-1">
+                    <label>Fulfillment Status</label>
+                    <select v-model="editModal.form.status" class="request-input request-select">
+                      <option value="pending">Pending Review</option>
+                      <option value="in_progress">In Progress / Downloading</option>
+                      <option value="completed">Completed / Added</option>
+                      <option value="rejected">Declined</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div v-if="devMode" class="form-group" style="margin-top:10px;">
+                  <label>Response Note for Requester <span class="opt-label">(Visible to Desktop 2)</span></label>
+                  <textarea v-model="editModal.form.admin_note" rows="2" placeholder="e.g. Downloading now, will be ready on next drive update!" class="request-input request-textarea"></textarea>
+                </div>
               </div>
 
               <div class="modal-footer">
@@ -15653,6 +16068,7 @@ const RequestsPage = {
   `,
   setup() {
     const router = VueRouter.useRouter();
+    const route = VueRouter.useRoute();
     const items = ref([]);
     const devMode = ref(false);
     const loading = ref(true);
@@ -15680,6 +16096,8 @@ const RequestsPage = {
     const searchError = ref(false);
     const duplicateMatch = ref(null);
     const titleInputRef = ref(null);
+    const digitalStatus = ref(null);
+    const isCheckingDigital = ref(false);
 
     let searchDebounce = null;
     let editSearchDebounce = null;
@@ -15708,9 +16126,17 @@ const RequestsPage = {
       return;
     }
 
-    const pendingList = computed(() => items.value.filter((i) => i.status !== "completed"));
+    const pendingList = computed(() => items.value.filter((i) => i.status === "pending" || i.status === "in_progress"));
     const completedList = computed(() => items.value.filter((i) => i.status === "completed"));
-    const currentTabList = computed(() => activeTab.value === "pending" ? pendingList.value : completedList.value);
+    const rejectedList = computed(() => items.value.filter((i) => i.status === "rejected"));
+    const currentTabList = computed(() => {
+      if (activeTab.value === "completed") return completedList.value;
+      if (activeTab.value === "rejected") return rejectedList.value;
+      return pendingList.value;
+    });
+
+    const onlineSynced = ref(false);
+    const clientId = ref("");
 
     async function loadRequests() {
       loading.value = true;
@@ -15718,6 +16144,8 @@ const RequestsPage = {
         const res = await API.get("/api/requests");
         items.value = res.requests || [];
         devMode.value = !!res.dev_mode;
+        onlineSynced.value = !!res.online_synced;
+        clientId.value = res.client_id || "";
       } catch (err) {
         addToast(err.message || "Failed to load requests", "error");
       } finally {
@@ -15834,6 +16262,32 @@ const RequestsPage = {
       }
     }
 
+    async function checkDigitalStatus(tmdbId, mediaType, season = null, episode = null) {
+      if (!tmdbId) {
+        digitalStatus.value = null;
+        return;
+      }
+      isCheckingDigital.value = true;
+      try {
+        let url = `/api/tmdb/digital-status?id=${encodeURIComponent(tmdbId)}&type=${encodeURIComponent(mediaType || 'movie')}`;
+        if (season) url += `&season=${encodeURIComponent(season)}`;
+        if (episode) url += `&episode=${encodeURIComponent(episode)}`;
+        const res = await API.get(url);
+        digitalStatus.value = res;
+      } catch (err) {
+        console.warn("[Requests] Failed to check digital status:", err);
+        digitalStatus.value = null;
+      } finally {
+        isCheckingDigital.value = false;
+      }
+    }
+
+    watch([() => form.season, () => form.episode], ([newS, newE]) => {
+      if (selectedTmdb.value && (form.type === "TV Show" || form.type === "Anime")) {
+        checkDigitalStatus(selectedTmdb.value.tmdb_id, selectedTmdb.value.media_type, newS, newE);
+      }
+    });
+
     function selectTmdb(item) {
       selectedTmdb.value = item;
       form.title = item.title;
@@ -15850,10 +16304,13 @@ const RequestsPage = {
       }
       showDropdown.value = false;
       tmdbResults.value = [];
+      digitalStatus.value = null;
+      checkDigitalStatus(item.tmdb_id, item.media_type, form.season, form.episode);
     }
 
     function clearSelectedTmdb() {
       selectedTmdb.value = null;
+      digitalStatus.value = null;
       showDropdown.value = false;
       nextTick(() => {
         if (titleInputRef.value) titleInputRef.value.focus();
@@ -15866,6 +16323,7 @@ const RequestsPage = {
       form.season = "";
       form.episode = "";
       selectedTmdb.value = null;
+      digitalStatus.value = null;
       tmdbResults.value = [];
       showDropdown.value = false;
       duplicateMatch.value = null;
@@ -15875,6 +16333,7 @@ const RequestsPage = {
     function useCustomTitle() {
       showDropdown.value = false;
       selectedTmdb.value = null;
+      digitalStatus.value = null;
     }
 
     function goToTitle(item) {
@@ -15907,6 +16366,12 @@ const RequestsPage = {
         payload.vote_average = selectedTmdb.value.vote_average || null;
       }
 
+      if (digitalStatus.value) {
+        payload.has_digital_release = digitalStatus.value.has_digital_release;
+        payload.digital_release_date = digitalStatus.value.digital_release_date || null;
+        payload.digital_status_label = digitalStatus.value.digital_status_label || null;
+      }
+
       try {
         const res = await API.post("/api/requests", payload);
         if (res.ok && res.request) {
@@ -15929,12 +16394,16 @@ const RequestsPage = {
         const res = await API.patch(`/api/requests/${req.id}`, { status: newStatus });
         if (res.ok && res.request) {
           req.status = newStatus;
-          addToast(newStatus === "completed" ? "Marked as Added to Drive!" : "Reverted back to Pending", "success");
+          const label = newStatus === "completed" ? "Marked as Added to Drive!" :
+                        newStatus === "in_progress" ? "Marked as In Progress / Downloading" :
+                        newStatus === "rejected" ? "Marked as Declined" : "Reopened to Pending";
+          addToast(label, "success");
         }
       } catch (err) {
         addToast(err.message || "Failed to update status", "error");
       }
     }
+
 
     async function deleteRequest(req) {
       const ok = await customConfirm({
@@ -15984,6 +16453,8 @@ const RequestsPage = {
       editModal.form.season = req.season != null ? req.season : "";
       editModal.form.episode = req.episode != null ? req.episode : "";
       editModal.form.notes = req.notes || "";
+      editModal.form.status = req.status || "pending";
+      editModal.form.admin_note = req.admin_note || "";
       editModal.tmdb = req.tmdb_id ? {
         tmdb_id: req.tmdb_id,
         title: req.title,
@@ -16050,6 +16521,14 @@ const RequestsPage = {
         episode: isNaN(editEpisode) ? null : editEpisode,
         notes: editModal.form.notes.trim() || null,
       };
+
+      if (devMode.value) {
+        if (editModal.form.status) {
+          payload.status = editModal.form.status;
+        }
+        payload.admin_note = editModal.form.admin_note ? editModal.form.admin_note.trim() : null;
+      }
+
 
       if (editModal.tmdb) {
         payload.tmdb_id = editModal.tmdb.tmdb_id || null;
@@ -16118,6 +16597,29 @@ const RequestsPage = {
     });
 
     const isSyncing = ref(false);
+    const isSyncingOnline = ref(false);
+
+    async function syncOnline() {
+      isSyncingOnline.value = true;
+      try {
+        const res = await API.post("/api/requests/sync-online");
+        if (res.ok) {
+          items.value = res.requests || [];
+          onlineSynced.value = !!res.online_synced;
+          if (res.detected_count > 0) {
+            addToast(`Synced online! ${res.detected_count} title(s) auto-completed in library.`, "success");
+          } else if (res.online_synced) {
+            addToast("Successfully synchronized with online cloud relay!", "success");
+          } else {
+            addToast("Online sync checked (local mode).", "info");
+          }
+        }
+      } catch (err) {
+        addToast(err.message || "Online sync failed", "error");
+      } finally {
+        isSyncingOnline.value = false;
+      }
+    }
 
     async function syncLibrary() {
       isSyncing.value = true;
@@ -16139,6 +16641,7 @@ const RequestsPage = {
       }
     }
 
+
     function goToLibraryMedia(req) {
       const mtype = req.detected_media_type || (req.type === "Movie" ? "movie" : "series");
       const mid = req.detected_media_id;
@@ -16153,6 +16656,17 @@ const RequestsPage = {
         router.push(`/title/${mtype}/${req.tmdb_id}${seasonQuery}`);
       }
     }
+
+    onMounted(() => {
+      loadRequests();
+      if (route?.query?.title) {
+        form.title = String(route.query.title);
+        if (route.query.type) form.type = String(route.query.type);
+        if (route.query.season) form.season = String(route.query.season);
+        if (route.query.episode) form.episode = String(route.query.episode);
+        triggerTmdbSearch();
+      }
+    });
 
     return {
       store,
@@ -16170,11 +16684,18 @@ const RequestsPage = {
       searchError,
       duplicateMatch,
       titleInputRef,
+      digitalStatus,
+      isCheckingDigital,
       editModal,
       pendingList,
       completedList,
+      rejectedList,
       currentTabList,
+      onlineSynced,
+      clientId,
       isSyncing,
+      isSyncingOnline,
+      syncOnline,
       syncLibrary,
       goToLibraryMedia,
       onTitleInput,
@@ -16211,7 +16732,7 @@ const router = createRouter({
     { path: "/profiles", component: ProfilesPage },
     { path: "/browse", component: BrowsePage },
     { path: "/search", component: SearchPage },
-    { path: "/title/:type/:id", component: DetailPage },
+    { path: "/title/:type/:id", alias: "/detail/:type/:id", component: DetailPage },
     { path: "/watch/:id", component: PlayerPage },
     { path: "/playlists", component: PlaylistsPage },
     { path: "/playlists/:id", component: PlaylistDetailPage },
@@ -16241,93 +16762,337 @@ router.beforeEach((to, from, next) => {
 
 const ScanProgressWidget = {
   template: `
-    <div class="scan-floating-widget" v-if="store.scanRunning || showCompleted">
-      <!-- Minimized Pill View -->
-      <div v-if="isMinimized" class="scan-widget-pill" @click="isMinimized = false" id="scan-widget-pill">
-        <div class="scan-widget-pill-text">
-          <i :class="phaseIcon" :style="{ animation: store.scanRunning ? 'spin 1s linear infinite' : 'none' }"></i>
-          <span v-if="store.scanRunning">{{ phaseLabel }} · {{ store.scanPercent }}% ({{ store.scanCount || 0 }}{{ store.scanTotal ? '/' + store.scanTotal : '' }})</span>
-          <span v-else style="color:var(--success)">Scan Complete!</span>
-        </div>
-        <button class="scan-widget-btn" title="Expand Widget" id="scan-widget-expand-btn">
-          <i class="ph ph-caret-up"></i>
-        </button>
-      </div>
+    <div class="scan-floating-widget-root">
+      <!-- 1. Full Screen Mode Overlay -->
+      <teleport to="body">
+        <div class="scan-fullscreen-overlay" v-if="isFullscreen && (store.scanRunning || showCompleted)">
+          <div class="scan-fullscreen-backdrop" @click="exitFullscreen"></div>
+          <div class="scan-fullscreen-card" id="scan-fullscreen-card">
+            <!-- Header -->
+            <div class="scan-fullscreen-header">
+              <div class="scan-fullscreen-brand">
+                <div class="scan-fullscreen-logo-glow">
+                  <img src="/static/img/favicon.png" alt="CapsStream" />
+                </div>
+                <div class="scan-fullscreen-title-col">
+                  <div class="scan-fullscreen-title">{{ store.scanRunning ? 'Library Scanner' : 'Scan Complete!' }}</div>
+                  <div class="scan-fullscreen-subtitle" v-if="store.scanRunning">
+                    <span class="scan-phase-badge" :class="store.scanPhase">
+                      <i :class="phaseIcon"></i> {{ phaseLabel }} Phase
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div class="scan-fullscreen-actions">
+                <button class="scan-widget-btn scan-fullscreen-btn-top" @click="exitFullscreen" title="Exit Full Screen" id="scan-widget-fullscreen-exit-btn">
+                  <i class="ph ph-arrows-in"></i>
+                </button>
+                <button class="scan-widget-btn scan-fullscreen-btn-top" @click="minimizeToBackground" title="Run in Background" id="scan-widget-minimize-bg-btn">
+                  <i class="ph ph-minus"></i>
+                </button>
+              </div>
+            </div>
 
-      <!-- Expanded Card View -->
-      <div v-else class="scan-widget-card" id="scan-widget-card">
-        <div class="scan-widget-header">
-          <div class="scan-widget-title">
-            <i class="ph ph-popcorn"></i>
-            <span>{{ store.scanRunning ? 'Library Scan' : 'Scan Complete!' }}</span>
-            <span v-if="store.scanRunning" class="scan-phase-badge" :class="store.scanPhase">
-              <i :class="phaseIcon"></i>{{ phaseLabel }}
-            </span>
+            <!-- Content Stage -->
+            <template v-if="store.scanRunning">
+              <!-- Active Item Stage -->
+              <div class="scan-fullscreen-item-stage" v-if="store.scanItem && store.scanItem.file_name">
+                <div class="scan-fullscreen-poster-wrap">
+                  <img v-if="store.scanItem.poster_path" :src="imgUrl(store.scanItem.poster_path)" class="scan-fullscreen-poster-img" :alt="store.scanItem.matched_title || store.scanItem.title" />
+                  <div v-else class="scan-fullscreen-poster-fallback">
+                    <i :class="typeIcon"></i>
+                  </div>
+                  <div class="scan-fullscreen-poster-badge">{{ typeLabel }}</div>
+                </div>
+
+                <div class="scan-fullscreen-item-details">
+                  <div class="scan-fullscreen-item-eyebrow">
+                    <span class="scan-fullscreen-badge-type"><i :class="typeIcon"></i> {{ typeLabel }}</span>
+                    <span class="scan-item-se" v-if="isEpisode">Season {{ pad2(store.scanItem.season) }} · Episode {{ pad2(store.scanItem.episode) }}</span>
+                  </div>
+                  <h3 class="scan-fullscreen-item-title">{{ store.scanItem.matched_title || store.scanItem.title }}</h3>
+                  
+                  <div class="scan-fullscreen-meta-row" v-if="store.scanItem.matched_title">
+                    <span class="scan-fullscreen-meta-tag" v-if="store.scanItem.year"><i class="ph ph-calendar-blank"></i> {{ store.scanItem.year }}</span>
+                    <span class="scan-fullscreen-meta-tag rating" v-if="store.scanItem.rating"><i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ Number(store.scanItem.rating).toFixed(1) }}</span>
+                    <span class="scan-fullscreen-match-pill"><i class="ph ph-check-circle"></i> TMDb Matched</span>
+                  </div>
+                  <div class="scan-fullscreen-searching-row" v-else>
+                    <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite"></i> Searching metadata on TMDb...
+                  </div>
+
+                  <div class="scan-fullscreen-filename" :title="store.scanItem.file_name">
+                    <i class="ph ph-file-code"></i> {{ store.scanItem.file_name }}<span v-if="itemSize"> · {{ itemSize }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Idle / Discovering Stage -->
+              <div class="scan-fullscreen-idle-stage" v-else>
+                <div class="scan-fullscreen-spinner-wrap">
+                  <i class="ph ph-circle-notch" style="animation:spin 1.2s linear infinite"></i>
+                </div>
+                <div class="scan-fullscreen-idle-text">{{ store.scanProgress || 'Discovering media files across your folders...' }}</div>
+              </div>
+
+              <!-- Progress Bar -->
+              <div class="scan-fullscreen-progress-section">
+                <div class="scan-fullscreen-progress-header">
+                  <span>Overall Progress</span>
+                  <span class="scan-fullscreen-percent-num">{{ store.scanPercent || 0 }}%</span>
+                </div>
+                <div class="scan-fullscreen-progress-track">
+                  <div
+                    class="scan-fullscreen-progress-fill"
+                    :class="{ indeterminate: store.scanRunning && !store.scanPercent }"
+                    :style="{ width: store.scanRunning ? (store.scanPercent || 5) + '%' : '100%' }"
+                  ></div>
+                </div>
+              </div>
+
+              <!-- Statistics Grid -->
+              <div class="scan-fullscreen-stats-grid">
+                <div class="scan-fullscreen-stat-card">
+                  <div class="scan-fullscreen-stat-icon"><i class="ph ph-files"></i></div>
+                  <div class="scan-fullscreen-stat-info">
+                    <span class="scan-fullscreen-stat-val">{{ store.scanCount || 0 }} / {{ store.scanTotal || '?' }}</span>
+                    <span class="scan-fullscreen-stat-lbl">Processed Files</span>
+                  </div>
+                </div>
+                <div class="scan-fullscreen-stat-card">
+                  <div class="scan-fullscreen-stat-icon matched"><i class="ph ph-checks"></i></div>
+                  <div class="scan-fullscreen-stat-info">
+                    <span class="scan-fullscreen-stat-val">{{ store.scanMatched || 0 }}</span>
+                    <span class="scan-fullscreen-stat-lbl">Matched to TMDb</span>
+                  </div>
+                </div>
+                <div class="scan-fullscreen-stat-card">
+                  <div class="scan-fullscreen-stat-icon timer"><i class="ph ph-timer"></i></div>
+                  <div class="scan-fullscreen-stat-info">
+                    <span class="scan-fullscreen-stat-val">{{ fmtElapsed(store.scanElapsed) }}</span>
+                    <span class="scan-fullscreen-stat-lbl">Time Elapsed</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Action Footer -->
+              <div class="scan-fullscreen-footer-bar">
+                <button class="btn btn-secondary btn-sm" @click="minimizeToBackground" id="scan-fullscreen-bg-btn">
+                  <i class="ph ph-arrow-down-left" style="margin-right:6px"></i> Run in Background
+                </button>
+              </div>
+            </template>
+
+            <!-- Completed Celebration Stage -->
+            <template v-else>
+              <div class="scan-fullscreen-celebration-stage">
+                <div class="scan-fullscreen-celebration-icon">
+                  <i class="ph ph-popcorn"></i>
+                </div>
+                <h2 class="scan-fullscreen-celebration-title">Library Scan Complete!</h2>
+                <p class="scan-fullscreen-celebration-desc">
+                  Successfully indexed your media library with rich TMDb posters, synopses, cast information, and episode metadata.
+                </p>
+
+                <div class="scan-fullscreen-stats-grid celebration">
+                  <div class="scan-fullscreen-stat-card">
+                    <div class="scan-fullscreen-stat-icon"><i class="ph ph-film-strip"></i></div>
+                    <div class="scan-fullscreen-stat-info">
+                      <span class="scan-fullscreen-stat-val">{{ store.scanCount || 0 }}</span>
+                      <span class="scan-fullscreen-stat-lbl">Files Processed</span>
+                    </div>
+                  </div>
+                  <div class="scan-fullscreen-stat-card">
+                    <div class="scan-fullscreen-stat-icon matched"><i class="ph ph-sparkle"></i></div>
+                    <div class="scan-fullscreen-stat-info">
+                      <span class="scan-fullscreen-stat-val">{{ store.scanMatched || 0 }}</span>
+                      <span class="scan-fullscreen-stat-lbl">TMDb Matched</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="scan-fullscreen-celebration-actions">
+                  <button class="btn btn-primary btn-lg" @click="exploreLibrary" id="scan-fullscreen-explore-btn">
+                    <i class="ph ph-play-circle" style="font-size:1.3rem;margin-right:8px"></i>
+                    Explore Library <span v-if="countdown > 0">({{ countdown }}s)</span>
+                  </button>
+                </div>
+              </div>
+            </template>
           </div>
-          <div class="scan-widget-actions">
-            <button class="scan-widget-btn" @click="isMinimized = true" title="Minimize Widget" id="scan-widget-minimize-btn">
-              <i class="ph ph-minus"></i>
+        </div>
+      </teleport>
+
+      <!-- 2. Bottom-Left Floating Widget (When NOT in Fullscreen) -->
+      <div class="scan-floating-widget" v-if="!isFullscreen && (store.scanRunning || showCompleted)">
+        <!-- Minimized Pill View -->
+        <div v-if="isMinimized" class="scan-widget-pill" @click="isMinimized = false" id="scan-widget-pill">
+          <div class="scan-widget-pill-text">
+            <i :class="phaseIcon" :style="{ animation: store.scanRunning ? 'spin 1s linear infinite' : 'none' }"></i>
+            <span v-if="store.scanRunning">{{ phaseLabel }} · {{ store.scanPercent }}% ({{ store.scanCount || 0 }}{{ store.scanTotal ? '/' + store.scanTotal : '' }})</span>
+            <span v-else style="color:var(--success)">Scan Complete!</span>
+          </div>
+          <div class="scan-widget-pill-actions">
+            <button class="scan-widget-btn" @click.stop="toggleFullscreen" title="Full Screen Mode" id="scan-widget-pill-fullscreen-btn">
+              <i class="ph ph-arrows-out"></i>
             </button>
-            <button class="scan-widget-btn" @click="dismiss" title="Close" id="scan-widget-close-btn">
-              <i class="ph ph-x"></i>
+            <button class="scan-widget-btn" title="Expand Widget" id="scan-widget-expand-btn">
+              <i class="ph ph-caret-up"></i>
             </button>
           </div>
         </div>
 
-        <div class="scan-widget-progress-row">
-          <div class="scan-widget-progress-bg">
-            <div
-              class="scan-widget-progress-fill"
-              :class="{ indeterminate: store.scanRunning && !store.scanPercent }"
-              :style="{ width: store.scanRunning ? store.scanPercent + '%' : '100%' }"
-            ></div>
+        <!-- Expanded Card View -->
+        <div v-else class="scan-widget-card" id="scan-widget-card">
+          <div class="scan-widget-header">
+            <div class="scan-widget-title">
+              <i class="ph ph-popcorn"></i>
+              <span>{{ store.scanRunning ? 'Library Scan' : 'Scan Complete!' }}</span>
+              <span v-if="store.scanRunning" class="scan-phase-badge" :class="store.scanPhase">
+                <i :class="phaseIcon"></i>{{ phaseLabel }}
+              </span>
+            </div>
+            <div class="scan-widget-actions">
+              <button class="scan-widget-btn" @click="toggleFullscreen" title="Full Screen Mode" id="scan-widget-fullscreen-btn">
+                <i class="ph ph-arrows-out"></i>
+              </button>
+              <button class="scan-widget-btn" @click="isMinimized = true" title="Minimize Widget" id="scan-widget-minimize-btn">
+                <i class="ph ph-minus"></i>
+              </button>
+              <button class="scan-widget-btn" @click="dismiss" title="Close" id="scan-widget-close-btn">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
           </div>
-          <span class="scan-widget-percent" v-if="store.scanRunning">{{ store.scanPercent }}%</span>
+
+          <div class="scan-widget-progress-row">
+            <div class="scan-widget-progress-bg">
+              <div
+                class="scan-widget-progress-fill"
+                :class="{ indeterminate: store.scanRunning && !store.scanPercent }"
+                :style="{ width: store.scanRunning ? store.scanPercent + '%' : '100%' }"
+              ></div>
+            </div>
+            <span class="scan-widget-percent" v-if="store.scanRunning">{{ store.scanPercent }}%</span>
+          </div>
+
+          <!-- Running: current item details -->
+          <template v-if="store.scanRunning">
+            <div class="scan-widget-item" v-if="store.scanItem && store.scanItem.file_name">
+              <div class="scan-item-top">
+                <span class="scan-item-type"><i :class="typeIcon"></i>{{ typeLabel }}</span>
+                <span class="scan-item-se" v-if="isEpisode">S{{ pad2(store.scanItem.season) }}E{{ pad2(store.scanItem.episode) }}</span>
+              </div>
+              <div class="scan-item-title" :title="store.scanItem.title">{{ store.scanItem.title }}</div>
+              <div class="scan-item-file" :title="store.scanItem.file_name">
+                {{ store.scanItem.file_name }}<span v-if="itemSize"> · {{ itemSize }}</span>
+              </div>
+              <div class="scan-item-match" v-if="store.scanItem.matched_title">
+                <i class="ph ph-check-circle"></i>
+                Matched: {{ store.scanItem.matched_title }}<template v-if="store.scanItem.year"> ({{ store.scanItem.year }})</template><template v-if="store.scanItem.rating"> · <i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ Number(store.scanItem.rating).toFixed(1) }}</template>
+              </div>
+              <div class="scan-item-match pending" v-else>
+                <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite"></i> Searching TMDb...
+              </div>
+            </div>
+
+            <div class="scan-widget-status" v-else style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+              {{ store.scanProgress || 'Preparing scan...' }}
+            </div>
+
+            <div class="scan-widget-footer">
+              <span><i class="ph ph-files"></i> {{ store.scanCount || 0 }}/{{ store.scanTotal || '?' }} processed</span>
+              <span v-if="store.scanMatched"><i class="ph ph-checks"></i> {{ store.scanMatched }} matched</span>
+              <span v-if="store.scanElapsed"><i class="ph ph-timer"></i> {{ fmtElapsed(store.scanElapsed) }}</span>
+            </div>
+          </template>
+
+          <!-- Completed -->
+          <template v-else>
+            <div class="scan-widget-status" style="color:var(--text-muted)">
+              Processed {{ store.scanCount || 0 }} new media files<template v-if="store.scanMatched"> · {{ store.scanMatched }} matched to TMDb</template>.
+            </div>
+          </template>
         </div>
-
-        <!-- Running: current item details -->
-        <template v-if="store.scanRunning">
-          <div class="scan-widget-item" v-if="store.scanItem && store.scanItem.file_name">
-            <div class="scan-item-top">
-              <span class="scan-item-type"><i :class="typeIcon"></i>{{ typeLabel }}</span>
-              <span class="scan-item-se" v-if="isEpisode">S{{ pad2(store.scanItem.season) }}E{{ pad2(store.scanItem.episode) }}</span>
-            </div>
-            <div class="scan-item-title" :title="store.scanItem.title">{{ store.scanItem.title }}</div>
-            <div class="scan-item-file" :title="store.scanItem.file_name">
-              {{ store.scanItem.file_name }}<span v-if="itemSize"> · {{ itemSize }}</span>
-            </div>
-            <div class="scan-item-match" v-if="store.scanItem.matched_title">
-              <i class="ph ph-check-circle"></i>
-              Matched: {{ store.scanItem.matched_title }}<template v-if="store.scanItem.year"> ({{ store.scanItem.year }})</template><template v-if="store.scanItem.rating"> · <i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ Number(store.scanItem.rating).toFixed(1) }}</template>
-            </div>
-            <div class="scan-item-match pending" v-else>
-              <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite"></i> Searching TMDb...
-            </div>
-          </div>
-
-          <div class="scan-widget-status" v-else style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-            {{ store.scanProgress || 'Preparing scan...' }}
-          </div>
-
-          <div class="scan-widget-footer">
-            <span><i class="ph ph-files"></i> {{ store.scanCount || 0 }}/{{ store.scanTotal || '?' }} processed</span>
-            <span v-if="store.scanMatched"><i class="ph ph-checks"></i> {{ store.scanMatched }} matched</span>
-            <span v-if="store.scanElapsed"><i class="ph ph-timer"></i> {{ fmtElapsed(store.scanElapsed) }}</span>
-          </div>
-        </template>
-
-        <!-- Completed -->
-        <template v-else>
-          <div class="scan-widget-status" style="color:var(--text-muted)">
-            Processed {{ store.scanCount || 0 }} new media files<template v-if="store.scanMatched"> · {{ store.scanMatched }} matched to TMDb</template>.
-          </div>
-        </template>
       </div>
     </div>
   `,
   setup() {
     const isMinimized = ref(false);
+    const isFullscreen = ref(false);
     const showCompleted = ref(false);
+    const countdown = ref(5);
+    let countdownTimer = null;
+
+    function checkAutoFullscreen(running, prev) {
+      if (running && !prev) {
+        const isPendingOnboarding = sessionStorage.getItem("cs_pending_onboarding") === "true";
+        const hasScannedBefore = localStorage.getItem("cs_has_scanned") === "true";
+        if (isPendingOnboarding || !hasScannedBefore) {
+          isFullscreen.value = true;
+          isMinimized.value = false;
+          if (store.onboardingWaiting) {
+            store.onboardingWaiting = false;
+          }
+        }
+      }
+    }
+
+    onMounted(() => {
+      if (store.scanRunning) {
+        const isPendingOnboarding = sessionStorage.getItem("cs_pending_onboarding") === "true";
+        const hasScannedBefore = localStorage.getItem("cs_has_scanned") === "true";
+        if (isPendingOnboarding || !hasScannedBefore) {
+          isFullscreen.value = true;
+          isMinimized.value = false;
+          if (store.onboardingWaiting) {
+            store.onboardingWaiting = false;
+          }
+        }
+      }
+    });
+
+    onUnmounted(() => {
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+    });
+
+    function toggleFullscreen() {
+      isFullscreen.value = !isFullscreen.value;
+      if (isFullscreen.value) {
+        isMinimized.value = false;
+      }
+    }
+
+    function exitFullscreen() {
+      isFullscreen.value = false;
+    }
+
+    function minimizeToBackground() {
+      isFullscreen.value = false;
+      isMinimized.value = true;
+    }
+
+    function exploreLibrary() {
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+      isFullscreen.value = false;
+      showCompleted.value = false;
+      isMinimized.value = false;
+
+      if (sessionStorage.getItem("cs_pending_onboarding") === "true") {
+        sessionStorage.removeItem("cs_pending_onboarding");
+        setTimeout(() => {
+          if (typeof window.startOnboardingTour === "function") {
+            window.startOnboardingTour();
+          }
+        }, 350);
+      }
+    }
 
     const phaseLabel = computed(() => {
       if (store.scanPhase === "matching") return "Matching";
@@ -16379,10 +17144,24 @@ const ScanProgressWidget = {
       () => store.scanRunning,
       (running, prev) => {
         if (!running && prev === true) {
+          localStorage.setItem("cs_has_scanned", "true");
           showCompleted.value = true;
-          setTimeout(() => {
-            showCompleted.value = false;
-          }, 4000);
+          if (isFullscreen.value) {
+            countdown.value = 5;
+            if (countdownTimer) clearInterval(countdownTimer);
+            countdownTimer = setInterval(() => {
+              countdown.value--;
+              if (countdown.value <= 0) {
+                exploreLibrary();
+              }
+            }, 1000);
+          } else {
+            setTimeout(() => {
+              showCompleted.value = false;
+            }, 4000);
+          }
+        } else if (running && !prev) {
+          checkAutoFullscreen(running, prev);
         }
       },
     );
@@ -16404,7 +17183,27 @@ const ScanProgressWidget = {
       return `${bytes.toFixed(i > 1 ? 1 : 0)} ${units[i]}`;
     }
 
-    return { store, isMinimized, showCompleted, dismiss, phaseLabel, phaseIcon, typeLabel, typeIcon, isEpisode, itemSize, pad2, fmtElapsed };
+    return {
+      store,
+      isMinimized,
+      isFullscreen,
+      showCompleted,
+      countdown,
+      dismiss,
+      toggleFullscreen,
+      exitFullscreen,
+      minimizeToBackground,
+      exploreLibrary,
+      phaseLabel,
+      phaseIcon,
+      typeLabel,
+      typeIcon,
+      isEpisode,
+      itemSize,
+      pad2,
+      fmtElapsed,
+      imgUrl,
+    };
   },
 };
 
@@ -17288,6 +18087,7 @@ const App = {
         <button
           v-if="showBackToTop && !isPlayerRoute"
           class="back-to-top-btn"
+          :class="{ 'floating-offset-up': store.hasFloatingSaveBar }"
           @click="scrollToTop"
           title="Back to Top"
           aria-label="Back to Top"

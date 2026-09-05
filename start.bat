@@ -24,6 +24,21 @@ if not exist "%PYTHON%" (
     exit /b 1
 )
 
+REM Check if CapsStream server is already running
+"%PYTHON%" -c "import backend.settings as s, sys; sys.exit(0 if s.is_server_running() else 1)" 2>nul
+if %ERRORLEVEL% equ 0 (
+    echo  [!] CapsStream Server is ALREADY RUNNING!
+    echo.
+    echo  ============================================================
+    echo   STATUS: CapsStream Server is already active and healthy.
+    echo   Reusing running instance and focusing browser window...
+    echo  ============================================================
+    echo.
+    "%PYTHON%" -c "import backend.settings as s; s.launch_browser()" 2>nul
+    timeout /t 3 >nul
+    exit /b 0
+)
+
 REM Install dependencies if needed
 echo  [1/4] Checking dependencies...
 "%PYTHON%" -m pip install -q -r "%ROOT%requirements.txt" 2>nul

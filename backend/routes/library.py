@@ -244,6 +244,65 @@ def api_remove_from_collection(collection_id, media_id):
     return jsonify({"ok": True})
 
 
+@library_bp.route("/api/collections/convert-to-playlist", methods=["POST"])
+def api_convert_collection_to_playlist():
+    pid = require_profile()
+    data = request.json or {}
+    name = (data.get("name") or "").strip()
+    desc = (data.get("description") or "").strip()
+    is_shared = bool(data.get("is_shared", False))
+    include_all_episodes = bool(data.get("include_all_episodes", False))
+    raw_items = data.get("items") or []
+
+    if not name:
+        return jsonify({"error": "Playlist name is required"}), 400
+
+    if not raw_items:
+        return jsonify({"error": "No items provided to convert"}), 400
+
+    if active_is_kids():
+        raw_items = filter_for_profile(raw_items)
+        if not raw_items:
+            return jsonify({"error": "No eligible titles found for this profile"}), 400
+
+    pl_id = create_playlist(pid, name, desc, is_shared=is_shared)
+
+    media_ids_to_add = []
+    for it in raw_items:
+        item_type = it.get("type", "movie")
+        tmdb_id = it.get("tmdb_id")
+        mid = it.get("id")
+
+        if item_type in ("series", "anime") and tmdb_id:
+            eps = get_media_by_tmdb(tmdb_id, item_type)
+            if eps:
+                sorted_eps = sorted(
+                    eps,
+                    key=lambda e: (int(e.get("season") or 1), int(e.get("episode") or 1))
+                )
+                if include_all_episodes:
+                    for ep in sorted_eps:
+                        if ep.get("id"):
+                            media_ids_to_add.append(ep["id"])
+                else:
+                    first_ep = sorted_eps[0]
+                    if first_ep.get("id"):
+                        media_ids_to_add.append(first_ep["id"])
+            elif mid:
+                media_ids_to_add.append(mid)
+        elif mid:
+            media_ids_to_add.append(mid)
+
+    for m_id in media_ids_to_add:
+        try:
+            add_to_playlist(pl_id, int(m_id), profile_id=pid)
+        except Exception:
+            pass
+
+    pl = get_playlist(pl_id, pid)
+    return jsonify(pl), 201
+
+
 # ─── Playlists ─────────────────────────────────────────────────────────────────
 
 @library_bp.route("/api/playlists", methods=["GET"])

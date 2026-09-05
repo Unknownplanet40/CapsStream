@@ -76,8 +76,10 @@ def api_test_api_key():
     data = request.json or {}
     provider = data.get("provider", "")
     key = data.get("key", "")
-    ok, message = test_api_key(provider, key)
+    url = data.get("url", "")
+    ok, message = test_api_key(provider, key, url=url)
     return jsonify({"ok": ok, "message": message})
+
 
 
 @admin_bp.route("/api/health", methods=["GET"])

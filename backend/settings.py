@@ -69,10 +69,14 @@ DEFAULT_CONFIG = {
     "profiles": {
         "max_profiles": 8
     },
+    "supabase_url": "",
+    "supabase_anon_key": "",
     "features": {
-        "requests": False
+        "requests": True,
+        "online_requests": True
     }
 }
+
 
 # NOTE: The built-in "media/" default folders have been removed.
 # Users provide their own media sources via Settings → Media Scanner Paths.
@@ -148,7 +152,7 @@ def load_config():
 
         # Secrets are provided via environment / .env — env values win over
         # anything stale in config.json, and empty config values get filled.
-        for secret in ("tmdb_api_key",):
+        for secret in ("tmdb_api_key", "supabase_url", "supabase_anon_key"):
             env_val = os.environ.get(secret.upper())
             if env_val:
                 merged[secret] = env_val
@@ -238,16 +242,16 @@ def save_config(new_data):
         return False, str(e)
 
 
-def test_api_key(provider, api_key):
-    """Test a TMDb API key live."""
+def test_api_key(provider, api_key, url=None):
+    """Test an API key live."""
     if not api_key or not api_key.strip():
         return False, "API key cannot be empty"
 
     key = api_key.strip()
     if provider.lower() == "tmdb":
-        url = f"https://api.themoviedb.org/3/authentication?api_key={key}"
+        endpoint = f"https://api.themoviedb.org/3/authentication?api_key={key}"
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "CapsStream/1.0"})
+            req = urllib.request.Request(endpoint, headers={"User-Agent": "CapsStream/1.0"})
             with urllib.request.urlopen(req, timeout=5) as res:
                 data = json.loads(res.read().decode("utf-8"))
                 if data.get("success") is True:
@@ -261,6 +265,13 @@ def test_api_key(provider, api_key):
                 return False, f"HTTP Error {e.code}: Invalid TMDB API key"
         except Exception as e:
             return False, f"Connection error: {str(e)}"
+
+    if provider.lower() == "supabase":
+        from backend.utils.supabase_client import test_supabase_connection
+        cfg = load_config()
+        supabase_url = (url or "").strip() or cfg.get("supabase_url") or os.environ.get("SUPABASE_URL", "")
+        return test_supabase_connection(url=supabase_url, key=key)
+
 
     return False, "Unknown provider"
 
@@ -534,6 +545,46 @@ def is_browser_already_open(url):
         pass
 
     return False
+
+
+def is_server_running(url=None):
+    """Check if a CapsStream server instance is already running and responding, or if a server process is active."""
+    import urllib.request
+    import urllib.error
+    import ssl
+    import ctypes
+
+    # 1. Quick check for Windows named mutex held by active server process
+    if os.name == "nt":
+        try:
+            h_mutex = ctypes.windll.kernel32.OpenMutexW(0x00100000, False, "CapsStream_Server_Instance_Mutex")
+            if h_mutex:
+                ctypes.windll.kernel32.CloseHandle(h_mutex)
+                return True
+        except Exception:
+            pass
+
+    # 2. HTTP health check against local endpoint
+    if not url:
+        config = load_config()
+        host = (config.get("host") or "127.0.0.1").strip()
+        port = int(config.get("port") or 8000)
+        proto = "https" if config.get("ssl", False) else "http"
+        display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+        url = f"{proto}://{display_host}:{port}"
+
+    health_url = f"{url.rstrip('/')}/api/health"
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(health_url, headers={"User-Agent": "CapsStream-Launcher"})
+        with urllib.request.urlopen(req, timeout=1.5, context=ctx) as resp:
+            return resp.status < 500
+    except urllib.error.HTTPError:
+        return True
+    except Exception:
+        return False
 
 
 def launch_browser():

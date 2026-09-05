@@ -274,12 +274,12 @@ const PlayerPage = {
               </button>
 
               <!-- Skip -10s -->
-              <button class="ctrl-btn" @click="skip(-10)" title="Rewind 10s (Left Arrow)" id="ctrl-rewind">
+              <button class="ctrl-btn hide-on-mobile" @click="skip(-10)" title="Rewind 10s (Left Arrow)" id="ctrl-rewind">
                 <i class="ph ph-arrow-counter-clockwise"></i>
               </button>
 
               <!-- Skip +10s -->
-              <button class="ctrl-btn" @click="skip(10)" title="Forward 10s (Right Arrow)" id="ctrl-forward">
+              <button class="ctrl-btn hide-on-mobile" @click="skip(10)" title="Forward 10s (Right Arrow)" id="ctrl-forward">
                 <i class="ph ph-arrow-clockwise"></i>
               </button>
 
@@ -348,7 +348,7 @@ const PlayerPage = {
 
               <!-- Audio Track Menu (Only shown if video has multiple audio tracks) -->
               <!-- Audio Track & Sound Enhancer Menu -->
-              <div style="position:relative">
+              <div class="hide-on-mobile" style="position:relative">
                 <button class="ctrl-btn" @click="showAudioMenu = !showAudioMenu; showSubMenu = false; showSpeedMenu = false; showQualityMenu = false; showSleepMenu = false" title="Audio Track & Sound Enhancer" id="ctrl-audio" style="font-size:0.85rem;font-weight:700">
                   <i class="ph ph-microphone-stage" style="font-size:1.35rem"></i>
                 </button>
@@ -460,12 +460,12 @@ const PlayerPage = {
                 </div>
               </div>
 
-              <!-- Chapters Menu Button -->
-              <div style="position:relative" v-if="chapters && chapters.length > 0">
+              <!-- Chapters Menu Button (Desktop) -->
+              <div class="hide-on-mobile" style="position:relative" v-if="chapters && chapters.length > 0">
                 <button
                   class="ctrl-btn"
                   :class="{ active: showChapterMenu }"
-                  @click="showChapterMenu = !showChapterMenu; showQualityMenu = false; showSpeedMenu = false; showSubMenu = false; showAudioMenu = false; showSleepMenu = false"
+                  @click="showChapterMenu = !showChapterMenu; showQualityMenu = false; showSubMenu = false; showAudioMenu = false"
                   title="Chapters"
                   id="ctrl-chapters"
                   style="font-size:0.85rem;font-weight:700"
@@ -489,164 +489,6 @@ const PlayerPage = {
                 </div>
               </div>
 
-              <!-- Video Quality & Player Options Menu (Gear Icon) -->
-              <div style="position:relative">
-                <button class="ctrl-btn" :class="{ active: showQualityMenu }" @click="showQualityMenu = !showQualityMenu; showSpeedMenu = false; showSubMenu = false; showAudioMenu = false; showSleepMenu = false; showChapterMenu = false" title="Player Options & Quality" id="ctrl-quality" style="font-size:0.85rem;font-weight:700;position:relative">
-                  <i class="ph ph-gear-six" style="font-size:1.35rem"></i>
-                  <span v-if="activeQualityBadge" class="ctrl-quality-badge">{{ activeQualityBadge }}</span>
-                </button>
-                <div v-if="showQualityMenu" class="player-popup-menu" @click.stop style="min-width:220px">
-                  <div style="font-size:0.75rem;color:var(--text-muted);padding:6px 12px 4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">
-                    Player Options
-                  </div>
-
-                  <!-- Aspect Ratio Selector inside Player Options -->
-                  <div class="player-menu-section-item" style="padding:4px 12px 6px">
-                    <div style="font-size:0.8rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-                      <span style="display:flex;align-items:center;gap:6px">
-                        <i class="ph ph-frame-corners" style="font-size:0.95rem"></i> Aspect Ratio
-                      </span>
-                      <span style="font-size:0.72rem;color:var(--accent);text-transform:capitalize;font-weight:700">{{ aspectRatioFit }}</span>
-                    </div>
-                    <div class="player-aspect-pills" style="display:flex;gap:4px">
-                      <button
-                        v-for="mode in ['contain', 'cover', 'fill']"
-                        :key="mode"
-                        class="player-aspect-pill"
-                        :class="{ active: aspectRatioFit === mode }"
-                        @click="aspectRatioFit = mode"
-                      >
-                        {{ mode.charAt(0).toUpperCase() + mode.slice(1) }}
-                      </button>
-                    </div>
-                  </div>
-
-                  <!-- Sound Enhancer Mode inside Player Options -->
-                  <div class="player-menu-section-item" style="padding:4px 12px 6px">
-                    <div style="font-size:0.8rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-                      <span style="display:flex;align-items:center;gap:6px">
-                        <i class="ph ph-speaker-high" style="font-size:0.95rem"></i> Sound Enhancer
-                      </span>
-                      <span style="font-size:0.72rem;color:var(--accent);text-transform:capitalize;font-weight:700">{{ audioEnhancerMode }}</span>
-                    </div>
-                    <div class="player-aspect-pills" style="display:flex;gap:4px">
-                      <button
-                        v-for="opt in [{ id: 'off', label: 'Off' }, { id: 'dialogue', label: 'Dialogue' }, { id: 'night', label: 'Night' }]"
-                        :key="opt.id"
-                        class="player-aspect-pill"
-                        :class="{ active: audioEnhancerMode === opt.id }"
-                        @click="setAudioEnhancerMode(opt.id)"
-                        :title="opt.id === 'dialogue' ? 'Boosts speech frequencies for crystal clear dialogue' : opt.id === 'night' ? 'Dialogue boost + compresses loud sound effects & explosions' : 'Standard audio output'"
-                      >
-                        {{ opt.label }}
-                      </button>
-                    </div>
-                  </div>
-
-                  <!-- Picture-in-Picture Toggle inside Player Options -->
-                  <div
-                    v-if="isPipSupported"
-                    class="player-menu-item"
-                    :class="{ active: isPipActive }"
-                    @click="togglePip(); showQualityMenu = false"
-                    id="player-menu-pip"
-                    style="display:flex;align-items:center;justify-content:space-between"
-                  >
-                    <span style="display:flex;align-items:center;gap:8px">
-                      <i :class="isPipActive ? 'ph-fill ph-screencast' : 'ph ph-screencast'"></i> Picture-in-Picture (P)
-                    </span>
-                    <i v-if="isPipActive" class="ph-bold ph-check" style="color:var(--accent)"></i>
-                  </div>
-
-                  <!-- Edit Skip Markers -->
-                  <div v-if="!store.profile?.is_kids" class="player-menu-item" @click="showSkipModal = true; showQualityMenu = false" id="player-menu-skip-markers">
-                    <span>⏱️ Edit Skip Markers</span>
-                  </div>
-
-                  <!-- Video Quality: always visible; clickable only when an
-                       alternative quality source actually exists -->
-                  <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0"></div>
-                  <div style="font-size:0.75rem;color:var(--text-muted);padding:6px 12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">
-                    Video Quality
-                  </div>
-                  <div
-                    v-for="opt in (qualityOptions.length ? qualityOptions : [{ display_label: 'Default', media_id: selectedQualityMediaId }])"
-                    :key="opt.media_id"
-                    class="player-menu-item"
-                    :class="{ active: selectedQualityMediaId === opt.media_id, disabled: !canSwitchQuality }"
-                    @click="canSwitchQuality && selectQuality(opt)"
-                    style="display:flex;align-items:center;justify-content:space-between;gap:12px"
-                  >
-                    <span>{{ opt.display_label }}</span>
-                    <span v-if="opt.size_str" style="font-size:0.75rem;color:var(--text-muted)">{{ opt.size_str }}</span>
-                  </div>
-                  <div v-if="!canSwitchQuality" style="font-size:0.68rem;color:var(--text-muted);padding:4px 12px 6px">
-                    No alternative quality sources
-                  </div>
-                </div>
-              </div>
-
-              <!-- Sleep Timer Menu Button -->
-              <div style="position:relative">
-                <button
-                  class="ctrl-btn"
-                  :class="{ active: sleepTimer.active || showSleepMenu }"
-                  @click="showSleepMenu = !showSleepMenu; showQualityMenu = false; showSpeedMenu = false; showSubMenu = false; showAudioMenu = false"
-                  title="Sleep Timer (Z)"
-                  id="ctrl-sleep"
-                  style="font-size:0.85rem;font-weight:700;position:relative"
-                >
-                  <i :class="sleepTimer.active ? 'ph-fill ph-moon' : 'ph ph-moon'" style="font-size:1.35rem"></i>
-                  <span v-if="sleepTimer.active && sleepTimerBadge" class="player-sleep-badge">
-                    {{ sleepTimerBadge }}
-                  </span>
-                </button>
-                <div v-if="showSleepMenu" class="player-popup-menu" @click.stop style="min-width:240px">
-                  <div style="font-size:0.75rem;color:var(--text-muted);padding:6px 12px 4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;display:flex;justify-content:space-between;align-items:center">
-                    <span>Sleep Timer</span>
-                    <span v-if="sleepTimer.active" style="color:#38bdf8;font-size:0.72rem;font-weight:700">{{ sleepTimerRemainingStr }}</span>
-                  </div>
-
-                  <div class="player-aspect-pills" style="display:flex;gap:4px;padding:4px 12px 6px;flex-wrap:wrap">
-                    <button
-                      v-for="opt in sleepPresets"
-                      :key="opt.label"
-                      class="player-aspect-pill"
-                      :class="{ active: sleepTimer.active && sleepTimer.mode === opt.mode && sleepTimer.durationMinutes === opt.minutes }"
-                      @click="setSleepTimer(opt.mode, opt.minutes)"
-                    >
-                      {{ opt.label }}
-                    </button>
-                  </div>
-
-                  <div v-if="sleepTimer.active" style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0"></div>
-                  <div v-if="sleepTimer.active" style="display:flex;align-items:center;justify-content:space-between;padding:4px 12px 6px;gap:6px">
-                    <span style="font-size:0.75rem;color:var(--text-muted)">Extend:</span>
-                    <div style="display:flex;gap:4px">
-                      <button class="sub-size-btn" @click="extendSleepTimer(5)">+5m</button>
-                      <button class="sub-size-btn" @click="extendSleepTimer(10)">+10m</button>
-                      <button class="sub-size-btn" @click="extendSleepTimer(15)">+15m</button>
-                    </div>
-                  </div>
-
-                  <div v-if="sleepTimer.active" class="player-menu-item" style="color:#ef4444;font-weight:600;display:flex;align-items:center;gap:6px" @click="cancelSleepTimer">
-                    <i class="ph ph-x-circle"></i> Turn Off Timer
-                  </div>
-                </div>
-              </div>
-
-              <!-- Playback Speed Menu -->
-              <div style="position:relative">
-                <button class="ctrl-btn" @click="showSpeedMenu = !showSpeedMenu; showSubMenu = false; showAudioMenu = false; showQualityMenu = false; showSleepMenu = false" title="Playback Speed" style="font-size:0.85rem;font-weight:700" id="ctrl-speed">
-                  {{ playbackRate }}x
-                </button>
-                <div v-if="showSpeedMenu" class="player-popup-menu" @click.stop>
-                  <div v-for="rate in [0.5, 0.75, 1, 1.25, 1.5, 2]" :key="rate" class="player-menu-item" :class="{ active: playbackRate === rate }" @click="selectSpeed(rate)">
-                    {{ rate }}x
-                  </div>
-                </div>
-              </div>
-
               <!-- Episodes & Seasons Drawer Button (Series / Anime) -->
               <div style="position:relative" v-if="isSeriesMedia">
                 <button
@@ -660,8 +502,8 @@ const PlayerPage = {
                 </button>
               </div>
 
-              <!-- Queue & Playlist Drawer Button -->
-              <div style="position:relative">
+              <!-- Queue & Playlist Drawer Button (Desktop) -->
+              <div class="hide-on-mobile" style="position:relative">
                 <button
                   class="ctrl-btn"
                   :class="{ active: showQueueDrawer }"
@@ -676,17 +518,322 @@ const PlayerPage = {
                 </button>
               </div>
 
-              <!-- Dedicated Picture-in-Picture Button -->
-              <button
-                v-if="isPipSupported"
-                class="ctrl-btn"
-                :class="{ active: isPipActive }"
-                @click="togglePip"
-                :title="isPipActive ? 'Exit Picture-in-Picture (P)' : 'Picture-in-Picture (P)'"
-                id="ctrl-pip"
-              >
-                <i :class="isPipActive ? 'ph-fill ph-screencast' : 'ph ph-screencast'" style="font-size:1.3rem"></i>
-              </button>
+              <!-- Multi-Page Player Settings Menu (Gear Icon) -->
+              <div style="position:relative">
+                <button
+                  class="ctrl-btn"
+                  :class="{ active: showQualityMenu }"
+                  @click="toggleSettingsMenu"
+                  title="Player Settings"
+                  id="ctrl-quality"
+                  style="font-size:0.85rem;font-weight:700;position:relative"
+                >
+                  <i class="ph ph-gear-six" style="font-size:1.35rem"></i>
+                  <span v-if="settingsButtonBadge" class="ctrl-quality-badge">{{ settingsButtonBadge }}</span>
+                </button>
+
+                <div v-if="showQualityMenu" class="player-popup-menu player-settings-menu" @click.stop>
+                  <!-- ── Main Settings Menu Pane ── -->
+                  <div v-if="!activeSettingsSubmenu" class="player-menu-pane">
+                    <div class="player-menu-header">
+                      <span class="player-menu-title">Player Settings</span>
+                      <button class="player-menu-close-btn" @click="showQualityMenu = false" title="Close">
+                        <i class="ph ph-x"></i>
+                      </button>
+                    </div>
+
+                    <!-- 1. Video Quality Submenu Row -->
+                    <div class="player-menu-nav-row" @click="openSettingsSubmenu('quality')" id="settings-nav-quality">
+                      <div class="player-nav-row-left">
+                        <i class="ph ph-sliders-horizontal"></i>
+                        <span>Quality</span>
+                      </div>
+                      <div class="player-nav-row-right">
+                        <span class="player-nav-value">{{ activeQualityBadge || 'Default' }}</span>
+                        <i class="ph ph-caret-right"></i>
+                      </div>
+                    </div>
+
+                    <!-- 2. Playback Speed Submenu Row -->
+                    <div class="player-menu-nav-row" @click="openSettingsSubmenu('speed')" id="settings-nav-speed">
+                      <div class="player-nav-row-left">
+                        <i class="ph ph-gauge"></i>
+                        <span>Playback Speed</span>
+                      </div>
+                      <div class="player-nav-row-right">
+                        <span class="player-nav-value">{{ playbackRate === 1 ? 'Normal (1x)' : playbackRate + 'x' }}</span>
+                        <i class="ph ph-caret-right"></i>
+                      </div>
+                    </div>
+
+                    <!-- 3. Sleep Timer Submenu Row -->
+                    <div class="player-menu-nav-row" @click="openSettingsSubmenu('sleep')" id="settings-nav-sleep">
+                      <div class="player-nav-row-left">
+                        <i :class="sleepTimer.active ? 'ph-fill ph-moon' : 'ph ph-moon'"></i>
+                        <span>Sleep Timer</span>
+                      </div>
+                      <div class="player-nav-row-right">
+                        <span class="player-nav-value" :class="{ highlight: sleepTimer.active }">{{ sleepTimerDisplayStatus }}</span>
+                        <i class="ph ph-caret-right"></i>
+                      </div>
+                    </div>
+
+                    <!-- 4. Audio Track Submenu Row -->
+                    <div class="player-menu-nav-row" @click="openSettingsSubmenu('audio')" id="settings-nav-audio">
+                      <div class="player-nav-row-left">
+                        <i class="ph ph-microphone-stage"></i>
+                        <span>Audio Track</span>
+                      </div>
+                      <div class="player-nav-row-right">
+                        <span class="player-nav-value">{{ activeAudioTrackLabel }}</span>
+                        <i class="ph ph-caret-right"></i>
+                      </div>
+                    </div>
+
+                    <!-- 5. Chapters Submenu Row (if chapters exist) -->
+                    <div v-if="chapters && chapters.length" class="player-menu-nav-row" @click="openSettingsSubmenu('chapters')" id="settings-nav-chapters">
+                      <div class="player-nav-row-left">
+                        <i class="ph ph-bookmarks"></i>
+                        <span>Chapters</span>
+                      </div>
+                      <div class="player-nav-row-right">
+                        <span class="player-nav-value">{{ activeChapterTitle }}</span>
+                        <i class="ph ph-caret-right"></i>
+                      </div>
+                    </div>
+
+                    <!-- 6. Queue & Playlist link -->
+                    <div class="player-menu-nav-row" @click="openQueueFromSettings" id="settings-nav-queue">
+                      <div class="player-nav-row-left">
+                        <i class="ph ph-queue"></i>
+                        <span>Queue & Playlist</span>
+                      </div>
+                      <div class="player-nav-row-right">
+                        <span v-if="store.queue && store.queue.length" class="player-nav-value">{{ store.queue.length }} items</span>
+                        <i class="ph ph-caret-right"></i>
+                      </div>
+                    </div>
+
+                    <div class="player-menu-divider"></div>
+
+                    <!-- Aspect Ratio Selector inside Player Options -->
+                    <div class="player-menu-section-item" style="padding:6px 16px">
+                      <div class="player-section-label-row">
+                        <span><i class="ph ph-frame-corners"></i> Aspect Ratio</span>
+                        <span class="player-section-val-pill">{{ aspectRatioFit }}</span>
+                      </div>
+                      <div class="player-aspect-pills" style="display:flex;gap:4px">
+                        <button
+                          v-for="mode in ['contain', 'cover', 'fill']"
+                          :key="mode"
+                          class="player-aspect-pill"
+                          :class="{ active: aspectRatioFit === mode }"
+                          @click="aspectRatioFit = mode"
+                        >
+                          {{ mode.charAt(0).toUpperCase() + mode.slice(1) }}
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Sound Enhancer Mode inside Player Options -->
+                    <div class="player-menu-section-item" style="padding:6px 16px">
+                      <div class="player-section-label-row">
+                        <span><i class="ph ph-speaker-high"></i> Sound Enhancer</span>
+                        <span class="player-section-val-pill">{{ audioEnhancerMode }}</span>
+                      </div>
+                      <div class="player-aspect-pills" style="display:flex;gap:4px">
+                        <button
+                          v-for="opt in [{ id: 'off', label: 'Off' }, { id: 'dialogue', label: 'Dialogue' }, { id: 'night', label: 'Night' }]"
+                          :key="opt.id"
+                          class="player-aspect-pill"
+                          :class="{ active: audioEnhancerMode === opt.id }"
+                          @click="setAudioEnhancerMode(opt.id)"
+                          :title="opt.id === 'dialogue' ? 'Boosts speech frequencies for crystal clear dialogue' : opt.id === 'night' ? 'Dialogue boost + compresses loud sound effects & explosions' : 'Standard audio output'"
+                        >
+                          {{ opt.label }}
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Picture-in-Picture Toggle inside Player Options -->
+                    <div
+                      v-if="isPipSupported"
+                      class="player-menu-item"
+                      :class="{ active: isPipActive }"
+                      @click="togglePip(); showQualityMenu = false"
+                      id="player-menu-pip"
+                      style="display:flex;align-items:center;justify-content:space-between;padding:9px 16px"
+                    >
+                      <span style="display:flex;align-items:center;gap:10px">
+                        <i :class="isPipActive ? 'ph-fill ph-screencast' : 'ph ph-screencast'" style="font-size:1.15rem"></i> Picture-in-Picture (P)
+                      </span>
+                      <i v-if="isPipActive" class="ph-bold ph-check" style="color:var(--accent)"></i>
+                    </div>
+
+                    <!-- Edit Skip Markers -->
+                    <div v-if="!store.profile?.is_kids" class="player-menu-item" @click="showSkipModal = true; showQualityMenu = false" id="player-menu-skip-markers" style="padding:9px 16px">
+                      <span style="display:flex;align-items:center;gap:10px">
+                        <i class="ph ph-sliders-horizontal" style="font-size:1.15rem"></i> Edit Skip Markers
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- ── Submenu: Playback Speed ── -->
+                  <div v-else-if="activeSettingsSubmenu === 'speed'" class="player-menu-pane">
+                    <div class="player-submenu-header">
+                      <button class="player-submenu-back-btn" @click="closeSettingsSubmenu" title="Back">
+                        <i class="ph-bold ph-caret-left"></i>
+                      </button>
+                      <span class="player-submenu-title">Playback Speed</span>
+                      <button class="player-menu-close-btn" @click="showQualityMenu = false" title="Close">
+                        <i class="ph ph-x"></i>
+                      </button>
+                    </div>
+                    <div class="player-submenu-list">
+                      <div
+                        v-for="rate in [0.5, 0.75, 1, 1.25, 1.5, 2]"
+                        :key="rate"
+                        class="player-choice-item"
+                        :class="{ active: playbackRate === rate }"
+                        @click="selectSpeedAndClose(rate)"
+                      >
+                        <span>{{ rate === 1 ? '1x (Normal)' : rate + 'x' }}</span>
+                        <i v-if="playbackRate === rate" class="ph-bold ph-check player-check-icon"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- ── Submenu: Sleep Timer ── -->
+                  <div v-else-if="activeSettingsSubmenu === 'sleep'" class="player-menu-pane">
+                    <div class="player-submenu-header">
+                      <button class="player-submenu-back-btn" @click="closeSettingsSubmenu" title="Back">
+                        <i class="ph-bold ph-caret-left"></i>
+                      </button>
+                      <span class="player-submenu-title">Sleep Timer</span>
+                      <button class="player-menu-close-btn" @click="showQualityMenu = false" title="Close">
+                        <i class="ph ph-x"></i>
+                      </button>
+                    </div>
+
+                    <div v-if="sleepTimer.active" class="player-sleep-status-card">
+                      <div style="display:flex;align-items:center;justify-content:space-between">
+                        <span style="color:var(--text-muted);font-size:0.75rem">Active Timer:</span>
+                        <span style="color:#38bdf8;font-weight:700;font-size:0.8rem">{{ sleepTimerRemainingStr }}</span>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:6px;margin-top:8px">
+                        <span style="font-size:0.75rem;color:var(--text-muted)">Extend:</span>
+                        <button class="sub-size-btn" @click="extendSleepTimer(5)">+5m</button>
+                        <button class="sub-size-btn" @click="extendSleepTimer(10)">+10m</button>
+                        <button class="sub-size-btn" @click="extendSleepTimer(15)">+15m</button>
+                      </div>
+                      <button class="btn btn-ghost btn-xs" style="color:#ef4444;margin-top:8px;width:100%;justify-content:center" @click="cancelSleepTimer(); showQualityMenu = false">
+                        <i class="ph ph-x-circle" style="margin-right:4px"></i> Turn Off Timer
+                      </button>
+                    </div>
+
+                    <div class="player-submenu-list">
+                      <div
+                        v-for="opt in sleepPresets"
+                        :key="opt.label"
+                        class="player-choice-item"
+                        :class="{ active: sleepTimer.active && sleepTimer.mode === opt.mode && sleepTimer.durationMinutes === opt.minutes }"
+                        @click="setSleepTimerAndClose(opt.mode, opt.minutes)"
+                      >
+                        <span>{{ opt.label }}</span>
+                        <i v-if="sleepTimer.active && sleepTimer.mode === opt.mode && sleepTimer.durationMinutes === opt.minutes" class="ph-bold ph-check player-check-icon"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- ── Submenu: Video Quality ── -->
+                  <div v-else-if="activeSettingsSubmenu === 'quality'" class="player-menu-pane">
+                    <div class="player-submenu-header">
+                      <button class="player-submenu-back-btn" @click="closeSettingsSubmenu" title="Back">
+                        <i class="ph-bold ph-caret-left"></i>
+                      </button>
+                      <span class="player-submenu-title">Video Quality</span>
+                      <button class="player-menu-close-btn" @click="showQualityMenu = false" title="Close">
+                        <i class="ph ph-x"></i>
+                      </button>
+                    </div>
+                    <div class="player-submenu-list">
+                      <div
+                        v-for="opt in (qualityOptions.length ? qualityOptions : [{ display_label: 'Default', media_id: selectedQualityMediaId }])"
+                        :key="opt.media_id"
+                        class="player-choice-item"
+                        :class="{ active: selectedQualityMediaId === opt.media_id, disabled: !canSwitchQuality }"
+                        @click="canSwitchQuality && selectQualityAndClose(opt)"
+                      >
+                        <div style="display:flex;align-items:center;gap:8px">
+                          <span>{{ opt.display_label }}</span>
+                          <span v-if="opt.size_str" style="font-size:0.75rem;color:var(--text-muted)">({{ opt.size_str }})</span>
+                        </div>
+                        <i v-if="selectedQualityMediaId === opt.media_id" class="ph-bold ph-check player-check-icon"></i>
+                      </div>
+                      <div v-if="!canSwitchQuality" style="font-size:0.72rem;color:var(--text-muted);padding:8px 16px">
+                        No alternative video quality streams available
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- ── Submenu: Audio Tracks ── -->
+                  <div v-else-if="activeSettingsSubmenu === 'audio'" class="player-menu-pane">
+                    <div class="player-submenu-header">
+                      <button class="player-submenu-back-btn" @click="closeSettingsSubmenu" title="Back">
+                        <i class="ph-bold ph-caret-left"></i>
+                      </button>
+                      <span class="player-submenu-title">Audio Tracks</span>
+                      <button class="player-menu-close-btn" @click="showQualityMenu = false" title="Close">
+                        <i class="ph ph-x"></i>
+                      </button>
+                    </div>
+                    <div class="player-submenu-list">
+                      <div v-if="!audioTracks || !audioTracks.length" class="player-choice-item active">
+                        <span>Default Audio</span>
+                        <i class="ph-bold ph-check player-check-icon"></i>
+                      </div>
+                      <div
+                        v-for="track in audioTracks"
+                        :key="track.index"
+                        class="player-choice-item"
+                        :class="{ active: (streamState.audioTrack ?? defaultAudioIndex) === track.index }"
+                        @click="selectAudioTrackAndClose(track.index)"
+                      >
+                        <div>
+                          <span>{{ track.title }}</span>
+                          <span v-if="track.index === defaultAudioIndex" style="opacity:0.6;font-size:0.75rem"> · Default</span>
+                        </div>
+                        <i v-if="(streamState.audioTrack ?? defaultAudioIndex) === track.index" class="ph-bold ph-check player-check-icon"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- ── Submenu: Chapters ── -->
+                  <div v-else-if="activeSettingsSubmenu === 'chapters'" class="player-menu-pane">
+                    <div class="player-submenu-header">
+                      <button class="player-submenu-back-btn" @click="closeSettingsSubmenu" title="Back">
+                        <i class="ph-bold ph-caret-left"></i>
+                      </button>
+                      <span class="player-submenu-title">Chapters ({{ chapters.length }})</span>
+                      <button class="player-menu-close-btn" @click="showQualityMenu = false" title="Close">
+                        <i class="ph ph-x"></i>
+                      </button>
+                    </div>
+                    <div class="player-submenu-list" style="max-height:280px;overflow-y:auto">
+                      <div
+                        v-for="ch in chapters"
+                        :key="ch.id"
+                        class="chapter-menu-item player-choice-item"
+                        :class="{ active: currentChapter && currentChapter.id === ch.id }"
+                        @click="seekToChapterAndClose(ch)"
+                      >
+                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ch?.title || 'Chapter' }}</span>
+                        <span class="chapter-menu-time">{{ formatTime(ch?.start || 0) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               <!-- Fullscreen -->
               <button class="ctrl-btn" @click="toggleFullscreen" title="Fullscreen (F)" id="ctrl-fullscreen">
@@ -1058,7 +1205,10 @@ const PlayerPage = {
                   <i class="ph-fill ph-play"></i>
                 </div>
 
-                <!-- Missing Episode Overlay -->
+                <!-- Missing or Unaired Episode Overlay -->
+                <div v-else-if="ep.is_local === false && ep.is_unaired" class="drawer-ep-missing-overlay unaired">
+                  <span>Unaired</span>
+                </div>
                 <div v-else class="drawer-ep-missing-overlay">
                   <span>{{ ep.is_mounted === false ? 'Unmounted' : 'Missing' }}</span>
                 </div>
@@ -3805,6 +3955,92 @@ const PlayerPage = {
       }
     }
 
+    // ─── Multi-Page Player Settings & Submenus ──────────────────
+    const activeSettingsSubmenu = ref(null); // 'speed' | 'sleep' | 'quality' | 'audio' | 'chapters' | null
+
+    function openSettingsSubmenu(key) {
+      activeSettingsSubmenu.value = key;
+    }
+
+    function closeSettingsSubmenu() {
+      activeSettingsSubmenu.value = null;
+    }
+
+    function toggleSettingsMenu() {
+      showQualityMenu.value = !showQualityMenu.value;
+      activeSettingsSubmenu.value = null;
+      if (showQualityMenu.value) {
+        showSubMenu.value = false;
+        showAudioMenu.value = false;
+        showSpeedMenu.value = false;
+        showSleepMenu.value = false;
+        showChapterMenu.value = false;
+      }
+    }
+
+    function selectSpeedAndClose(rate) {
+      selectSpeed(rate);
+      showQualityMenu.value = false;
+      activeSettingsSubmenu.value = null;
+    }
+
+    function setSleepTimerAndClose(mode, minutes = null) {
+      setSleepTimer(mode, minutes);
+      showQualityMenu.value = false;
+      activeSettingsSubmenu.value = null;
+    }
+
+    function selectQualityAndClose(opt) {
+      selectQuality(opt);
+      showQualityMenu.value = false;
+      activeSettingsSubmenu.value = null;
+    }
+
+    function selectAudioTrackAndClose(trackIndex) {
+      selectAudioTrack(trackIndex);
+      showQualityMenu.value = false;
+      activeSettingsSubmenu.value = null;
+    }
+
+    function seekToChapterAndClose(ch) {
+      seekToChapter(ch);
+      showQualityMenu.value = false;
+      activeSettingsSubmenu.value = null;
+    }
+
+    function openQueueFromSettings() {
+      showQualityMenu.value = false;
+      activeSettingsSubmenu.value = null;
+      toggleQueueDrawer();
+    }
+
+    const sleepTimerDisplayStatus = computed(() => {
+      if (!sleepTimer.active) return "Off";
+      if (sleepTimer.mode === "end_of_episode") return "End of Episode";
+      const m = Math.ceil((sleepTimer.remainingSeconds || 0) / 60);
+      return `${m}m left`;
+    });
+
+    const activeAudioTrackLabel = computed(() => {
+      const currentIdx = streamState.audioTrack ?? defaultAudioIndex.value;
+      const t = (audioTracks.value || []).find((tr) => tr.index === currentIdx);
+      if (t) return t.title || `Track ${t.index + 1}`;
+      return "Default Audio";
+    });
+
+    const activeChapterTitle = computed(() => {
+      if (currentChapter.value && currentChapter.value.title) {
+        return currentChapter.value.title;
+      }
+      return chapters.value && chapters.value.length ? `${chapters.value.length} Chapters` : "";
+    });
+
+    const settingsButtonBadge = computed(() => {
+      if (playbackRate.value !== 1) return `${playbackRate.value}x`;
+      if (sleepTimer.active && sleepTimerBadge.value) return sleepTimerBadge.value;
+      return activeQualityBadge.value || "";
+    });
+
     // ─── OpenSubtitles download ─────────────────────────────────
     const downloadingSubs = ref(false);
 
@@ -4315,7 +4551,13 @@ const PlayerPage = {
 
     function playEpisodeFromDrawer(ep) {
       if (ep.is_local === false || ep.is_mounted === false) {
-        addToast(ep.is_mounted === false ? "This episode is on an unmounted drive" : "This episode is not downloaded locally", "warning");
+        if (ep.is_mounted === false) {
+          addToast("This episode is on an unmounted drive", "warning");
+        } else if (ep.is_unaired) {
+          addToast("This episode has not aired yet", "info");
+        } else {
+          addToast("This episode is not downloaded locally", "warning");
+        }
         return;
       }
       if (!ep.id || Number(ep.id) === Number(media.value?.id)) return;
@@ -5035,9 +5277,13 @@ const PlayerPage = {
           } else if (showQueueDrawer.value) {
             e.preventDefault();
             showQueueDrawer.value = false;
+          } else if (activeSettingsSubmenu.value) {
+            e.preventDefault();
+            activeSettingsSubmenu.value = null;
           } else if (showQualityMenu.value || showAudioMenu.value || showSubMenu.value || showSpeedMenu.value || showSleepMenu.value || showChapterMenu.value) {
             e.preventDefault();
             showQualityMenu.value = false;
+            activeSettingsSubmenu.value = null;
             showAudioMenu.value = false;
             showSubMenu.value = false;
             showSpeedMenu.value = false;
@@ -5747,6 +5993,20 @@ const PlayerPage = {
       seekToNextChapter,
       seekToPrevChapter,
       activeQualityBadge,
+      activeSettingsSubmenu,
+      openSettingsSubmenu,
+      closeSettingsSubmenu,
+      toggleSettingsMenu,
+      selectSpeedAndClose,
+      setSleepTimerAndClose,
+      selectQualityAndClose,
+      selectAudioTrackAndClose,
+      seekToChapterAndClose,
+      openQueueFromSettings,
+      sleepTimerDisplayStatus,
+      activeAudioTrackLabel,
+      activeChapterTitle,
+      settingsButtonBadge,
       ambientAudioEnabled,
       toggleAmbientAudio,
       replayCurrentEpisode,

@@ -35,6 +35,9 @@ def bust_home_cache():
 
 def _merge_season_episodes(tmdb_id, s_num, local_map, pid, fallback_backdrop=None, show_title=None):
     from backend.matcher import fetch_season_episodes
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).date()
+
     tmdb_eps = fetch_season_episodes(tmdb_id, s_num) if tmdb_id else []
     merged_list = []
     if tmdb_eps:
@@ -42,9 +45,24 @@ def _merge_season_episodes(tmdb_id, s_num, local_map, pid, fallback_backdrop=Non
         for meta in tmdb_eps:
             ep_num = meta["episode_number"]
             seen_ep_nums.add(ep_num)
+            air_date = meta.get("air_date")
+
+            is_unaired = False
+            if air_date:
+                try:
+                    ep_date = datetime.strptime(air_date[:10], "%Y-%m-%d").date()
+                    if ep_date > today:
+                        is_unaired = True
+                except Exception:
+                    pass
+            else:
+                is_unaired = True
+
             if (s_num, ep_num) in local_map:
                 ep = dict(local_map[(s_num, ep_num)])
                 ep["is_local"] = True
+                ep["is_unaired"] = False
+                ep["air_date"] = air_date or ep.get("air_date")
                 if not ep.get("ep_title") or ep.get("ep_title") == ep.get("title"):
                     ep["ep_title"] = meta.get("name")
                 ep["overview"] = meta.get("overview") or ep.get("overview")
@@ -57,9 +75,14 @@ def _merge_season_episodes(tmdb_id, s_num, local_map, pid, fallback_backdrop=Non
                 merged_list.append(ep)
             else:
                 merged_list.append({
-                    "id": None, "is_local": False,
-                    "season": s_num, "episode": ep_num,
-                    "ep_title": meta.get("name"), "overview": meta.get("overview"),
+                    "id": None,
+                    "is_local": False,
+                    "is_unaired": is_unaired,
+                    "air_date": air_date,
+                    "season": s_num,
+                    "episode": ep_num,
+                    "ep_title": meta.get("name"),
+                    "overview": meta.get("overview"),
                     "still_path": meta.get("still_path") or fallback_backdrop,
                     "duration": (meta.get("runtime") * 60) if meta.get("runtime") else None,
                     "title": show_title or (local_map.get((s_num, ep_num), {}).get("title")),
@@ -69,6 +92,7 @@ def _merge_season_episodes(tmdb_id, s_num, local_map, pid, fallback_backdrop=Non
             if ls == s_num and le not in seen_ep_nums:
                 ep_dict = dict(ep)
                 ep_dict["is_local"] = True
+                ep_dict["is_unaired"] = False
                 if pid and ep_dict.get("id"):
                     ep_progress = get_progress(pid, ep_dict["id"])
                     ep_dict["progress"] = dict(ep_progress) if ep_progress else None
@@ -78,6 +102,7 @@ def _merge_season_episodes(tmdb_id, s_num, local_map, pid, fallback_backdrop=Non
             if ls == s_num:
                 ep_dict = dict(ep)
                 ep_dict["is_local"] = True
+                ep_dict["is_unaired"] = False
                 if pid and ep_dict.get("id"):
                     ep_progress = get_progress(pid, ep_dict["id"])
                     ep_dict["progress"] = dict(ep_progress) if ep_progress else None
@@ -673,6 +698,29 @@ def api_tmdb_search():
     from backend.matcher import search_tmdb
     results = search_tmdb(query, media_type=mtype, year=year or None)
     return jsonify(results)
+
+
+@media_bp.route("/api/tmdb/digital-status", methods=["GET"])
+def api_tmdb_digital_status():
+    tmdb_id = request.args.get("id", "").strip()
+    mtype = request.args.get("type", "movie").strip()
+    season = request.args.get("season", "").strip()
+    episode = request.args.get("episode", "").strip()
+    if not tmdb_id:
+        return jsonify({"error": "id is required"}), 400
+    try:
+        tmdb_id_int = int(tmdb_id)
+    except ValueError:
+        return jsonify({"error": "Invalid id"}), 400
+
+    from backend.matcher import get_tmdb_digital_release_status
+    status_info = get_tmdb_digital_release_status(
+        tmdb_id_int,
+        media_type=mtype,
+        season=int(season) if season.isdigit() else None,
+        episode=int(episode) if episode.isdigit() else None,
+    )
+    return jsonify(status_info)
 
 
 @media_bp.route("/api/override", methods=["POST"])

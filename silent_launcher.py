@@ -493,10 +493,39 @@ def kill_tree(pid):
         log(f"Failed to kill PID {pid}: {e}")
 
 
+_LAUNCHER_MUTEX = None
+
+
+def _acquire_launcher_mutex():
+    """Ensure only one instance of silent_launcher.py runs at a time."""
+    global _LAUNCHER_MUTEX
+    if os.name != "nt":
+        return True
+    try:
+        ERROR_ALREADY_EXISTS = 183
+        _LAUNCHER_MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "CapsStream_Launcher_Instance_Mutex")
+        last_error = ctypes.windll.kernel32.GetLastError()
+        if last_error == ERROR_ALREADY_EXISTS:
+            return False
+        return True
+    except Exception:
+        return True
+
+
 def main():
     os.makedirs(LOG_DIR, exist_ok=True)
     log("=" * 50)
     log("CapsStream silent launcher starting")
+
+    # Guard against duplicate launcher instances
+    if not _acquire_launcher_mutex():
+        cfg = read_config()
+        url, _, _ = server_url(cfg)
+        log("Another silent launcher instance is already active — focusing existing window and exiting")
+        hwnd = find_capsstream_window(url)
+        if hwnd:
+            bring_window_to_foreground(hwnd)
+        sys.exit(0)
 
     from_restart = "--restarted" in sys.argv or "--from-restart" in sys.argv or "--no-browser" in sys.argv
 

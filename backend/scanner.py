@@ -424,6 +424,7 @@ def scan_library(callback=None):
                 "matched_title": None,
                 "year":       None,
                 "rating":     None,
+                "poster_path": None,
             }
             _set_status(current_item=current_item)
             log(f"Matching {mtype}: {fname}" + (f" S{season}E{episode}" if (season and mtype != 'movie') else ""))
@@ -437,6 +438,7 @@ def scan_library(callback=None):
                             "matched_title": meta.get("title"),
                             "year":          meta.get("year"),
                             "rating":        meta.get("rating"),
+                            "poster_path":   meta.get("poster_path"),
                         })
                         _set_status(current_item=current_item)
                         upsert_media({
@@ -464,6 +466,7 @@ def scan_library(callback=None):
                             "matched_title": show_meta.get("title"),
                             "year":          show_meta.get("year"),
                             "rating":        show_meta.get("rating"),
+                            "poster_path":   show_meta.get("poster_path"),
                         })
                         _set_status(current_item=current_item)
 

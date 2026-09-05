@@ -28,3 +28,29 @@ def has_ffmpeg() -> bool:
 def has_ffprobe() -> bool:
     """True if ffprobe executable exists bundled or in system PATH."""
     return os.path.isfile(FFPROBE_BIN) or bool(shutil.which(FFPROBE_BIN))
+
+
+CLIENT_ID_FILE = os.path.join(BASE_DIR, "data", "client_id")
+
+
+def get_client_id() -> str:
+    """Return persistent unique device identifier for this CapsStream installation."""
+    if os.path.isfile(CLIENT_ID_FILE):
+        try:
+            with open(CLIENT_ID_FILE, "r", encoding="utf-8") as f:
+                cid = f.read().strip()
+                if cid:
+                    return cid
+        except Exception:
+            pass
+
+    import uuid
+    cid = str(uuid.uuid4())
+    try:
+        os.makedirs(os.path.dirname(CLIENT_ID_FILE), exist_ok=True)
+        with open(CLIENT_ID_FILE, "w", encoding="utf-8") as f:
+            f.write(cid)
+    except Exception:
+        pass
+    return cid
+

@@ -133,6 +133,53 @@ class TestRouteMedia(unittest.TestCase):
         self.assertIsNone(merged[1]["id"])
         self.assertEqual(merged[1]["ep_title"], "Chapter 2")
 
+    @patch("backend.matcher.fetch_season_episodes")
+    def test_merge_season_episodes_unaired_vs_missing(self, mock_fetch_tmdb):
+        """Verify _merge_season_episodes distinguishes between aired-missing and future-unaired episodes."""
+        from datetime import datetime, timedelta, timezone
+        today = datetime.now(timezone.utc).date()
+        past_date = (today - timedelta(days=14)).strftime("%Y-%m-%d")
+        future_date = (today + timedelta(days=14)).strftime("%Y-%m-%d")
+
+        mock_fetch_tmdb.return_value = [
+            {"episode_number": 1, "name": "Downloaded Ep", "air_date": past_date, "runtime": 30},
+            {"episode_number": 2, "name": "Aired Missing Ep", "air_date": past_date, "runtime": 30},
+            {"episode_number": 3, "name": "Upcoming Unaired Ep", "air_date": future_date, "runtime": 30},
+            {"episode_number": 4, "name": "TBD Unaired Ep", "air_date": None, "runtime": 30},
+        ]
+        local_map = {
+            (1, 1): {"id": 101, "season": 1, "episode": 1, "title": "Test Show", "file_path": "/path/s01e01.mp4"}
+        }
+
+        merged = _merge_season_episodes(
+            tmdb_id=888,
+            s_num=1,
+            local_map=local_map,
+            pid=None,
+            show_title="Test Show"
+        )
+        self.assertEqual(len(merged), 4)
+
+        # Ep 1: Local
+        self.assertTrue(merged[0]["is_local"])
+        self.assertFalse(merged[0]["is_unaired"])
+        self.assertEqual(merged[0]["air_date"], past_date)
+
+        # Ep 2: Aired, not local (Missing)
+        self.assertFalse(merged[1]["is_local"])
+        self.assertFalse(merged[1]["is_unaired"])
+        self.assertEqual(merged[1]["air_date"], past_date)
+
+        # Ep 3: Future air date (Unaired)
+        self.assertFalse(merged[2]["is_local"])
+        self.assertTrue(merged[2]["is_unaired"])
+        self.assertEqual(merged[2]["air_date"], future_date)
+
+        # Ep 4: None air date (Unaired/TBD)
+        self.assertFalse(merged[3]["is_local"])
+        self.assertTrue(merged[3]["is_unaired"])
+        self.assertIsNone(merged[3]["air_date"])
+
     @patch("backend.db.media.get_conn")
     def test_series_quality_options_deduplication(self, mock_conn):
         """Verify get_all_sources_for_media does NOT group distinct episodes/extras as quality options."""

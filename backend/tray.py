@@ -357,7 +357,6 @@ class CapsStreamTray:
 
         # 3. Quick Folders submenu
         hfolder_menu = user32.CreatePopupMenu()
-        user32.AppendMenuW(hfolder_menu, MF_STRING, self.CMD_OPEN_MEDIA, "Media Library Folder")
         if self.log_dir:
             user32.AppendMenuW(hfolder_menu, MF_STRING, self.CMD_OPEN_LOGS, "Logs Folder")
         if self.data_dir:
