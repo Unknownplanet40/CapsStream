@@ -3,8 +3,8 @@
 Tests for Admin Route Endpoints (backend/routes/admin.py)
 Covers settings retrieval, test-api endpoint, system cache stats, and health checks.
 """
-import sys
 import unittest
+import sys
 from unittest.mock import patch, MagicMock
 from flask import Flask
 
@@ -13,12 +13,6 @@ if "app" not in sys.modules:
     mock_app_module._get_api_health.return_value = {}
     mock_app_module._get_github_profile.return_value = {}
     sys.modules["app"] = mock_app_module
-
-if "backend.scanner" not in sys.modules:
-    mock_scanner = MagicMock()
-    mock_scanner.get_scan_status.return_value = {"running": False, "phase": "idle"}
-    mock_scanner.scan_library = MagicMock()
-    sys.modules["backend.scanner"] = mock_scanner
 
 from backend.routes.admin import admin_bp
 from backend.routes.middleware import has_active_profile_session
@@ -170,5 +164,3 @@ class TestRouteAdmin(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-

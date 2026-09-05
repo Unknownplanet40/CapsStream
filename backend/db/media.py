@@ -31,7 +31,7 @@ def is_drive_mounted(file_path):
         if os.name == "nt":
             mounted = os.path.exists(drive + os.sep)
         else:
-            mounted = os.path.exists(file_path) or os.path.exists(drive_root) or True
+            mounted = os.path.exists(file_path) or os.path.exists(drive_root)
         _DRIVE_MOUNT_CACHE[drive_root] = mounted
         return mounted
 
@@ -1031,4 +1031,3 @@ def get_unmatched():
 
 
 # ─── Profile Queries ──────────────────────────────────────────────────────────
-
