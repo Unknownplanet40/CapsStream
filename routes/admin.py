@@ -710,3 +710,9 @@ def api_system_validate_paths():
     from backend.settings import validate_media_paths
     results = validate_media_paths(paths_list)
     return jsonify(results)
+
+
+@admin_bp.route("/api/system/drives-status", methods=["GET"])
+def api_system_drives_status():
+    from backend.routes.admin import api_system_drives_status as _impl
+    return _impl()

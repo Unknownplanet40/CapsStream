@@ -49,7 +49,7 @@ const PlayerPage = {
       </video>
 
       <!-- Custom High-Reliability Subtitle Overlay -->
-      <div v-if="activeCueText" class="caps-sub-overlay" :style="customCueStyle">
+      <div v-if="activeCueText && !isPipActive" class="caps-sub-overlay" :style="customCueStyle">
         {{ activeCueText }}
       </div>
 
@@ -73,6 +73,59 @@ const PlayerPage = {
         </transition>
       </div>
 
+      <!-- Deep Standby Sleep Overlay -->
+      <transition name="fade">
+        <div v-if="isSleepStandby" class="player-sleep-standby-overlay" @click.stop="wakeFromSleepStandby">
+          <div class="sleep-standby-card">
+            <div class="sleep-standby-moon-glow">
+              <i class="ph-fill ph-moon-stars"></i>
+            </div>
+            <h2 class="sleep-standby-title">CapsStream is Resting</h2>
+            <p class="sleep-standby-subtitle">{{ media?.title || 'Media' }} paused by Sleep Timer</p>
+            <div class="sleep-standby-btn-wake" @click.stop="wakeFromSleepStandby">
+              <i class="ph-fill ph-play"></i>
+              <span>Click or press Space to Wake & Resume</span>
+            </div>
+          </div>
+        </div>
+      </transition>
+
+      <!-- Dedicated Drive Offline Disconnect Overlay -->
+      <transition name="fade">
+        <div v-if="isDriveOffline" class="player-drive-offline-overlay" @click.stop>
+          <div class="drive-offline-card">
+            <div class="drive-offline-icon-pulse">
+              <i class="ph-bold ph-hard-drive"></i>
+              <div class="drive-offline-pulse-dot"></div>
+            </div>
+            <h2 class="drive-offline-title">Media Drive Disconnected</h2>
+            <div class="drive-offline-badge-row">
+              <span class="drive-offline-tag">Drive {{ offlineDriveLetter || 'Offline' }}</span>
+              <span class="drive-offline-tag sec" v-if="savedPlaybackTime > 0">Saved at {{ formatTime(savedPlaybackTime) }}</span>
+            </div>
+            <p class="drive-offline-subtitle">
+              Playback paused safely. Please reconnect the external drive or verify the storage connection. CapsStream is actively watching for remount...
+            </p>
+            <div class="drive-offline-status-bar">
+              <div class="drive-offline-spinner" :class="{ 'is-rechecking': isCheckingDrive }">
+                <i class="ph ph-circle-notch spin"></i>
+              </div>
+              <span>{{ driveOfflineStatusMsg || 'Watching for drive reconnect...' }}</span>
+            </div>
+            <div class="drive-offline-actions">
+              <button class="btn-drive-action primary" @click="checkDriveNow(true)" :disabled="isCheckingDrive">
+                <i class="ph ph-arrows-clockwise" :class="{ 'spin': isCheckingDrive }"></i>
+                Check Connection Now
+              </button>
+              <button class="btn-drive-action secondary" @click="returnToBrowse">
+                <i class="ph ph-arrow-left"></i>
+                Return to Library
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+
       <!-- Volume OSD (minimal vertical bar, right side) -->
       <transition name="fade">
         <div v-if="volumeOSD" class="player-volume-osd">
@@ -92,6 +145,14 @@ const PlayerPage = {
             <div class="player-hud-fill" :style="{ width: brightnessLevel + '%' }"></div>
           </div>
           <span class="player-hud-value">{{ brightnessLevel }}%</span>
+        </div>
+      </transition>
+
+      <!-- Sleep Timer HUD Pill -->
+      <transition name="fade">
+        <div v-if="sleepHUD" class="player-hud-pill sleep-hud-pill">
+          <i class="ph-fill ph-moon-stars player-hud-icon" style="color:#38bdf8"></i>
+          <span class="player-hud-value">{{ sleepHUDText }}</span>
         </div>
       </transition>
 
@@ -115,6 +176,18 @@ const PlayerPage = {
       <div v-if="isBuffering" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;pointer-events:none">
         <div class="loading-spinner" style="width:56px;height:56px;border-width:4px"></div>
       </div>
+
+      <!-- Sleep Timer Pre-Expiry Warning Toast (15s fade-out window) -->
+      <transition name="fade">
+        <div v-if="sleepExpiringWarning" class="player-sleep-warning-toast" @click.stop="extendSleepTimer(15)">
+          <div class="sleep-warning-pill">
+            <i class="ph-fill ph-moon-stars" style="color:#38bdf8;font-size:1.2rem"></i>
+            <span>Sleep Timer expiring in <strong>{{ sleepTimerRemainingStr }}</strong></span>
+            <button class="sleep-extend-btn" @click.stop="extendSleepTimer(15)" title="Add 15 minutes">+15m</button>
+            <button class="sleep-dismiss-btn" @click.stop="cancelSleepTimer" title="Cancel timer"><i class="ph ph-x"></i></button>
+          </div>
+        </div>
+      </transition>
 
       <!-- Backdrop Blocker overlay when Resume Prompt is active (Blocks all clicks outside top bar) -->
       <div v-if="showResumeModal" class="resume-backdrop-blocker" @click.stop.prevent></div>
@@ -169,6 +242,7 @@ const PlayerPage = {
                 class="seekbar-thumb-preview"
                 :style="thumbCellStyle(hoverTooltipTime)"
               ></div>
+              <div v-if="hoverChapterTitle" class="seekbar-chapter-title">{{ hoverChapterTitle }}</div>
               {{ formatTime(hoverTooltipTime) }}
             </div>
             <div class="seekbar-track">
@@ -177,6 +251,14 @@ const PlayerPage = {
               <div v-if="skipTimes.op" class="seekbar-segment op-segment" :style="getSegmentStyle(skipTimes.op)"></div>
               <div v-if="skipTimes.ed" class="seekbar-segment ed-segment" :style="getSegmentStyle(skipTimes.ed)"></div>
               <div v-if="skipTimes.preview" class="seekbar-segment preview-segment" :style="getSegmentStyle(skipTimes.preview)"></div>
+              <!-- Embedded Chapter Ticks -->
+              <div
+                v-for="ch in visibleChapters"
+                :key="ch.id"
+                class="seekbar-chapter-tick"
+                :style="{ left: (ch.start / duration * 100) + '%' }"
+                :title="ch.title"
+              ></div>
               <div class="seekbar-fill" :style="{ width: progressPercent + '%' }">
                 <div class="seekbar-handle"></div>
               </div>
@@ -267,7 +349,7 @@ const PlayerPage = {
               <!-- Audio Track Menu (Only shown if video has multiple audio tracks) -->
               <!-- Audio Track & Sound Enhancer Menu -->
               <div style="position:relative">
-                <button class="ctrl-btn" @click="showAudioMenu = !showAudioMenu; showSubMenu = false; showSpeedMenu = false; showQualityMenu = false" title="Audio Track & Sound Enhancer" id="ctrl-audio" style="font-size:0.85rem;font-weight:700">
+                <button class="ctrl-btn" @click="showAudioMenu = !showAudioMenu; showSubMenu = false; showSpeedMenu = false; showQualityMenu = false; showSleepMenu = false" title="Audio Track & Sound Enhancer" id="ctrl-audio" style="font-size:0.85rem;font-weight:700">
                   <i class="ph ph-microphone-stage" style="font-size:1.35rem"></i>
                 </button>
                 <div v-if="showAudioMenu" class="player-popup-menu" @click.stop style="min-width:220px">
@@ -304,7 +386,7 @@ const PlayerPage = {
 
               <!-- Subtitles Menu -->
               <div style="position:relative">
-                <button class="ctrl-btn" @click="showSubMenu = !showSubMenu; showSpeedMenu = false; showAudioMenu = false; showQualityMenu = false" title="Subtitles" id="ctrl-subs" style="font-size:0.85rem;font-weight:700">
+                <button class="ctrl-btn" @click="showSubMenu = !showSubMenu; showSpeedMenu = false; showAudioMenu = false; showQualityMenu = false; showSleepMenu = false" title="Subtitles" id="ctrl-subs" style="font-size:0.85rem;font-weight:700">
                   <i class="ph ph-closed-captioning" style="font-size:1.35rem"></i>
                 </button>
                 <div v-if="showSubMenu" class="player-popup-menu" @click.stop style="min-width:200px">
@@ -378,10 +460,40 @@ const PlayerPage = {
                 </div>
               </div>
 
+              <!-- Chapters Menu Button -->
+              <div style="position:relative" v-if="chapters && chapters.length > 0">
+                <button
+                  class="ctrl-btn"
+                  :class="{ active: showChapterMenu }"
+                  @click="showChapterMenu = !showChapterMenu; showQualityMenu = false; showSpeedMenu = false; showSubMenu = false; showAudioMenu = false; showSleepMenu = false"
+                  title="Chapters"
+                  id="ctrl-chapters"
+                  style="font-size:0.85rem;font-weight:700"
+                >
+                  <i class="ph ph-bookmarks" style="font-size:1.35rem"></i>
+                </button>
+                <div v-if="showChapterMenu" class="player-popup-menu" @click.stop style="min-width:240px;max-height:280px;overflow-y:auto">
+                  <div style="font-size:0.75rem;color:var(--text-muted);padding:6px 12px 4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">
+                    Chapters ({{ chapters.length }})
+                  </div>
+                  <div
+                    v-for="ch in chapters"
+                    :key="ch.id"
+                    class="chapter-menu-item"
+                    :class="{ active: currentChapter && currentChapter.id === ch.id }"
+                    @click="seekToChapter(ch)"
+                  >
+                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ch?.title || 'Chapter' }}</span>
+                    <span class="chapter-menu-time">{{ formatTime(ch?.start || 0) }}</span>
+                  </div>
+                </div>
+              </div>
+
               <!-- Video Quality & Player Options Menu (Gear Icon) -->
               <div style="position:relative">
-                <button class="ctrl-btn" :class="{ active: showQualityMenu }" @click="showQualityMenu = !showQualityMenu; showSpeedMenu = false; showSubMenu = false; showAudioMenu = false" title="Player Options & Quality" id="ctrl-quality" style="font-size:0.85rem;font-weight:700">
+                <button class="ctrl-btn" :class="{ active: showQualityMenu }" @click="showQualityMenu = !showQualityMenu; showSpeedMenu = false; showSubMenu = false; showAudioMenu = false; showSleepMenu = false; showChapterMenu = false" title="Player Options & Quality" id="ctrl-quality" style="font-size:0.85rem;font-weight:700;position:relative">
                   <i class="ph ph-gear-six" style="font-size:1.35rem"></i>
+                  <span v-if="activeQualityBadge" class="ctrl-quality-badge">{{ activeQualityBadge }}</span>
                 </button>
                 <div v-if="showQualityMenu" class="player-popup-menu" @click.stop style="min-width:220px">
                   <div style="font-size:0.75rem;color:var(--text-muted);padding:6px 12px 4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">
@@ -474,9 +586,58 @@ const PlayerPage = {
                 </div>
               </div>
 
+              <!-- Sleep Timer Menu Button -->
+              <div style="position:relative">
+                <button
+                  class="ctrl-btn"
+                  :class="{ active: sleepTimer.active || showSleepMenu }"
+                  @click="showSleepMenu = !showSleepMenu; showQualityMenu = false; showSpeedMenu = false; showSubMenu = false; showAudioMenu = false"
+                  title="Sleep Timer (Z)"
+                  id="ctrl-sleep"
+                  style="font-size:0.85rem;font-weight:700;position:relative"
+                >
+                  <i :class="sleepTimer.active ? 'ph-fill ph-moon' : 'ph ph-moon'" style="font-size:1.35rem"></i>
+                  <span v-if="sleepTimer.active && sleepTimerBadge" class="player-sleep-badge">
+                    {{ sleepTimerBadge }}
+                  </span>
+                </button>
+                <div v-if="showSleepMenu" class="player-popup-menu" @click.stop style="min-width:240px">
+                  <div style="font-size:0.75rem;color:var(--text-muted);padding:6px 12px 4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;display:flex;justify-content:space-between;align-items:center">
+                    <span>Sleep Timer</span>
+                    <span v-if="sleepTimer.active" style="color:#38bdf8;font-size:0.72rem;font-weight:700">{{ sleepTimerRemainingStr }}</span>
+                  </div>
+
+                  <div class="player-aspect-pills" style="display:flex;gap:4px;padding:4px 12px 6px;flex-wrap:wrap">
+                    <button
+                      v-for="opt in sleepPresets"
+                      :key="opt.label"
+                      class="player-aspect-pill"
+                      :class="{ active: sleepTimer.active && sleepTimer.mode === opt.mode && sleepTimer.durationMinutes === opt.minutes }"
+                      @click="setSleepTimer(opt.mode, opt.minutes)"
+                    >
+                      {{ opt.label }}
+                    </button>
+                  </div>
+
+                  <div v-if="sleepTimer.active" style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0"></div>
+                  <div v-if="sleepTimer.active" style="display:flex;align-items:center;justify-content:space-between;padding:4px 12px 6px;gap:6px">
+                    <span style="font-size:0.75rem;color:var(--text-muted)">Extend:</span>
+                    <div style="display:flex;gap:4px">
+                      <button class="sub-size-btn" @click="extendSleepTimer(5)">+5m</button>
+                      <button class="sub-size-btn" @click="extendSleepTimer(10)">+10m</button>
+                      <button class="sub-size-btn" @click="extendSleepTimer(15)">+15m</button>
+                    </div>
+                  </div>
+
+                  <div v-if="sleepTimer.active" class="player-menu-item" style="color:#ef4444;font-weight:600;display:flex;align-items:center;gap:6px" @click="cancelSleepTimer">
+                    <i class="ph ph-x-circle"></i> Turn Off Timer
+                  </div>
+                </div>
+              </div>
+
               <!-- Playback Speed Menu -->
               <div style="position:relative">
-                <button class="ctrl-btn" @click="showSpeedMenu = !showSpeedMenu; showSubMenu = false; showAudioMenu = false; showQualityMenu = false" title="Playback Speed" style="font-size:0.85rem;font-weight:700" id="ctrl-speed">
+                <button class="ctrl-btn" @click="showSpeedMenu = !showSpeedMenu; showSubMenu = false; showAudioMenu = false; showQualityMenu = false; showSleepMenu = false" title="Playback Speed" style="font-size:0.85rem;font-weight:700" id="ctrl-speed">
                   {{ playbackRate }}x
                 </button>
                 <div v-if="showSpeedMenu" class="player-popup-menu" @click.stop>
@@ -514,6 +675,18 @@ const PlayerPage = {
                   </span>
                 </button>
               </div>
+
+              <!-- Dedicated Picture-in-Picture Button -->
+              <button
+                v-if="isPipSupported"
+                class="ctrl-btn"
+                :class="{ active: isPipActive }"
+                @click="togglePip"
+                :title="isPipActive ? 'Exit Picture-in-Picture (P)' : 'Picture-in-Picture (P)'"
+                id="ctrl-pip"
+              >
+                <i :class="isPipActive ? 'ph-fill ph-screencast' : 'ph ph-screencast'" style="font-size:1.3rem"></i>
+              </button>
 
               <!-- Fullscreen -->
               <button class="ctrl-btn" @click="toggleFullscreen" title="Fullscreen (F)" id="ctrl-fullscreen">
@@ -623,9 +796,9 @@ const PlayerPage = {
         </div>
       </div>
 
-      <!-- Netflix / Disney+ Floating Right-Side Next Episode Card -->
+      <!-- Netflix / Disney+ Floating Right-Side Next Episode Card (Outro/Credits Stage 1) -->
       <transition name="fade">
-        <div v-if="showCreditsShrink && hasNextEp" class="next-ep-floating-card" @click.stop>
+        <div v-if="showCreditsShrink && hasNextEp && !isEnded" class="next-ep-floating-card" @click.stop>
           <div class="next-ep-floating-header">
             <div class="next-ep-floating-badge">
               <i class="ph ph-hourglass-high"></i>
@@ -680,6 +853,91 @@ const PlayerPage = {
             <button class="btn btn-secondary btn-full" @click="dismissCreditsShrink" id="btn-next-ep-dismiss">
               <span>Watch Credits</span>
             </button>
+          </div>
+        </div>
+      </transition>
+
+      <!-- Stage 2: Two-Stage Cinematic End-of-Episode Backdrop Screen -->
+      <transition name="fade">
+        <div v-if="isEnded && hasNextEp" class="player-cinematic-endcard" @click.stop>
+          <div
+            class="cinematic-backdrop-layer"
+            :style="{ backgroundImage: 'url(' + imgUrl(nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path || media?.backdrop_path) + ')' }"
+          ></div>
+          <div class="cinematic-vignette-layer"></div>
+          <div class="cinematic-content-card">
+            <div class="cinematic-card-header">
+              <div class="cinematic-badge">
+                <i class="ph ph-hourglass-high"></i>
+                <span>Next Episode in {{ Math.ceil(nextEpCountdownSeconds) }}s</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <button
+                  class="cinematic-ambient-btn"
+                  :class="{ active: ambientAudioEnabled }"
+                  @click="toggleAmbientAudio"
+                  title="Toggle ambient soundscape"
+                >
+                  <i :class="ambientAudioEnabled ? 'ph ph-speaker-high' : 'ph ph-speaker-slash'"></i>
+                  <span>Ambient {{ ambientAudioEnabled ? 'On' : 'Off' }}</span>
+                </button>
+                <button class="next-ep-floating-close" @click="cancelAutoAdvance" title="Close">
+                  <i class="ph ph-x"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="cinematic-card-body">
+              <div class="cinematic-thumb-container" @click="handleNextEpClick">
+                <img
+                  v-if="nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path"
+                  :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path)"
+                  class="cinematic-thumb-img"
+                  @error="e => e.target.style.display = 'none'"
+                />
+                <div v-else class="cinematic-thumb-fallback">
+                  <i class="ph ph-film-strip"></i>
+                </div>
+                <div class="cinematic-thumb-overlay">
+                  <i class="ph-fill ph-play"></i>
+                </div>
+              </div>
+
+              <div class="cinematic-info">
+                <div class="cinematic-ep-code">
+                  S{{ (nextEp.season || activeDrawerSeason).toString().padStart(2,'0') }}E{{ (nextEp.episode || 1).toString().padStart(2,'0') }}
+                  <span v-if="nextEp.duration"> · {{ formatDuration(nextEp.duration) }}</span>
+                </div>
+                <div class="cinematic-ep-title">
+                  {{ nextEp.ep_title || nextEp.title || ('Episode ' + nextEp.episode) }}
+                </div>
+                <div class="cinematic-ep-overview" v-if="nextEp.overview">
+                  {{ nextEp.overview }}
+                </div>
+              </div>
+            </div>
+
+            <div class="cinematic-progress-wrap">
+              <div class="cinematic-progress-bar">
+                <div class="cinematic-progress-fill" :style="{ width: nextEpProgressPercent + '%' }"></div>
+              </div>
+            </div>
+
+            <div class="cinematic-actions">
+              <div class="cinematic-action-buttons">
+                <button class="btn btn-primary" @click="handleNextEpClick" id="btn-cinematic-play-next">
+                  <i class="ph-fill ph-play"></i>
+                  <span>Play Next (Enter)</span>
+                </button>
+                <button class="btn btn-secondary" @click="replayCurrentEpisode" id="btn-cinematic-replay">
+                  <i class="ph ph-arrow-counter-clockwise"></i>
+                  <span>Replay</span>
+                </button>
+              </div>
+              <button class="btn btn-secondary" @click="cancelAutoAdvance" id="btn-cinematic-dismiss">
+                <span>Dismiss</span>
+              </button>
+            </div>
           </div>
         </div>
       </transition>
@@ -1076,6 +1334,351 @@ const PlayerPage = {
     const showSpeedMenu = ref(false);
     const showSubMenu = ref(false);
     const showShortcuts = ref(false);
+
+    // ── External Drive Health & Offline Recovery State ──
+    const isDriveOffline = ref(false);
+    const offlineDriveLetter = ref("");
+    const savedPlaybackTime = ref(0);
+    const isCheckingDrive = ref(false);
+    const driveOfflineStatusMsg = ref("");
+    let driveRemountTimer = null;
+
+    function showDriveOfflineScreen(driveLetter) {
+      const v = videoRef.value;
+      if (v) {
+        try {
+          const currentPos = typeof currentContentTime === "function" ? currentContentTime() : v.currentTime;
+          savedPlaybackTime.value = Math.max(0, currentPos || 0);
+          v.pause();
+        } catch (e) {}
+      }
+      isDriveOffline.value = true;
+      offlineDriveLetter.value = driveLetter || (media.value?.drive_letter) || "";
+      driveOfflineStatusMsg.value = "Watching for drive reconnect...";
+      startDriveRemountPoller();
+    }
+
+    function startDriveRemountPoller() {
+      stopDriveRemountPoller();
+      driveRemountTimer = setInterval(async () => {
+        await checkDriveNow(false);
+      }, 2500);
+    }
+
+    function stopDriveRemountPoller() {
+      if (driveRemountTimer) {
+        clearInterval(driveRemountTimer);
+        driveRemountTimer = null;
+      }
+    }
+
+    async function checkDriveNow(manual = true) {
+      if (isCheckingDrive.value) return;
+      isCheckingDrive.value = true;
+      if (manual) driveOfflineStatusMsg.value = "Checking drive connection...";
+      try {
+        const res = await API.get("/api/system/drives-status", { cache: false });
+        if (!res || !res.drives) return;
+        const targetDrive = (offlineDriveLetter.value || media.value?.drive_letter || "").toUpperCase();
+        const driveObj = res.drives.find(d => String(d.drive_letter).toUpperCase() === targetDrive);
+        const isMounted = driveObj ? driveObj.is_mounted : !res.has_offline_drives;
+        if (isMounted) {
+          stopDriveRemountPoller();
+          driveOfflineStatusMsg.value = "Drive detected! Resuming playback...";
+          if (typeof addToast === "function") {
+            addToast(`Drive ${offlineDriveLetter.value || ''} reconnected! Resuming...`, "success", 4000);
+          }
+          setTimeout(async () => {
+            isDriveOffline.value = false;
+            const targetResume = savedPlaybackTime.value;
+            await initPlayer();
+            if (targetResume > 0 && videoRef.value) {
+              try {
+                if (typeof seekTo === "function") seekTo(targetResume);
+                else videoRef.value.currentTime = targetResume;
+                await videoRef.value.play();
+              } catch (e) {}
+            }
+          }, 750);
+        } else if (manual) {
+          driveOfflineStatusMsg.value = `Drive ${offlineDriveLetter.value || ''} is still offline. Please verify connection.`;
+        }
+      } catch (e) {
+        if (manual) driveOfflineStatusMsg.value = "Failed to query server. Checking again shortly...";
+      } finally {
+        isCheckingDrive.value = false;
+      }
+    }
+
+    function returnToBrowse() {
+      stopDriveRemountPoller();
+      isDriveOffline.value = false;
+      router.push("/");
+    }
+
+    // ── Sleep Timer & Deep Standby ──
+    const showSleepMenu = ref(false);
+    const isSleepStandby = ref(false);
+    const sleepExpiringWarning = ref(false);
+    const sleepHUD = ref(false);
+    const sleepHUDText = ref("");
+    let sleepHUDTimer = null;
+    let sleepTickInterval = null;
+    let sleepFadeInterval = null;
+    let sleepPreFadeVolume = 1.0;
+
+    const sleepTimer = reactive({
+      active: false,
+      mode: null, // 'minutes' | 'end_of_episode'
+      durationMinutes: null,
+      targetTime: null,
+      remainingSeconds: 0,
+      isFading: false,
+    });
+
+    const sleepPresets = [
+      { label: "15m", mode: "minutes", minutes: 15 },
+      { label: "30m", mode: "minutes", minutes: 30 },
+      { label: "45m", mode: "minutes", minutes: 45 },
+      { label: "60m", mode: "minutes", minutes: 60 },
+      { label: "End of Ep", mode: "end_of_episode", minutes: null },
+    ];
+
+    const sleepTimerBadge = computed(() => {
+      if (!sleepTimer.active) return "";
+      if (sleepTimer.mode === "end_of_episode") return "End";
+      const mins = Math.ceil(sleepTimer.remainingSeconds / 60);
+      if (mins <= 0) return "<1m";
+      return mins + "m";
+    });
+
+    const sleepTimerRemainingStr = computed(() => {
+      if (!sleepTimer.active) return "";
+      if (sleepTimer.mode === "end_of_episode") {
+        if (!videoRef.value || !videoRef.value.duration) return "End of Episode";
+        const outroStart = (typeof skipTimes !== "undefined" && skipTimes.value?.ed?.start) ? skipTimes.value.ed.start : videoRef.value.duration;
+        const rem = Math.max(0, Math.floor(outroStart - videoRef.value.currentTime));
+        const m = Math.floor(rem / 60);
+        const s = rem % 60;
+        return `${m}:${s.toString().padStart(2, "0")}`;
+      }
+      const m = Math.floor(sleepTimer.remainingSeconds / 60);
+      const s = Math.floor(sleepTimer.remainingSeconds % 60);
+      return `${m}:${s.toString().padStart(2, "0")}`;
+    });
+
+    function triggerSleepHUD(text) {
+      sleepHUDText.value = text;
+      sleepHUD.value = true;
+      if (sleepHUDTimer) clearTimeout(sleepHUDTimer);
+      sleepHUDTimer = setTimeout(() => {
+        sleepHUD.value = false;
+      }, 2000);
+    }
+
+    function setSleepTimer(mode, minutes = null) {
+      cancelSleepFade();
+      if (isSleepStandby.value) {
+        isSleepStandby.value = false;
+      }
+      if (mode === "end_of_episode") {
+        sleepTimer.active = true;
+        sleepTimer.mode = "end_of_episode";
+        sleepTimer.durationMinutes = null;
+        sleepTimer.targetTime = null;
+        sleepTimer.remainingSeconds = 0;
+        sleepTimer.isFading = false;
+        triggerSleepHUD("Sleep Timer: End of Episode");
+      } else {
+        const secs = (minutes || 15) * 60;
+        sleepTimer.active = true;
+        sleepTimer.mode = "minutes";
+        sleepTimer.durationMinutes = minutes;
+        sleepTimer.targetTime = Date.now() + secs * 1000;
+        sleepTimer.remainingSeconds = secs;
+        sleepTimer.isFading = false;
+        triggerSleepHUD(`Sleep Timer: ${minutes} min`);
+      }
+      startSleepTick();
+    }
+
+    function extendSleepTimer(extraMinutes = 15) {
+      if (!sleepTimer.active) {
+        setSleepTimer("minutes", extraMinutes);
+        return;
+      }
+      cancelSleepFade();
+      sleepExpiringWarning.value = false;
+      if (sleepTimer.mode === "end_of_episode") {
+        const currentEpRemSecs = (videoRef.value && videoRef.value.duration) ? Math.max(0, videoRef.value.duration - videoRef.value.currentTime) : 0;
+        const newSecs = Math.round(currentEpRemSecs + extraMinutes * 60);
+        sleepTimer.mode = "minutes";
+        sleepTimer.durationMinutes = Math.round(newSecs / 60);
+        sleepTimer.targetTime = Date.now() + newSecs * 1000;
+        sleepTimer.remainingSeconds = newSecs;
+      } else {
+        const addSecs = extraMinutes * 60;
+        sleepTimer.targetTime = (sleepTimer.targetTime || Date.now()) + addSecs * 1000;
+        sleepTimer.remainingSeconds += addSecs;
+        sleepTimer.durationMinutes = Math.ceil(sleepTimer.remainingSeconds / 60);
+      }
+      triggerSleepHUD(`+${extraMinutes}m added (${Math.ceil(sleepTimer.remainingSeconds / 60)}m left)`);
+      startSleepTick();
+    }
+
+    function cancelSleepTimer() {
+      cancelSleepFade();
+      sleepTimer.active = false;
+      sleepTimer.mode = null;
+      sleepTimer.durationMinutes = null;
+      sleepTimer.targetTime = null;
+      sleepTimer.remainingSeconds = 0;
+      sleepTimer.isFading = false;
+      sleepExpiringWarning.value = false;
+      if (sleepTickInterval) {
+        clearInterval(sleepTickInterval);
+        sleepTickInterval = null;
+      }
+      triggerSleepHUD("Sleep Timer: Off");
+    }
+
+    function cycleSleepTimer() {
+      if (!sleepTimer.active) {
+        setSleepTimer("minutes", 15);
+      } else if (sleepTimer.mode === "minutes") {
+        if (sleepTimer.durationMinutes === 15) setSleepTimer("minutes", 30);
+        else if (sleepTimer.durationMinutes === 30) setSleepTimer("minutes", 45);
+        else if (sleepTimer.durationMinutes === 45) setSleepTimer("minutes", 60);
+        else if (sleepTimer.durationMinutes === 60) setSleepTimer("end_of_episode");
+        else setSleepTimer("end_of_episode");
+      } else if (sleepTimer.mode === "end_of_episode") {
+        cancelSleepTimer();
+      } else {
+        cancelSleepTimer();
+      }
+    }
+
+    function startSleepTick() {
+      if (sleepTickInterval) clearInterval(sleepTickInterval);
+      sleepTickInterval = setInterval(checkSleepTimerTick, 1000);
+      checkSleepTimerTick();
+    }
+
+    function checkSleepTimerTick() {
+      if (!sleepTimer.active) {
+        if (sleepTickInterval) {
+          clearInterval(sleepTickInterval);
+          sleepTickInterval = null;
+        }
+        return;
+      }
+
+      if (sleepTimer.mode === "minutes") {
+        const remaining = Math.max(0, Math.round((sleepTimer.targetTime - Date.now()) / 1000));
+        sleepTimer.remainingSeconds = remaining;
+
+        if (remaining <= 0) {
+          executeDeepStandby();
+          return;
+        }
+
+        if (remaining <= 15 && !sleepTimer.isFading) {
+          beginSleepFade(remaining);
+        }
+      } else if (sleepTimer.mode === "end_of_episode") {
+        if (videoRef.value && videoRef.value.duration) {
+          const cur = videoRef.value.currentTime;
+          const dur = videoRef.value.duration;
+          const outroStart = (typeof skipTimes !== "undefined" && skipTimes.value?.ed?.start) ? skipTimes.value.ed.start : dur;
+          const targetEnd = Math.min(dur, outroStart);
+          const remSecs = Math.max(0, Math.floor(targetEnd - cur));
+
+          if (remSecs <= 0 || videoRef.value.ended) {
+            executeDeepStandby();
+            return;
+          }
+
+          if (remSecs <= 15 && !sleepTimer.isFading) {
+            beginSleepFade(remSecs);
+          }
+        }
+      }
+    }
+
+    function beginSleepFade(durationSecs) {
+      if (sleepTimer.isFading) return;
+      sleepTimer.isFading = true;
+      sleepExpiringWarning.value = true;
+      sleepPreFadeVolume = volume.value;
+
+      const fadeSteps = Math.max(5, Math.min(30, durationSecs * 2));
+      const stepTimeMs = (durationSecs * 1000) / fadeSteps;
+      let currentStep = 0;
+
+      if (sleepFadeInterval) clearInterval(sleepFadeInterval);
+      sleepFadeInterval = setInterval(() => {
+        currentStep++;
+        const factor = Math.max(0, 1 - (currentStep / fadeSteps));
+        const targetVol = sleepPreFadeVolume * factor;
+        if (videoRef.value) {
+          videoRef.value.volume = targetVol;
+        }
+        if (currentStep >= fadeSteps) {
+          clearInterval(sleepFadeInterval);
+          sleepFadeInterval = null;
+        }
+      }, stepTimeMs);
+    }
+
+    function cancelSleepFade() {
+      if (sleepFadeInterval) {
+        clearInterval(sleepFadeInterval);
+        sleepFadeInterval = null;
+      }
+      if (sleepTimer.isFading) {
+        sleepTimer.isFading = false;
+        if (videoRef.value) {
+          videoRef.value.volume = sleepPreFadeVolume;
+          volume.value = sleepPreFadeVolume;
+        }
+      }
+      sleepExpiringWarning.value = false;
+    }
+
+    function executeDeepStandby() {
+      cancelSleepFade();
+      sleepTimer.active = false;
+      sleepTimer.mode = null;
+      sleepExpiringWarning.value = false;
+      if (sleepTickInterval) {
+        clearInterval(sleepTickInterval);
+        sleepTickInterval = null;
+      }
+
+      if (videoRef.value) {
+        videoRef.value.pause();
+        isPlaying.value = false;
+        videoRef.value.volume = sleepPreFadeVolume;
+        volume.value = sleepPreFadeVolume;
+      }
+
+      isSleepStandby.value = true;
+      controlsHidden.value = true;
+      saveProgressNow();
+    }
+
+    function wakeFromSleepStandby() {
+      if (!isSleepStandby.value) return;
+      isSleepStandby.value = false;
+      controlsHidden.value = false;
+      if (videoRef.value) {
+        videoRef.value.volume = sleepPreFadeVolume;
+        volume.value = sleepPreFadeVolume;
+        videoRef.value.play().catch(() => {});
+        isPlaying.value = true;
+      }
+      triggerSleepHUD("Waking up • Resumed");
+    }
 
     const showOnlineSubModal = ref(false);
     const onlineSubResults = ref([]);
@@ -1506,6 +2109,27 @@ const PlayerPage = {
       !!media.value && qualityOptions.value.length > 1
     );
 
+    const activeQualityBadge = computed(() => {
+      const activeOpt = (qualityOptions.value || []).find((o) => o.media_id === selectedQualityMediaId.value);
+      if (activeOpt && (activeOpt.resolution || activeOpt.display_label || activeOpt.base_label)) {
+        const text = (activeOpt.resolution || activeOpt.display_label || activeOpt.base_label).toLowerCase();
+        if (text.includes("2160") || text.includes("4k")) return "4K";
+        if (text.includes("1080")) return "1080p";
+        if (text.includes("720")) return "720p";
+        if (text.includes("480")) return "480p";
+        return activeOpt.display_label || "";
+      }
+      if (media.value && media.value.resolution) {
+        const res = String(media.value.resolution).toLowerCase();
+        if (res.includes("2160") || res.includes("4k")) return "4K";
+        if (res.includes("1080")) return "1080p";
+        if (res.includes("720")) return "720p";
+        if (res.includes("480")) return "480p";
+        return media.value.resolution;
+      }
+      return "";
+    });
+
     async function loadQualityOptions(mediaId) {
       try {
         const opts = await API.get(`/api/quality-options/${mediaId}`);
@@ -1611,6 +2235,7 @@ const PlayerPage = {
       }).catch(() => { audioTracks.value = []; });
 
       loadSkipTimes(option.media_id);
+      loadChapters(option.media_id);
       loadThumbSheet(option.media_id);
 
       swapStream(atContent, true);
@@ -1963,12 +2588,12 @@ const PlayerPage = {
       controlsHidden.value = false;
       clearTimeout(hideTimer);
       // Never auto-hide if a settings/selection submenu or modal is open
-      if (showSubMenu.value || showAudioMenu.value || showQualityMenu.value || showSpeedMenu.value || showOnlineSubModal.value || showResumeModal.value) {
+      if (showSubMenu.value || showAudioMenu.value || showQualityMenu.value || showSpeedMenu.value || showSleepMenu.value || showChapterMenu.value || showOnlineSubModal.value || showResumeModal.value) {
         return;
       }
       if (videoRef.value && !videoRef.value.paused) {
         hideTimer = setTimeout(() => {
-          if (showSubMenu.value || showAudioMenu.value || showQualityMenu.value || showSpeedMenu.value || showOnlineSubModal.value || showResumeModal.value) {
+          if (showSubMenu.value || showAudioMenu.value || showQualityMenu.value || showSpeedMenu.value || showSleepMenu.value || showChapterMenu.value || showOnlineSubModal.value || showResumeModal.value) {
             return;
           }
           controlsHidden.value = true;
@@ -2577,7 +3202,7 @@ const PlayerPage = {
       const activeIdx = selectedSub.value;
       for (let i = 0; i < tracks.length; i++) {
         try {
-          const newMode = i === activeIdx ? "hidden" : "disabled";
+          const newMode = i === activeIdx ? (isPipActive.value ? "showing" : "hidden") : "disabled";
           if (tracks[i].mode !== newMode) {
             tracks[i].mode = newMode;
           }
@@ -3065,6 +3690,7 @@ const PlayerPage = {
           await videoRef.value.requestPictureInPicture();
           isPipActive.value = true;
         }
+        syncTextTracks();
       } catch (e) {
         console.log("Picture-in-Picture interaction:", e);
         addToast("Unable to toggle Picture-in-Picture", "error");
@@ -3075,11 +3701,13 @@ const PlayerPage = {
       if (!videoRef.value) return;
       videoRef.value.addEventListener("enterpictureinpicture", () => {
         isPipActive.value = true;
+        syncTextTracks();
         addToast("Entered Picture-in-Picture", "info");
         unlockAchievementSilently("pip_master");
       });
       videoRef.value.addEventListener("leavepictureinpicture", () => {
         isPipActive.value = false;
+        syncTextTracks();
         addToast("Exited Picture-in-Picture", "info");
       });
     }
@@ -3097,6 +3725,83 @@ const PlayerPage = {
         skipTimes.value = data || {};
       } catch (e) {
         skipTimes.value = {};
+      }
+    }
+
+    // ─── Embedded Chapters ──────────────────────────────────────
+    const chapters = ref([]);
+    const showChapterMenu = ref(false);
+
+    async function loadChapters(mediaId) {
+      if (!mediaId) {
+        chapters.value = [];
+        return;
+      }
+      try {
+        const data = await API.get(`/api/chapters/${mediaId}`);
+        chapters.value = Array.isArray(data) ? data : [];
+      } catch (e) {
+        chapters.value = [];
+      }
+    }
+
+    const visibleChapters = computed(() => {
+      if (!chapters.value || !Array.isArray(chapters.value) || !duration.value || duration.value <= 0) {
+        return [];
+      }
+      return chapters.value.filter(ch => ch && typeof ch.start === "number" && ch.start > 0 && ch.start < duration.value);
+    });
+
+    const currentChapter = computed(() => {
+      if (!chapters.value || !chapters.value.length || !videoRef.value) return null;
+      const t = currentTime.value || videoRef.value.currentTime || 0;
+      for (let i = chapters.value.length - 1; i >= 0; i--) {
+        const c = chapters.value[i];
+        if (c && typeof c.start === "number" && t >= c.start) {
+          return c;
+        }
+      }
+      return chapters.value[0] || null;
+    });
+
+    const hoverChapterTitle = computed(() => {
+      if (!chapters.value || !chapters.value.length || hoverTooltipTime.value === null || hoverTooltipTime.value === undefined) return "";
+      const t = hoverTooltipTime.value;
+      for (let i = chapters.value.length - 1; i >= 0; i--) {
+        const c = chapters.value[i];
+        if (c && typeof c.start === "number" && t >= c.start && (c.end <= 0 || t <= c.end + 0.5)) {
+          return c.title || "";
+        }
+      }
+      return "";
+    });
+
+    function seekToChapter(ch) {
+      if (!ch) return;
+      seekTo(ch.start);
+      showChapterMenu.value = false;
+      addToast(`Chapter: ${ch.title}`, "info");
+    }
+
+    function seekToNextChapter() {
+      if (!chapters.value || !chapters.value.length || !videoRef.value) return;
+      const cur = videoRef.value.currentTime || 0;
+      const next = chapters.value.find(c => c.start > cur + 1.0);
+      if (next) {
+        seekTo(next.start);
+        addToast(`Chapter: ${next.title}`, "info");
+      }
+    }
+
+    function seekToPrevChapter() {
+      if (!chapters.value || !chapters.value.length || !videoRef.value) return;
+      const cur = videoRef.value.currentTime || 0;
+      const prev = [...chapters.value].reverse().find(c => c.start < cur - 1.5);
+      if (prev) {
+        seekTo(prev.start);
+        addToast(`Chapter: ${prev.title}`, "info");
+      } else {
+        seekTo(0);
       }
     }
 
@@ -3439,12 +4144,97 @@ const PlayerPage = {
     const nextEpProgressPercent = ref(0);
     let autoAdvanceInterval = null;
 
+    // ─── Procedural Web Audio Ambient Soundscape ────────────────
+    let ambientAudioCtx = null;
+    let ambientGain = null;
+    let ambientOsc1 = null;
+    let ambientOsc2 = null;
+    const ambientAudioEnabled = ref(localStorage.getItem("caps_ambient_sound") !== "false");
+
+    function toggleAmbientAudio() {
+      ambientAudioEnabled.value = !ambientAudioEnabled.value;
+      localStorage.setItem("caps_ambient_sound", String(ambientAudioEnabled.value));
+      if (ambientAudioEnabled.value) {
+        startAmbientSoundscape();
+      } else {
+        stopAmbientSoundscape();
+      }
+    }
+
+    function startAmbientSoundscape() {
+      if (!ambientAudioEnabled.value) return;
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        stopAmbientSoundscape();
+        ambientAudioCtx = new AudioCtx();
+        if (ambientAudioCtx.state === "suspended") {
+          ambientAudioCtx.resume().catch(() => {});
+        }
+
+        ambientGain = ambientAudioCtx.createGain();
+        ambientGain.gain.setValueAtTime(0.0001, ambientAudioCtx.currentTime);
+        ambientGain.gain.exponentialRampToValueAtTime(0.035, ambientAudioCtx.currentTime + 1.6);
+
+        const filter = ambientAudioCtx.createBiquadFilter();
+        filter.type = "lowpass";
+        filter.frequency.value = 380;
+
+        ambientOsc1 = ambientAudioCtx.createOscillator();
+        ambientOsc1.type = "sine";
+        ambientOsc1.frequency.value = 110; // Warm A2 drone
+
+        ambientOsc2 = ambientAudioCtx.createOscillator();
+        ambientOsc2.type = "triangle";
+        ambientOsc2.frequency.value = 164.81; // Gentle E3 fifth harmony
+
+        ambientOsc1.connect(filter);
+        ambientOsc2.connect(filter);
+        filter.connect(ambientGain);
+        ambientGain.connect(ambientAudioCtx.destination);
+
+        ambientOsc1.start();
+        ambientOsc2.start();
+      } catch (e) {
+        console.log("Ambient sound note:", e);
+      }
+    }
+
+    function stopAmbientSoundscape() {
+      if (ambientGain && ambientAudioCtx) {
+        try {
+          ambientGain.gain.exponentialRampToValueAtTime(0.0001, ambientAudioCtx.currentTime + 0.4);
+          setTimeout(() => {
+            try {
+              if (ambientOsc1) { ambientOsc1.stop(); ambientOsc1.disconnect(); ambientOsc1 = null; }
+              if (ambientOsc2) { ambientOsc2.stop(); ambientOsc2.disconnect(); ambientOsc2 = null; }
+              if (ambientAudioCtx && ambientAudioCtx.state !== "closed") ambientAudioCtx.close();
+              ambientAudioCtx = null;
+            } catch (e) {}
+          }, 450);
+        } catch (e) {
+          ambientAudioCtx = null;
+        }
+      }
+    }
+
+    function replayCurrentEpisode() {
+      cancelAutoAdvance();
+      stopAmbientSoundscape();
+      if (videoRef.value) {
+        seekTo(0);
+        videoRef.value.play().catch(() => {});
+        isPlaying.value = true;
+      }
+    }
+
     function startAutoAdvanceCountdown(durationSec = 5.0) {
       cancelAutoAdvance();
       isEnded.value = true;
       controlsHidden.value = false;
       nextEpCountdownSeconds.value = durationSec;
       nextEpProgressPercent.value = 0;
+      startAmbientSoundscape();
 
       const startTime = Date.now();
 
@@ -3456,6 +4246,7 @@ const PlayerPage = {
 
         if (remaining <= 0) {
           cancelAutoAdvance();
+          stopAmbientSoundscape();
           playNext(true);
         }
       }, 50);
@@ -3468,10 +4259,12 @@ const PlayerPage = {
       }
       isEnded.value = false;
       nextEpProgressPercent.value = 0;
+      stopAmbientSoundscape();
     }
 
     function handleNextEpClick() {
       cancelAutoAdvance();
+      stopAmbientSoundscape();
       playNext(false);
       unlockAchievementSilently("next_ep_advance");
     }
@@ -3602,6 +4395,13 @@ const PlayerPage = {
 
     function onEnded() {
       isPlaying.value = false;
+
+      // 0. If sleep timer is active (especially 'end_of_episode' mode or expired), halt into deep standby
+      if (sleepTimer.active && (sleepTimer.mode === "end_of_episode" || sleepTimer.remainingSeconds <= 5)) {
+        executeDeepStandby();
+        return;
+      }
+
       // 1. If repeat 'one' is active
       if (store.queueRepeat === "one" && videoRef.value) {
         seekTo(0);
@@ -3665,6 +4465,13 @@ const PlayerPage = {
     async function executeFreezeRecovery(reason = "decoder_freeze") {
       const v = videoRef.value;
       if (!v || !media.value) return;
+
+      // Halt freeze retries immediately if drive is offline
+      if (isDriveOffline.value) return;
+      if (media.value?.is_mounted === false) {
+        showDriveOfflineScreen(media.value?.drive_letter);
+        return;
+      }
 
       // Safeguard 1: Global isRecovering lock prevents overlapping/concurrent recoveries
       if (isRecovering.value) {
@@ -3835,7 +4642,7 @@ const PlayerPage = {
       }
     }
 
-    function onVideoError(e) {
+    async function onVideoError(e) {
       const v = videoRef.value;
       if (!v || !v.currentSrc || v.currentSrc.endsWith('/stream/') || v.currentSrc.endsWith('/null') || v.currentSrc.endsWith('/undefined')) {
         return;
@@ -3844,6 +4651,21 @@ const PlayerPage = {
       if (!v.error || v.error.code === 0 || v.error.code === 1) {
         return;
       }
+      if (isDriveOffline.value) return;
+
+      // Fast check if the underlying storage drive has been unplugged
+      try {
+        const driveCheck = await API.get("/api/system/drives-status", { cache: false });
+        if (driveCheck && driveCheck.has_offline_drives) {
+          const myDrive = (media.value?.drive_letter || "").toUpperCase();
+          const isMyOffline = (driveCheck.offline_drive_letters || []).some(d => String(d).toUpperCase() === myDrive);
+          if (isMyOffline || !myDrive) {
+            showDriveOfflineScreen(media.value?.drive_letter || (driveCheck.offline_drive_letters || [])[0]);
+            return;
+          }
+        }
+      } catch (err) {}
+
       if (v.currentSrc && v.currentSrc.includes('/api/stream/')) {
         console.error("[HTML5 Player Error]", e, "code:", v.error.code, "msg:", v.error.message);
         executeFreezeRecovery("video_element_error_code_" + v.error.code);
@@ -3967,20 +4789,105 @@ const PlayerPage = {
       return h > 0 ? `${h}:${mStr}:${sStr}` : `${mStr}:${sStr}`;
     }
 
+    function toggleSubtitlesShortcut() {
+      if (!subtitles.value || subtitles.value.length === 0) {
+        addToast("No subtitles available", "info");
+        return;
+      }
+      if (selectedSub.value === -1) {
+        selectSub(0);
+        addToast(`Subtitles: ${subtitles.value[0]?.label || 'On'}`, "info");
+      } else if (selectedSub.value + 1 < subtitles.value.length) {
+        selectSub(selectedSub.value + 1);
+        addToast(`Subtitles: ${subtitles.value[selectedSub.value]?.label || 'Next'}`, "info");
+      } else {
+        selectSub(-1);
+        addToast("Subtitles: Off", "info");
+      }
+    }
+
+    function handleOverlayDpad(e) {
+      if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Select"].includes(e.key)) {
+        return false;
+      }
+
+      // Check if any popup menu, drawer, or cinematic card is currently active
+      const activePopup = document.querySelector(".player-popup-menu, .episodes-drawer, .queue-drawer, .player-cinematic-endcard, .next-ep-floating-card");
+      if (!activePopup) return false;
+
+      const focusables = Array.from(activePopup.querySelectorAll(
+        "button:not([disabled]), .player-menu-item:not(.disabled), .chapter-menu-item:not(.disabled), .player-aspect-pill:not([disabled]), .cinematic-thumb-container, input:not([disabled])"
+      )).filter(el => el.offsetParent !== null);
+
+      if (!focusables.length) return false;
+
+      const currentIdx = focusables.findIndex(el => el.classList.contains("remote-focused") || el === document.activeElement);
+
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+        e.preventDefault();
+        const nextIdx = currentIdx < 0 ? 0 : (currentIdx + 1) % focusables.length;
+        focusables.forEach(el => el.classList.remove("remote-focused"));
+        focusables[nextIdx].classList.add("remote-focused");
+        if (typeof focusables[nextIdx].focus === "function") focusables[nextIdx].focus();
+        return true;
+      }
+
+      if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        const prevIdx = currentIdx <= 0 ? focusables.length - 1 : currentIdx - 1;
+        focusables.forEach(el => el.classList.remove("remote-focused"));
+        focusables[prevIdx].classList.add("remote-focused");
+        if (typeof focusables[prevIdx].focus === "function") focusables[prevIdx].focus();
+        return true;
+      }
+
+      if (e.key === "Enter" || e.key === "Select") {
+        if (currentIdx >= 0 && focusables[currentIdx]) {
+          e.preventDefault();
+          focusables[currentIdx].click();
+          return true;
+        }
+      }
+
+      return false;
+    }
+
     function handleKeyboard(e) {
       if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
       // Block all shortcuts while error overlay is shown
       if (playerError.value) return;
       unlockAchievementSilently("keyboard_ninja");
 
+      if (isSleepStandby.value) {
+        e.preventDefault();
+        wakeFromSleepStandby();
+        return;
+      }
+
       if (showResumeModal.value) {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           confirmResume();
           return;
-        } else if (e.key === "Escape") {
+        } else if (e.key === "Escape" || e.key === "Back") {
           e.preventDefault();
           confirmResume();
+          return;
+        }
+      }
+
+      // ─── Smart Hybrid Remote / TV D-Pad Menu Navigation ────────
+      if (handleOverlayDpad(e)) {
+        return;
+      }
+
+      // ─── Number keys 0-9 for 0% - 90% timeline seeking ─────────
+      if (e.key >= "0" && e.key <= "9" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (duration.value > 0) {
+          e.preventDefault();
+          const targetPct = parseInt(e.key, 10) / 10;
+          seekTo(duration.value * targetPct);
+          addToast(`Seek: ${parseInt(e.key, 10) * 10}%`, "info");
           return;
         }
       }
@@ -3991,20 +4898,39 @@ const PlayerPage = {
         case " ":
         case "k":
         case "K":
+        case "MediaPlayPause":
           e.preventDefault();
           togglePlay();
+          break;
+        case "MediaPlay":
+        case "Play":
+          e.preventDefault();
+          if (videoRef.value && videoRef.value.paused) togglePlay();
+          break;
+        case "MediaPause":
+        case "Pause":
+          e.preventDefault();
+          if (videoRef.value && !videoRef.value.paused) togglePlay();
           break;
         case "ArrowRight":
         case "l":
         case "L":
           e.preventDefault();
-          skip(step);
+          if (e.altKey) {
+            seekToNextChapter();
+          } else {
+            skip(e.shiftKey ? 30 : step);
+          }
           break;
         case "ArrowLeft":
         case "j":
         case "J":
           e.preventDefault();
-          skip(-step);
+          if (e.altKey) {
+            seekToPrevChapter();
+          } else {
+            skip(e.shiftKey ? -30 : -step);
+          }
           break;
         case "ArrowUp":
           e.preventDefault();
@@ -4022,6 +4948,24 @@ const PlayerPage = {
             volume.value = newVol;
           }
           break;
+        case "PageDown":
+          e.preventDefault();
+          seekToNextChapter();
+          break;
+        case "PageUp":
+          e.preventDefault();
+          seekToPrevChapter();
+          break;
+        case "MediaFastForward":
+        case "FastForward":
+          e.preventDefault();
+          skip(30);
+          break;
+        case "MediaRewind":
+        case "Rewind":
+          e.preventDefault();
+          skip(-30);
+          break;
         case "f":
         case "F":
           e.preventDefault();
@@ -4037,6 +4981,11 @@ const PlayerPage = {
           e.preventDefault();
           toggleMute();
           break;
+        case "c":
+        case "C":
+          e.preventDefault();
+          toggleSubtitlesShortcut();
+          break;
         case "e":
         case "E":
           e.preventDefault();
@@ -4047,10 +4996,28 @@ const PlayerPage = {
           e.preventDefault();
           toggleQueueDrawer();
           break;
+        case "z":
+        case "Z":
+          e.preventDefault();
+          cycleSleepTimer();
+          break;
         case "n":
         case "N":
+        case "MediaTrackNext":
           e.preventDefault();
           if (hasNextEp.value) handleNextEpClick();
+          break;
+        case "MediaTrackPrevious":
+          e.preventDefault();
+          seekTo(0);
+          break;
+        case "Select":
+          e.preventDefault();
+          if (isEnded.value && hasNextEp.value) {
+            handleNextEpClick();
+          } else {
+            togglePlay();
+          }
           break;
         case "s":
         case "S":
@@ -4060,12 +5027,25 @@ const PlayerPage = {
           }
           break;
         case "Escape":
+        case "Back":
+        case "BrowserBack":
           if (showEpisodesDrawer.value) {
             e.preventDefault();
             showEpisodesDrawer.value = false;
           } else if (showQueueDrawer.value) {
             e.preventDefault();
             showQueueDrawer.value = false;
+          } else if (showQualityMenu.value || showAudioMenu.value || showSubMenu.value || showSpeedMenu.value || showSleepMenu.value || showChapterMenu.value) {
+            e.preventDefault();
+            showQualityMenu.value = false;
+            showAudioMenu.value = false;
+            showSubMenu.value = false;
+            showSpeedMenu.value = false;
+            showSleepMenu.value = false;
+            showChapterMenu.value = false;
+          } else if (isEnded.value && hasNextEp.value) {
+            e.preventDefault();
+            cancelAutoAdvance();
           }
           break;
         case "[":
@@ -4202,6 +5182,7 @@ const PlayerPage = {
       autoSkippedOp.value = false;
       autoSkippedEd.value = false;
       loadSkipTimes(mediaId);
+      loadChapters(mediaId);
       loadThumbSheet(mediaId);
 
       try {
@@ -4236,6 +5217,12 @@ const PlayerPage = {
       try {
         media.value = await API.get(`/api/media/${mediaId}`);
         subtitles.value = media.value.subtitles || [];
+
+        // Drive health check on initial entry: if drive is unmounted, halt playback and show recovery overlay
+        if (media.value.is_mounted === false) {
+          showDriveOfflineScreen(media.value.drive_letter);
+          return;
+        }
 
         // Pre-emptive compatibility check: if media is HEVC and browser lacks native decode support
         const vInfo = media.value.video_info || {};
@@ -4460,10 +5447,14 @@ const PlayerPage = {
       cancelAutoAdvance();
       saveProgressNow();
       detachRemoteAudio();
+      stopDriveRemountPoller();
       clearInterval(progressTimer);
       clearInterval(stallTimer);
       clearInterval(renderHealthTimer);
       if (memoryHealthTimer) clearInterval(memoryHealthTimer);
+      if (sleepTickInterval) clearInterval(sleepTickInterval);
+      if (sleepFadeInterval) clearInterval(sleepFadeInterval);
+      if (sleepHUDTimer) clearTimeout(sleepHUDTimer);
       if (rvfcHandle && videoRef.value && "cancelVideoFrameCallback" in videoRef.value) {
         try { videoRef.value.cancelVideoFrameCallback(rvfcHandle); } catch (e) {}
       }
@@ -4733,6 +5724,40 @@ const PlayerPage = {
       checkMemoryPressure,
       freezeWarningNotice,
       isRecovering,
+      showSleepMenu,
+      isSleepStandby,
+      sleepExpiringWarning,
+      sleepHUD,
+      sleepHUDText,
+      sleepTimer,
+      sleepPresets,
+      sleepTimerBadge,
+      sleepTimerRemainingStr,
+      setSleepTimer,
+      extendSleepTimer,
+      cancelSleepTimer,
+      cycleSleepTimer,
+      wakeFromSleepStandby,
+      chapters,
+      visibleChapters,
+      showChapterMenu,
+      currentChapter,
+      hoverChapterTitle,
+      seekToChapter,
+      seekToNextChapter,
+      seekToPrevChapter,
+      activeQualityBadge,
+      ambientAudioEnabled,
+      toggleAmbientAudio,
+      replayCurrentEpisode,
+      isDriveOffline,
+      offlineDriveLetter,
+      savedPlaybackTime,
+      isCheckingDrive,
+      driveOfflineStatusMsg,
+      checkDriveNow,
+      returnToBrowse,
+      showDriveOfflineScreen,
     };
   },
 };

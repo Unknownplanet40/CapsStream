@@ -36,6 +36,8 @@ def is_drive_mounted(file_path):
         return mounted
 
     if file_path.startswith("/"):
+        if os.name == "nt":
+            return True
         parts = [p for p in file_path.split("/") if p]
         mount_check = "/" + parts[0] if parts else "/"
         if mount_check in _DRIVE_MOUNT_CACHE:
@@ -45,6 +47,23 @@ def is_drive_mounted(file_path):
         return mounted
 
     return True
+
+
+def get_drive_identifier(file_path):
+    """Extract a human-readable drive/mount identifier, e.g. 'D:' or '/mnt/storage'."""
+    if not file_path:
+        return ""
+    import ntpath
+    drive = ntpath.splitdrive(file_path)[0]
+    if drive:
+        return drive.upper()
+    if file_path.startswith("/"):
+        parts = [p for p in file_path.split("/") if p]
+        if parts:
+            if parts[0] in ("mnt", "media", "Volumes") and len(parts) > 1:
+                return f"/{parts[0]}/{parts[1]}"
+            return f"/{parts[0]}"
+    return ""
 
 
 def is_item_mounted(item):
@@ -60,6 +79,7 @@ def is_item_mounted(item):
 def enrich_mounted(item):
     if isinstance(item, dict):
         item["is_mounted"] = is_item_mounted(item)
+        item["drive_letter"] = get_drive_identifier(item.get("file_path"))
     return item
 
 
@@ -228,6 +248,7 @@ def get_all_sources_for_media(media):
 
     for item in items:
         item["is_mounted"] = is_item_mounted(item)
+        item["drive_letter"] = get_drive_identifier(item.get("file_path"))
     return items
 
 
@@ -369,6 +390,7 @@ def enrich_mounted_list(items):
     for item in items:
         if isinstance(item, dict):
             item["is_mounted"] = is_item_mounted(item)
+            item["drive_letter"] = get_drive_identifier(item.get("file_path"))
 
     if cfg.get("hide_unmounted_items", False):
         items = [item for item in items if isinstance(item, dict) and item.get("is_mounted", True)]

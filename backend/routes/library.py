@@ -16,6 +16,7 @@ from backend.db import (
     add_to_collection, remove_from_collection,
     get_playlists, get_playlist, create_playlist, update_playlist,
     delete_playlist, add_to_playlist, remove_from_playlist, reorder_playlist,
+    is_media_in_playlist,
 )
 from backend.franchises import get_universe_collections
 from backend.regional import get_country_collections
@@ -257,9 +258,10 @@ def api_create_playlist():
     data = request.json or {}
     name = (data.get("name") or "").strip()
     desc = (data.get("description") or "").strip()
+    is_shared = bool(data.get("is_shared", False))
     if not name:
         return jsonify({"error": "Playlist name is required"}), 400
-    pl_id = create_playlist(pid, name, desc)
+    pl_id = create_playlist(pid, name, desc, is_shared=is_shared)
     pl = get_playlist(pl_id, pid)
     return jsonify(pl), 201
 
@@ -282,7 +284,10 @@ def api_update_playlist(playlist_id):
     data = request.json or {}
     name = data.get("name")
     desc = data.get("description")
-    update_playlist(playlist_id, pid, name=name, description=desc)
+    is_shared = data.get("is_shared")
+    ok = update_playlist(playlist_id, pid, name=name, description=desc, is_shared=is_shared)
+    if not ok:
+        return jsonify({"error": "Permission denied"}), 403
     pl = get_playlist(playlist_id, pid)
     return jsonify(pl)
 
@@ -290,7 +295,9 @@ def api_update_playlist(playlist_id):
 @library_bp.route("/api/playlists/<int:playlist_id>", methods=["DELETE"])
 def api_delete_playlist(playlist_id):
     pid = require_profile()
-    delete_playlist(playlist_id, pid)
+    ok = delete_playlist(playlist_id, pid)
+    if not ok:
+        return jsonify({"error": "Permission denied"}), 403
     return jsonify({"ok": True})
 
 
@@ -301,14 +308,20 @@ def api_add_to_playlist(playlist_id):
     media_id = data.get("media_id")
     if not media_id:
         return jsonify({"error": "media_id is required"}), 400
-    item_id = add_to_playlist(playlist_id, int(media_id))
-    return jsonify({"ok": True, "item_id": item_id})
+    mid = int(media_id)
+    was_already = is_media_in_playlist(playlist_id, mid)
+    item_id = add_to_playlist(playlist_id, mid, profile_id=pid)
+    if item_id is None:
+        return jsonify({"error": "Permission denied"}), 403
+    return jsonify({"ok": True, "item_id": item_id, "already_in_playlist": was_already})
 
 
 @library_bp.route("/api/playlists/<int:playlist_id>/items/<int:item_id>", methods=["DELETE"])
 def api_remove_from_playlist(playlist_id, item_id):
     pid = require_profile()
-    remove_from_playlist(playlist_id, item_id)
+    ok = remove_from_playlist(playlist_id, item_id, profile_id=pid)
+    if not ok:
+        return jsonify({"error": "Permission denied"}), 403
     return jsonify({"ok": True})
 
 
@@ -319,5 +332,7 @@ def api_reorder_playlist(playlist_id):
     item_ids = data.get("item_ids", [])
     if not isinstance(item_ids, list):
         return jsonify({"error": "item_ids array is required"}), 400
-    reorder_playlist(playlist_id, [int(i) for i in item_ids])
+    ok = reorder_playlist(playlist_id, [int(i) for i in item_ids], profile_id=pid)
+    if not ok:
+        return jsonify({"error": "Permission denied"}), 403
     return jsonify({"ok": True})

@@ -72,6 +72,7 @@ from .playback import (
     delete_progress,
     get_continue_watching,
     get_profile_recommendations,
+    get_similar_media,
 )
 
 from .achievements import (
@@ -109,6 +110,7 @@ from .playlists import (
     add_to_playlist,
     remove_from_playlist,
     reorder_playlist,
+    is_media_in_playlist,
 )
 
 __all__ = [
@@ -166,6 +168,8 @@ __all__ = [
     "save_progress",
     "delete_progress",
     "get_continue_watching",
+    "get_profile_recommendations",
+    "get_similar_media",
     "ACHIEVEMENTS",
     "KIDS_ACHIEVEMENTS",
     "ACTION_TO_KIDS_ACHIEVEMENTS",
@@ -191,4 +195,5 @@ __all__ = [
     "add_to_playlist",
     "remove_from_playlist",
     "reorder_playlist",
+    "is_media_in_playlist",
 ]

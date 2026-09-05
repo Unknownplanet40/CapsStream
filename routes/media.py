@@ -15,7 +15,7 @@ from backend.db import (
     get_all_media, get_media_by_id, get_media_by_tmdb, get_best_media_source,
     get_media_quality_options, search_media as db_search_media, get_unique_shows,
     get_recently_added, get_top_rated, get_by_genre, get_all_genres,
-    get_random_pick, get_continue_watching, get_profile_recommendations, get_progress, is_favorite,
+    get_random_pick, get_continue_watching, get_profile_recommendations, get_similar_media, get_progress, is_favorite,
     get_unmatched, upsert_media,
     delete_media_by_id, delete_media_by_tmdb, delete_media_by_title_and_type,
 )
@@ -204,7 +204,7 @@ def api_home():
         cw = get_continue_watching(pid, limit=15)
         if cw:
             final_rows.append({"title": "Continue Watching", "type": "continue", "items": cw})
-        recs = get_profile_recommendations(pid, limit=2)
+        recs = get_profile_recommendations(pid, limit=3, all_shows=all_shows)
     else:
         recs = []
 
@@ -215,9 +215,13 @@ def api_home():
         if rec_idx == 0 and recs and (r.get("title") == "Recently Added" or i == 0):
             final_rows.append(recs[0])
             rec_idx += 1
-        # Place 2nd recommendation row after Top Rated or 3rd catalog row
+        # Place 2nd recommendation row after Top Rated or 2nd catalog row
         elif rec_idx == 1 and len(recs) > 1 and (r.get("title") == "Top Rated" or i == 2):
             final_rows.append(recs[1])
+            rec_idx += 1
+        # Place 3rd recommendation row after Movies or Series catalog row
+        elif rec_idx == 2 and len(recs) > 2 and (r.get("title") in ("Movies", "Series") or i == 4):
+            final_rows.append(recs[2])
             rec_idx += 1
 
     while rec_idx < len(recs):
@@ -402,7 +406,42 @@ def api_media_detail(media_id):
     media["audio_tracks"] = probe_audio_tracks(media["file_path"])
     media["has_multi_audio"] = len(media["audio_tracks"]) > 1
 
+    try:
+        from backend.franchises import get_media_franchise
+        media["franchise"] = get_media_franchise(media)
+    except Exception:
+        media["franchise"] = None
+
+    try:
+        media["similar_items"] = get_similar_media(media_id, limit=16, profile_id=pid)
+    except Exception:
+        media["similar_items"] = []
+
     return jsonify(media)
+
+
+@media_bp.route("/api/media/<int:media_id>/franchise", methods=["GET"])
+def api_media_franchise(media_id):
+    media = get_media_by_id(media_id)
+    if not media:
+        return jsonify({"error": "Media not found"}), 404
+    from backend.franchises import get_media_franchise
+    franchise = get_media_franchise(media)
+    return jsonify(franchise or {})
+
+
+@media_bp.route("/api/media/<int:media_id>/similar", methods=["GET"])
+def api_media_similar(media_id):
+    media = get_media_by_id(media_id)
+    if not media:
+        return jsonify({"error": "Media not found"}), 404
+    pid = current_profile()
+    try:
+        limit = request.args.get("limit", 16, type=int)
+        similar = get_similar_media(media_id, limit=limit, profile_id=pid)
+        return jsonify(similar)
+    except Exception:
+        return jsonify([])
 
 
 @media_bp.route("/api/media/<int:media_id>/trailer", methods=["GET"])
@@ -473,6 +512,8 @@ def api_show_detail(tmdb_id):
 
     show = dict(episodes[0])
     show["is_mounted"] = any(ep.get("is_mounted", False) for ep in episodes)
+    if not show["is_mounted"] and episodes:
+        show["drive_letter"] = episodes[0].get("drive_letter") or ""
     for f in ["season", "episode", "ep_title", "file_path", "file_size", "duration"]:
         show.pop(f, None)
 
@@ -568,6 +609,17 @@ def api_show_detail(tmdb_id):
             from backend.audio_probe import probe_audio_tracks
             show["audio_tracks"] = probe_audio_tracks(first_local["file_path"])
             show["has_multi_audio"] = len(show.get("audio_tracks", [])) > 1
+
+    try:
+        from backend.franchises import get_media_franchise
+        show["franchise"] = get_media_franchise(show)
+    except Exception:
+        show["franchise"] = None
+
+    try:
+        show["similar_items"] = get_similar_media(show.get("id"), limit=16, profile_id=pid)
+    except Exception:
+        show["similar_items"] = []
 
     return jsonify(show)
 

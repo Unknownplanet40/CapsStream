@@ -19,8 +19,10 @@ from backend.proc_utils import CREATE_NO_WINDOW
 from backend.utils.paths import BASE_DIR, FFPROBE_BIN
 
 SKIP_CACHE_DIR = os.path.join(BASE_DIR, "data", "metadata", "skip_times")
+CHAPTERS_CACHE_DIR = os.path.join(BASE_DIR, "data", "metadata", "chapters")
 MAL_CACHE_FILE = os.path.join(BASE_DIR, "data", "metadata", "mal_ids.json")
 os.makedirs(SKIP_CACHE_DIR, exist_ok=True)
+os.makedirs(CHAPTERS_CACHE_DIR, exist_ok=True)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CapsStream/1.0",
@@ -166,6 +168,81 @@ def probe_chapters_for_skips(file_path):
         print(f"[Skips] FFprobe chapter probe error: {e}")
 
     return {}
+
+
+def probe_chapters_full(file_path):
+    """
+    Probes video file embedded FFmpeg chapter markers and returns a structured list:
+    [
+      { "id": 0, "start": 0.0, "end": 120.5, "title": "Prologue" },
+      ...
+    ]
+    """
+    if not file_path or not os.path.exists(file_path) or not os.path.exists(FFPROBE_BIN):
+        return []
+
+    cmd = [
+        FFPROBE_BIN,
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_chapters",
+        file_path
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=6,
+                             creationflags=CREATE_NO_WINDOW)
+        if res.returncode == 0:
+            data = json.loads(res.stdout)
+            raw_chapters = data.get("chapters", [])
+            parsed = []
+            for i, c in enumerate(raw_chapters):
+                start = float(c.get("start_time", 0))
+                end = float(c.get("end_time", 0))
+                tags = c.get("tags", {})
+                title = tags.get("title") or tags.get("TITLE") or f"Chapter {i + 1}"
+                parsed.append({
+                    "id": c.get("id", i),
+                    "start": round(start, 2),
+                    "end": round(end, 2),
+                    "title": str(title).strip()
+                })
+            return parsed
+    except Exception as e:
+        print(f"[Chapters] FFprobe chapter probe error: {e}")
+
+    return []
+
+
+def fetch_chapters(media_id):
+    """
+    Fetches chapters for a media item, with persistent file caching.
+    Returns: list of { "id": int, "start": float, "end": float, "title": str }
+    """
+    media = get_media_by_id(media_id)
+    if not media:
+        return []
+
+    cache_path = os.path.join(CHAPTERS_CACHE_DIR, f"{media_id}.json")
+    if os.path.isfile(cache_path):
+        try:
+            with open(cache_path, encoding="utf-8") as f:
+                cached = json.load(f)
+                if isinstance(cached, list):
+                    return cached
+        except Exception:
+            pass
+
+    file_path = media.get("file_path")
+    chapters = probe_chapters_full(file_path)
+    if chapters:
+        try:
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(chapters, f)
+        except Exception as e:
+            print(f"[Chapters] Failed writing cache for media {media_id}: {e}")
+
+    return chapters
+
 
 
 def is_anime(media):

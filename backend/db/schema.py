@@ -118,6 +118,7 @@ def init_db():
             profile_id  INTEGER NOT NULL,
             name        TEXT NOT NULL,
             description TEXT DEFAULT '',
+            is_shared   INTEGER NOT NULL DEFAULT 0,
             created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
@@ -237,6 +238,15 @@ def init_db():
     except Exception as e:
         print("[DB] Migration notice:", e)
 
+    # Migration guard for playlists table — shared family playlists
+    try:
+        pl_cols = [r["name"] for r in conn.execute("PRAGMA table_info(playlists)").fetchall()]
+        if "is_shared" not in pl_cols:
+            conn.execute("ALTER TABLE playlists ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0")
+            print("[DB] Migrated: added is_shared column to playlists")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_playlists_shared ON playlists(is_shared)")
+    except Exception as e:
+        print("[DB] Migration notice (playlists):", e)
 
     conn.commit()
     conn.close()

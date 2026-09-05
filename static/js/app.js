@@ -139,6 +139,11 @@ const store = reactive({
   scanMatched: 0,
   scanElapsed: 0,
   serverOnline: true,
+  hasOfflineDrives: false,
+  offlineDrivesCount: 0,
+  offlineDriveLetters: [],
+  drivesStatus: [],
+  hideOfflineMedia: typeof localStorage !== "undefined" && localStorage.getItem("caps_hide_offline") === "true",
   updateInfo: null,      // set when an update is available
   pendingScanAfterCacheCleared: false, // triggers auto-scan when returning home after cache clear
   pendingUpdateCheck: false,           // triggers auto-check for updates when Settings opens from the banner
@@ -255,7 +260,11 @@ function parseChangelogToSections(rawMd) {
 
 window.parseChangelogToSections = parseChangelogToSections;
 
-window.openWhatsNewModal = async function (version = null) {
+window.openWhatsNewModal = async function (version = null, force = false) {
+  const currentPath = (typeof router !== "undefined" && router.currentRoute?.value?.path) || window.location.hash || window.location.pathname;
+  if (!force && (!store.profile || String(currentPath).includes("profiles"))) {
+    return;
+  }
   store.whatsNewLoading = true;
   store.whatsNewModalOpen = true;
   try {
@@ -275,6 +284,7 @@ const playlistPickerState = reactive({
   playlists: [],
   loading: false,
   inlineName: "",
+  inlineShared: false,
 });
 
 async function openAddToPlaylist(media) {
@@ -285,6 +295,7 @@ async function openAddToPlaylist(media) {
   if (!media) return;
   playlistPickerState.item = media;
   playlistPickerState.inlineName = "";
+  playlistPickerState.inlineShared = false;
   playlistPickerState.show = true;
   playlistPickerState.loading = true;
   try {
@@ -299,16 +310,40 @@ async function openAddToPlaylist(media) {
 
 function isItemInPlaylist(playlist) {
   if (!playlistPickerState.item || !playlist) return false;
-  const targetId = playlistPickerState.item.id;
-  return (playlist.item_ids || []).includes(targetId);
+  const targetId = Number(playlistPickerState.item.id);
+  const ids = (playlist.item_ids || []).map(Number);
+  return ids.includes(targetId);
 }
 
 async function toggleItemInPlaylist(playlist) {
   if (!playlistPickerState.item || !playlist) return;
-  const mediaId = playlistPickerState.item.id;
+  if (playlist.can_edit === false) {
+    addToast("Only the creator or an admin can modify this shared playlist", "warning");
+    return;
+  }
+  const mediaId = Number(playlistPickerState.item.id);
+  const mediaTitle = playlistPickerState.item.title || "This title";
+
+  // Check if media is already present in this playlist
+  if (isItemInPlaylist(playlist)) {
+    const confirmed = await customConfirm({
+      title: "Already in Playlist",
+      message: `"${mediaTitle}" is already in "${playlist.name}". Do you want to add it again as a duplicate?`,
+      icon: "ph-bold ph-warning-circle",
+      okText: "Add Again",
+      cancelText: "Cancel",
+      danger: false
+    });
+    if (!confirmed) return;
+  }
+
   try {
-    await API.post(`/api/playlists/${playlist.id}/items`, { media_id: mediaId });
-    addToast(`Added "${playlistPickerState.item.title}" to ${playlist.name}`, "success");
+    const res = await API.post(`/api/playlists/${playlist.id}/items`, { media_id: mediaId });
+    if (res && res.already_in_playlist) {
+      addToast(`Added duplicate of "${mediaTitle}" to ${playlist.name}`, "info");
+    } else {
+      addToast(`Added "${mediaTitle}" to ${playlist.name}`, "success");
+    }
     const lists = await API.get("/api/playlists");
     playlistPickerState.playlists = Array.isArray(lists) ? lists : [];
   } catch (e) {
@@ -320,11 +355,13 @@ async function createAndAddToPlaylist() {
   const name = playlistPickerState.inlineName.trim();
   if (!name || !playlistPickerState.item) return;
   try {
-    const pl = await API.post("/api/playlists", { name });
+    const is_shared = !!playlistPickerState.inlineShared;
+    const pl = await API.post("/api/playlists", { name, is_shared });
     if (pl && pl.id) {
       await API.post(`/api/playlists/${pl.id}/items`, { media_id: playlistPickerState.item.id });
       addToast(`Created "${name}" and added title!`, "success");
       playlistPickerState.inlineName = "";
+      playlistPickerState.inlineShared = false;
       const lists = await API.get("/api/playlists");
       playlistPickerState.playlists = Array.isArray(lists) ? lists : [];
     }
@@ -470,15 +507,63 @@ function handleServerOffline() {
   }
 }
 
-function addToast(message, type = "info", duration = 3000) {
+function addToast(message, type = "info", duration = 3000, action = null) {
   const id = Date.now() + Math.random();
-  store.toasts.push({ id, message, type });
+  store.toasts.push({ id, message, type, action });
   setTimeout(() => {
     store.toasts = store.toasts.filter((t) => t.id !== id);
   }, duration);
 }
 
 window.addToast = addToast;
+
+// ─── Drive Health & Disconnection Watcher ─────────────────────
+let prevOfflineDrives = null;
+let driveWatcherInterval = null;
+
+async function checkDrivesHealth() {
+  try {
+    const res = await API.get("/api/system/drives-status", { cache: false });
+    if (!res || !res.drives) return;
+
+    const currentOffline = new Set((res.offline_drive_letters || []).map(l => String(l).toUpperCase()));
+    store.hasOfflineDrives = res.has_offline_drives || false;
+    store.offlineDrivesCount = res.offline_drives_count || 0;
+    store.offlineDriveLetters = res.offline_drive_letters || [];
+    store.drivesStatus = res.drives || [];
+    if (res.hide_unmounted_items !== undefined) {
+      store.hideOfflineMedia = !!res.hide_unmounted_items;
+    }
+
+    if (prevOfflineDrives !== null) {
+      for (const d of prevOfflineDrives) {
+        if (!currentOffline.has(d)) {
+          addToast(`Drive ${d} reconnected!`, "success", 9000, {
+            label: "Rescan Library",
+            onClick: (t) => {
+              store.toasts = store.toasts.filter(x => x.id !== t.id);
+              if (typeof triggerScan === "function") {
+                triggerScan();
+              } else {
+                API.post("/api/scan").then(() => addToast("Library scan started", "success")).catch(() => {});
+              }
+            }
+          });
+        }
+      }
+    }
+    prevOfflineDrives = currentOffline;
+  } catch (e) {}
+}
+
+function startDriveWatcher() {
+  checkDrivesHealth();
+  if (driveWatcherInterval) clearInterval(driveWatcherInterval);
+  driveWatcherInterval = setInterval(checkDrivesHealth, 25000);
+  if (typeof window !== "undefined") {
+    window.addEventListener("focus", checkDrivesHealth);
+  }
+}
 
 function playAchievementSound() {
   try {
@@ -1331,7 +1416,7 @@ const MediaCard = {
          :id="'card-' + (cardItem.id || 'card')">
 
       <div v-if="cardItem.is_mounted === false && showTooltip" class="unmounted-tooltip">
-        <i class="ph ph-warning" style="margin-right:4px;color:#ffb703"></i> Source drive not mounted. Please connect drive to watch this title.
+        <i class="ph ph-warning" style="margin-right:4px;color:#ffb703"></i> Source drive {{ cardItem.drive_letter ? ('(' + cardItem.drive_letter + ')') : '' }} not mounted. Connect drive to watch.
       </div>
 
       <div class="card-inner">
@@ -1370,7 +1455,7 @@ const MediaCard = {
         </div>
 
         <div v-if="cardItem.is_mounted === false" class="unmounted-badge">
-          <i class="ph ph-hard-drive"></i> Unmounted
+          <i class="ph-bold ph-hard-drive"></i> {{ cardItem.drive_letter ? ('Offline (' + cardItem.drive_letter + ')') : 'Offline' }}
         </div>
 
         <span v-if="showBadge !== false && !isContinue && cardItem.is_mounted !== false && cardItem.type !== 'anime'" class="card-badge" :class="cardItem.type">
@@ -1661,12 +1746,21 @@ const MediaCard = {
     function scheduleClose() {
       clearTimeout(closeTimer);
       closeTimer = setTimeout(() => {
+        if (contextMenuState.show && contextMenuState.item && (contextMenuState.item.id === cardItem.value?.id || contextMenuState.item.file_path === cardItem.value?.file_path)) {
+          return;
+        }
         isPopoutActive.value = false;
         isVideoPlaying.value = false;
         trailerEmbedUrl.value = null;
         previewVideoUrl.value = null;
       }, 150);
     }
+
+    watch(() => contextMenuState.show, (showing) => {
+      if (!showing && isPopoutActive.value) {
+        scheduleClose();
+      }
+    });
 
     function cancelClose() {
       clearTimeout(closeTimer);
@@ -2726,8 +2820,9 @@ const ContentRow = {
       </div>
 
       <!-- Generic row header for other rows -->
-      <div v-else class="row-header">
+      <div v-else class="row-header" :class="{ 'recommendation-row-header': row?.type === 'recommendation' }">
         <div class="row-title">
+          <i v-if="row?.type === 'recommendation'" class="ph ph-sparkle" style="color:var(--accent);margin-right:8px;font-size:1.15rem"></i>
           {{ row.title }}
           <span class="row-arrow">›</span>
         </div>
@@ -3920,10 +4015,19 @@ const DetailPage = {
 
           <!-- Actions -->
           <div class="detail-actions">
-            <button class="btn btn-primary btn-lg detail-play-btn" @click="playMedia" id="detail-play-btn">
-              <i class="ph-fill ph-play"></i>
-              <span>{{ resumeLabel }}</span>
+            <button
+              class="btn btn-primary btn-lg detail-play-btn"
+              :class="{ 'btn-warning': media.is_mounted === false }"
+              @click="playMedia"
+              id="detail-play-btn"
+            >
+              <i :class="media.is_mounted !== false ? 'ph-fill ph-play' : 'ph-bold ph-hard-drive'"></i>
+              <span>{{ media.is_mounted !== false ? resumeLabel : ('Drive Disconnected (' + (media.drive_letter || 'External') + ')') }}</span>
             </button>
+            <div v-if="media.is_mounted === false" class="detail-offline-banner">
+              <i class="ph-bold ph-warning" style="color:var(--warning);font-size:1.1rem"></i>
+              <span>Source drive <strong>{{ media.drive_letter || 'External' }}</strong> is disconnected. Connect it to watch.</span>
+            </div>
             <div class="detail-quick-actions">
               <button v-if="!store.profile?.is_kids" class="detail-action-circle" @click="watchTrailer" id="detail-trailer-btn" title="Trailer">
                 <div class="detail-action-icon"><i class="ph ph-film-strip"></i></div>
@@ -4013,14 +4117,35 @@ const DetailPage = {
           <!-- Sequels & Prequels / Franchise Shelf -->
           <div class="detail-section" v-if="media.franchise && media.franchise.items && media.franchise.items.length > 1">
             <div class="detail-section-header">
-              <div class="detail-section-title" style="display:flex;align-items:center;gap:8px">
+              <div class="detail-section-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
                 <i class="ph ph-film-strip" style="color:var(--accent)"></i>
                 <span>Part of {{ media.franchise.name }}</span>
-                <span class="universe-card-badge" style="margin-left:6px;font-size:0.7rem;text-transform:uppercase">
+                <span class="universe-card-badge" style="font-size:0.7rem;text-transform:uppercase">
                   {{ media.franchise.item_count }} in Library
                 </span>
+                <!-- Timeline vs Release Order Toggle -->
+                <div v-if="media.franchise.has_timeline && media.franchise.timeline_items" class="franchise-order-toggle">
+                  <button
+                    type="button"
+                    class="franchise-toggle-btn"
+                    :class="{ active: franchiseOrder === 'release' }"
+                    @click="franchiseOrder = 'release'"
+                    title="Sort by original release date"
+                  >
+                    Release Order
+                  </button>
+                  <button
+                    type="button"
+                    class="franchise-toggle-btn"
+                    :class="{ active: franchiseOrder === 'timeline' }"
+                    @click="franchiseOrder = 'timeline'"
+                    title="Sort by in-universe chronological timeline"
+                  >
+                    Timeline Order
+                  </button>
+                </div>
               </div>
-              <div class="row-header-controls" v-if="media.franchise.items.length > 4">
+              <div class="row-header-controls" v-if="displayedFranchiseItems.length > 4">
                 <button class="row-control-btn" @click="scrollFranchise(-400)" title="Scroll Left">
                   <i class="ph ph-caret-left"></i>
                 </button>
@@ -4030,11 +4155,48 @@ const DetailPage = {
               </div>
             </div>
             <div class="cards-scroller" ref="franchiseScrollerRef" style="padding:4px 0 16px">
+              <div
+                v-for="item in displayedFranchiseItems"
+                :key="item.id"
+                class="franchise-card-container"
+              >
+                <div v-if="item.sequence_number" class="franchise-seq-badge">#{{ item.sequence_number }}</div>
+                <div v-if="item.id === media.id || item.is_current" class="franchise-current-indicator">
+                  <i class="ph ph-check-circle" style="font-size:0.75rem"></i> Current
+                </div>
+                <media-card
+                  :item="item"
+                  :class="{ 'active-detail-item': item.id === media.id || item.is_current }"
+                  @click="navigateToSibling(item)"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- More Like This / Similar Media Shelf -->
+          <div class="detail-section" v-if="media.similar_items && media.similar_items.length > 0">
+            <div class="detail-section-header">
+              <div class="detail-section-title" style="display:flex;align-items:center;gap:8px">
+                <i class="ph ph-sparkle" style="color:var(--accent)"></i>
+                <span>More Like This</span>
+                <span class="universe-card-badge" style="margin-left:6px;font-size:0.7rem;text-transform:uppercase">
+                  {{ media.similar_items.length }} Recommendations
+                </span>
+              </div>
+              <div class="row-header-controls" v-if="media.similar_items.length > 4">
+                <button class="row-control-btn" @click="scrollSimilar(-400)" title="Scroll Left">
+                  <i class="ph ph-caret-left"></i>
+                </button>
+                <button class="row-control-btn" @click="scrollSimilar(400)" title="Scroll Right">
+                  <i class="ph ph-caret-right"></i>
+                </button>
+              </div>
+            </div>
+            <div class="cards-scroller" ref="similarScrollerRef" style="padding:4px 0 16px">
               <media-card
-                v-for="item in media.franchise.items"
+                v-for="item in media.similar_items"
                 :key="item.id"
                 :item="item"
-                :class="{ 'active-detail-item': item.id === media.id }"
                 @click="navigateToSibling(item)"
               />
             </div>
@@ -4073,8 +4235,8 @@ const DetailPage = {
                     <span>{{ getFileExtension(media.file_path) }}</span>
                   </div>
                   <div class="file-pill" :class="media.is_mounted !== false ? 'mounted' : 'unmounted'">
-                    <i :class="media.is_mounted !== false ? 'ph ph-check-circle' : 'ph ph-plugs-connected'"></i>
-                    <span>{{ media.is_mounted !== false ? 'Drive Mounted' : 'Drive Unmounted' }}</span>
+                    <i :class="media.is_mounted !== false ? 'ph ph-check-circle' : 'ph-bold ph-hard-drive'"></i>
+                    <span>{{ media.is_mounted !== false ? 'Drive Mounted' : ('Offline (' + (media.drive_letter || 'Drive') + ')') }}</span>
                   </div>
                   <div class="file-pill" v-if="media.has_multi_audio">
                     <i class="ph ph-speaker-high"></i>
@@ -4436,6 +4598,7 @@ const DetailPage = {
     });
     watch(() => route.params.id, () => {
       activeBackdropIdx.value = 0;
+      franchiseOrder.value = 'release';
       load();
     });
     watch(() => route.query.season, (newSeason) => {
@@ -4480,7 +4643,8 @@ const DetailPage = {
     function playMedia() {
       if (!media.value) return;
       if (media.value.is_mounted === false) {
-        addToast("Source drive not mounted. Please connect drive to watch this title.", "error");
+        const d = media.value.drive_letter ? `[${media.value.drive_letter}] ` : "";
+        addToast(`Source drive ${d}is not connected. Please reconnect drive to watch.`, "warning");
         return;
       }
       if (media.value.type === "movie") {
@@ -4491,7 +4655,8 @@ const DetailPage = {
         if (playableEp) {
           router.push(`/watch/${playableEp.id}`);
         } else {
-          addToast("Source drive not mounted. Please connect drive to watch this title.", "error");
+          const d = media.value.drive_letter ? `[${media.value.drive_letter}] ` : "";
+          addToast(`Episodes on drive ${d}are currently offline. Reconnect drive to watch.`, "warning");
         }
       }
     }
@@ -4502,7 +4667,8 @@ const DetailPage = {
         return;
       }
       if (ep.is_mounted === false) {
-        addToast("Source drive not mounted. Please connect drive to watch this title.", "error");
+        const d = ep.drive_letter ? `[${ep.drive_letter}] ` : "";
+        addToast(`Source drive ${d}is not connected. Reconnect drive to play this episode.`, "warning");
         return;
       }
       router.push(`/watch/${ep.id}`);
@@ -4683,10 +4849,27 @@ const DetailPage = {
       }
     }
 
+    const franchiseOrder = ref("release"); // 'release' | 'timeline'
+    const displayedFranchiseItems = computed(() => {
+      const f = media.value?.franchise;
+      if (!f) return [];
+      if (franchiseOrder.value === "timeline" && f.timeline_items && f.timeline_items.length) {
+        return f.timeline_items;
+      }
+      return f.items || [];
+    });
+
     const franchiseScrollerRef = ref(null);
     function scrollFranchise(offset) {
       if (franchiseScrollerRef.value) {
         franchiseScrollerRef.value.scrollBy({ left: offset, behavior: "smooth" });
+      }
+    }
+
+    const similarScrollerRef = ref(null);
+    function scrollSimilar(offset) {
+      if (similarScrollerRef.value) {
+        similarScrollerRef.value.scrollBy({ left: offset, behavior: "smooth" });
       }
     }
 
@@ -4776,8 +4959,12 @@ const DetailPage = {
       castScrollerRef,
       scrollCast,
       searchCast,
+      franchiseOrder,
+      displayedFranchiseItems,
       franchiseScrollerRef,
       scrollFranchise,
+      similarScrollerRef,
+      scrollSimilar,
       navigateToSibling,
       backdropFailed,
       activeBackdropIdx,
@@ -5052,15 +5239,15 @@ const SettingsPage = {
                 @click="setLayoutMode('standard')"
                 id="layout-mode-standard"
               >
-                <div class="layout-mode-badge" v-if="store.layoutMode !== 'tv'">
-                  <i class="ph-bold ph-check"></i> Active
-                </div>
                 <div class="layout-mode-preview">
                   <div class="mini-std-topbar"></div>
                   <div class="mini-std-hero"></div>
                   <div class="mini-std-grid">
                     <span></span><span></span><span></span><span></span>
                   </div>
+                </div>
+                <div class="layout-mode-badge" v-if="store.layoutMode !== 'tv'">
+                  <i class="ph-bold ph-check"></i> Active
                 </div>
                 <div class="layout-mode-title">
                   <i class="ph-bold ph-browsers"></i> Standard Web Layout
@@ -5077,12 +5264,6 @@ const SettingsPage = {
                 @click="setLayoutMode('tv')"
                 id="layout-mode-tv"
               >
-                <div class="layout-mode-badge" v-if="store.layoutMode === 'tv' && !isMobileScreen">
-                  <i class="ph-bold ph-check"></i> Active
-                </div>
-                <div class="layout-mode-badge tv-restricted" v-else-if="isMobileScreen">
-                  <i class="ph-bold ph-device-mobile-slash"></i> Desktop & TV Only
-                </div>
                 <div class="layout-mode-preview">
                   <div class="mini-tv-topbar">
                     <span class="mini-tv-avatar"></span>
@@ -5095,6 +5276,12 @@ const SettingsPage = {
                     <span class="mini-tv-poster"></span>
                     <span class="mini-tv-poster"></span>
                   </div>
+                </div>
+                <div class="layout-mode-badge" v-if="store.layoutMode === 'tv' && !isMobileScreen">
+                  <i class="ph-bold ph-check"></i> Active
+                </div>
+                <div class="layout-mode-badge tv-restricted" v-else-if="isMobileScreen">
+                  <i class="ph-bold ph-device-mobile-slash"></i> Desktop & TV Only
                 </div>
                 <div class="layout-mode-title">
                   <i class="ph-bold ph-television"></i> TV Layout
@@ -5767,6 +5954,94 @@ const SettingsPage = {
             </div>
           </div>
 
+          <!-- 2a. Connected Storage & Drive Health -->
+          <div class="settings-section" id="settings-storage-health-section">
+            <div class="settings-section-title" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <i class="ph ph-hard-drives" style="color:var(--accent)"></i>
+                <span>Connected Storage & Drive Health</span>
+                <span v-if="store.hasOfflineDrives" class="offline-pill" style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-size:0.75rem; padding:2px 8px; border-radius:999px; font-weight:600;">
+                  <i class="ph-bold ph-warning"></i> {{ store.offlineDrivesCount }} Offline
+                </span>
+                <span v-else-if="(store.drivesStatus || []).length" class="online-pill" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-size:0.75rem; padding:2px 8px; border-radius:999px; font-weight:600;">
+                  <i class="ph-bold ph-check"></i> All Connected
+                </span>
+              </div>
+              <button class="btn btn-sm btn-subtle" @click="refreshDrivesHealth" title="Check drive status now" style="gap:5px; font-size:0.8rem; padding:4px 10px;">
+                <i class="ph ph-arrows-clockwise" :class="{ 'spin': isRefreshingDrives }"></i> Refresh
+              </button>
+            </div>
+
+            <div class="settings-desc" style="margin-bottom:14px; font-size:0.85rem; color:var(--text-muted);">
+              Monitor connected media drives and storage usage. If an external drive disconnects, associated media is clearly marked and playback is safely guarded until remounted.
+            </div>
+
+            <div v-if="!(store.drivesStatus || []).length" class="path-empty">
+              <i class="ph ph-hard-drive"></i> No storage drives detected yet.
+            </div>
+
+            <div v-else class="drive-status-cards-grid">
+              <div v-for="d in store.drivesStatus" :key="d.drive_letter" class="drive-status-card" :class="{ 'is-offline': !d.is_mounted }">
+                <div class="drive-card-header">
+                  <div class="drive-card-title-group">
+                    <div class="drive-card-icon" :class="d.is_mounted ? 'online' : 'offline'">
+                      <i :class="d.is_mounted ? 'ph-bold ph-hard-drive' : 'ph-bold ph-warning-octagon'"></i>
+                    </div>
+                    <div>
+                      <div class="drive-letter-name">{{ d.drive_letter }}</div>
+                      <div class="drive-paths-count">{{ (d.paths || []).length }} library folder{{ (d.paths || []).length === 1 ? '' : 's' }}</div>
+                    </div>
+                  </div>
+                  <span class="drive-status-badge" :class="d.is_mounted ? 'online' : 'offline'">
+                    <i :class="d.is_mounted ? 'ph ph-check-circle' : 'ph-bold ph-warning'"></i>
+                    {{ d.is_mounted ? 'Mounted' : 'Offline' }}
+                  </span>
+                </div>
+
+                <div v-if="d.is_mounted" class="drive-usage-section">
+                  <div class="drive-usage-meta">
+                    <span>{{ d.free_gb != null ? (d.free_gb + ' GB free') : 'Drive connected' }}</span>
+                    <span>{{ d.total_gb != null ? (d.total_gb + ' GB total') : '' }}</span>
+                  </div>
+                  <div class="drive-usage-bar-bg" v-if="(d.used_pct ?? d.used_percent) != null">
+                    <div class="drive-usage-bar-fill" :style="{ width: Math.min(100, Math.max(0, (d.used_pct ?? d.used_percent))) + '%', backgroundColor: (d.used_pct ?? d.used_percent) > 90 ? '#ef4444' : (d.used_pct ?? d.used_percent) > 75 ? '#f59e0b' : 'var(--accent)' }"></div>
+                  </div>
+                </div>
+                <div v-else class="drive-offline-notice">
+                  <i class="ph-bold ph-plug"></i> Drive disconnected or unmounted. CapsStream will resume automatically when reconnected.
+                </div>
+
+                <div class="drive-card-footer">
+                  <span class="drive-media-count">
+                    <i class="ph ph-film-strip"></i> {{ d.media_count || 0 }} media items
+                  </span>
+                  <button v-if="!d.is_mounted" class="btn btn-xs btn-subtle" @click="refreshDrivesHealth">
+                    <i class="ph ph-arrows-clockwise"></i> Recheck
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Hide Offline Media Setting -->
+            <div class="settings-group" style="margin-top:16px; border-top:1px solid rgba(255,255,255,0.06); padding-top:14px;">
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label" style="display:flex; align-items:center; gap:8px;">
+                    <i class="ph-bold ph-eye-slash" style="color:#f59e0b"></i>
+                    <span>Hide Offline Media</span>
+                  </div>
+                  <div class="settings-desc">
+                    When enabled, media files on disconnected external drives or unmounted storage paths are hidden from your library views. When disabled, offline items remain visible with amber drive badges.
+                  </div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="form.hide_unmounted_items" id="setting-hide-offline-media" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
         <!-- ══════ Side-by-Side: Library Scanning & Metadata Providers ══════ -->
         <div class="settings-grid-row">
           <!-- 2b. Library & Scanning -->
@@ -5991,7 +6266,7 @@ const SettingsPage = {
 
               <div class="settings-row">
                 <div class="settings-label-container">
-                  <div class="settings-label">Hide Unmounted Media Items</div>
+                  <div class="settings-label">Hide Offline Media</div>
                   <div class="settings-desc">When enabled, automatically hides media files located on disconnected external drives or unmounted storage paths.</div>
                 </div>
                 <label class="toggle-switch">
@@ -6606,6 +6881,7 @@ const SettingsPage = {
       browser: "edge",
       tmdb_api_key: "264a7dcdd8291a83c4a51727755343bc",
       hide_system_files: false,
+      hide_unmounted_items: false,
       launch_browser_on_start: true,
       host: "127.0.0.1",
       port: 8000,
@@ -6730,6 +7006,12 @@ const SettingsPage = {
       try {
         await API.post("/api/settings", form.value);
         initialFormJson.value = JSON.stringify(form.value);
+        if (form.value.hide_unmounted_items !== undefined) {
+          store.hideOfflineMedia = !!form.value.hide_unmounted_items;
+          try {
+            localStorage.setItem("caps_hide_offline", form.value.hide_unmounted_items ? "true" : "false");
+          } catch (err) {}
+        }
         addToast("Settings saved successfully", "success");
         return true;
       } catch (e) {
@@ -6949,7 +7231,7 @@ const SettingsPage = {
 
     function openWhatsNew() {
       if (typeof window.openWhatsNewModal === "function") {
-        window.openWhatsNewModal(sysInfo.value?.version || "");
+        window.openWhatsNewModal(sysInfo.value?.version || "", true);
       }
     }
 
@@ -7606,7 +7888,19 @@ const SettingsPage = {
       }, 250);
     }
 
+    const isRefreshingDrives = ref(false);
+    async function refreshDrivesHealth() {
+      isRefreshingDrives.value = true;
+      try {
+        await checkDrivesHealth();
+      } finally {
+        setTimeout(() => { isRefreshingDrives.value = false; }, 400);
+      }
+    }
+
     return {
+      isRefreshingDrives,
+      refreshDrivesHealth,
       activeTab,
       setTab,
       visibleNavItems,
@@ -7761,12 +8055,32 @@ const ShortcutsModal = {
                 <div class="kbd-group"><kbd class="shortcut-kbd">↑</kbd> <kbd class="shortcut-kbd">↓</kbd></div>
               </div>
               <div class="shortcut-item">
+                <span class="shortcut-desc">Picture-in-Picture</span>
+                <kbd class="shortcut-kbd">P</kbd>
+              </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Cycle / Toggle Subtitles</span>
+                <kbd class="shortcut-kbd">C</kbd>
+              </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Next / Previous Chapter</span>
+                <div class="kbd-group"><kbd class="shortcut-kbd">PgUp</kbd> <kbd class="shortcut-kbd">PgDn</kbd></div>
+              </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Seek 0% - 90% Percentage</span>
+                <div class="kbd-group"><kbd class="shortcut-kbd">0</kbd> ... <kbd class="shortcut-kbd">9</kbd></div>
+              </div>
+              <div class="shortcut-item">
                 <span class="shortcut-desc">Subtitle Sync (±250ms / ±1s)</span>
                 <div class="kbd-group"><kbd class="shortcut-kbd">[</kbd> <kbd class="shortcut-kbd">]</kbd></div>
               </div>
               <div class="shortcut-item">
                 <span class="shortcut-desc">Queue & Playlist Drawer</span>
                 <kbd class="shortcut-kbd">Q</kbd>
+              </div>
+              <div class="shortcut-item">
+                <span class="shortcut-desc">Sleep Timer (Cycle Presets)</span>
+                <kbd class="shortcut-kbd">Z</kbd>
               </div>
             </div>
 
@@ -7829,18 +8143,6 @@ const BrowsePage = {
             <option value="">All Genres</option>
             <option v-for="g in displayGenres" :key="g" :value="g">{{ g }}</option>
           </select>
-
-          <button
-            v-if="!store.profile?.is_kids"
-            class="filter-btn"
-            :class="{ active: hideUnmounted }"
-            @click="toggleHideUnmounted"
-            id="filter-unmounted-toggle"
-            style="margin-left:8px"
-            title="Toggle hiding media from unmounted drives"
-          >
-            {{ hideUnmounted ? 'Unmounted Hidden' : 'Show Unmounted' }}
-          </button>
         </div>
       </div>
 
@@ -8041,16 +8343,9 @@ const BrowsePage = {
       },
     );
 
-    const hideUnmounted = ref(false);
-
-    function toggleHideUnmounted() {
-      hideUnmounted.value = !hideUnmounted.value;
-      currentPage.value = 1;
-    }
-
     const filteredItems = computed(() => {
       let list = items.value || [];
-      if (hideUnmounted.value) {
+      if (store.hideOfflineMedia) {
         list = list.filter((item) => item.is_mounted !== false);
       }
       if (selectedGenre.value) {
@@ -8134,8 +8429,6 @@ const BrowsePage = {
       onGenreChange,
       types,
       pageTitle,
-      hideUnmounted,
-      toggleHideUnmounted,
       setType,
       handleClick,
       currentPage,
@@ -8650,10 +8943,40 @@ const PlaylistsPage = {
               <i class="ph ph-queue"></i>
               <span>Empty Playlist</span>
             </div>
+            <!-- Quick Share Action Button on Card Cover -->
+            <button
+              v-if="pl.can_edit"
+              class="playlist-card-share-btn"
+              :class="{ 'is-shared': pl.is_shared }"
+              @click.stop="toggleQuickShare(pl, $event)"
+              :title="pl.is_shared ? 'Shared with Family (click to make private)' : 'Share with Family profiles'"
+            >
+              <i :class="pl.is_shared ? 'ph-bold ph-users-three' : 'ph ph-share-network'"></i>
+            </button>
           </div>
           <div class="collection-info">
-            <div class="collection-name">{{ pl.name }}</div>
-            <div class="collection-count">{{ pl.item_count || 0 }} item{{ pl.item_count !== 1 ? 's' : '' }}</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+              <div class="collection-name">{{ pl.name }}</div>
+              <button
+                v-if="pl.can_edit"
+                class="playlist-badge-toggle"
+                :class="{ 'is-shared': pl.is_shared }"
+                @click.stop="toggleQuickShare(pl, $event)"
+                :title="pl.is_shared ? 'Shared with Family (click to make private)' : 'Click to share with household profiles'"
+              >
+                <i :class="pl.is_shared ? 'ph-bold ph-users-three' : 'ph ph-share-network'"></i>
+                {{ pl.is_shared ? 'Family' : 'Share' }}
+              </button>
+              <span v-else-if="pl.is_shared" class="playlist-shared-pill" title="Shared with Family" style="display:inline-flex;align-items:center;gap:3px;background:rgba(59,130,246,0.18);color:#60a5fa;border:1px solid rgba(59,130,246,0.3);font-size:0.7rem;padding:2px 7px;border-radius:999px;font-weight:600;flex-shrink:0;">
+                <i class="ph-bold ph-users-three"></i> Family
+              </span>
+            </div>
+            <div class="collection-count">
+              <span>{{ pl.item_count || 0 }} item{{ pl.item_count !== 1 ? 's' : '' }}</span>
+              <span v-if="pl.is_shared && pl.creator_name" style="opacity:0.85;margin-left:4px;">
+                · by {{ pl.creator_name }}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -8670,7 +8993,19 @@ const PlaylistsPage = {
             <label class="form-label">Description (optional)</label>
             <input id="new-playlist-desc" class="form-input" v-model="newDesc" placeholder="A brief description of this playlist" @keyup.enter="handleCreate">
           </div>
-          <div style="display:flex;gap:0.75rem;margin-top:1rem">
+          <div class="form-group" style="margin-top:10px">
+            <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:10px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;user-select:none">
+              <div style="display:flex;align-items:center;gap:10px">
+                <i class="ph-bold ph-users-three" style="color:#60a5fa;font-size:1.35rem"></i>
+                <div>
+                  <div style="font-weight:600;font-size:0.88rem;color:#fff">Shared with Family</div>
+                  <div style="font-size:0.75rem;color:var(--text-muted)">Visible to all household profiles on this server</div>
+                </div>
+              </div>
+              <input type="checkbox" v-model="newShared" id="new-playlist-shared" style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer">
+            </label>
+          </div>
+          <div style="display:flex;gap:0.75rem;margin-top:1.25rem">
             <button class="btn btn-primary btn-full" @click="handleCreate" :disabled="creating" id="save-playlist-btn">
               {{ creating ? 'Creating...' : 'Create' }}
             </button>
@@ -8688,6 +9023,7 @@ const PlaylistsPage = {
     const creating = ref(false);
     const newName = ref("");
     const newDesc = ref("");
+    const newShared = ref(false);
 
     async function load() {
       if (!store.profile) return;
@@ -8707,11 +9043,13 @@ const PlaylistsPage = {
       try {
         const pl = await API.post("/api/playlists", {
           name: newName.value.trim(),
-          description: newDesc.value.trim()
+          description: newDesc.value.trim(),
+          is_shared: newShared.value
         });
         showCreate.value = false;
         newName.value = "";
         newDesc.value = "";
+        newShared.value = false;
         addToast("Playlist created!", "success");
         if (pl && pl.id) {
           router.push(`/playlists/${pl.id}`);
@@ -8722,6 +9060,23 @@ const PlaylistsPage = {
         addToast("Failed to create playlist", "error");
       } finally {
         creating.value = false;
+      }
+    }
+
+    async function toggleQuickShare(pl, evt) {
+      if (evt && typeof evt.stopPropagation === "function") evt.stopPropagation();
+      if (!pl || pl.can_edit === false) return;
+      const targetState = !pl.is_shared;
+      try {
+        const updated = await API.put(`/api/playlists/${pl.id}`, {
+          name: pl.name,
+          description: pl.description,
+          is_shared: targetState
+        });
+        pl.is_shared = updated.is_shared ? 1 : 0;
+        addToast(targetState ? `"${pl.name}" is now shared with family profiles!` : `"${pl.name}" is now private`, "success");
+      } catch (e) {
+        addToast("Failed to update playlist sharing", "error");
       }
     }
 
@@ -8742,7 +9097,9 @@ const PlaylistsPage = {
       creating,
       newName,
       newDesc,
+      newShared,
       handleCreate,
+      toggleQuickShare,
       resumeActiveQueue,
       imgUrl,
       router
@@ -8775,6 +9132,10 @@ const PlaylistDetailPage = {
                 <span class="collection-hero-badge">
                   <i class="ph ph-queue"></i> Custom Playlist
                 </span>
+                <span v-if="playlist.is_shared" class="collection-hero-badge family-shared-badge" style="background:rgba(59,130,246,0.18); color:#60a5fa; border:1px solid rgba(59,130,246,0.35);">
+                  <i class="ph-bold ph-users-three"></i> Shared with Family
+                  <span v-if="playlist.creator_name" style="opacity:0.85; margin-left:4px;">(by {{ playlist.creator_name }})</span>
+                </span>
                 <span class="collection-hero-badge">
                   {{ (playlist.items || []).length }} item{{ (playlist.items || []).length !== 1 ? 's' : '' }}
                 </span>
@@ -8805,13 +9166,26 @@ const PlaylistDetailPage = {
                 <i class="ph ph-shuffle"></i> Shuffle
               </button>
               <button
+                v-if="playlist.can_edit"
+                class="btn btn-secondary playlist-share-hero-btn"
+                :class="{ 'is-shared': playlist.is_shared }"
+                @click="toggleShareDetail"
+                id="playlist-share-hero-btn"
+                :title="playlist.is_shared ? 'Shared with Family (click to make private)' : 'Share with Family profiles'"
+              >
+                <i :class="playlist.is_shared ? 'ph-bold ph-users-three' : 'ph ph-share-network'"></i>
+                {{ playlist.is_shared ? 'Shared with Family' : 'Share with Family' }}
+              </button>
+              <button
+                v-if="playlist.can_edit"
                 class="btn btn-ghost"
-                @click="showEdit = true"
+                @click="openEdit"
                 title="Edit Playlist Info"
               >
                 <i class="ph ph-pencil-simple"></i> Edit
               </button>
               <button
+                v-if="playlist.can_edit"
                 class="btn btn-ghost danger"
                 @click="deletePlaylist"
                 title="Delete Playlist"
@@ -8839,7 +9213,7 @@ const PlaylistDetailPage = {
                   <th>Title / Episode</th>
                   <th style="width:120px">Type</th>
                   <th style="width:90px">Duration</th>
-                  <th style="width:160px;text-align:right">Actions</th>
+                  <th v-if="playlist.can_edit" style="width:160px;text-align:right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -8873,7 +9247,7 @@ const PlaylistDetailPage = {
                   <td style="color:var(--text-muted);font-size:0.85rem">
                     {{ formatDuration(item.duration) }}
                   </td>
-                  <td style="text-align:right" @click.stop>
+                  <td v-if="playlist.can_edit" style="text-align:right" @click.stop>
                     <div class="playlist-row-actions">
                       <button class="path-act-btn" @click.stop="moveItem(idx, -1)" :disabled="idx === 0" title="Move Up">
                         <i class="ph ph-caret-up"></i>
@@ -8904,7 +9278,19 @@ const PlaylistDetailPage = {
               <label class="form-label">Description</label>
               <input class="form-input" v-model="editDesc" placeholder="Description">
             </div>
-            <div style="display:flex;gap:0.75rem;margin-top:1rem">
+            <div class="form-group" style="margin-top:10px">
+              <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:10px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;user-select:none">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <i class="ph-bold ph-users-three" style="color:#60a5fa;font-size:1.35rem"></i>
+                  <div>
+                    <div style="font-weight:600;font-size:0.88rem;color:#fff">Shared with Family</div>
+                    <div style="font-size:0.75rem;color:var(--text-muted)">Visible to all household profiles on this server</div>
+                  </div>
+                </div>
+                <input type="checkbox" v-model="editShared" id="edit-playlist-shared" style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer">
+              </label>
+            </div>
+            <div style="display:flex;gap:0.75rem;margin-top:1.25rem">
               <button class="btn btn-primary btn-full" @click="handleUpdate">Save Changes</button>
               <button class="btn btn-ghost btn-full" @click="showEdit = false">Cancel</button>
             </div>
@@ -8921,6 +9307,7 @@ const PlaylistDetailPage = {
     const showEdit = ref(false);
     const editName = ref("");
     const editDesc = ref("");
+    const editShared = ref(false);
 
     const heroBackdrop = computed(() => {
       const items = playlist.value?.items || [];
@@ -8946,6 +9333,7 @@ const PlaylistDetailPage = {
         if (playlist.value) {
           editName.value = playlist.value.name || "";
           editDesc.value = playlist.value.description || "";
+          editShared.value = !!playlist.value.is_shared;
         }
       } catch (e) {
         addToast("Failed to load playlist", "error");
@@ -8953,6 +9341,14 @@ const PlaylistDetailPage = {
       } finally {
         loading.value = false;
       }
+    }
+
+    function openEdit() {
+      if (!playlist.value) return;
+      editName.value = playlist.value.name || "";
+      editDesc.value = playlist.value.description || "";
+      editShared.value = !!playlist.value.is_shared;
+      showEdit.value = true;
     }
 
     function playAll(shuffle = false) {
@@ -9011,14 +9407,33 @@ const PlaylistDetailPage = {
       try {
         const updated = await API.put(`/api/playlists/${playlist.value.id}`, {
           name: editName.value.trim(),
-          description: editDesc.value.trim()
+          description: editDesc.value.trim(),
+          is_shared: editShared.value
         });
         playlist.value.name = updated.name;
         playlist.value.description = updated.description;
+        playlist.value.is_shared = updated.is_shared;
         showEdit.value = false;
         addToast("Playlist updated", "success");
       } catch (e) {
         addToast("Failed to update playlist", "error");
+      }
+    }
+
+    async function toggleShareDetail() {
+      if (!playlist.value || playlist.value.can_edit === false) return;
+      const targetState = !playlist.value.is_shared;
+      try {
+        const updated = await API.put(`/api/playlists/${playlist.value.id}`, {
+          name: playlist.value.name,
+          description: playlist.value.description,
+          is_shared: targetState
+        });
+        playlist.value.is_shared = updated.is_shared;
+        editShared.value = !!updated.is_shared;
+        addToast(targetState ? `"${playlist.value.name}" is now shared with family profiles!` : `"${playlist.value.name}" is now private`, "success");
+      } catch (e) {
+        addToast("Failed to update playlist sharing", "error");
       }
     }
 
@@ -9056,6 +9471,7 @@ const PlaylistDetailPage = {
       moveItem,
       removeItem,
       handleUpdate,
+      toggleShareDetail,
       deletePlaylist,
       formatDuration,
       imgUrl
@@ -10501,6 +10917,9 @@ const ProfilesPage = {
           // so the library scan doesn't fire while still on the profile page.
           router.push("/").then(() => {
             startLibraryScan();
+            if (typeof window.checkPostUpdateWhatsNew === "function") {
+              window.checkPostUpdateWhatsNew();
+            }
           });
         }
       } catch (e) {
@@ -16133,8 +16552,9 @@ const App = {
             </div>
 
             <!-- Settings button (hidden for Kids profiles) -->
-            <div v-if="!store.profile?.is_kids" class="nav-search-btn" @click="router.push('/settings')" id="nav-settings" data-tooltip="Settings">
+            <div v-if="!store.profile?.is_kids" class="nav-search-btn" @click="router.push('/settings')" id="nav-settings" data-tooltip="Settings" style="position:relative">
               <i class="ph ph-gear" style="font-size:1.1rem"></i>
+              <div v-if="store.hasOfflineDrives" class="nav-gear-offline-dot" title="One or more media drives are disconnected"></div>
             </div>
 
             <!-- Kids Mode Badge -->
@@ -16302,7 +16722,13 @@ const App = {
           </div>
 
           <div class="toast-card-body">
-            {{ toast.message }}
+            <div>{{ toast.message }}</div>
+            <div v-if="toast.action" class="toast-card-action" style="margin-top:8px">
+              <button class="btn btn-sm btn-primary" @click.stop="toast.action.onClick(toast)" id="btn-toast-action">
+                <i class="ph ph-arrows-clockwise" style="margin-right:4px"></i>
+                {{ toast.action.label }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -16493,97 +16919,99 @@ const App = {
       />
 
       <!-- Floating Global Context Menu -->
-      <div
-        v-if="contextMenuState.show && contextMenuState.item"
-        class="floating-context-menu"
-        :style="{ top: contextMenuState.y + 'px', left: contextMenuState.x + 'px' }"
-        @click.stop
-      >
-        <div class="context-menu-header">
-          <div class="context-menu-thumb" v-if="contextMenuPoster">
-            <img :src="contextMenuPoster" :alt="contextMenuState.item.title" loading="lazy" />
-          </div>
-          <div v-else class="context-menu-thumb placeholder">
-            <i class="ph-fill ph-film-strip"></i>
-          </div>
-          <div class="context-menu-header-info">
-            <div class="context-menu-title" :title="contextMenuState.item.title">
-              {{ contextMenuState.item.title }}
+      <teleport to="body">
+        <div
+          v-if="contextMenuState.show && contextMenuState.item"
+          class="floating-context-menu"
+          :style="{ top: contextMenuState.y + 'px', left: contextMenuState.x + 'px' }"
+          @click.stop
+        >
+          <div class="context-menu-header">
+            <div class="context-menu-thumb" v-if="contextMenuPoster">
+              <img :src="contextMenuPoster" :alt="contextMenuState.item.title" loading="lazy" />
             </div>
-            <div v-if="contextMenuState.item.season || contextMenuState.item.episode || contextMenuState.item.ep_title" class="context-menu-ep-info">
-              <span v-if="contextMenuState.item.season || contextMenuState.item.episode" class="context-menu-ep-code">
-                S{{ String(contextMenuState.item.season || 1).padStart(2, '0') }}E{{ String(contextMenuState.item.episode || 1).padStart(2, '0') }}
-              </span>
-              <span v-if="contextMenuState.item.ep_title" class="context-menu-ep-title" :title="contextMenuState.item.ep_title">
-                {{ contextMenuState.item.ep_title }}
-              </span>
+            <div v-else class="context-menu-thumb placeholder">
+              <i class="ph-fill ph-film-strip"></i>
             </div>
-            <div class="context-menu-meta">
-              <span v-if="contextMenuState.item.year" class="context-menu-meta-tag">{{ contextMenuState.item.year }}</span>
-              <span v-if="contextMenuState.item.type" class="badge" style="text-transform:capitalize;font-size:0.65rem">{{ contextMenuState.item.type }}</span>
-              <span v-if="contextMenuState.item.duration" class="context-menu-meta-tag">{{ formatDuration(contextMenuState.item.duration) }}</span>
-              <span v-if="contextMenuState.item.rating" class="context-menu-rating" style="color:var(--gold);font-weight:700"><i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ formatRating(contextMenuState.item.rating) }}</span>
+            <div class="context-menu-header-info">
+              <div class="context-menu-title" :title="contextMenuState.item.title">
+                {{ contextMenuState.item.title }}
+              </div>
+              <div v-if="contextMenuState.item.season || contextMenuState.item.episode || contextMenuState.item.ep_title" class="context-menu-ep-info">
+                <span v-if="contextMenuState.item.season || contextMenuState.item.episode" class="context-menu-ep-code">
+                  S{{ String(contextMenuState.item.season || 1).padStart(2, '0') }}E{{ String(contextMenuState.item.episode || 1).padStart(2, '0') }}
+                </span>
+                <span v-if="contextMenuState.item.ep_title" class="context-menu-ep-title" :title="contextMenuState.item.ep_title">
+                  {{ contextMenuState.item.ep_title }}
+                </span>
+              </div>
+              <div class="context-menu-meta">
+                <span v-if="contextMenuState.item.year" class="context-menu-meta-tag">{{ contextMenuState.item.year }}</span>
+                <span v-if="contextMenuState.item.type" class="badge" style="text-transform:capitalize;font-size:0.65rem">{{ contextMenuState.item.type }}</span>
+                <span v-if="contextMenuState.item.duration" class="context-menu-meta-tag">{{ formatDuration(contextMenuState.item.duration) }}</span>
+                <span v-if="contextMenuState.item.rating" class="context-menu-rating" style="color:var(--gold);font-weight:700"><i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ formatRating(contextMenuState.item.rating) }}</span>
+              </div>
+              <div v-if="contextMenuState.item.genres" class="context-menu-genres" :title="contextMenuState.item.genres">
+                {{ formatGenres(contextMenuState.item.genres, 3) }}
+              </div>
             </div>
-            <div v-if="contextMenuState.item.genres" class="context-menu-genres" :title="contextMenuState.item.genres">
-              {{ formatGenres(contextMenuState.item.genres, 3) }}
+          </div>
+
+          <div v-if="calcProgressPercent(contextMenuState.item) > 0" class="context-menu-progress-wrap">
+            <div class="context-menu-progress-bar">
+              <div class="context-menu-progress-fill" :style="{ width: calcProgressPercent(contextMenuState.item) + '%' }"></div>
+            </div>
+            <div class="context-menu-progress-labels">
+              <span>{{ calcProgressPercent(contextMenuState.item) }}% watched</span>
+              <span v-if="calcTimeLeft(contextMenuState.item)">{{ calcTimeLeft(contextMenuState.item) }}</span>
             </div>
           </div>
-        </div>
 
-        <div v-if="calcProgressPercent(contextMenuState.item) > 0" class="context-menu-progress-wrap">
-          <div class="context-menu-progress-bar">
-            <div class="context-menu-progress-fill" :style="{ width: calcProgressPercent(contextMenuState.item) + '%' }"></div>
+          <!-- Group 1: Play / Details -->
+          <div class="context-menu-item" @click="handleContextMenuPlay">
+            <i class="ph-fill ph-play"></i>
+            <span>{{ (contextMenuState.item.position > 0 && !isItemCompleted(contextMenuState.item)) ? 'Resume Playback' : 'Play Title' }}</span>
           </div>
-          <div class="context-menu-progress-labels">
-            <span>{{ calcProgressPercent(contextMenuState.item) }}% watched</span>
-            <span v-if="calcTimeLeft(contextMenuState.item)">{{ calcTimeLeft(contextMenuState.item) }}</span>
+
+          <div class="context-menu-item" @click="handleContextMenuDetails">
+            <i class="ph ph-info"></i>
+            <span>View Details</span>
           </div>
-        </div>
 
-        <!-- Group 1: Play / Details -->
-        <div class="context-menu-item" @click="handleContextMenuPlay">
-          <i class="ph-fill ph-play"></i>
-          <span>{{ (contextMenuState.item.position > 0 && !isItemCompleted(contextMenuState.item)) ? 'Resume Playback' : 'Play Title' }}</span>
-        </div>
+          <div class="context-menu-divider"></div>
 
-        <div class="context-menu-item" @click="handleContextMenuDetails">
-          <i class="ph ph-info"></i>
-          <span>View Details</span>
-        </div>
-
-        <div class="context-menu-divider"></div>
-
-        <!-- Group 2: Organization (Watchlist / Collection / Playlist) -->
-        <div class="context-menu-item" @click="handleContextMenuFav">
-          <i :class="contextMenuState.isFavorite ? 'ph-fill ph-heart' : 'ph ph-heart'"></i>
-          <span>{{ contextMenuState.isFavorite ? 'Remove from Watchlist' : 'Add to Watchlist' }}</span>
-        </div>
-
-        <div class="context-menu-item" @click="handleContextMenuCollection">
-          <i class="ph ph-stack"></i>
-          <span>Add to Collection</span>
-        </div>
-
-        <div class="context-menu-item" @click="handleContextMenuPlaylist">
-          <i class="ph-bold ph-queue"></i>
-          <span>Add to Playlist</span>
-        </div>
-
-        <div class="context-menu-divider"></div>
-
-        <!-- Group 3: Progress & History -->
-        <div class="context-menu-item" @click="handleContextMenuToggleWatched">
-          <i :class="isItemCompleted(contextMenuState.item) ? 'ph ph-arrow-counter-clockwise' : 'ph ph-check-circle'"></i>
-          <span>{{ isItemCompleted(contextMenuState.item) ? 'Mark as Unwatched' : 'Mark as Watched' }}</span>
-        </div>
-
-        <template v-if="contextMenuState.item.position > 0 && !isItemCompleted(contextMenuState.item)">
-          <div class="context-menu-item danger" @click="handleContextMenuResetProgress">
-            <i class="ph ph-x-circle"></i>
-            <span>Remove from Continue</span>
+          <!-- Group 2: Organization (Watchlist / Collection / Playlist) -->
+          <div class="context-menu-item" @click="handleContextMenuFav">
+            <i :class="contextMenuState.isFavorite ? 'ph-fill ph-heart' : 'ph ph-heart'"></i>
+            <span>{{ contextMenuState.isFavorite ? 'Remove from Watchlist' : 'Add to Watchlist' }}</span>
           </div>
-        </template>
-      </div>
+
+          <div class="context-menu-item" @click="handleContextMenuCollection">
+            <i class="ph ph-stack"></i>
+            <span>Add to Collection</span>
+          </div>
+
+          <div class="context-menu-item" @click="handleContextMenuPlaylist">
+            <i class="ph-bold ph-queue"></i>
+            <span>Add to Playlist</span>
+          </div>
+
+          <div class="context-menu-divider"></div>
+
+          <!-- Group 3: Progress & History -->
+          <div class="context-menu-item" @click="handleContextMenuToggleWatched">
+            <i :class="isItemCompleted(contextMenuState.item) ? 'ph ph-arrow-counter-clockwise' : 'ph ph-check-circle'"></i>
+            <span>{{ isItemCompleted(contextMenuState.item) ? 'Mark as Unwatched' : 'Mark as Watched' }}</span>
+          </div>
+
+          <template v-if="contextMenuState.item.position > 0 && !isItemCompleted(contextMenuState.item)">
+            <div class="context-menu-item danger" @click="handleContextMenuResetProgress">
+              <i class="ph ph-x-circle"></i>
+              <span>Remove from Continue</span>
+            </div>
+          </template>
+        </div>
+      </teleport>
 
       <!-- Global Collection Picker Modal -->
       <div
@@ -16685,7 +17113,7 @@ const App = {
             </div>
 
             <!-- Create new playlist inline -->
-            <div style="display:flex;gap:8px;margin-bottom:1.25rem">
+            <div style="display:flex;gap:8px;margin-bottom:0.4rem">
               <input
                 type="text"
                 v-model="playlistPickerState.inlineName"
@@ -16696,6 +17124,14 @@ const App = {
               <button class="btn btn-primary btn-sm" @click="createAndAddToPlaylist">
                 Create
               </button>
+            </div>
+            <div style="display:flex;align-items:center;padding:2px 4px 10px;font-size:0.78rem;color:var(--text-secondary);">
+              <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
+                <input type="checkbox" v-model="playlistPickerState.inlineShared" style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer;">
+                <span style="display:inline-flex;align-items:center;gap:4px">
+                  <i class="ph-bold ph-users-three" style="color:#60a5fa"></i> Share with Family
+                </span>
+              </label>
             </div>
 
             <div v-if="playlistPickerState.loading" style="text-align:center;padding:1.5rem">
@@ -16715,8 +17151,18 @@ const App = {
                 @click="toggleItemInPlaylist(pl)"
               >
                 <div>
-                  <div style="font-weight:700;font-size:0.9rem">{{ pl.name }}</div>
-                  <div style="font-size:0.75rem;color:var(--text-muted)">{{ pl.item_count || 0 }} items</div>
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <span style="font-weight:700;font-size:0.9rem">{{ pl.name }}</span>
+                    <span v-if="pl.is_shared" style="display:inline-flex;align-items:center;gap:2px;font-size:0.68rem;padding:1px 6px;border-radius:999px;background:rgba(59,130,246,0.18);color:#60a5fa;border:1px solid rgba(59,130,246,0.3);font-weight:600">
+                      <i class="ph-bold ph-users-three"></i> Family
+                    </span>
+                  </div>
+                  <div style="font-size:0.75rem;color:var(--text-muted)">
+                    {{ pl.item_count || 0 }} items
+                    <span v-if="isItemInPlaylist(pl)" style="color:var(--accent);font-weight:600;margin-left:4px">· Already added</span>
+                    <span v-if="pl.is_shared && pl.creator_name"> · by {{ pl.creator_name }}</span>
+                    <span v-if="pl.can_edit === false" style="color:var(--warning);margin-left:4px">(view only)</span>
+                  </div>
                 </div>
                 <i :class="isItemInPlaylist(pl) ? 'ph-fill ph-check-circle' : 'ph ph-plus-circle'" :style="{ color: isItemInPlaylist(pl) ? 'var(--accent)' : 'var(--text-muted)', fontSize: '1.3rem' }"></i>
               </div>
@@ -16855,7 +17301,7 @@ const App = {
       <!-- Global What's New Post-Update Modal -->
       <transition name="fade">
         <div
-          v-if="store.whatsNewModalOpen"
+          v-if="store.whatsNewModalOpen && store.profile && $route.path !== '/profiles'"
           class="whats-new-backdrop"
           @click.self="closeWhatsNewModal"
         >
@@ -17162,6 +17608,11 @@ const App = {
     }
 
     async function checkPostUpdateWhatsNew() {
+      // Only show What's New modal when a user is logged in, never on the profile page
+      if (!store.profile) return;
+      const currentPath = (router && router.currentRoute?.value?.path) || "";
+      if (currentPath === "/profiles") return;
+
       try {
         const info = store.sysInfo || (await API.get("/api/system/info").catch(() => null));
         if (info && info.version) {
@@ -17178,6 +17629,22 @@ const App = {
         }
       } catch (e) {}
     }
+    window.checkPostUpdateWhatsNew = checkPostUpdateWhatsNew;
+
+    // Automatically trigger What's New check as soon as a profile logs in and leaves /profiles
+    watch(
+      () => [store.profile, router.currentRoute.value?.path],
+      ([newProf, newPath], [oldProf, oldPath] = []) => {
+        if (newProf && newPath && newPath !== "/profiles") {
+          if (!oldProf || oldPath === "/profiles") {
+            checkPostUpdateWhatsNew();
+          }
+        }
+        if (!newProf || newPath === "/profiles") {
+          store.whatsNewModalOpen = false;
+        }
+      }
+    );
 
     onMounted(() => {
       // One-click update restart completed — confirm it to the user
@@ -17191,7 +17658,6 @@ const App = {
           );
         }
       } catch (e) {}
-      checkPostUpdateWhatsNew();
     });
     let updateQuietChecked = false;
     async function checkUpdateQuiet() {
@@ -17546,6 +18012,7 @@ const App = {
     }
 
     function switchProfile() {
+      store.whatsNewModalOpen = false;
       showProfileMenu.value = false;
       clearInterval(scanPollTimer);
       store.scanRunning = false;
@@ -17563,6 +18030,7 @@ const App = {
     }
 
     function logout() {
+      store.whatsNewModalOpen = false;
       showProfileMenu.value = false;
       clearInterval(scanPollTimer);
       store.scanRunning = false;
@@ -17580,6 +18048,7 @@ const App = {
     }
 
     function handleBedtimeGoodnight() {
+      store.whatsNewModalOpen = false;
       store.bedtimeActive = false;
       store.profile = null;
       router.push("/profiles");
@@ -17837,6 +18306,7 @@ const App = {
       }
 
       const serverHealthTimer = setInterval(checkServerHealth, 10000);
+      startDriveWatcher();
 
       // Poll if scan is running only when an active profile is logged in.
       try {
@@ -17859,6 +18329,7 @@ const App = {
 
     onUnmounted(() => {
       clearInterval(serverHealthTimer);
+      if (driveWatcherInterval) clearInterval(driveWatcherInterval);
       if (profileHeartbeatTimer) clearInterval(profileHeartbeatTimer);
       window.removeEventListener("beforeunload", handleWindowUnload);
       window.removeEventListener("click", handleOutsideClick);

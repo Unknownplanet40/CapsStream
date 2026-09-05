@@ -10,6 +10,7 @@ from flask import Blueprint, jsonify, request, send_file, abort, current_app, Re
 
 from .middleware import kids_guard_media, current_profile
 from backend.db import get_best_media_source, get_media_by_id, get_media_quality_options
+from backend.db.media import is_item_mounted, get_drive_identifier
 from backend.streamer import stream_file
 
 streaming_bp = Blueprint("streaming", __name__)
@@ -48,6 +49,20 @@ def api_skip_times(media_id):
     return jsonify(skip_data)
 
 
+@streaming_bp.route("/api/chapters/<int:media_id>")
+def api_chapters(media_id):
+    from backend.skip_times import fetch_chapters, CHAPTERS_CACHE_DIR
+    if request.args.get("refresh") in ("1", "true"):
+        cache_path = os.path.join(CHAPTERS_CACHE_DIR, f"{media_id}.json")
+        try:
+            if os.path.isfile(cache_path):
+                os.remove(cache_path)
+        except Exception:
+            pass
+    chapters = fetch_chapters(media_id)
+    return jsonify(chapters)
+
+
 @streaming_bp.route("/api/quality-options/<int:media_id>")
 def api_quality_options(media_id):
     options = get_media_quality_options(media_id)
@@ -69,6 +84,14 @@ def api_stream(media_id):
     media = get_best_media_source(media_id)
     if not media:
         abort(404)
+
+    if not is_item_mounted(media):
+        drive = media.get("drive_letter") or get_drive_identifier(media.get("file_path")) or "External"
+        return jsonify({
+            "error": "drive_offline",
+            "drive_letter": drive,
+            "message": f"Source drive {drive} is offline or disconnected."
+        }), 503
 
     guard = kids_guard_media(media, deep=True)
     if guard:
@@ -146,6 +169,13 @@ def api_hls_master(media_id):
     media = get_best_media_source(media_id)
     if not media or not media.get("file_path"):
         abort(404)
+    if not is_item_mounted(media):
+        drive = media.get("drive_letter") or get_drive_identifier(media.get("file_path")) or "External"
+        return jsonify({
+            "error": "drive_offline",
+            "drive_letter": drive,
+            "message": f"Source drive {drive} is offline or disconnected."
+        }), 503
     guard = kids_guard_media(media, deep=True)
     if guard:
         return guard

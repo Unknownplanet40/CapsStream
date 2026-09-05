@@ -8,8 +8,6 @@ import unittest
 from unittest.mock import patch, MagicMock
 from flask import Flask
 
-if "backend.scanner" not in sys.modules:
-    sys.modules["backend.scanner"] = MagicMock()
 if "app" not in sys.modules:
     mock_app_module = MagicMock()
     mock_app_module._get_api_health.return_value = {}

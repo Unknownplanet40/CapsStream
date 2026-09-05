@@ -720,3 +720,116 @@ def api_system_validate_paths():
     from backend.settings import validate_media_paths
     results = validate_media_paths(paths_list)
     return jsonify(results)
+
+
+@admin_bp.route("/api/system/drives-status", methods=["GET"])
+def api_system_drives_status():
+    """
+    Lightweight health monitor for all configured media library drives and storage roots.
+    Returns mount status, drive letter, storage capacity, and whether any drive is offline.
+    """
+    from backend.settings import load_config
+    from backend.db.media import is_drive_mounted, get_drive_identifier
+    from backend.db import get_conn
+
+    cfg = load_config()
+    media_paths = cfg.get("media_paths", {})
+    disabled_paths = cfg.get("disabled_paths", {})
+
+    path_counts = {}
+    try:
+        conn = get_conn()
+        rows = conn.execute("SELECT file_path FROM media").fetchall()
+        for r in rows:
+            fp = r["file_path"] if r else ""
+            if fp:
+                norm_fp = os.path.normpath(fp).lower()
+                path_counts[norm_fp] = path_counts.get(norm_fp, 0) + 1
+    except Exception:
+        pass
+
+    # Group exclusively by drives configured in Media Scanner Paths
+    drives_by_letter = {}
+    for cat in ["movies", "series", "anime"]:
+        for p in (media_paths.get(cat) or []):
+            if not p:
+                continue
+            norm_p = os.path.normpath(p)
+            drive_letter = get_drive_identifier(norm_p)
+            if not drive_letter:
+                drive_letter = norm_p.split(os.sep)[0] or norm_p
+
+            d_key = drive_letter.upper()
+            if d_key not in drives_by_letter:
+                drives_by_letter[d_key] = {
+                    "drive_letter": drive_letter,
+                    "paths": [],
+                    "categories": set(),
+                    "all_disabled": True,
+                }
+
+            if norm_p not in drives_by_letter[d_key]["paths"]:
+                drives_by_letter[d_key]["paths"].append(norm_p)
+            drives_by_letter[d_key]["categories"].add(cat)
+
+            is_p_disabled = norm_p in [os.path.normpath(dp) for dp in (disabled_paths.get(cat) or [])]
+            if not is_p_disabled:
+                drives_by_letter[d_key]["all_disabled"] = False
+
+    drives_list = []
+    offline_letters = set()
+
+    for d_key, info in drives_by_letter.items():
+        drive_letter = info["drive_letter"]
+        paths = info["paths"]
+        all_disabled = info["all_disabled"]
+
+        is_mounted = any(is_drive_mounted(p) for p in paths)
+        total_gb = 0.0
+        free_gb = 0.0
+        used_pct = 0
+
+        if is_mounted:
+            check_target = (drive_letter + "\\") if (drive_letter and os.name == "nt" and len(drive_letter) == 2 and drive_letter[1] == ":") else (paths[0] if paths else drive_letter)
+            try:
+                usage = shutil.disk_usage(check_target)
+                total_gb = round(usage.total / (1024 ** 3), 1)
+                free_gb = round(usage.free / (1024 ** 3), 1)
+                used_pct = round(100 * usage.used / usage.total) if usage.total else 0
+            except Exception:
+                pass
+        else:
+            if not all_disabled:
+                offline_letters.add(drive_letter)
+
+        m_count = 0
+        for p in paths:
+            path_key = p.lower()
+            prefix = path_key + os.sep.lower()
+            m_count += sum(cnt for fp_norm, cnt in path_counts.items() if fp_norm == path_key or fp_norm.startswith(prefix))
+
+        drives_list.append({
+            "path": paths[0] if paths else drive_letter,
+            "paths": paths,
+            "category": ", ".join(sorted(info["categories"])),
+            "drive_letter": drive_letter,
+            "is_mounted": is_mounted,
+            "is_accessible": is_mounted,
+            "is_disabled": all_disabled,
+            "total_gb": total_gb,
+            "free_gb": free_gb,
+            "used_pct": used_pct,
+            "used_percent": used_pct,
+            "media_count": m_count,
+        })
+
+    has_offline = len(offline_letters) > 0
+
+    return jsonify({
+        "drives": drives_list,
+        "has_offline_drives": has_offline,
+        "offline_drives_count": len(offline_letters),
+        "offline_drive_letters": sorted(list(offline_letters)),
+        "hide_unmounted_items": bool(cfg.get("hide_unmounted_items", False)),
+        "timestamp": time.time(),
+    })

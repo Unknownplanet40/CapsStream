@@ -458,6 +458,133 @@ UNIVERSES = [
             r"\bthe continental\b",
             r"\bballerina\b"
         ]
+    },
+    {
+        "id": "universe-breaking-bad",
+        "name": "Breaking Bad Universe",
+        "description": "The criminal empire chronicle of Walter White, Jesse Pinkman, and Jimmy McGill in Albuquerque.",
+        "icon": "ph ph-flask",
+        "patterns": [
+            r"\bbreaking bad\b",
+            r"\bbetter call saul\b",
+            r"\bel camino\b",
+            r"\bslippin'? jimmy\b"
+        ],
+        "timeline_patterns": [
+            (1, r"\bbetter call saul\b"),
+            (2, r"\bbreaking bad\b"),
+            (3, r"\bel camino\b")
+        ]
+    },
+    {
+        "id": "universe-got",
+        "name": "Game of Thrones & Westeros",
+        "description": "The epic fantasy chronicle of the Seven Kingdoms, the Iron Throne, and the Targaryen dynasty.",
+        "icon": "ph ph-crown",
+        "patterns": [
+            r"\bgame of thrones\b",
+            r"\bhouse of the dragon\b",
+            r"\ba knight of the seven kingdoms\b"
+        ],
+        "timeline_patterns": [
+            (1, r"\bhouse of the dragon\b"),
+            (2, r"\ba knight of the seven kingdoms\b"),
+            (3, r"\bgame of thrones\b")
+        ]
+    },
+    {
+        "id": "universe-walking-dead",
+        "name": "The Walking Dead Universe",
+        "description": "The expanding post-apocalyptic zombie survival chronicles.",
+        "icon": "ph ph-skull",
+        "patterns": [
+            r"\bthe walking dead\b",
+            r"\bfear the walking dead\b",
+            r"\bdead city\b",
+            r"\bdaryl dixon\b",
+            r"\bthe ones who live\b",
+            r"\bworld beyond\b",
+            r"\btales of the walking dead\b"
+        ]
+    },
+    {
+        "id": "universe-naruto",
+        "name": "Naruto Ninja Universe",
+        "description": "The complete shinobi journey of Naruto Uzumaki and the next generation in Boruto.",
+        "icon": "ph ph-swords",
+        "patterns": [
+            r"\bnaruto\b",
+            r"\bnaruto shippuden\b",
+            r"\bnaruto:? shippuuden\b",
+            r"\bboruto\b"
+        ],
+        "timeline_patterns": [
+            (1, r"^naruto\b(?!.*shippu)"),
+            (2, r"shippu"),
+            (3, r"\bboruto\b")
+        ]
+    },
+    {
+        "id": "universe-dragon-ball",
+        "name": "Dragon Ball Saga",
+        "description": "Akira Toriyama's legendary martial arts adventure spanning Super Saiyans and the multiverse.",
+        "icon": "ph ph-fire",
+        "patterns": [
+            r"\bdragon ball\b",
+            r"\bdragon ball z\b",
+            r"\bdragon ball gt\b",
+            r"\bdragon ball super\b",
+            r"\bdragon ball daima\b"
+        ],
+        "timeline_patterns": [
+            (1, r"^dragon ball\b(?!.*[z|gt|super|daima])"),
+            (2, r"\bdragon ball z\b"),
+            (3, r"\bdragon ball super\b"),
+            (4, r"\bdragon ball daima\b"),
+            (5, r"\bdragon ball gt\b")
+        ]
+    },
+    {
+        "id": "universe-the-boys",
+        "name": "The Boys Universe",
+        "description": "The gritty, irreverent anti-superhero saga exploring Vought corruption and Godolkin University.",
+        "icon": "ph ph-lightning",
+        "patterns": [
+            r"\bthe boys\b",
+            r"\bgen v\b",
+            r"\bdiabolical\b"
+        ]
+    },
+    {
+        "id": "universe-avatar-airbender",
+        "name": "Avatar: The Last Airbender Universe",
+        "description": "The Four Nations, the bending arts, and the reincarnation cycle across Aang and Korra.",
+        "icon": "ph ph-wind",
+        "patterns": [
+            r"\bavatar:? the last airbender\b",
+            r"\bthe legend of korra\b"
+        ],
+        "timeline_patterns": [
+            (1, r"\bavatar:? the last airbender\b"),
+            (2, r"\bthe legend of korra\b")
+        ]
+    },
+    {
+        "id": "universe-yellowstone",
+        "name": "Yellowstone & Dutton Saga",
+        "description": "Taylor Sheridan's generational chronicle of the Dutton family ranch across centuries.",
+        "icon": "ph ph-horse",
+        "patterns": [
+            r"\byellowstone\b",
+            r"\b1883\b",
+            r"\b1923\b",
+            r"\b6666\b"
+        ],
+        "timeline_patterns": [
+            (1, r"\b1883\b"),
+            (2, r"\b1923\b"),
+            (3, r"\byellowstone\b")
+        ]
     }
 ]
 
@@ -615,19 +742,50 @@ def get_media_franchise(media_item: Dict[str, Any], library_items: Optional[List
     target_tmdb = media_item.get("tmdb_id")
 
     for col in all_collections:
-        for item in col.get("items", []):
-            if (target_id and item.get("id") == target_id) or (target_tmdb and item.get("tmdb_id") == target_tmdb):
-                return {
-                    "id": col["id"],
-                    "name": col["name"],
-                    "description": col.get("description", ""),
-                    "poster_path": col.get("poster_path"),
-                    "backdrop_path": col.get("backdrop_path"),
-                    "icon": col.get("icon", "ph ph-sparkle"),
-                    "smart": True,
-                    "universe": True,
-                    "item_count": len(col.get("items", [])),
-                    "items": col.get("items", []),
-                }
+        col_items = col.get("items", [])
+        is_match = any(
+            (target_id and it.get("id") == target_id) or (target_tmdb and it.get("tmdb_id") == target_tmdb)
+            for it in col_items
+        )
+        if is_match:
+            # Annotate release order items
+            annotated_items = []
+            for idx, it in enumerate(col_items, 1):
+                item_copy = dict(it)
+                item_copy["sequence_number"] = idx
+                item_copy["is_current"] = bool(
+                    (target_id and it.get("id") == target_id) or
+                    (target_tmdb and it.get("tmdb_id") == target_tmdb)
+                )
+                annotated_items.append(item_copy)
+
+            # Annotate timeline items if available
+            annotated_timeline = None
+            if col.get("has_timeline") and col.get("timeline_items"):
+                annotated_timeline = []
+                for idx, it in enumerate(col["timeline_items"], 1):
+                    item_copy = dict(it)
+                    item_copy["sequence_number"] = idx
+                    item_copy["is_current"] = bool(
+                        (target_id and it.get("id") == target_id) or
+                        (target_tmdb and it.get("tmdb_id") == target_tmdb)
+                    )
+                    annotated_timeline.append(item_copy)
+
+            return {
+                "id": col["id"],
+                "name": col["name"],
+                "description": col.get("description", ""),
+                "poster_path": col.get("poster_path"),
+                "backdrop_path": col.get("backdrop_path"),
+                "icon": col.get("icon", "ph ph-sparkle"),
+                "smart": True,
+                "universe": True,
+                "has_timeline": bool(col.get("has_timeline")),
+                "item_count": len(annotated_items),
+                "items": annotated_items,
+                "timeline_items": annotated_timeline,
+            }
 
     return None
+
