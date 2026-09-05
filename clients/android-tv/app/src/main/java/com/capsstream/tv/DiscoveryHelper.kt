@@ -44,7 +44,7 @@ object DiscoveryHelper {
     /**
      * Checks whether an endpoint is a live CapsStream instance.
      */
-    suspend fun isCapsStreamServer(ip: String, port: int): Boolean = withContext(Dispatchers.IO) {
+    suspend fun isCapsStreamServer(ip: String, port: Int): Boolean = withContext(Dispatchers.IO) {
         try {
             val endpoint = URL("http://$ip:$port/")
             val conn = (endpoint.openConnection() as HttpURLConnection).apply {
