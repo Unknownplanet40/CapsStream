@@ -69,7 +69,7 @@ object DiscoveryHelper {
                 for (intf in interfaces.asSequence()) {
                     if (intf.isLoopback || !intf.isUp) continue
                     for (addr in intf.inetAddresses.asSequence()) {
-                        if (!addr.isLoopback && addr is java.net.Inet4Address) {
+                        if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
                             val host = addr.hostAddress ?: continue
                             val parts = host.split(".")
                             if (parts.size == 4 && parts[0] != "127") {
