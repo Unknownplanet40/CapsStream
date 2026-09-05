@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">CapsStream</string>
+    <string name="server_connecting">Connecting to CapsStream server...</string>
+    <string name="server_discovery">Searching for CapsStream on local network...</string>
+    <string name="manual_ip_hint">Enter Server Address (e.g. 192.168.1.50:8000)</string>
+    <string name="connect_button">Connect</string>
+    <string name="retry_button">Retry Search</string>
+    <string name="server_not_found">No CapsStream server found automatically.</string>
+</resources>
