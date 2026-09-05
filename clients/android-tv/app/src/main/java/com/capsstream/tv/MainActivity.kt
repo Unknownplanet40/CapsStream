@@ -78,6 +78,28 @@ class MainActivity : AppCompatActivity() {
                     showManualConnect("Could not connect to CapsStream. Please check IP and port.")
                 }
             }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                // Automatically activate TV layout mode when running inside this app.
+                // This mirrors what setLayoutMode("tv") does in app.js:
+                //   1. Persist the preference so it survives page reloads.
+                //   2. Update the reactive store so Vue components re-render immediately.
+                //   3. Add the CSS class so layout-tv-mode styles apply right away.
+                view?.evaluateJavascript("""
+                    (function() {
+                        try {
+                            localStorage.setItem('capsstream_layout_mode', 'tv');
+                            if (window.store && window.store.layoutMode !== 'tv') {
+                                window.store.layoutMode = 'tv';
+                                document.body.classList.add('layout-tv-mode');
+                            } else if (!window.store) {
+                                document.body.classList.add('layout-tv-mode');
+                            }
+                        } catch(e) {}
+                    })();
+                """.trimIndent(), null)
+            }
         }
     }
 
