@@ -9,6 +9,8 @@
   <img src="https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/FFmpeg-Hardware%20Accelerated-007808?logo=ffmpeg&logoColor=white" alt="FFmpeg">
   <img src="https://img.shields.io/badge/UI-Vue.js%203-4FC08D?logo=vuedotjs&logoColor=white" alt="Vue 3">
+  <img src="https://img.shields.io/badge/Android%20TV-Companion%20App-3DDC84?logo=android&logoColor=white" alt="Android TV">
+  <img src="https://img.shields.io/badge/Windows%20Tray-Companion-0078D6?logo=windows&logoColor=white" alt="Windows Tray">
 </p>
 
 ---
@@ -179,6 +181,55 @@ Then open **http://127.0.0.1:8000** in your browser (Microsoft Edge or Google Ch
 * **Multi-Profile & Kids Mode**: Create individual family profiles with custom avatars, PIN protection, and independent watch histories.
 * **1-Click Backup & Restore**: Secure your library metadata, playlists, and watch histories from the Settings menu.
 * **Built-in Auto-Updater**: One-click update check (`update.bat`) that pulls improvements without wiping your database, settings, or media paths.
+* **Android TV Companion App**: Native Android app with automatic LAN discovery, TV layout auto-activation, and D-pad / remote control support.
+* **Windows System Tray Companion**: Keeps CapsStream running silently in the background with a tray icon — server stays alive even after the browser window closes.
+
+---
+
+## Companion Apps
+
+CapsStream ships two lightweight companion clients that work alongside the main server.
+
+### 🖥️ Windows System Tray
+
+The tray companion runs automatically when you launch CapsStream via **`Start CapsStream Silent.vbs`**. It lives in your Windows notification area and lets you:
+
+- **Open** the CapsStream web interface from the tray
+- **Keep the server alive** after you close the browser window — no more accidentally killing the server
+- **Quit** cleanly from the tray icon right-click menu
+
+No extra setup needed — it starts with CapsStream automatically.
+
+### 📺 Android TV Companion App
+
+A native Android / Android TV app that connects to your CapsStream server over your local network.
+
+**Features:**
+- Automatic LAN discovery via UDP broadcast — just open the app and it finds your server
+- Manual IP entry fallback if discovery doesn't work
+- TV layout activated automatically — the full Netflix-style grid UI loads on launch
+- D-pad and remote control navigation
+- Works on Android phones, tablets, Android TV boxes, and Fire TV sticks
+
+**Getting the APK:**
+
+1. Go to the [**Actions tab**](https://github.com/Unknownplanet40/CapsStream/actions/workflows/build-android-tv.yml) on GitHub.
+2. Click the latest successful **Build Android TV Companion APK** run.
+3. Scroll down to **Artifacts** and download **`CapsStream-AndroidTV-Debug`**.
+4. Extract the zip and install the `.apk` on your Android device (enable *Install from unknown sources* in settings).
+
+**Connecting to your server:**
+
+> ⚠️ Your CapsStream server must be bound to `0.0.0.0` (not `127.0.0.1`) so it is reachable on your local network.
+
+Open `config.json` and set:
+```json
+{
+  "host": "0.0.0.0",
+  "port": 8000
+}
+```
+Then restart CapsStream. The Android app will discover the server automatically, or you can enter your PC's local IP (e.g. `192.168.1.5:8000`) manually.
 
 ---
 
@@ -226,8 +277,12 @@ CapsStream/
 ├── start.bat                   # Console launcher with live logging
 ├── update.bat                  # Safe auto-updater
 ├── app.py                      # Core Flask API & streaming engine
-├── silent_launcher.py          # Background runner & app-mode window manager
-├── backend/                    # Library scanner, matcher, transcoding, database
+├── silent_launcher.py          # Background runner, tray companion & app-mode window manager
+├── backend/
+│   ├── tray.py                 # Windows system tray companion (pure Win32 ctypes)
+│   └── ...                     # Library scanner, matcher, transcoding, database
+├── clients/
+│   └── android-tv/             # Android TV / Android companion app (Kotlin + Leanback)
 ├── static/                     # Frontend Vue 3 web application, styles & audio
 ├── templates/                  # Single-page HTML shell
 ├── data/                       # Local database, downloaded artwork & cache (ignored by git)
