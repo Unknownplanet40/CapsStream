@@ -470,7 +470,10 @@ class CapsStreamTray:
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         nid.uCallbackMessage = WM_TRAY
         nid.hIcon = self._hicon
-        tip = f"CapsStream — Streaming Server\n{self.local_url}"
+        if self.lan_url and self.lan_url != self.local_url:
+            tip = f"CapsStream — Streaming Server\nLAN: {self.lan_url}\nLocal: {self.local_url}"
+        else:
+            tip = f"CapsStream — Streaming Server\n{self.local_url}"
         nid.szTip = tip[:127]
 
         self._nid = nid

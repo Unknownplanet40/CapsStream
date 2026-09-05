@@ -688,6 +688,11 @@ if __name__ == "__main__":
                 print(f"   Local Network Access:        {proto}://{dev_ip}:{port}")
         except Exception:
             pass
+        try:
+            from backend.discovery import start_discovery_service
+            start_discovery_service(http_port=port, ssl=bool(ssl_context))
+        except Exception as e:
+            print(f"   [!] LAN discovery beacon notice: {e}")
     print(f"   TO STOP THE SERVER: Press Ctrl+C in this window")
     print(f"  ==========================================================\n")
 

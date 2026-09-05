@@ -65,6 +65,10 @@ class MainActivity : AppCompatActivity() {
         settings.databaseEnabled = true
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
+        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+
+        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
         webView.webChromeClient = object : WebChromeClient() {}
         webView.webViewClient = object : WebViewClient() {
@@ -81,10 +85,21 @@ class MainActivity : AppCompatActivity() {
         btnConnect.setOnClickListener {
             val input = ipEditText.text.toString().trim()
             if (input.isNotEmpty()) {
-                val formatted = if (input.startsWith("http://") || input.startsWith("https://")) {
+                var formatted = if (input.startsWith("http://") || input.startsWith("https://")) {
                     input
                 } else {
                     "http://$input"
+                }
+                // If user didn't specify a port (e.g. 192.168.1.5), default to :8000
+                val hostPart = formatted.substringAfter("://").substringBefore("/")
+                if (!hostPart.contains(":")) {
+                    formatted = if (formatted.contains("/")) {
+                        val scheme = formatted.substringBefore("://")
+                        val path = formatted.substringAfter("://").substringAfter("/")
+                        "$scheme://$hostPart:8000/$path"
+                    } else {
+                        "$formatted:8000"
+                    }
                 }
                 connectToServer(formatted)
             }
@@ -98,7 +113,7 @@ class MainActivity : AppCompatActivity() {
     private fun startDiscovery() {
         discoveryOverlay.visibility = View.VISIBLE
         progressBar.visibility = View.VISIBLE
-        manualConnectLayout.visibility = View.GONE
+        manualConnectLayout.visibility = View.VISIBLE
         statusText.text = getString(R.string.server_discovery)
 
         lifecycleScope.launch {
@@ -106,7 +121,8 @@ class MainActivity : AppCompatActivity() {
             if (discovered != null) {
                 connectToServer(discovered)
             } else {
-                showManualConnect(getString(R.string.server_not_found))
+                progressBar.visibility = View.GONE
+                statusText.text = getString(R.string.server_not_found)
             }
         }
     }

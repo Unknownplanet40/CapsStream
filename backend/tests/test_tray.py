@@ -59,6 +59,29 @@ class TestTrayUtils(unittest.TestCase):
         tray._handle_command(CapsStreamTray.CMD_EXIT)
         self.assertTrue(tray.is_exit_requested())
 
+    def test_window_detection_filtering(self):
+        """Verify is_capsstream_title ignores GitHub, searches, and matches actual app."""
+        from silent_launcher import is_capsstream_title
+
+        # Negative test cases (should NOT match)
+        self.assertFalse(is_capsstream_title("Release · Unknownplanet40/CapsStream · GitHub - Google Chrome", "chrome.exe"))
+        self.assertFalse(is_capsstream_title("Unknownplanet40/CapsStream: Portable media server - Google Chrome", "chrome.exe"))
+        self.assertFalse(is_capsstream_title("capsstream - Google Search - Microsoft Edge", "msedge.exe"))
+        self.assertFalse(is_capsstream_title("capsstream reddit - Google Search - Brave", "brave.exe"))
+        self.assertFalse(is_capsstream_title("CapsStream", "notepad.exe"))
+        self.assertFalse(is_capsstream_title("CapsStream", "cmd.exe"))
+        self.assertFalse(is_capsstream_title("", "msedge.exe"))
+
+        # Positive test cases (MUST match)
+        self.assertTrue(is_capsstream_title("CapsStream", "msedge.exe"))
+        self.assertTrue(is_capsstream_title("CapsStream", "chrome.exe"))
+        self.assertTrue(is_capsstream_title("CapsStream - Microsoft Edge", "msedge.exe"))
+        self.assertTrue(is_capsstream_title("CapsStream - Personal - Microsoft Edge", "msedge.exe"))
+        self.assertTrue(is_capsstream_title("CapsStream - Google Chrome", "chrome.exe"))
+        self.assertTrue(is_capsstream_title("CapsStream — Mozilla Firefox", "firefox.exe"))
+        self.assertTrue(is_capsstream_title("http://127.0.0.1:8000 - Brave", "brave.exe"))
+        self.assertTrue(is_capsstream_title("localhost:8000 - Opera", "opera.exe"))
+
 
 if __name__ == "__main__":
     unittest.main()

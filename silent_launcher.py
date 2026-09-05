@@ -279,13 +279,90 @@ def find_browser_exe(choice):
     return None
 
 
-def is_capsstream_window_visible(url, browser_proc=None):
+def bring_window_to_foreground(hwnd):
+    """Restore (if minimized) and bring the target window to foreground."""
+    if not hwnd or os.name != "nt":
+        return False
+    try:
+        user32 = ctypes.windll.user32
+        SW_RESTORE = 9
+        SW_SHOW = 5
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+        else:
+            user32.ShowWindow(hwnd, SW_SHOW)
+
+        try:
+            user32.AllowSetForegroundWindow(-1)
+        except Exception:
+            pass
+
+        # Windows foreground lock bypass via Alt key simulation
+        user32.keybd_event(0x12, 0, 0, 0)  # VK_MENU down
+        user32.SetForegroundWindow(hwnd)
+        user32.keybd_event(0x12, 0, 2, 0)  # VK_MENU up
+        user32.BringWindowToTop(hwnd)
+        return True
+    except Exception as e:
+        log(f"Notice: could not bring window {hwnd} to foreground: {e}")
+        return False
+
+
+def is_capsstream_title(title: str, pname: str, url_clean: str = "127.0.0.1:8000", url_alt: str = "localhost:8000", port_str: str = ":8000") -> bool:
     """
-    Check if any visible or minimized browser window or PWA window is displaying CapsStream.
-    Returns True if at least one CapsStream window exists (active or minimized).
+    Determine whether a window title and browser process belong to CapsStream.
+    Strictly filters out unrelated browser tabs/windows (e.g. GitHub repos,
+    search engine queries, documentation, IDEs) mentioning 'CapsStream'.
+    """
+    known_browsers = (
+        "msedge", "chrome", "brave", "opera", "vivaldi",
+        "firefox", "arc", "applicationframehost"
+    )
+    pname_lower = (pname or "").lower()
+    if not any(b in pname_lower for b in known_browsers):
+        return False
+
+    t = (title or "").strip().lower()
+    if not t:
+        return False
+
+    ignore_keywords = (
+        "github", "google search", "bing search", "duckduckgo",
+        "reddit", "gitlab", "stackoverflow", "commit", "action",
+        "workflow", "pull request", "issue", "blob", "tree",
+        "antigravity", "visual studio"
+    )
+    if any(ign in t for ign in ignore_keywords):
+        return False
+
+    # Matches:
+    # 1. Standalone app window: title is exactly "capsstream"
+    # 2. CapsStream browser tab: title starts with "capsstream" followed by standard separator
+    # 3. URL match: contains 127.0.0.1:8000 or localhost:8000 without search engine markers
+    is_exact = (t == "capsstream")
+    is_browser_tab = (
+        t.startswith("capsstream -")
+        or t.startswith("capsstream —")
+        or t.startswith("capsstream |")
+        or t.startswith("capsstream •")
+    )
+    is_url_match = (
+        (url_clean in t or url_alt in t or (port_str in t and "capsstream" in t))
+        and not any(ign in t for ign in ("search", "google", "bing", "github"))
+    )
+
+    return is_exact or is_browser_tab or is_url_match
+
+
+def find_capsstream_window(url, browser_proc=None):
+    """
+    Locate an existing visible or minimized window displaying CapsStream.
+    Returns the HWND of the window if found, otherwise None.
+    Strictly filters out unrelated browser windows/tabs (e.g. GitHub repos,
+    search results, dev tools) that happen to mention 'CapsStream' in their title.
     """
     if os.name != "nt":
-        return False
+        return None
     try:
         import urllib.parse
         parsed = urllib.parse.urlparse(url)
@@ -310,29 +387,26 @@ def is_capsstream_window_visible(url, browser_proc=None):
         PROCESS_QUERY_INFORMATION = 0x0400
         PROCESS_VM_READ = 0x0010
 
-        found = [False]
-
-        known_browsers = (
-            "msedge", "chrome", "brave", "opera", "vivaldi",
-            "firefox", "arc", "applicationframehost"
-        )
+        target_pid = browser_proc.pid if (browser_proc is not None and browser_proc.poll() is None) else None
+        found_hwnd = [None]
 
         def foreach_window(hwnd, lParam):
-            # Window must be visible or minimized (iconic)
             if IsWindowVisible(hwnd) or IsIconic(hwnd):
                 length = GetWindowTextLengthW(hwnd)
                 if length > 0:
                     buff = ctypes.create_unicode_buffer(length + 1)
                     GetWindowTextW(hwnd, buff, length + 1)
-                    title = buff.value.strip().lower()
+                    title = buff.value.strip()
 
                     pid = ctypes.c_ulong()
                     GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
 
-                    if browser_proc is not None and browser_proc.poll() is None and pid.value == browser_proc.pid:
-                        found[0] = True
+                    # 1. Exact PID match from our tracked browser process
+                    if target_pid is not None and pid.value == target_pid:
+                        found_hwnd[0] = hwnd
                         return False
 
+                    # 2. Check process name for browser windows
                     pname = ""
                     hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid.value)
                     if hProcess:
@@ -341,18 +415,25 @@ def is_capsstream_window_visible(url, browser_proc=None):
                             pname = p_buff.value.lower()
                         CloseHandle(hProcess)
 
-                    if any(b in pname for b in known_browsers):
-                        if "capsstream" in title or url_clean in title or url_alt in title or port_str in title:
-                            found[0] = True
-                            return False
+                    if is_capsstream_title(title, pname, url_clean, url_alt, port_str):
+                        found_hwnd[0] = hwnd
+                        return False
             return True
 
         WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
         user32.EnumWindows(WNDENUMPROC(foreach_window), 0)
-        return found[0]
+        return found_hwnd[0]
     except Exception as e:
         log(f"Window detection notice: {e}")
-        return False
+        return None
+
+
+def is_capsstream_window_visible(url, browser_proc=None):
+    """
+    Check if any visible or minimized browser window or PWA window is displaying CapsStream.
+    Returns True if at least one CapsStream window exists (active or minimized).
+    """
+    return find_capsstream_window(url, browser_proc) is not None
 
 
 def launch_app_window(cfg, url):
@@ -464,8 +545,14 @@ def main():
 
     def do_open_ui():
         log("Opening CapsStream UI from tray or launcher")
-        if not is_capsstream_window_visible(url, browser_state["proc"]):
-            browser_state["proc"] = launch_app_window(cfg, url)
+        hwnd = find_capsstream_window(url, browser_state.get("proc"))
+        if hwnd:
+            log(f"Found existing CapsStream window (HWND {hwnd}) — bringing to foreground")
+            if bring_window_to_foreground(hwnd):
+                return
+            log("Could not bring existing window to foreground — launching fresh window")
+        log(f"Launching standalone app window for {url}")
+        browser_state["proc"] = launch_app_window(cfg, url)
 
     def do_restart_server():
         nonlocal server
@@ -485,8 +572,11 @@ def main():
             time.sleep(HEALTH_POLL_INTERVAL)
 
         if restarted:
-            log(f"Server restarted successfully at {url}")
-            send_toast("CapsStream Ready", f"Server restarted successfully at {url}")
+            raw_host = (cfg.get("host") or "127.0.0.1").strip()
+            is_lan = raw_host in ("0.0.0.0", "::")
+            restart_label = f"Serving on LAN: {lan_url} (Local: {url})" if is_lan else f"Serving at {url}"
+            log(f"Server restarted successfully — {restart_label}")
+            send_toast("CapsStream Ready", f"Server restarted: {restart_label}")
         else:
             log("Server failed to respond after restart")
             send_toast("CapsStream Error", "Server failed to respond after restart")
@@ -515,19 +605,26 @@ def main():
     except Exception as e:
         log(f"Tray initialization notice: {e}")
 
+    raw_host = (cfg.get("host") or "127.0.0.1").strip()
+    is_lan = raw_host in ("0.0.0.0", "::")
+    serving_label = f"Serving on LAN: {lan_url} (Local: {url})" if is_lan else f"Serving at {url}"
+
     if not cfg.get("launch_browser_on_start", True):
         log("launch_browser_on_start is disabled — server left running headless")
-        send_toast("CapsStream is running", f"Serving at {url} (headless mode)")
+        send_toast("CapsStream is running", f"{serving_label} (headless mode)")
         log("Launcher running in background tray mode (stop it via tray icon or Task Manager)")
 
     window_already_open = is_capsstream_window_visible(url)
     if cfg.get("launch_browser_on_start", True):
-        if from_restart or window_already_open:
-            log(f"CapsStream window detected (from_restart={from_restart}, window_open={window_already_open}) — attaching to existing window")
+        if from_restart:
+            log(f"CapsStream window detected after restart (window_open={window_already_open}) — attaching to existing window")
+        elif window_already_open:
+            log(f"CapsStream window already open for {url} — bringing to foreground")
+            bring_window_to_foreground(find_capsstream_window(url))
         else:
             browser_state["proc"] = launch_app_window(cfg, url)
-            send_toast("CapsStream is running", f"Serving at {url}")
-            log(f"CapsStream window launched for {url}")
+            send_toast("CapsStream is running", serving_label)
+            log(f"CapsStream window launched for {url} (LAN URL: {lan_url})")
 
     # Initial grace period for window to render / reload and be visible
     start_wait = time.time()
