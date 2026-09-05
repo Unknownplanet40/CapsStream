@@ -9,18 +9,22 @@ Previously each of these 10 files computed its own copy:
   skip_times.py, intro_detect.py, scanner.py, routes/streaming.py, routes/admin.py
 """
 import os
+import shutil
 
 # Project root — two levels up from backend/utils/
 BASE_DIR    = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-FFMPEG_BIN  = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffmpeg.exe")
-FFPROBE_BIN = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe")
+_bundled_ffmpeg  = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffmpeg.exe")
+_bundled_ffprobe = os.path.join(BASE_DIR, "ffmpeg", "bin", "ffprobe.exe")
+
+FFMPEG_BIN  = _bundled_ffmpeg if os.path.isfile(_bundled_ffmpeg) else (shutil.which("ffmpeg") or _bundled_ffmpeg)
+FFPROBE_BIN = _bundled_ffprobe if os.path.isfile(_bundled_ffprobe) else (shutil.which("ffprobe") or _bundled_ffprobe)
 
 
 def has_ffmpeg() -> bool:
-    """True if the bundled ffmpeg.exe exists and is a file."""
-    return os.path.isfile(FFMPEG_BIN)
+    """True if ffmpeg executable exists bundled or in system PATH."""
+    return os.path.isfile(FFMPEG_BIN) or bool(shutil.which(FFMPEG_BIN))
 
 
 def has_ffprobe() -> bool:
-    """True if the bundled ffprobe.exe exists and is a file."""
-    return os.path.isfile(FFPROBE_BIN)
+    """True if ffprobe executable exists bundled or in system PATH."""
+    return os.path.isfile(FFPROBE_BIN) or bool(shutil.which(FFPROBE_BIN))

@@ -11,6 +11,7 @@ Each entry carries a "source" field: "manual" | "aniskip" | "chapters".
 """
 
 import os
+import re
 import json
 import subprocess
 import requests
@@ -116,7 +117,7 @@ def probe_chapters_for_skips(file_path):
     """
     Probes video file embedded FFmpeg chapter markers for intro/outro keywords.
     """
-    if not file_path or not os.path.exists(file_path) or not os.path.exists(FFPROBE_BIN):
+    if not file_path or not os.path.exists(file_path):
         return {}
 
     cmd = [
@@ -138,8 +139,9 @@ def probe_chapters_for_skips(file_path):
                 end = float(c.get("end_time", 0))
                 tags = c.get("tags", {})
                 title = (tags.get("title") or tags.get("TITLE") or "").lower()
+                words = set(re.findall(r'[a-z0-9]+', title))
 
-                if any(kw in title for kw in ["preview", "next time", "next episode"]):
+                if any(kw in title for kw in ["preview", "next time", "next episode", "next ep", "teaser"]):
                     skips["preview"] = {
                         "start": round(start, 2),
                         "end": round(end, 2),
@@ -147,7 +149,7 @@ def probe_chapters_for_skips(file_path):
                         "label": "Skip Preview",
                         "source": "chapters"
                     }
-                elif any(kw in title for kw in ["intro", "opening", "theme", "op"]):
+                elif any(kw in title for kw in ["intro", "opening", "theme", "title sequence"]) or "op" in words:
                     skips["op"] = {
                         "start": round(start, 2),
                         "end": round(end, 2),
@@ -155,7 +157,7 @@ def probe_chapters_for_skips(file_path):
                         "label": "Skip Intro",
                         "source": "chapters"
                     }
-                elif any(kw in title for kw in ["outro", "ending", "credit", "ed"]):
+                elif any(kw in title for kw in ["outro", "ending", "credit", "end title"]) or "ed" in words:
                     skips["ed"] = {
                         "start": round(start, 2),
                         "end": round(end, 2),
@@ -164,6 +166,8 @@ def probe_chapters_for_skips(file_path):
                         "source": "chapters"
                     }
             return skips
+    except (FileNotFoundError, OSError):
+        return {}
     except Exception as e:
         print(f"[Skips] FFprobe chapter probe error: {e}")
 
@@ -178,7 +182,7 @@ def probe_chapters_full(file_path):
       ...
     ]
     """
-    if not file_path or not os.path.exists(file_path) or not os.path.exists(FFPROBE_BIN):
+    if not file_path or not os.path.exists(file_path):
         return []
 
     cmd = [
@@ -207,6 +211,8 @@ def probe_chapters_full(file_path):
                     "title": str(title).strip()
                 })
             return parsed
+    except (FileNotFoundError, OSError):
+        return []
     except Exception as e:
         print(f"[Chapters] FFprobe chapter probe error: {e}")
 

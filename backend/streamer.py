@@ -51,36 +51,37 @@ def find_keyframe_before(file_path, t):
         return cached
 
     result = t
-    if os.path.exists(FFPROBE_BIN):
-        try:
-            window_start = max(0.0, t - 60)
-            cmd = [
-                FFPROBE_BIN, "-v", "quiet",
-                "-select_streams", "v:0",
-                "-show_packets",
-                "-print_format", "json",
-                "-read_intervals", f"{window_start:.3f}%{t + 0.5:.3f}",
-                file_path,
-            ]
-            out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=15,
-                                          creationflags=CREATE_NO_WINDOW)
-            data = json.loads(out.decode("utf-8", errors="ignore"))
-            best = None
-            for pkt in data.get("packets", []):
-                flags = pkt.get("flags", "")
-                if "K" not in flags:
-                    continue
-                try:
-                    pts = float(pkt.get("pts_time") or -1)
-                except (TypeError, ValueError):
-                    continue
-                if 0 <= pts <= t and (best is None or pts > best):
-                    best = pts
-            if best is not None:
-                result = best
-        except Exception as e:
-            print(f"[Streamer] Keyframe lookup failed for {file_path}@{t}: {e}")
-            result = t
+    try:
+        window_start = max(0.0, t - 60)
+        cmd = [
+            FFPROBE_BIN, "-v", "quiet",
+            "-select_streams", "v:0",
+            "-show_packets",
+            "-print_format", "json",
+            "-read_intervals", f"{window_start:.3f}%{t + 0.5:.3f}",
+            file_path,
+        ]
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=15,
+                                      creationflags=CREATE_NO_WINDOW)
+        data = json.loads(out.decode("utf-8", errors="ignore"))
+        best = None
+        for pkt in data.get("packets", []):
+            flags = pkt.get("flags", "")
+            if "K" not in flags:
+                continue
+            try:
+                pts = float(pkt.get("pts_time") or -1)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= pts <= t and (best is None or pts > best):
+                best = pts
+        if best is not None:
+            result = best
+    except (FileNotFoundError, OSError):
+        result = t
+    except Exception as e:
+        print(f"[Streamer] Keyframe lookup failed for {file_path}@{t}: {e}")
+        result = t
 
     if len(_KEYFRAME_CACHE) >= _KEYFRAME_CACHE_MAX:
         _KEYFRAME_CACHE.clear()
@@ -247,23 +248,24 @@ def describe_hw_encoder(force=False):
         ff = FFMPEG_BIN
         result = {"available": False, "encoder": None, "hardware": False}
 
-        if os.path.exists(ff):
-            try:
-                res = subprocess.run(
-                    [ff, "-hide_banner", "-encoders"],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
-                    creationflags=CREATE_NO_WINDOW,
-                )
-                encoders_text = res.stdout or ""
-                for name, extra, is_hw in _HW_CANDIDATES:
-                    if name not in encoders_text:
-                        continue
-                    if not _encoder_selftest(name, extra):
-                        continue
-                    result = {"available": True, "encoder": name, "hardware": is_hw}
-                    break
-            except Exception as e:
-                print(f"[Streamer] Encoder probe failed: {e}")
+        try:
+            res = subprocess.run(
+                [ff, "-hide_banner", "-encoders"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
+                creationflags=CREATE_NO_WINDOW,
+            )
+            encoders_text = res.stdout or ""
+            for name, extra, is_hw in _HW_CANDIDATES:
+                if name not in encoders_text:
+                    continue
+                if not _encoder_selftest(name, extra):
+                    continue
+                result = {"available": True, "encoder": name, "hardware": is_hw}
+                break
+        except (FileNotFoundError, OSError):
+            pass
+        except Exception as e:
+            print(f"[Streamer] Encoder probe failed: {e}")
 
         _HW_ENCODER_CACHE = result
         return result

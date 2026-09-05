@@ -11,7 +11,13 @@ from flask import Blueprint, jsonify, request, send_file, abort, current_app, Re
 from .middleware import kids_guard_media, current_profile
 from backend.db import get_best_media_source, get_media_by_id, get_media_quality_options
 from backend.db.media import is_item_mounted, get_drive_identifier
-from backend.streamer import stream_file
+from backend.streamer import (
+    stream_file,
+    stream_audio_only,
+    stream_video_convert,
+    stream_transcoded,
+)
+from backend import streamer
 
 streaming_bp = Blueprint("streaming", __name__)
 
@@ -102,8 +108,7 @@ def api_stream(media_id):
         at = request.args.get("at", type=float, default=0.0)
         if not audio_track.isdigit():
             abort(400, description="audio_track required for audio-only mode")
-        from backend.streamer import stream_audio_only
-        return stream_audio_only(media["file_path"], int(audio_track), start_time=at)
+        return streamer.stream_audio_only(media["file_path"], int(audio_track), start_time=at)
 
     if request.args.get("transcode") in ("1", "true"):
         audio_track = request.args.get("audio_track", "")
@@ -111,9 +116,8 @@ def api_stream(media_id):
         start_time = request.args.get("start", type=float, default=0.0)
         max_height = request.args.get("max_height", type=int, default=1080)
         force_sw = request.args.get("sw") in ("1", "true")
-        from backend.streamer import stream_video_convert
         kwargs = {"force_sw": True} if force_sw else {}
-        return stream_video_convert(
+        return streamer.stream_video_convert(
             media["file_path"], audio_track_index=track_idx,
             start_time=start_time, max_height=max_height,
             **kwargs
@@ -124,8 +128,7 @@ def api_stream(media_id):
 
     if audio_track is not None and audio_track != "" and str(audio_track).isdigit():
         track_idx = int(audio_track)
-        from backend.streamer import stream_transcoded
-        return stream_transcoded(media["file_path"], audio_track_index=track_idx, start_time=start_time)
+        return streamer.stream_transcoded(media["file_path"], audio_track_index=track_idx, start_time=start_time)
 
     return stream_file(media["file_path"])
 

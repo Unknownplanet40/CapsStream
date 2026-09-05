@@ -743,7 +743,7 @@ def api_system_drives_status():
         for r in rows:
             fp = r["file_path"] if r else ""
             if fp:
-                norm_fp = os.path.normpath(fp).lower()
+                norm_fp = fp.replace("\\", "/").lower()
                 path_counts[norm_fp] = path_counts.get(norm_fp, 0) + 1
     except Exception:
         pass
@@ -804,8 +804,8 @@ def api_system_drives_status():
 
         m_count = 0
         for p in paths:
-            path_key = p.lower()
-            prefix = path_key + os.sep.lower()
+            path_key = p.replace("\\", "/").rstrip("/").lower()
+            prefix = path_key + "/"
             m_count += sum(cnt for fp_norm, cnt in path_counts.items() if fp_norm == path_key or fp_norm.startswith(prefix))
 
         drives_list.append({

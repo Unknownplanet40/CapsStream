@@ -18,15 +18,36 @@ def get_all_profiles():
             "FROM profiles ORDER BY position ASC, id ASC"
         ).fetchall()
     except sqlite3.OperationalError:
-        rows = conn.execute(
-            "SELECT id, name, avatar, color, theme, is_kids, is_admin, custom_avatar_url, "
-            "maturity_rating, blocked_genres, default_audio_lang, default_sub_lang, position, auto_lock_minutes, "
-            "daily_limit_minutes, bedtime_curfew, 0 as has_completed_tour, "
-            "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
-            "FROM profiles ORDER BY position ASC, id ASC"
-        ).fetchall()
+        try:
+            rows = conn.execute(
+                "SELECT id, name, avatar, color, is_kids, is_admin, custom_avatar_url, "
+                "maturity_rating, blocked_genres, default_audio_lang, default_sub_lang, position, auto_lock_minutes, "
+                "daily_limit_minutes, bedtime_curfew, 0 as has_completed_tour, "
+                "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
+                "FROM profiles ORDER BY position ASC, id ASC"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = conn.execute(
+                "SELECT id, name, avatar, color, is_kids, is_admin, "
+                "daily_limit_minutes, bedtime_curfew, 0 as has_completed_tour, "
+                "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
+                "FROM profiles ORDER BY id ASC"
+            ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    profiles = []
+    for r in rows:
+        d = dict(r)
+        d.setdefault("theme", "crimson")
+        d.setdefault("has_completed_tour", 0)
+        d.setdefault("position", 0)
+        d.setdefault("auto_lock_minutes", 0)
+        d.setdefault("custom_avatar_url", "")
+        d.setdefault("maturity_rating", "All")
+        d.setdefault("blocked_genres", "")
+        d.setdefault("default_audio_lang", "")
+        d.setdefault("default_sub_lang", "")
+        profiles.append(d)
+    return profiles
 
 
 def get_profile(profile_id):

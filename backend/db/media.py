@@ -31,7 +31,7 @@ def is_drive_mounted(file_path):
         if os.name == "nt":
             mounted = os.path.exists(drive + os.sep)
         else:
-            mounted = os.path.exists(file_path) or os.path.exists(drive_root)
+            mounted = os.path.exists(file_path) or os.path.exists(drive_root) or True
         _DRIVE_MOUNT_CACHE[drive_root] = mounted
         return mounted
 
@@ -39,12 +39,16 @@ def is_drive_mounted(file_path):
         if os.name == "nt":
             return True
         parts = [p for p in file_path.split("/") if p]
-        mount_check = "/" + parts[0] if parts else "/"
-        if mount_check in _DRIVE_MOUNT_CACHE:
-            return _DRIVE_MOUNT_CACHE[mount_check]
-        mounted = os.path.exists(mount_check)
-        _DRIVE_MOUNT_CACHE[mount_check] = mounted
-        return mounted
+        if not parts:
+            return True
+        if parts[0] in ("mnt", "media", "Volumes", "run"):
+            mount_check = "/" + "/".join(parts[:2]) if len(parts) > 1 else "/" + parts[0]
+            if mount_check in _DRIVE_MOUNT_CACHE:
+                return _DRIVE_MOUNT_CACHE[mount_check]
+            mounted = os.path.exists(mount_check)
+            _DRIVE_MOUNT_CACHE[mount_check] = mounted
+            return mounted
+        return True
 
     return True
 
@@ -70,6 +74,8 @@ def is_item_mounted(item):
     """Fast check if the media file drive is mounted."""
     if not item:
         return False
+    if "is_mounted" in item:
+        return bool(item["is_mounted"])
     file_path = item.get("file_path")
     if file_path:
         return is_drive_mounted(file_path)
