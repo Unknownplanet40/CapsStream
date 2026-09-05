@@ -228,9 +228,10 @@ class TestRouteRequests(unittest.TestCase):
         self.assertEqual(req["detected_media_type"], "movie")
 
     @patch("backend.routes.requests.detect_media_in_library")
+    @patch("backend.routes.requests.is_dev_mode", return_value=True)
     @patch("backend.routes.requests.get_profile", return_value={"name": "Uncle", "is_kids": 0})
     @patch("backend.routes.requests.current_profile", return_value=1)
-    def test_auto_detect_on_request_creation(self, mock_pid, mock_prof, mock_detect):
+    def test_auto_detect_on_request_creation(self, mock_pid, mock_prof, mock_dev, mock_detect):
         """POST /api/requests auto-completes if title already in library."""
         mock_detect.return_value = {
             "id": 99,
@@ -286,4 +287,3 @@ class TestRouteRequests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

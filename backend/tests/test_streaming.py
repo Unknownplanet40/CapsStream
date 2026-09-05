@@ -184,7 +184,8 @@ class TestVideoStreaming(unittest.TestCase):
 
     @patch("backend.streamer.subprocess.Popen")
     @patch("backend.audio_probe.probe_audio_tracks")
-    def test_stream_audio_only_generator(self, mock_audio, mock_popen):
+    @patch("backend.streamer.os.path.exists", return_value=True)
+    def test_stream_audio_only_generator(self, mock_exists, mock_audio, mock_popen):
         """Verify stream_audio_only produces ADTS AAC audio stream."""
         mock_audio.return_value = [{"index": 0, "codec": "AAC"}]
 
