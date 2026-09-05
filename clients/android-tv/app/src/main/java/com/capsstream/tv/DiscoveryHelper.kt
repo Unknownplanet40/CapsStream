@@ -64,6 +64,21 @@ object DiscoveryHelper {
 
     private fun getSubnetPrefix(context: Context): String? {
         return try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            if (interfaces != null) {
+                for (intf in interfaces.asSequence()) {
+                    if (intf.isLoopback || !intf.isUp) continue
+                    for (addr in intf.inetAddresses.asSequence()) {
+                        if (!addr.isLoopback && addr is java.net.Inet4Address) {
+                            val host = addr.hostAddress ?: continue
+                            val parts = host.split(".")
+                            if (parts.size == 4 && parts[0] != "127") {
+                                return "${parts[0]}.${parts[1]}.${parts[2]}"
+                            }
+                        }
+                    }
+                }
+            }
             val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
             val ipInt = wm?.connectionInfo?.ipAddress ?: 0
             if (ipInt == 0) return "192.168.1"
