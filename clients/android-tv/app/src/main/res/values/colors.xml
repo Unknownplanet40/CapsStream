@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_dark">#0b0e14</color>
+    <color name="surface_dark">#121722</color>
+    <color name="accent_blue">#3b82f6</color>
+    <color name="accent_indigo">#6366f1</color>
+    <color name="text_primary">#f8fafc</color>
+    <color name="text_secondary">#94a3b8</color>
+    <color name="input_bg">#1e293b</color>
+    <color name="focus_ring">#60a5fa</color>
+    <color name="ic_launcher_background">#0b0e14</color>
+</resources>

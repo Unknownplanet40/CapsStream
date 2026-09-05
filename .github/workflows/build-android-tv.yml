@@ -1,0 +1,43 @@
+name: Build Android TV Companion APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'clients/android-tv/**'
+      - '.github/workflows/build-android-tv.yml'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
+
+      - name: Build Debug APK
+        working-directory: clients/android-tv
+        run: |
+          gradle assembleDebug --stacktrace
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CapsStream-AndroidTV-Debug
+          path: clients/android-tv/app/build/outputs/apk/debug/*.apk

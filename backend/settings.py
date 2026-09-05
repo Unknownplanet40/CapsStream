@@ -482,17 +482,31 @@ def is_browser_already_open(url):
         WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
         EnumWindows(WNDENUMPROC(foreach_window), 0)
 
+        ignore_markers = ("github", "google search", "bing search", "duckduckgo", "reddit", "commit", "action", "workflow", "pull request", "issue", "blob", "tree", "antigravity", "visual studio")
         for hwnd, pname, title, pid_val in windows:
             # Strictly restrict detection to actual browser processes
-            if any(b in pname for b in ["msedge", "chrome", "brave", "opera", "vivaldi"]):
+            if any(b in pname for b in ["msedge", "chrome", "brave", "opera", "vivaldi", "firefox"]):
                 t_lower = title.lower()
+                if any(ign in t_lower for ign in ignore_markers):
+                    continue
                 # Check for matching URL or port-specific CapsStream window
                 if url_clean in t_lower or url_full in t_lower or (port_str in t_lower and "capsstream" in t_lower):
                     try:
                         # Bring existing window to foreground
                         SW_RESTORE = 9
-                        ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+                        SW_SHOW = 5
+                        if ctypes.windll.user32.IsIconic(hwnd):
+                            ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+                        else:
+                            ctypes.windll.user32.ShowWindow(hwnd, SW_SHOW)
+                        try:
+                            ctypes.windll.user32.AllowSetForegroundWindow(-1)
+                        except Exception:
+                            pass
+                        ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)
                         ctypes.windll.user32.SetForegroundWindow(hwnd)
+                        ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)
+                        ctypes.windll.user32.BringWindowToTop(hwnd)
                     except Exception:
                         pass
                     return True
