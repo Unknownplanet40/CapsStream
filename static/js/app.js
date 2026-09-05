@@ -6307,25 +6307,27 @@ const SettingsPage = {
               </div>
 
               <!-- ══════ Supabase Cloud Relay for Online Requests ══════ -->
-              <div class="settings-divider" style="margin: 16px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
-              <div class="settings-row" style="flex-direction:column;align-items:flex-start">
-                <div class="settings-label-container">
-                  <div class="settings-label" style="display:flex;align-items:center;gap:8px">
-                    <i class="ph-bold ph-cloud" style="color:#38bdf8"></i>
-                    <span>Supabase Cloud Relay (Online Media Requests)</span>
+              <template v-if="store.features?.requests">
+                <div class="settings-divider" style="margin: 16px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
+                <div class="settings-row" style="flex-direction:column;align-items:flex-start">
+                  <div class="settings-label-container">
+                    <div class="settings-label" style="display:flex;align-items:center;gap:8px">
+                      <i class="ph-bold ph-cloud" style="color:#38bdf8"></i>
+                      <span>Supabase Cloud Relay (Online Media Requests)</span>
+                    </div>
+                    <div class="settings-desc">Allows Desktop 2 (outside your home network) to submit requests to Desktop 1 over the internet via Supabase REST API without port forwarding or VPNs.</div>
                   </div>
-                  <div class="settings-desc">Allows Desktop 2 (outside your home network) to submit requests to Desktop 1 over the internet via Supabase REST API without port forwarding or VPNs.</div>
-                </div>
-                <div style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:10px">
-                  <input type="text" v-model="form.supabase_url" class="form-input" placeholder="Supabase Project URL (https://xyz.supabase.co)..." style="width:100%" />
-                  <div style="display:flex;gap:8px;width:100%">
-                    <input type="password" v-model="form.supabase_anon_key" class="form-input" placeholder="Supabase Anon Public API Key..." style="flex:1" />
-                    <button class="btn btn-secondary" @click="testApi('supabase', form.supabase_anon_key)" :disabled="testingApi === 'supabase'">
-                      {{ testingApi === 'supabase' ? 'Testing...' : 'Test Connection' }}
-                    </button>
+                  <div style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:10px">
+                    <input type="text" v-model="form.supabase_url" class="form-input" placeholder="Supabase Project URL (https://xyz.supabase.co)..." style="width:100%" />
+                    <div style="display:flex;gap:8px;width:100%">
+                      <input type="password" v-model="form.supabase_anon_key" class="form-input" placeholder="Supabase Anon Public API Key..." style="flex:1" />
+                      <button class="btn btn-secondary" @click="testApi('supabase', form.supabase_anon_key)" :disabled="testingApi === 'supabase'">
+                        {{ testingApi === 'supabase' ? 'Testing...' : 'Test Connection' }}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </template>
             </div>
           </div>
         </div>
