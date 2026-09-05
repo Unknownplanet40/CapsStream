@@ -8,4 +8,5 @@
     <color name="text_secondary">#94a3b8</color>
     <color name="input_bg">#1e293b</color>
     <color name="focus_ring">#60a5fa</color>
+    <color name="ic_launcher_background">#0b0e14</color>
 </resources>
