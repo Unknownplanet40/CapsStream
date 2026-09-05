@@ -27,20 +27,37 @@ def get_all_profiles():
                 "FROM profiles ORDER BY position ASC, id ASC"
             ).fetchall()
         except sqlite3.OperationalError:
-            rows = conn.execute(
-                "SELECT id, name, avatar, color, is_kids, is_admin, "
-                "daily_limit_minutes, bedtime_curfew, 0 as has_completed_tour, "
-                "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
-                "FROM profiles ORDER BY id ASC"
-            ).fetchall()
+            try:
+                rows = conn.execute(
+                    "SELECT id, name, avatar, color, 'crimson' as theme, is_kids, 0 as is_admin, "
+                    "'' as custom_avatar_url, 'All' as maturity_rating, '' as blocked_genres, "
+                    "'' as default_audio_lang, '' as default_sub_lang, 0 as position, 0 as auto_lock_minutes, "
+                    "daily_limit_minutes, bedtime_curfew, 0 as has_completed_tour, "
+                    "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
+                    "FROM profiles ORDER BY id ASC"
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = conn.execute(
+                    "SELECT id, name, avatar, color, 'crimson' as theme, 0 as is_kids, 0 as is_admin, "
+                    "'' as custom_avatar_url, 'All' as maturity_rating, '' as blocked_genres, "
+                    "'' as default_audio_lang, '' as default_sub_lang, 0 as position, 0 as auto_lock_minutes, "
+                    "0 as daily_limit_minutes, '' as bedtime_curfew, 0 as has_completed_tour, "
+                    "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
+                    "FROM profiles ORDER BY id ASC"
+                ).fetchall()
     conn.close()
     profiles = []
     for r in rows:
         d = dict(r)
         d.setdefault("theme", "crimson")
+        d.setdefault("is_kids", 0)
+        d.setdefault("is_admin", 0)
+        d.setdefault("has_pin", 0)
         d.setdefault("has_completed_tour", 0)
         d.setdefault("position", 0)
         d.setdefault("auto_lock_minutes", 0)
+        d.setdefault("daily_limit_minutes", 0)
+        d.setdefault("bedtime_curfew", "")
         d.setdefault("custom_avatar_url", "")
         d.setdefault("maturity_rating", "All")
         d.setdefault("blocked_genres", "")

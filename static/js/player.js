@@ -5482,10 +5482,14 @@ const PlayerPage = {
         }
 
         // ── 4K Hardware / Browser Compatibility Guard (Smart Auto-Switch) ──
-        const is4KInitial = (media.value?.base_label || "").startsWith("4K") ||
+        const hasExplicitLowerRes = (media.value?.video_info?.height > 0 && media.value?.video_info?.height < 2160) ||
+                                    (media.value?.height > 0 && media.value?.height < 2160) ||
+                                    filePath.includes("1080p") || filePath.includes("720p") || filePath.includes("480p");
+        const is4KInitial = !hasExplicitLowerRes && (
+                            (media.value?.base_label || "").startsWith("4K") ||
                             (media.value?.video_info?.height >= 2160 || media.value?.video_info?.width >= 3840) ||
                             (media.value?.height >= 2160 || media.value?.width >= 3840) ||
-                            (filePath.includes("2160p") || filePath.includes("4k") || filePath.includes("uhd"));
+                            (filePath.includes("2160p") || filePath.includes("4k") || filePath.includes("3840x2160")));
 
         const check4KEnabled = playerSettings.value?.playback?.check_4k_compat !== false;
         if (is4KInitial && !streamState.transcode && check4KEnabled) {

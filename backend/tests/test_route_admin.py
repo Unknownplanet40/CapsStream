@@ -14,6 +14,12 @@ if "app" not in sys.modules:
     mock_app_module._get_github_profile.return_value = {}
     sys.modules["app"] = mock_app_module
 
+if "backend.scanner" not in sys.modules:
+    mock_scanner = MagicMock()
+    mock_scanner.get_scan_status.return_value = {"running": False, "phase": "idle"}
+    mock_scanner.scan_library = MagicMock()
+    sys.modules["backend.scanner"] = mock_scanner
+
 from backend.routes.admin import admin_bp
 from backend.routes.middleware import has_active_profile_session
 

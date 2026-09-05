@@ -94,12 +94,48 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Set up JDK 17 for Android TV APK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
+
+      - name: Build Android TV Companion APK
+        working-directory: clients/android-tv
+        run: |
+          gradle assembleDebug --stacktrace
+          TAG="${GITHUB_REF_NAME#v}"
+          APK_SRC="app/build/outputs/apk/debug/app-debug.apk"
+          if [ -f "$APK_SRC" ]; then
+            cp "$APK_SRC" "../../CapsStream-AndroidTV-${TAG}.apk"
+            cp "$APK_SRC" "../../CapsStream-AndroidTV.apk"
+            cd ../..
+            sha256sum "CapsStream-AndroidTV-${TAG}.apk" >> sha256sums.txt
+            sha256sum "CapsStream-AndroidTV.apk" >> sha256sums.txt
+          else
+            echo "::warning::Android TV APK not found at $APK_SRC"
+          fi
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          gh release create "${GITHUB_REF_NAME}" "$ZIP" sha256sums.txt \
+          RELEASE_ASSETS=("$ZIP" sha256sums.txt)
+          for apk in CapsStream-AndroidTV*.apk; do
+            [ -f "$apk" ] && RELEASE_ASSETS+=("$apk")
+          done
+          gh release create "${GITHUB_REF_NAME}" "${RELEASE_ASSETS[@]}" \
             --title "CapsStream ${GITHUB_REF_NAME}" \
             --notes "$(cat changelog.txt | sed 's/^/- /' | sed "s/^/ /")"
 

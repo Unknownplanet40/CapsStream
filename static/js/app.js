@@ -2375,30 +2375,42 @@ const TvContentRow = {
 
     function formatQualityBadge(item) {
       if (!item) return "HD";
+      // 1. Probed dimension ground truth if available
+      const h = item.height || item.video_info?.height;
+      const w = item.width || item.video_info?.width;
+      if (h) {
+        if (h >= 2160 || (w && w >= 3840)) return "4K Ultra HD";
+        if (h >= 1440 || (w && w >= 2560)) return "1440p";
+        if (h >= 1080 || (w && w >= 1920)) return "1080p HD";
+        if (h >= 720 || (w && w >= 1280)) return "720p HD";
+        if (h < 720) return "SD";
+      }
+
       const rawQ = (item.quality || item.resolution || item.base_label || "").toString().toLowerCase();
       const fp = (item.file_path || "").toLowerCase();
 
-      if (rawQ.includes("4k") || rawQ.includes("2160") || rawQ.includes("uhd") || fp.includes("2160p") || fp.includes("4k") || fp.includes("uhd")) {
+      // 2. Explicit target resolution tokens take priority over disc source labels
+      const has4k = rawQ.includes("4k") || rawQ.includes("2160") || fp.includes("2160p") || fp.includes("4k");
+      const has1440 = rawQ.includes("1440") || rawQ.includes("qhd") || fp.includes("1440p");
+      const has1080 = rawQ.includes("1080") || rawQ.includes("fhd") || fp.includes("1080p") || fp.includes("1080i");
+      const has720 = rawQ.includes("720") || fp.includes("720p");
+      const hasSd = rawQ.includes("480") || rawQ.includes("sd") || fp.includes("480p") || fp.includes("dvdrip");
+
+      if (has4k) return "4K Ultra HD";
+      if (has1440) return "1440p";
+      if (has1080) return "1080p HD";
+      if (has720) return "720p HD";
+      if (hasSd) return "SD";
+
+      // 3. Fallback to disc source format only if no explicit resolution was found
+      if (rawQ.includes("uhd") || fp.includes("uhd") || fp.includes("ultra hd")) {
         return "4K Ultra HD";
       }
-      if (rawQ.includes("1440") || rawQ.includes("qhd") || fp.includes("1440p") || fp.includes("2k")) {
+      if (fp.includes("2k")) {
         return "1440p";
       }
-      if (rawQ.includes("1080") || rawQ.includes("fhd") || fp.includes("1080p") || fp.includes("1080i")) {
+      if (fp.includes("bluray") || fp.includes("blu-ray")) {
         return "1080p HD";
-      }
-      if (rawQ.includes("720") || fp.includes("720p")) {
-        return "720p HD";
-      }
-      if (rawQ.includes("480") || rawQ.includes("sd") || fp.includes("480p") || fp.includes("dvdrip")) {
-        return "SD";
-      }
-      if (item.height) {
-        if (item.height >= 2160 || (item.width && item.width >= 3840)) return "4K Ultra HD";
-        if (item.height >= 1440 || (item.width && item.width >= 2560)) return "1440p";
-        if (item.height >= 1080 || (item.width && item.width >= 1920)) return "1080p HD";
-        if (item.height >= 720 || (item.width && item.width >= 1280)) return "720p HD";
-        if (item.height < 720) return "SD";
       }
       return "HD";
     }
@@ -4010,29 +4022,30 @@ const DetailPage = {
             <span v-if="media.has_multi_audio" class="multi-audio-badge" :title="media.audio_tracks ? media.audio_tracks.map(t => t.title).join(', ') : 'Multiple audio tracks available'">
               Multi-Audio
             </span>
+          </div>
 
-            <!-- Quality & Drive Badges -->
-            <template v-if="media.quality_options && media.quality_options.length > 0">
-              <span
-                v-for="opt in media.quality_options"
-                :key="opt.media_id"
-                class="quality-source-badge"
-                :class="{ 'quality-source-current': opt.is_current, 'quality-source-unmounted': !opt.is_mounted }"
-                :title="opt.file_path"
-              >
-                <i class="ph-bold ph-hard-drive" style="font-size:0.85rem"></i>
-                {{ opt.resolution }}<template v-if="opt.drive"> • {{ opt.drive }}</template><template v-if="opt.size_str"> ({{ opt.size_str }})</template>
-              </span>
-            </template>
+          <!-- Quality & Drive Badges -->
+          <div v-if="media.quality_options && media.quality_options.length > 0" class="detail-quality-row">
+            <span
+              v-for="opt in media.quality_options"
+              :key="opt.media_id"
+              class="quality-source-badge"
+              :class="{ 'quality-source-current': opt.is_current, 'quality-source-unmounted': !opt.is_mounted }"
+              :title="opt.file_path"
+            >
+              <i class="ph-bold ph-hard-drive" style="font-size:0.85rem"></i>
+              {{ opt.resolution }}<template v-if="opt.drive"> • {{ opt.drive }}</template><template v-if="opt.size_str"> ({{ opt.size_str }})</template>
+            </span>
           </div>
 
           <div v-if="media.genres" class="detail-genres">
             <span
-              v-for="genre in media.genres.split(',')"
-              :key="genre.trim()"
+              v-for="genre in media.genres.split(',').map(g => g.trim()).filter(Boolean)"
+              :key="genre"
               class="genre-tag"
-              @click="browseGenre(genre.trim())"
-            >{{ genre.trim() }}</span>
+              @click="browseGenre(genre)"
+              :title="'Browse ' + genre"
+            >{{ genre }}</span>
           </div>
 
           <p v-if="media.tagline" style="font-style:italic;color:var(--text-muted);margin-bottom:0.75rem;font-size:0.9rem">"{{ media.tagline }}"</p>
@@ -8184,6 +8197,92 @@ const SettingsPage = {
 const ShortcutsModal = {
   emits: ["close"],
   setup(props, { emit }) {
+    const searchQuery = ref("");
+    const activeTab = ref("all");
+    const searchInput = ref(null);
+
+    const categories = [
+      { id: "all", label: "All", icon: "ph-squares-four" },
+      { id: "player", label: "Player", icon: "ph-play-circle" },
+      { id: "audio_sub", label: "Audio & Subs", icon: "ph-subtitles" },
+      { id: "navigation", label: "Queue & Nav", icon: "ph-queue" },
+      { id: "global", label: "Global", icon: "ph-globe" },
+    ];
+
+    const shortcutGroups = [
+      {
+        id: "player",
+        title: "Video Player",
+        icon: "ph-play-circle",
+        items: [
+          { desc: "Play / Pause", keys: ["Space", "K"] },
+          { desc: "Toggle Fullscreen", keys: ["F"] },
+          { desc: "Mute / Unmute", keys: ["M"] },
+          { desc: "Seek 10s Backward / Forward", keys: ["←", "→"] },
+          { desc: "Seek 0% – 90% Percentage", keys: ["0", "...", "9"] },
+          { desc: "Picture-in-Picture", keys: ["P"] },
+        ]
+      },
+      {
+        id: "audio_sub",
+        title: "Audio & Subtitles",
+        icon: "ph-subtitles",
+        items: [
+          { desc: "Volume Up / Down", keys: ["↑", "↓"] },
+          { desc: "Cycle Subtitle Track", keys: ["C"] },
+          { desc: "Subtitle Menu Switcher", keys: ["S"] },
+          { desc: "Subtitle Sync (±250ms / ±1s)", keys: ["[", "]"] },
+        ]
+      },
+      {
+        id: "navigation",
+        title: "Queue & Navigation",
+        icon: "ph-queue",
+        items: [
+          { desc: "Next / Previous Chapter", keys: ["PgUp", "PgDn"] },
+          { desc: "Queue & Playlist Drawer", keys: ["Q"] },
+          { desc: "Sleep Timer (Cycle Presets)", keys: ["Z"] },
+        ]
+      },
+      {
+        id: "global",
+        title: "Navigation & Global",
+        icon: "ph-globe",
+        items: [
+          { desc: "Quick Search", keys: ["/"] },
+          { desc: "Shortcuts Cheatsheet", keys: ["?"] },
+          { desc: "Close Modal / Overlays", keys: ["Esc"] },
+        ]
+      }
+    ];
+
+    const filteredGroups = computed(() => {
+      const q = searchQuery.value.trim().toLowerCase();
+      const tab = activeTab.value;
+
+      return shortcutGroups
+        .filter(group => tab === "all" || group.id === tab)
+        .map(group => {
+          if (!q) return group;
+          const matched = group.items.filter(item => {
+            const matchDesc = item.desc.toLowerCase().includes(q);
+            const matchKey = item.keys.some(k => k.toLowerCase().includes(q));
+            return matchDesc || matchKey;
+          });
+          return { ...group, items: matched };
+        })
+        .filter(group => group.items.length > 0);
+    });
+
+    const totalCount = computed(() => {
+      return filteredGroups.value.reduce((acc, g) => acc + g.items.length, 0);
+    });
+
+    function clearSearch() {
+      searchQuery.value = "";
+      if (searchInput.value) searchInput.value.focus();
+    }
+
     // Esc closes the cheatsheet (both App-level and in-player instances)
     function onKey(e) {
       if (e.key === "Escape") {
@@ -8193,94 +8292,107 @@ const ShortcutsModal = {
     }
     onMounted(() => window.addEventListener("keydown", onKey));
     onUnmounted(() => window.removeEventListener("keydown", onKey));
+
+    return {
+      searchQuery,
+      activeTab,
+      categories,
+      filteredGroups,
+      totalCount,
+      searchInput,
+      clearSearch,
+    };
   },
   template: `
-    <div class="modal-backdrop" style="z-index: 500; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(16px);" @click.self="$emit('close')">
-      <div class="shortcuts-modal-card" @click.stop>
-        <div class="shortcuts-modal-inner">
+    <div class="modal-backdrop keyboard-shortcuts-backdrop" @click.self="$emit('close')">
+      <div class="shortcuts-modal-card keyboard-shortcuts-card" @click.stop>
+        <div class="keyboard-shortcuts-inner">
+          <!-- Header -->
           <div class="shortcuts-modal-header">
-            <div class="shortcuts-header-title">
-              <i class="ph ph-keyboard" style="color:var(--accent);font-size:1.5rem"></i>
-              <span>Keyboard Shortcuts</span>
+            <div class="shortcuts-header-left">
+              <div class="shortcuts-header-icon">
+                <i class="ph ph-keyboard"></i>
+              </div>
+              <div>
+                <div class="shortcuts-header-title">Keyboard Shortcuts</div>
+                <div class="shortcuts-header-subtitle">Quick controls & hotkey reference</div>
+              </div>
             </div>
-            <button class="shortcuts-close-btn" @click="$emit('close')" title="Close (Esc)">
-              <i class="ph ph-x"></i>
+            <div class="shortcuts-header-right">
+              <div class="shortcuts-search-wrap">
+                <i class="ph ph-magnifying-glass"></i>
+                <input
+                  ref="searchInput"
+                  type="text"
+                  v-model="searchQuery"
+                  class="shortcuts-search-input"
+                  placeholder="Search hotkeys..."
+                  aria-label="Search keyboard shortcuts"
+                />
+                <button
+                  v-if="searchQuery"
+                  class="shortcuts-search-clear"
+                  @click="clearSearch"
+                  title="Clear search"
+                >
+                  <i class="ph ph-x"></i>
+                </button>
+              </div>
+              <button class="shortcuts-close-btn" @click="$emit('close')" title="Close (Esc)">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Category Filter Bar -->
+          <div class="shortcuts-filter-bar">
+            <button
+              v-for="cat in categories"
+              :key="cat.id"
+              class="shortcuts-tab-btn"
+              :class="{ active: activeTab === cat.id }"
+              @click="activeTab = cat.id"
+            >
+              <i :class="['ph', cat.icon]"></i>
+              <span>{{ cat.label }}</span>
             </button>
           </div>
 
-          <div class="shortcuts-bento-grid">
-            <!-- Player Shortcuts -->
-            <div class="shortcuts-group">
-              <div class="shortcuts-group-title">Video Player</div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Play / Pause</span>
-                <div class="kbd-group"><kbd class="shortcut-kbd">Space</kbd> <kbd class="shortcut-kbd">K</kbd></div>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Toggle Fullscreen</span>
-                <kbd class="shortcut-kbd">F</kbd>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Mute / Unmute</span>
-                <kbd class="shortcut-kbd">M</kbd>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Seek 10s Backward / Forward</span>
-                <div class="kbd-group"><kbd class="shortcut-kbd">←</kbd> <kbd class="shortcut-kbd">→</kbd></div>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Volume Up / Down</span>
-                <div class="kbd-group"><kbd class="shortcut-kbd">↑</kbd> <kbd class="shortcut-kbd">↓</kbd></div>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Picture-in-Picture</span>
-                <kbd class="shortcut-kbd">P</kbd>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Cycle / Toggle Subtitles</span>
-                <kbd class="shortcut-kbd">C</kbd>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Next / Previous Chapter</span>
-                <div class="kbd-group"><kbd class="shortcut-kbd">PgUp</kbd> <kbd class="shortcut-kbd">PgDn</kbd></div>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Seek 0% - 90% Percentage</span>
-                <div class="kbd-group"><kbd class="shortcut-kbd">0</kbd> ... <kbd class="shortcut-kbd">9</kbd></div>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Subtitle Sync (±250ms / ±1s)</span>
-                <div class="kbd-group"><kbd class="shortcut-kbd">[</kbd> <kbd class="shortcut-kbd">]</kbd></div>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Queue & Playlist Drawer</span>
-                <kbd class="shortcut-kbd">Q</kbd>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Sleep Timer (Cycle Presets)</span>
-                <kbd class="shortcut-kbd">Z</kbd>
+          <!-- Modal Body -->
+          <div class="shortcuts-modal-body">
+            <div v-if="filteredGroups.length > 0" class="shortcuts-bento-grid">
+              <div v-for="group in filteredGroups" :key="group.id" class="shortcuts-group">
+                <div class="shortcuts-group-title">
+                  <i :class="['ph', group.icon]"></i>
+                  <span>{{ group.title }}</span>
+                </div>
+                <div v-for="item in group.items" :key="item.desc" class="shortcut-item">
+                  <span class="shortcut-desc">{{ item.desc }}</span>
+                  <div class="kbd-group">
+                    <kbd v-for="(k, idx) in item.keys" :key="idx" class="shortcut-kbd">{{ k }}</kbd>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <!-- Navigation & Global -->
-            <div class="shortcuts-group">
-              <div class="shortcuts-group-title">Navigation & Global</div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Quick Search</span>
-                <kbd class="shortcut-kbd">/</kbd>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Shortcuts Cheatsheet</span>
-                <kbd class="shortcut-kbd">?</kbd>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Close Modal</span>
-                <kbd class="shortcut-kbd">Esc</kbd>
-              </div>
-              <div class="shortcut-item">
-                <span class="shortcut-desc">Subtitle Menu Switcher</span>
-                <kbd class="shortcut-kbd">S</kbd>
-              </div>
+            <!-- Empty Search State -->
+            <div v-else class="shortcuts-empty">
+              <i class="ph ph-magnifying-glass"></i>
+              <div>No shortcuts matching "<strong>{{ searchQuery }}</strong>"</div>
+              <button class="btn btn-sm btn-ghost" @click="clearSearch(); activeTab = 'all'" style="margin-top: 8px;">
+                Reset filters
+              </button>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div class="shortcuts-modal-footer">
+            <div class="shortcuts-tip">
+              <i class="ph ph-lightbulb"></i>
+              <span>Press <kbd class="shortcut-kbd" style="margin: 0 4px; display: inline-flex;">?</kbd> anywhere to toggle this cheatsheet</span>
+            </div>
+            <div style="font-size: 0.76rem; color: var(--text-muted); white-space: nowrap;">
+              {{ totalCount }} shortcuts shown
             </div>
           </div>
         </div>

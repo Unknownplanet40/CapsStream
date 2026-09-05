@@ -3,9 +3,13 @@ name: Build Android TV Companion APK
 on:
   workflow_dispatch:
   push:
-    paths:
-      - 'clients/android-tv/**'
-      - '.github/workflows/build-android-tv.yml'
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build-apk:

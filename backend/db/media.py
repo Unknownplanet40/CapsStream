@@ -555,21 +555,40 @@ def get_media_resolution(item):
     ]).lower()
     file_size = float(item.get("file_size") or 0)
 
-    # 1. Explicit markers (Highest resolution first)
-    if any(marker in text for marker in ["8k", "4320p", "7680x4320", "8k uhd"]):
+    # 1. Highest priority: explicit target resolution tokens
+    has_8k = any(marker in text for marker in ["8k", "4320p", "7680x4320", "8k uhd"])
+    has_4k = any(marker in text for marker in ["4k", "2160p", "3840x2160", "4096x2160"])
+    has_1440p = any(marker in text for marker in ["1440p", "2560x1440", "qhd", "quad hd"])
+    has_1080p = any(marker in text for marker in ["1080p", "1080i", "1920x1080", "fhd", "full hd"])
+    has_720p = any(marker in text for marker in ["720p", "1280x720"])
+    has_sd = any(marker in text for marker in ["576p", "480p", "854x480", "360p", "640x360", "dvdrip"])
+
+    if has_8k:
         return "8K"
-    if any(marker in text for marker in ["4k", "2160p", "uhd", "3840x2160", "4096x2160", "ultra hd"]):
+    if has_4k:
         return "4K"
-    if any(marker in text for marker in ["1440p", "2560x1440", "qhd", "2k", "quad hd"]):
+    if has_1440p:
         return "1440p"
-    if any(marker in text for marker in ["1080p", "1920x1080", "fhd", "full hd"]):
+    if has_1080p:
         return "1080p"
-    if any(marker in text for marker in ["720p", "1280x720", "hd"]):
+    if has_720p:
         return "720p"
-    if any(marker in text for marker in ["576p", "480p", "854x480", "360p", "640x360", "sd", "dvd"]):
+    if has_sd:
         return "SD"
 
-    # 2. Fallback based on file size
+    # 2. Disc/source format indicators without explicit resolution (e.g. UHD BluRay without 1080p tag)
+    if any(marker in text for marker in ["uhd", "ultra hd"]):
+        return "4K"
+    if any(marker in text for marker in ["bluray", "blu-ray", "brrip", "bdrip"]):
+        return "1080p"
+    if "2k" in text:
+        return "1440p"
+    if "hd" in text:
+        return "720p"
+    if "dvd" in text or "sd" in text:
+        return "SD"
+
+    # 3. Fallback based on file size
     if file_size >= 3.5 * 1024 * 1024 * 1024:
         return "4K"
     elif file_size >= 1.2 * 1024 * 1024 * 1024:

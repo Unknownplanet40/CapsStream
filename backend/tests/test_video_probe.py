@@ -207,6 +207,39 @@ class TestVideoProbe(unittest.TestCase):
         health = probe_encoding_health(os.path.join(self.test_dir, "missing.mp4"))
         self.assertFalse(health["is_suspicious"])
 
+    def test_get_media_resolution_uhd_bluray(self):
+        """Verify that UHD BluRay encodes with explicit 1080p/720p tags are not misidentified as 4K."""
+        from backend.db.media import get_media_resolution
+
+        # 1080p encode from UHD BluRay source
+        item_1080p = {
+            "file_path": "Movies/Venom The Last Dance (2024) [UHD BLURAY] [1080p] [BluRay]/Venom.The.Last.Dance.2024.UHD.BLURAY.1080p.BluRay.x264.mp4",
+            "title": "Venom: The Last Dance",
+            "file_size": 2155910350,
+        }
+        self.assertEqual(get_media_resolution(item_1080p), "1080p")
+
+        # 720p encode from UHD BluRay source
+        item_720p = {
+            "file_path": "Movies/Movie (2024) [UHD BLURAY] [720p]/Movie.720p.mkv",
+            "file_size": 1000000000,
+        }
+        self.assertEqual(get_media_resolution(item_720p), "720p")
+
+        # True 4K UHD BluRay
+        item_4k = {
+            "file_path": "Movies/Dune Part Two (2024) [2160p] [UHD BLURAY]/Dune.2024.2160p.UHD.BluRay.x265.mkv",
+            "file_size": 15000000000,
+        }
+        self.assertEqual(get_media_resolution(item_4k), "4K")
+
+        # UHD BluRay with no explicit resolution tag defaults to 4K
+        item_uhd_raw = {
+            "file_path": "Movies/Oppenheimer (2023) [UHD BLURAY]/Oppenheimer.UHD.BluRay.mkv",
+            "file_size": 25000000000,
+        }
+        self.assertEqual(get_media_resolution(item_uhd_raw), "4K")
+
 
 if __name__ == "__main__":
     unittest.main()
