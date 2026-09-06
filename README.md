@@ -213,14 +213,16 @@ A native Android / Android TV app that connects to your CapsStream server over y
 
 **Getting the APK:**
 
-1. Go to the [**Actions tab**](https://github.com/Unknownplanet40/CapsStream/actions/workflows/build-android-tv.yml) on GitHub.
-2. Click the latest successful **Build Android TV Companion APK** run.
-3. Scroll down to **Artifacts** and download **`CapsStream-AndroidTV-Debug`**.
-4. Extract the zip and install the `.apk` on your Android device (enable *Install from unknown sources* in settings).
+1. Go to the [**Releases**](https://github.com/Unknownplanet40/CapsStream/releases) section on GitHub.
+2. Download the latest `CapsStream-AndroidTV-*.apk` from the release assets.
+3. Install the `.apk` on your Android TV or Android device (enable *Install from unknown sources* in system settings).
+
+*(Bleeding-edge pre-release builds are also available from the [Actions tab](https://github.com/Unknownplanet40/CapsStream/actions/workflows/build-android-tv.yml) under workflow artifacts).*
 
 **Connecting to your server:**
 
-> ⚠️ Your CapsStream server must be bound to `0.0.0.0` (not `127.0.0.1`) so it is reachable on your local network.
+> [!IMPORTANT]
+> Your CapsStream server must be bound to `0.0.0.0` (not `127.0.0.1`) so it is reachable on your local network.
 
 Open `config.json` and set:
 ```json

@@ -12,14 +12,16 @@ CapsStream is a portable, self-hosted personal media server for movies, TV serie
 - FFmpeg/FFprobe for probing, subtitle extraction, transcoding, thumbnails, and hardware acceleration.
 - Vue 3-style frontend JavaScript, HTML templates, CSS, and service-worker assets under `static/` and `templates/`.
 - External integrations include TMDb, AniSkip, OpenSubtitles, and GitHub APIs.
-- Windows-first portable launchers: `start.bat`, `Start CapsStream Silent.vbs`, and `silent_launcher.py`.
+- Windows-first portable launchers: `start.bat`, `Start CapsStream Silent.vbs`, `silent_launcher.py`, and native Win32 system tray (`backend/tray.py`).
+- Android TV / Google TV native companion client (`clients/android-tv/`) with automated CI builds and release packaging.
 
 ## Architecture
 
 - `app.py` is the Flask application entry point: it initializes configuration, secrets, rate limiting, network inspection, database state, and blueprints.
-- `backend/` contains domain services: media scanning/probing, matching, subtitles, intro detection, kids filtering, settings, updating, and shared utilities.
+- `backend/` contains domain services: media scanning/probing, matching, subtitles, intro detection, kids filtering, settings, updating, native tray, and shared utilities.
 - `backend/db/` owns the SQLite schema, migrations, and repositories for media, playback, profiles, playlists, collections, statistics, and achievements.
 - `backend/routes/` is the canonical blueprint implementation for admin, library, media, profiles, social, and streaming HTTP APIs. The top-level `routes/` package is retained as a compatibility/delegation surface.
+- `clients/android-tv/` contains the Android TV Leanback companion app project built with Gradle/Kotlin.
 - `static/` and `templates/` provide the single-page browser UI, service worker, styling, icons, sound effects, and HTML shell.
 - `data/` holds per-install runtime state, the SQLite database, metadata/artwork, profiles, backups, and generated secrets; it is intentionally ignored by Git.
 - Tests live primarily in `backend/tests/` and cover services, migrations, middleware, and route behavior.
@@ -54,10 +56,12 @@ CapsStream is a portable, self-hosted personal media server for movies, TV serie
 
 ## Current Focus
 
-- Recent work is centered on database history migration behavior, especially grouping duplicate movie-quality records, with the focused migration test passing.
-- Modified files currently include database statistics/migration logic, admin and middleware routes, related tests, `app.py`, and frontend application JavaScript; inspect the working tree before extending that work.
-- The codebase knowledge graph is indexed and ready under project name `C-Users-ryanj-OneDrive-Desktop-CapsStream` with 1,722 nodes and 7,812 edges.
-- We are currently remaking the player.
+- Recent work is centered on player modernization, UI glassmorphic detailing, responsive keyboard shortcuts, and Android TV companion builds.
+- Added real-time searchable keyboard shortcuts cheatsheet (`.keyboard-shortcuts-card`) elevated above the top navigation bar.
+- Modernized genre tags into sleek interactive chips and placed video quality badges in a dedicated detail row.
+- Enforced video resolution token priority (e.g. 1080p/720p UHD BluRay encodes labeled accurately instead of defaulting to 4K).
+- Hardened `get_all_profiles()` with multi-tiered fallback queries and defaults against legacy/unmigrated SQLite database schemas.
+- Automated Android TV Companion APK compilation (`clients/android-tv/`) on push to `main` and versioned release asset packaging.
 
 Whenever the user asks to commit, release, or save changes in this project, follow this exact workflow:
 
@@ -71,7 +75,7 @@ Whenever the user asks to commit, release, or save changes in this project, foll
 
 3. **NEVER Update Version Files Manually**
    - Do NOT edit `VERSION` or `version.json`. Versions are managed automatically by `.github/workflows/auto-release.yml`, which runs on every push to `main`.
-   - The workflow reads conventional-commit subjects since the last tag, bumps the version, commits `chore(release): ... [skip ci]`, tags it (`vX.Y.Z.W`), which triggers `release.yml` to build and publish the update zip.
+   - The workflow reads conventional-commit subjects since the last tag, bumps the version, commits `chore(release): ... [skip ci]`, tags it (`vX.Y.Z.W`), and publishes the update zip and companion APK (`CapsStream-AndroidTV-${NEW_VER}.apk`) directly to GitHub Release assets.
    - Bump mapping:
      - `feat:` / `feat(...)` → minor bump
      - `fix:` / `fix(...)` → patch bump
@@ -132,5 +136,4 @@ Whenever the user asks to commit, release, or save changes in this project, foll
    - After pushing, report:
      - the commit hash
      - push status
-     - the release CI will cut (e.g. “next auto-release: v2.21.6.0”)
-```
+     - the release CI will cut (e.g. “next auto-release: v2.57.3.0”)

@@ -113,15 +113,13 @@ jobs:
       - name: Build Android TV Companion APK
         working-directory: clients/android-tv
         run: |
-          gradle assembleDebug --stacktrace
           TAG="${GITHUB_REF_NAME#v}"
+          gradle assembleDebug -PversionName="${TAG}" --stacktrace
           APK_SRC="app/build/outputs/apk/debug/app-debug.apk"
           if [ -f "$APK_SRC" ]; then
             cp "$APK_SRC" "../../CapsStream-AndroidTV-${TAG}.apk"
-            cp "$APK_SRC" "../../CapsStream-AndroidTV.apk"
             cd ../..
             sha256sum "CapsStream-AndroidTV-${TAG}.apk" >> sha256sums.txt
-            sha256sum "CapsStream-AndroidTV.apk" >> sha256sums.txt
           else
             echo "::warning::Android TV APK not found at $APK_SRC"
           fi
