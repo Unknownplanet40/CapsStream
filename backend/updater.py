@@ -446,6 +446,7 @@ import time
 
 pid = int(sys.argv[1])
 root = sys.argv[2]
+launcher_pid = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3].isdigit() else 0
 log_path = os.path.join(root, "data", "update_restart.log")
 today_log_name = time.strftime("capsstream_%Y%m%d.log")
 today_log_path = os.path.join(root, "logs", today_log_name)
@@ -464,6 +465,8 @@ def log(msg):
 
 
 def pid_alive(target):
+    if not target or target <= 0:
+        return False
     SYNCHRONIZE = 0x00100000
     WAIT_TIMEOUT = 0x00000102
     k32 = ctypes.windll.kernel32
@@ -485,6 +488,33 @@ while pid_alive(pid):
         log("old server still running after 120s - giving up (will not double-start)")
         sys.exit(1)
 log(f"server exited after {waited:.0f}s")
+
+if launcher_pid and pid_alive(launcher_pid):
+    log(f"waiting for old launcher pid {launcher_pid} to exit")
+    waited_l = 0
+    while pid_alive(launcher_pid):
+        time.sleep(0.3)
+        waited_l += 0.3
+        if waited_l > 15:
+            log(f"old launcher pid {launcher_pid} did not exit after 15s - terminating")
+            try:
+                subprocess.run(["taskkill", "/PID", str(launcher_pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+            break
+    log(f"launcher exited after {waited_l:.1f}s")
+
+if os.name == "nt":
+    try:
+        SYNCHRONIZE = 0x00100000
+        k32 = ctypes.windll.kernel32
+        h_mut = k32.OpenMutexW(SYNCHRONIZE, False, "CapsStream_Launcher_Instance_Mutex")
+        if h_mut:
+            log("waiting for existing silent_launcher mutex to release")
+            k32.WaitForSingleObject(h_mut, 10000)
+            k32.CloseHandle(h_mut)
+    except Exception:
+        pass
 
 sys.path.insert(0, root)
 os.chdir(root)
@@ -557,8 +587,23 @@ def spawn_restart_helper():
         # Fully invisible — DETACHED_PROCESS alone still lets console-host
         # helpers (python.exe) flash a window.
         flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+
+    launcher_pid = os.environ.get("CAPSSTREAM_LAUNCHER_PID") or ""
+    if not launcher_pid:
+        pid_file = os.path.join(BASE_DIR, "data", "launcher.pid")
+        if os.path.isfile(pid_file):
+            try:
+                with open(pid_file, encoding="utf-8") as f:
+                    launcher_pid = f.read().strip()
+            except Exception:
+                pass
+
+    cmd = [sys.executable, helper_path, str(os.getpid()), BASE_DIR]
+    if launcher_pid and launcher_pid.isdigit():
+        cmd.append(str(launcher_pid))
+
     subprocess.Popen(
-        [sys.executable, helper_path, str(os.getpid()), BASE_DIR],
+        cmd,
         cwd=BASE_DIR,
         creationflags=flags,
         close_fds=True,

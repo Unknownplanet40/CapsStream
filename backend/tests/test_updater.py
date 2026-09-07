@@ -68,6 +68,18 @@ class TestUpdater(unittest.TestCase):
         self.assertEqual(info["version"], "2.25.0.0")
         self.assertIn("What's New modal", info["body"])
 
+    def test_spawn_restart_helper_passes_launcher_pid(self):
+        """Verify spawn_restart_helper detects CAPSSTREAM_LAUNCHER_PID and passes it to the helper."""
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"CAPSSTREAM_LAUNCHER_PID": "4242"}), \
+             patch("subprocess.Popen") as mock_popen, \
+             patch("builtins.open", unittest.mock.mock_open()):
+            helper_path, log_path = updater.spawn_restart_helper()
+            self.assertTrue(mock_popen.called)
+            args = mock_popen.call_args[0][0]
+            self.assertEqual(args[-1], "4242")
+            self.assertEqual(args[2], str(os.getpid()))
+
 
 if __name__ == "__main__":
     unittest.main()

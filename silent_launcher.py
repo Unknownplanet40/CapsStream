@@ -245,6 +245,7 @@ def start_server(cfg):
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
+    env["CAPSSTREAM_LAUNCHER_PID"] = str(os.getpid())
     proc = subprocess.Popen(
         [PYTHONW, APP_SCRIPT],
         cwd=ROOT,
@@ -496,17 +497,26 @@ def kill_tree(pid):
 _LAUNCHER_MUTEX = None
 
 
-def _acquire_launcher_mutex():
+def _acquire_launcher_mutex(timeout_sec=0):
     """Ensure only one instance of silent_launcher.py runs at a time."""
     global _LAUNCHER_MUTEX
     if os.name != "nt":
         return True
     try:
         ERROR_ALREADY_EXISTS = 183
-        _LAUNCHER_MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "CapsStream_Launcher_Instance_Mutex")
+        WAIT_OBJECT_0 = 0x00000000
+        WAIT_ABANDONED = 0x00000080
+        handle = ctypes.windll.kernel32.CreateMutexW(None, True, "CapsStream_Launcher_Instance_Mutex")
         last_error = ctypes.windll.kernel32.GetLastError()
         if last_error == ERROR_ALREADY_EXISTS:
+            if timeout_sec > 0:
+                wait_res = ctypes.windll.kernel32.WaitForSingleObject(handle, int(timeout_sec * 1000))
+                if wait_res in (WAIT_OBJECT_0, WAIT_ABANDONED):
+                    _LAUNCHER_MUTEX = handle
+                    return True
+            ctypes.windll.kernel32.CloseHandle(handle)
             return False
+        _LAUNCHER_MUTEX = handle
         return True
     except Exception:
         return True
@@ -517,8 +527,12 @@ def main():
     log("=" * 50)
     log("CapsStream silent launcher starting")
 
+    from_restart = "--restarted" in sys.argv or "--from-restart" in sys.argv or "--no-browser" in sys.argv
+
     # Guard against duplicate launcher instances
-    if not _acquire_launcher_mutex():
+    # When starting from restart, allow a grace period for the exiting launcher instance to release the mutex
+    mutex_timeout = 15 if from_restart else 0
+    if not _acquire_launcher_mutex(timeout_sec=mutex_timeout):
         cfg = read_config()
         url, _, _ = server_url(cfg)
         log("Another silent launcher instance is already active — focusing existing window and exiting")
@@ -527,7 +541,12 @@ def main():
             bring_window_to_foreground(hwnd)
         sys.exit(0)
 
-    from_restart = "--restarted" in sys.argv or "--from-restart" in sys.argv or "--no-browser" in sys.argv
+    try:
+        os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)
+        with open(os.path.join(ROOT, "data", "launcher.pid"), "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass
 
     if not os.path.isfile(PYTHONW):
         fail(f"pythonw.exe not found at:\n{PYTHONW}")
@@ -698,6 +717,12 @@ def main():
 
             time.sleep(1.5)
     finally:
+        try:
+            pid_file = os.path.join(ROOT, "data", "launcher.pid")
+            if os.path.isfile(pid_file):
+                os.remove(pid_file)
+        except Exception:
+            pass
         log("Cleaning up launcher and stopping services")
         if tray:
             tray.stop()
