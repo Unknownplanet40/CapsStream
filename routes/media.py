@@ -16,7 +16,7 @@ from backend.db import (
     get_media_quality_options, search_media as db_search_media, get_unique_shows,
     get_recently_added, get_top_rated, get_by_genre, get_all_genres,
     get_random_pick, get_continue_watching, get_profile_recommendations, get_similar_media, get_progress, is_favorite,
-    get_unmatched, upsert_media,
+    get_unmatched, get_media_needing_recache, upsert_media,
     delete_media_by_id, delete_media_by_tmdb, delete_media_by_title_and_type,
 )
 
@@ -647,6 +647,13 @@ def api_unmatched():
     return jsonify(get_unmatched())
 
 
+@media_bp.route("/api/media/needs-recache", methods=["GET"])
+def api_media_needs_recache():
+    require_admin()
+    return jsonify(get_media_needing_recache())
+
+
+
 @media_bp.route("/api/tmdb/search", methods=["GET"])
 def api_tmdb_search():
     query = request.args.get("query", "").strip()
@@ -664,6 +671,7 @@ def api_override():
     require_admin()
     data = request.json or {}
     media_id = data.get("media_id")
+    media_ids = data.get("media_ids")
     old_tmdb_id = data.get("old_tmdb_id")
     tmdb_id = data.get("tmdb_id")
     mtype = data.get("type", "movie")
@@ -679,13 +687,21 @@ def api_override():
     from backend.db import get_conn
     conn = get_conn()
     rows = []
-    if old_tmdb_id:
+    if media_ids and isinstance(media_ids, list):
+        valid_ids = [int(x) for x in media_ids if str(x).isdigit()]
+        if valid_ids:
+            placeholders = ",".join("?" for _ in valid_ids)
+            rows = conn.execute(f"SELECT * FROM media WHERE id IN ({placeholders})", valid_ids).fetchall()
+    if not rows and old_tmdb_id:
         rows = conn.execute("SELECT * FROM media WHERE tmdb_id=? AND type=?", (old_tmdb_id, mtype)).fetchall()
     if not rows and media_id:
         row = conn.execute("SELECT * FROM media WHERE id=?", (media_id,)).fetchone()
         if row:
-            if row["type"] in ("series", "anime") and row["tmdb_id"]:
-                rows = conn.execute("SELECT * FROM media WHERE tmdb_id=? AND type=?", (row["tmdb_id"], row["type"])).fetchall()
+            if row["type"] in ("series", "anime"):
+                if row["tmdb_id"]:
+                    rows = conn.execute("SELECT * FROM media WHERE tmdb_id=? AND type=?", (row["tmdb_id"], row["type"])).fetchall()
+                else:
+                    rows = conn.execute("SELECT * FROM media WHERE title=? AND type=? AND tmdb_matched=0", (row["title"], row["type"])).fetchall()
             else:
                 rows = [row]
     if not rows and media_id:

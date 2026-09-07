@@ -269,6 +269,69 @@ class TestRouteMedia(unittest.TestCase):
         self.assertEqual(results[0]["still_path"], "/still2.jpg")
         self.assertEqual(results[0]["ep_title"], "Cat's in the Bag")
 
+    @patch("backend.routes.media.require_admin")
+    @patch("backend.db.media.get_conn")
+    @patch("backend.db.media.enrich_mounted_list", side_effect=lambda items: items)
+    def test_api_unmatched_grouped(self, mock_enrich, mock_conn, mock_auth):
+        """Verify GET /api/unmatched groups multi-episode unmatched shows by title and type."""
+        mock_cursor = mock_conn.return_value.execute.return_value
+        mock_cursor.fetchall.return_value = [
+            {"id": 1, "title": "Solo Leveling", "type": "anime", "year": 2024, "season": 1, "episode": 1, "file_path": "C:/anime/ep1.mkv", "file_size": 1000},
+            {"id": 2, "title": "Solo Leveling", "type": "anime", "year": 2024, "season": 1, "episode": 2, "file_path": "C:/anime/ep2.mkv", "file_size": 2000},
+            {"id": 3, "title": "Random Movie", "type": "movie", "year": 2021, "season": None, "episode": None, "file_path": "C:/movies/m.mkv", "file_size": 5000},
+        ]
+
+        resp = self.client.get("/api/unmatched")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(len(data), 2)  # Grouped into Solo Leveling and Random Movie
+
+        solo = next(x for x in data if x["title"] == "Solo Leveling")
+        self.assertEqual(solo["file_count"], 2)
+        self.assertEqual(solo["file_size"], 3000)
+        self.assertEqual(solo["ids"], [1, 2])
+
+        movie = next(x for x in data if x["title"] == "Random Movie")
+        self.assertEqual(movie["file_count"], 1)
+        self.assertEqual(movie["file_size"], 5000)
+        self.assertEqual(movie["ids"], [3])
+
+    @patch("backend.routes.media.require_admin")
+    @patch("backend.routes.media.upsert_media")
+    @patch("backend.matcher.fetch_season_episodes")
+    @patch("backend.matcher.override_match")
+    @patch("backend.db.get_conn")
+    def test_api_override_batch_media_ids(self, mock_conn, mock_override, mock_fetch_eps, mock_upsert, mock_auth):
+        """Verify POST /api/override matches all episodes passed in media_ids."""
+        mock_override.return_value = {
+            "title": "Solo Leveling",
+            "poster_path": "anime/posters/solo.jpg",
+            "backdrop_path": "anime/backdrops/solo.jpg",
+            "year": 2024
+        }
+        mock_cursor = mock_conn.return_value.execute.return_value
+        mock_cursor.fetchall.return_value = [
+            {"id": 1, "title": "Solo Leveling", "type": "anime", "season": 1, "episode": 1, "file_path": "C:/anime/ep1.mkv", "ep_title": None},
+            {"id": 2, "title": "Solo Leveling", "type": "anime", "season": 1, "episode": 2, "file_path": "C:/anime/ep2.mkv", "ep_title": None},
+        ]
+        mock_fetch_eps.return_value = [
+            {"episode_number": 1, "name": "I'm Used to It"},
+            {"episode_number": 2, "name": "If I Had One More Chance"}
+        ]
+
+        payload = {
+            "media_id": 1,
+            "media_ids": [1, 2],
+            "tmdb_id": 123456,
+            "type": "anime"
+        }
+        resp = self.client.post("/api/override", json=payload)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("ok"))
+        self.assertEqual(data.get("updated"), 2)
+        self.assertEqual(mock_upsert.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

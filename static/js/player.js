@@ -55,7 +55,7 @@ const PlayerPage = {
 
       <!-- Minimal Achievement Pill (left side, never covers controls) -->
       <transition name="fade">
-        <div v-if="playerAch" class="player-achv-pill" :class="{ 'kids-achv-pill': playerAch.isKids }" :style="{ bottom: controlsHidden ? '40px' : '120px' }">
+        <div v-if="playerAch" class="player-achv-pill" :class="{ 'kids-achv-pill': playerAch.isKids }" :style="{ bottom: controlsHidden ? '40px' : '135px' }">
           <i :class="'ph-bold ' + (playerAch.icon && playerAch.icon.startsWith('ph-') ? playerAch.icon : 'ph-trophy')" style="font-size:1.15rem;margin-right:6px"></i>
           <span>{{ playerAch.title }}</span>
         </div>
@@ -193,7 +193,7 @@ const PlayerPage = {
       <div v-if="showResumeModal" class="resume-backdrop-blocker" @click.stop.prevent></div>
 
       <!-- Controls Overlay -->
-      <div class="custom-player-controls" :class="{ hidden: controlsHidden && !showResumeModal && !playerError }" @touchstart="showControls" @mousemove="showControls" @click.stop="showControls">
+      <div class="custom-player-controls" :class="{ hidden: controlsHidden && !showResumeModal && !playerError && !activeDynamicNotice }" @touchstart="showControls" @mousemove="showControls" @click.stop="showControls">
         <!-- Top Bar (Always Clickable) -->
         <div class="custom-player-top" style="z-index: 500; position: relative; pointer-events: auto;">
           <div style="display:flex;align-items:center;gap:8px">
@@ -207,13 +207,56 @@ const PlayerPage = {
               <i class="ph ph-keyboard" style="font-size:1.25rem"></i>
             </div>
           </div>
-          <div>
+          <div class="player-top-divider"></div>
+          <div class="player-title-box" style="min-width:0;flex:1;overflow:hidden;margin-inline-end:10px">
             <div class="player-title">{{ media?.title }}</div>
             <div v-if="media?.ep_title" class="player-episode">
               S{{ (media.season||'').toString().padStart(2,'0') }}E{{ (media.episode||'').toString().padStart(2,'0') }} — {{ media.ep_title }}
             </div>
           </div>
         </div>
+
+        <!-- Dynamic Island Notification Capsule (Above Bottom Dock) -->
+        <transition name="dynamic-island-anim" @after-leave="onCodecNoticeAfterLeave">
+          <div
+            v-if="activeDynamicNotice"
+            class="player-dynamic-island"
+            :class="'notice-' + activeDynamicNotice.type"
+            @click.stop
+          >
+            <div class="dynamic-island-icon-badge">
+              <i :class="activeDynamicNotice.icon"></i>
+            </div>
+            <div class="dynamic-island-body">
+              <div class="dynamic-island-title-row">
+                <span class="dynamic-island-title">{{ activeDynamicNotice.title }}</span>
+                <div v-if="activeDynamicNotice.tags && activeDynamicNotice.tags.length" class="dynamic-island-tags">
+                  <span v-for="tag in activeDynamicNotice.tags" :key="tag" class="dynamic-island-tag">{{ tag }}</span>
+                </div>
+              </div>
+              <div class="dynamic-island-text">{{ activeDynamicNotice.text }}</div>
+            </div>
+            <div class="dynamic-island-actions" v-if="activeDynamicNotice.action || activeDynamicNotice.dismiss">
+              <button
+                v-if="activeDynamicNotice.action"
+                class="dynamic-island-btn-action"
+                @click="activeDynamicNotice.action.handler"
+                :title="activeDynamicNotice.action.label"
+              >
+                <i v-if="activeDynamicNotice.action.icon" :class="activeDynamicNotice.action.icon"></i>
+                <span>{{ activeDynamicNotice.action.label }}</span>
+              </button>
+              <button
+                v-if="activeDynamicNotice.dismiss"
+                class="dynamic-island-btn-dismiss"
+                @click="activeDynamicNotice.dismiss"
+                title="Dismiss"
+              >
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+          </div>
+        </transition>
 
         <!-- Bottom Bar (Disabled when showResumeModal is true) -->
         <div class="custom-player-bottom" :class="{ 'resume-active-disabled': showResumeModal }">
@@ -235,22 +278,40 @@ const PlayerPage = {
                @mouseenter="onSeekbarMouseEnter"
                @mousemove="hoverSeekbar"
                @mouseleave="onSeekbarMouseLeave"
+               @touchstart.stop.prevent="onSeekbarTouchStart"
+               @touchmove.stop.prevent="onSeekbarTouchMove"
+               @touchend.stop.prevent="onSeekbarTouchEnd"
+               @touchcancel.stop.prevent="onSeekbarTouchEnd"
                id="player-seekbar">
-            <div v-if="showHoverTooltip" class="seekbar-tooltip" :class="{ 'has-preview': thumbSheet }" :style="{ left: hoverTooltipPos + 'px' }">
+            <div
+              v-if="showHoverTooltip"
+              class="seekbar-tooltip"
+              :class="{ 'has-preview': thumbSheet, 'is-touch-scrub': isTouchScrubbing }"
+              :style="{ left: hoverTooltipPosClamped + 'px' }"
+            >
               <div
                 v-if="thumbSheet"
                 class="seekbar-thumb-preview"
                 :style="thumbCellStyle(hoverTooltipTime)"
               ></div>
-              <div v-if="hoverChapterTitle" class="seekbar-chapter-title">{{ hoverChapterTitle }}</div>
-              {{ formatTime(hoverTooltipTime) }}
+              <div class="seekbar-tooltip-meta">
+                <div v-if="hoverChapterTitle" class="seekbar-chapter-title">{{ hoverChapterTitle }}</div>
+                <div class="seekbar-time-row">
+                  <span class="seekbar-time-badge">{{ formatTime(hoverTooltipTime) }}</span>
+                  <span
+                    v-if="hoverTimeDeltaStr"
+                    class="seekbar-time-delta"
+                    :class="{ positive: hoverTimeDeltaSec > 0, negative: hoverTimeDeltaSec < 0 }"
+                  >{{ hoverTimeDeltaStr }}</span>
+                </div>
+              </div>
             </div>
             <div class="seekbar-track">
-              <!-- Seekbar Segment Markers (Recap / Intro / Outro) -->
-              <div v-if="skipTimes.recap" class="seekbar-segment recap-segment" :style="getSegmentStyle(skipTimes.recap)"></div>
-              <div v-if="skipTimes.op" class="seekbar-segment op-segment" :style="getSegmentStyle(skipTimes.op)"></div>
-              <div v-if="skipTimes.ed" class="seekbar-segment ed-segment" :style="getSegmentStyle(skipTimes.ed)"></div>
-              <div v-if="skipTimes.preview" class="seekbar-segment preview-segment" :style="getSegmentStyle(skipTimes.preview)"></div>
+              <!-- Seekbar Segment Markers (Recap / Intro / Outro / Preview) -->
+              <div v-if="skipTimes.recap" class="seekbar-segment recap-segment" :style="getSegmentStyle(skipTimes.recap)" :title="'Recap: ' + formatSecToTime(skipTimes.recap.start) + ' - ' + formatSecToTime(skipTimes.recap.end)"></div>
+              <div v-if="skipTimes.op" class="seekbar-segment op-segment" :style="getSegmentStyle(skipTimes.op)" :title="'Intro: ' + formatSecToTime(skipTimes.op.start) + ' - ' + formatSecToTime(skipTimes.op.end)"></div>
+              <div v-if="skipTimes.ed" class="seekbar-segment ed-segment" :style="getSegmentStyle(skipTimes.ed)" :title="'Credits / Outro: ' + formatSecToTime(skipTimes.ed.start) + ' - ' + formatSecToTime(skipTimes.ed.end)"></div>
+              <div v-if="skipTimes.preview" class="seekbar-segment preview-segment" :style="getSegmentStyle(skipTimes.preview)" :title="'Preview: ' + formatSecToTime(skipTimes.preview.start) + ' - ' + formatSecToTime(skipTimes.preview.end)"></div>
               <!-- Embedded Chapter Ticks -->
               <div
                 v-for="ch in visibleChapters"
@@ -290,7 +351,7 @@ const PlayerPage = {
                   <i :class="isMuted || volume === 0 ? 'ph-fill ph-speaker-x' : volume < 0.5 ? 'ph-fill ph-speaker-low' : 'ph-fill ph-speaker-high'"></i>
                 </button>
                 <div class="volume-slider-container">
-                  <input type="range" class="volume-slider" min="0" max="2" step="0.05" :value="isMuted ? 0 : volume" @input="onVolumeInput" id="ctrl-volume-slider" />
+                  <input type="range" class="volume-slider" min="0" max="2" step="0.05" :value="isMuted ? 0 : volume" @input="onVolumeInput" id="ctrl-volume-slider" :style="{ background: 'linear-gradient(to right, var(--accent, #6366f1) ' + (isMuted ? 0 : Math.min(100, (volume / 2) * 100)) + '%, rgba(255, 255, 255, 0.25) ' + (isMuted ? 0 : Math.min(100, (volume / 2) * 100)) + '%)' }" />
                 </div>
               </div>
 
@@ -300,8 +361,8 @@ const PlayerPage = {
               </div>
             </div>
 
-            <!-- Ends-At Clock (center of control bar) -->
-            <div class="ctrl-end-time" v-if="endClockTime" :id="'ctrl-end-time'">
+            <!-- Ends-At Clock (center of control bar - hidden on mobile) -->
+            <div class="ctrl-end-time hide-on-mobile" v-if="endClockTime" :id="'ctrl-end-time'">
               <i class="ph ph-moon-stars"></i>
               <span>Ends at <strong>{{ endClockTime }}</strong></span>
             </div>
@@ -346,9 +407,8 @@ const PlayerPage = {
                 </transition>
               </div>
 
-              <!-- Audio Track Menu (Only shown if video has multiple audio tracks) -->
-              <!-- Audio Track & Sound Enhancer Menu -->
-              <div class="hide-on-mobile" style="position:relative">
+              <!-- Audio Track & Sound Enhancer Menu (Only shown in controller if multiple audio tracks) -->
+              <div class="hide-on-mobile" style="position:relative" v-if="audioTracks && audioTracks.length > 1">
                 <button class="ctrl-btn" @click="showAudioMenu = !showAudioMenu; showSubMenu = false; showSpeedMenu = false; showQualityMenu = false; showSleepMenu = false" title="Audio Track & Sound Enhancer" id="ctrl-audio" style="font-size:0.85rem;font-weight:700">
                   <i class="ph ph-microphone-stage" style="font-size:1.35rem"></i>
                 </button>
@@ -460,35 +520,6 @@ const PlayerPage = {
                 </div>
               </div>
 
-              <!-- Chapters Menu Button (Desktop) -->
-              <div class="hide-on-mobile" style="position:relative" v-if="chapters && chapters.length > 0">
-                <button
-                  class="ctrl-btn"
-                  :class="{ active: showChapterMenu }"
-                  @click="showChapterMenu = !showChapterMenu; showQualityMenu = false; showSubMenu = false; showAudioMenu = false"
-                  title="Chapters"
-                  id="ctrl-chapters"
-                  style="font-size:0.85rem;font-weight:700"
-                >
-                  <i class="ph ph-bookmarks" style="font-size:1.35rem"></i>
-                </button>
-                <div v-if="showChapterMenu" class="player-popup-menu" @click.stop style="min-width:240px;max-height:280px;overflow-y:auto">
-                  <div style="font-size:0.75rem;color:var(--text-muted);padding:6px 12px 4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">
-                    Chapters ({{ chapters.length }})
-                  </div>
-                  <div
-                    v-for="ch in chapters"
-                    :key="ch.id"
-                    class="chapter-menu-item"
-                    :class="{ active: currentChapter && currentChapter.id === ch.id }"
-                    @click="seekToChapter(ch)"
-                  >
-                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ch?.title || 'Chapter' }}</span>
-                    <span class="chapter-menu-time">{{ formatTime(ch?.start || 0) }}</span>
-                  </div>
-                </div>
-              </div>
-
               <!-- Episodes & Seasons Drawer Button (Series / Anime) -->
               <div style="position:relative" v-if="isSeriesMedia">
                 <button
@@ -502,8 +533,8 @@ const PlayerPage = {
                 </button>
               </div>
 
-              <!-- Queue & Playlist Drawer Button (Desktop) -->
-              <div class="hide-on-mobile" style="position:relative">
+              <!-- Queue & Playlist Drawer Button (Shown in controller only if queue has items) -->
+              <div class="hide-on-mobile" style="position:relative" v-if="store.queue && store.queue.length > 0">
                 <button
                   class="ctrl-btn"
                   :class="{ active: showQueueDrawer }"
@@ -512,7 +543,7 @@ const PlayerPage = {
                   id="ctrl-queue"
                 >
                   <i class="ph ph-queue" style="font-size:1.35rem"></i>
-                  <span v-if="store.queue && store.queue.length" class="player-queue-badge">
+                  <span class="player-queue-badge">
                     {{ store.queue.length }}
                   </span>
                 </button>
@@ -805,6 +836,25 @@ const PlayerPage = {
                         </div>
                         <i v-if="(streamState.audioTrack ?? defaultAudioIndex) === track.index" class="ph-bold ph-check player-check-icon"></i>
                       </div>
+
+                      <!-- Sound Enhancer / Night Mode in Settings -->
+                      <div style="border-top:1px solid rgba(255,255,255,0.1);margin:8px 0 6px"></div>
+                      <div style="font-size:0.75rem;color:var(--text-muted);padding:4px 12px 6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;display:flex;align-items:center;justify-content:space-between">
+                        <span>Sound Enhancer</span>
+                        <span style="color:var(--accent);text-transform:capitalize;font-size:0.7rem;font-weight:700">{{ audioEnhancerMode }}</span>
+                      </div>
+                      <div style="display:flex;gap:4px;padding:0 12px 8px">
+                        <button
+                          v-for="opt in [{ id: 'off', label: 'Off' }, { id: 'dialogue', label: 'Dialogue' }, { id: 'night', label: 'Night' }]"
+                          :key="opt.id"
+                          class="player-aspect-pill"
+                          :class="{ active: audioEnhancerMode === opt.id }"
+                          @click="setAudioEnhancerMode(opt.id)"
+                          :title="opt.id === 'dialogue' ? 'Boosts speech frequencies for crystal clear dialogue' : opt.id === 'night' ? 'Dialogue boost + compresses loud sound effects & explosions' : 'Standard audio output'"
+                        >
+                          {{ opt.label }}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -827,7 +877,7 @@ const PlayerPage = {
                         :class="{ active: currentChapter && currentChapter.id === ch.id }"
                         @click="seekToChapterAndClose(ch)"
                       >
-                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ch?.title || 'Chapter' }}</span>
+                        <span style="white-space:nowrap">{{ ch?.title || 'Chapter' }}</span>
                         <span class="chapter-menu-time">{{ formatTime(ch?.start || 0) }}</span>
                       </div>
                     </div>
@@ -845,7 +895,7 @@ const PlayerPage = {
       </div>
 
       <!-- Floating Skip Intro / Recap Action -->
-      <div v-if="activeSkipAction && !(showCreditsShrink && hasNextEp) && activeSkipAction.type !== 'Next'" class="player-skip-container" @click.stop>
+      <div v-if="activeSkipAction && !(showCreditsShrink && hasNextEp) && activeSkipAction.type !== 'Next'" class="player-skip-container" :class="['skip-type-' + (activeSkipAction.type || '').toLowerCase(), { 'controls-hidden': controlsHidden }]" :style="{ bottom: controlsHidden ? '36px' : '135px' }" @click.stop>
         <button class="player-skip-btn" @click="executeSkipAction" id="player-skip-btn">
           <div class="player-skip-icon">
             <i class="ph ph-fast-forward"></i>
@@ -875,32 +925,34 @@ const PlayerPage = {
       <!-- Bottom-Right Cinematic Resume Card -->
       <div v-if="showResumeModal" class="resume-card-bottom-right" @click.stop>
         <div class="resume-card-inner">
-          <!-- Thumbnail Header Preview -->
-          <div class="resume-thumb-container">
-            <img
-              v-if="media?.backdrop_path || media?.still_path || media?.poster_path"
-              :src="imgUrl(media.still_path || media.backdrop_path || media.poster_path)"
-              :alt="media?.title"
-              class="resume-thumb-img"
-            />
-            <div v-else class="resume-thumb-placeholder"><i class="ph-bold ph-film-strip"></i></div>
-            <!-- Progress Line on Thumbnail -->
-            <div class="resume-thumb-progress" v-if="duration > 0">
-              <div class="resume-thumb-progress-fill" :style="{ width: (resumeTime / duration * 100) + '%' }"></div>
+          <div class="resume-card-main-row">
+            <!-- Thumbnail Header Preview -->
+            <div class="resume-thumb-container">
+              <img
+                v-if="media?.backdrop_path || media?.still_path || media?.poster_path"
+                :src="imgUrl(media.still_path || media.backdrop_path || media.poster_path)"
+                :alt="media?.title"
+                class="resume-thumb-img"
+              />
+              <div v-else class="resume-thumb-placeholder"><i class="ph-bold ph-film-strip"></i></div>
+              <!-- Progress Line on Thumbnail -->
+              <div class="resume-thumb-progress" v-if="duration > 0">
+                <div class="resume-thumb-progress-fill" :style="{ width: (resumeTime / duration * 100) + '%' }"></div>
+              </div>
             </div>
-          </div>
 
-          <!-- Info & Title -->
-          <div class="resume-card-info">
-            <div class="resume-badge">
-              <i class="ph-fill ph-clock-counter-clockwise"></i> RESUME PLAYBACK
-            </div>
-            <div class="resume-card-heading" :title="media?.title">{{ media?.title || 'Title' }}</div>
-            <div v-if="media?.ep_title" class="resume-card-ep" :title="media.ep_title">
-              S{{ (media.season||'').toString().padStart(2,'0') }}E{{ (media.episode||'').toString().padStart(2,'0') }} — {{ media.ep_title }}
-            </div>
-            <div class="resume-card-subtext">
-              Stopped at <span class="resume-timestamp">{{ formatTime(resumeTime) }}</span>
+            <!-- Info & Title -->
+            <div class="resume-card-info">
+              <div class="resume-badge">
+                <i class="ph-fill ph-clock-counter-clockwise"></i> RESUME PLAYBACK
+              </div>
+              <div class="resume-card-heading" :title="media?.title">{{ media?.title || 'Title' }}</div>
+              <div v-if="media?.ep_title" class="resume-card-ep" :title="media.ep_title">
+                S{{ (media.season||'').toString().padStart(2,'0') }}E{{ (media.episode||'').toString().padStart(2,'0') }} — {{ media.ep_title }}
+              </div>
+              <div class="resume-card-subtext">
+                Stopped at <span class="resume-timestamp">{{ formatTime(resumeTime) }}</span>
+              </div>
             </div>
           </div>
 
@@ -1319,101 +1371,7 @@ const PlayerPage = {
         </div>
       </transition>
 
-      <!-- Codec Compatibility Notice Pill (HEVC / 10-Bit Color / AV1, non-blocking, bottom-center) -->
-      <transition name="fade" @after-leave="onCodecNoticeAfterLeave">
-        <div
-          v-if="codecNoticePill"
-          class="player-codec-notice-pill"
-          style="position:absolute;bottom:90px;left:50%;transform:translateX(-50%);z-index:300;display:flex;align-items:center;gap:10px;background:rgba(18,18,26,0.9);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.12);border-radius:99px;padding:8px 16px 8px 12px;font-size:0.83rem;color:rgba(255,255,255,0.88);pointer-events:auto;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,0.45)"
-        >
-          <i class="ph-bold ph-film-slate" style="font-size:1rem;color:#60a5fa;flex-shrink:0"></i>
-          <span style="font-weight:600;color:#fff">Codec Notice:</span>
-          <div style="display:flex;align-items:center;gap:6px">
-            <span
-              v-for="tag in codecNoticePill.tags"
-              :key="tag"
-              style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:0.75rem;font-weight:600;background:rgba(255,255,255,0.1);color:#e2e8f0;border:1px solid rgba(255,255,255,0.15)"
-            >{{ tag }}</span>
-          </div>
-          <span style="color:rgba(255,255,255,0.65);font-size:0.78rem">Requires hardware decoding</span>
-          <button
-            @click="dismissCodecNotice"
-            style="background:none;border:none;color:rgba(255,255,255,0.45);cursor:pointer;padding:0 2px;font-size:0.9rem;flex-shrink:0;margin-left:4px"
-            title="Dismiss"
-          ><i class="ph ph-x"></i></button>
-        </div>
-      </transition>
 
-      <!-- Auto-Switch 4K Notification Pill (non-blocking, bottom-center) -->
-      <transition name="fade">
-        <div
-          v-if="autoSwitched4K && !isCodecNoticeActive"
-          style="position:absolute;bottom:90px;left:50%;transform:translateX(-50%);z-index:300;display:flex;align-items:center;gap:10px;background:rgba(18,18,26,0.88);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.1);border-radius:99px;padding:8px 16px 8px 12px;font-size:0.83rem;color:rgba(255,255,255,0.85);pointer-events:auto;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,0.4)"
-        >
-          <i class="ph ph-info" style="font-size:1rem;color:rgba(255,200,80,0.9);flex-shrink:0"></i>
-          <span>Switched to {{ autoSwitched4K.label }} — 4K may not play smoothly</span>
-          <button
-            @click="dismissAutoSwitched4K"
-            style="background:none;border:none;color:rgba(255,255,255,0.45);cursor:pointer;padding:0 2px;font-size:0.9rem;flex-shrink:0"
-            title="Dismiss"
-          ><i class="ph ph-x"></i></button>
-        </div>
-      </transition>
-
-      <!-- Stutter 4K Banner (non-blocking, bottom, mid-playback) -->
-      <transition name="fade">
-        <div
-          v-if="stutter4KBanner && !isCodecNoticeActive && !autoSwitched4K"
-          style="position:absolute;bottom:80px;left:50%;transform:translateX(-50%);z-index:300;display:flex;align-items:center;gap:10px;background:rgba(18,18,26,0.9);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,160,60,0.25);border-radius:99px;padding:9px 18px 9px 14px;font-size:0.84rem;color:rgba(255,255,255,0.85);pointer-events:auto;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,0.45)"
-        >
-          <i class="ph ph-warning" style="font-size:1rem;color:rgba(255,160,60,0.9);flex-shrink:0"></i>
-          <span>4K playback is struggling on this device</span>
-          <button
-            @click="stutter4KAutoSwitch"
-            style="margin-left:4px;background:#e50914;border:none;border-radius:99px;padding:4px 14px;color:#fff;font-size:0.8rem;font-weight:700;cursor:pointer;transition:background 0.2s;flex-shrink:0"
-          >Switch to 1080p</button>
-          <button
-            @click="stutter4KBanner = null"
-            style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.18);border-radius:99px;padding:4px 12px;color:rgba(255,255,255,0.8);font-size:0.8rem;font-weight:500;cursor:pointer;flex-shrink:0"
-          >Keep Playing</button>
-        </div>
-      </transition>
-
-      <!-- Playback Issues Non-Blocking Warning Pill (displayed after attempt limit is reached) -->
-      <transition name="fade">
-        <div
-          v-if="freezeWarningNotice && !isCodecNoticeActive && !autoSwitched4K && !stutter4KBanner"
-          class="player-codec-notice-pill"
-          style="position:absolute;bottom:90px;left:50%;transform:translateX(-50%);z-index:300;display:flex;align-items:center;gap:10px;background:rgba(18,18,26,0.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(251,191,36,0.35);border-radius:99px;padding:8px 16px 8px 12px;font-size:0.83rem;color:rgba(255,255,255,0.9);pointer-events:auto;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,0.45)"
-        >
-          <i class="ph ph-warning" style="font-size:1rem;color:#fbbf24;flex-shrink:0"></i>
-          <span>{{ freezeWarningNotice }}</span>
-          <button
-            @click="freezeWarningNotice = null"
-            style="background:none;border:none;color:rgba(255,255,255,0.45);cursor:pointer;padding:0 2px;font-size:0.9rem;flex-shrink:0;margin-left:4px"
-            title="Dismiss"
-          ><i class="ph ph-x"></i></button>
-        </div>
-      </transition>
-
-      <!-- Low Memory Protection & In-Place Recovery Banner -->
-      <transition name="fade">
-        <div v-if="lowMemoryBanner && !isCodecNoticeActive && !autoSwitched4K && !stutter4KBanner && !freezeWarningNotice" class="player-low-memory-banner" @click.stop>
-          <i class="ph ph-warning-circle player-low-memory-icon"></i>
-          <div class="player-low-memory-msg">
-            <span>{{ lowMemoryBanner.message || 'Low memory detected • Light mode active' }}</span>
-          </div>
-          <div class="player-low-memory-actions">
-            <button class="player-low-memory-btn-recover" @click="freeMemoryAndRecover" title="Flush video buffers and re-anchor playback">
-              <i :class="recoveringMemory ? 'ph ph-circle-notch' : 'ph ph-lightning'" :style="recoveringMemory ? 'animation:spin 1s linear infinite' : ''"></i>
-              <span>{{ recoveringMemory ? 'Cleaning…' : 'Free Up Memory & Recover' }}</span>
-            </button>
-            <button class="player-low-memory-btn-dismiss" @click="dismissLowMemoryBanner" title="Dismiss">
-              <i class="ph ph-x"></i>
-            </button>
-          </div>
-        </div>
-      </transition>
 
       <!-- Playback Error Overlay (real failures only) -->
       <div
@@ -3227,14 +3185,71 @@ const PlayerPage = {
       }
     }
 
+    const isTouchScrubbing = ref(false);
+
+    const hoverTooltipPosClamped = computed(() => {
+      const rect = cachedSeekbarRect || (seekbarRef.value ? seekbarRef.value.getBoundingClientRect() : null);
+      if (!rect || rect.width <= 0) return hoverTooltipPos.value;
+      const minX = 85;
+      const maxX = Math.max(minX, rect.width - 85);
+      return Math.max(minX, Math.min(maxX, hoverTooltipPos.value));
+    });
+
+    const hoverTimeDeltaSec = computed(() => {
+      if (hoverTooltipTime.value === null || hoverTooltipTime.value === undefined) return 0;
+      return Math.round(hoverTooltipTime.value - displayTime.value);
+    });
+
+    const hoverTimeDeltaStr = computed(() => {
+      const sec = hoverTimeDeltaSec.value;
+      if (Math.abs(sec) < 2) return "";
+      const sign = sec > 0 ? "+" : "-";
+      const absSec = Math.abs(sec);
+      const m = Math.floor(absSec / 60);
+      const s = absSec % 60;
+      return `${sign}${m}:${String(s).padStart(2, "0")}`;
+    });
+
+    function calculateSeekbarTimeFromClientX(clientX) {
+      if (!cachedSeekbarRect && seekbarRef.value) {
+        cachedSeekbarRect = seekbarRef.value.getBoundingClientRect();
+      }
+      const rect = cachedSeekbarRect;
+      if (!rect || rect.width <= 0 || !displayDuration.value) return 0;
+      const relX = Math.max(0, Math.min(rect.width, clientX - rect.left));
+      hoverTooltipPos.value = relX;
+      let rawTime = (relX / rect.width) * displayDuration.value;
+
+      // Magnetic Snapping (snap within 4 seconds of chapters or intro/recap markers)
+      const snapPoints = [];
+      if (chapters.value && chapters.value.length) {
+        chapters.value.forEach(c => {
+          if (typeof c.start === "number") snapPoints.push(c.start);
+        });
+      }
+      if (skipTimes.value) {
+        ["recap", "op", "ed", "preview"].forEach(k => {
+          const seg = skipTimes.value[k];
+          if (seg) {
+            if (typeof seg.start === "number") snapPoints.push(seg.start);
+            if (typeof seg.end === "number") snapPoints.push(seg.end);
+          }
+        });
+      }
+      for (const pt of snapPoints) {
+        if (Math.abs(rawTime - pt) <= 4.0) {
+          rawTime = pt;
+          break;
+        }
+      }
+      return rawTime;
+    }
+
     function seekToClick(e) {
       if (!seekbarRef.value || !duration.value) return;
-      const rect = cachedSeekbarRect || seekbarRef.value.getBoundingClientRect();
-      if (!rect || rect.width <= 0) return;
-      const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      // Seekbar is player-relative — seekTo expects CONTENT time
-      const targetTime = playerToContent(pos * displayDuration.value);
-      seekTo(targetTime);
+      cachedSeekbarRect = seekbarRef.value.getBoundingClientRect();
+      const targetTime = calculateSeekbarTimeFromClientX(e.clientX);
+      seekTo(playerToContent(targetTime));
       unlockAchievementSilently("seeker");
     }
 
@@ -3243,16 +3258,40 @@ const PlayerPage = {
       const clientX = e.clientX;
       if (hoverRafId) cancelAnimationFrame(hoverRafId);
       hoverRafId = requestAnimationFrame(() => {
-        if (!cachedSeekbarRect && seekbarRef.value) {
-          cachedSeekbarRect = seekbarRef.value.getBoundingClientRect();
-        }
-        const rect = cachedSeekbarRect;
-        if (!rect || rect.width <= 0) return;
-        const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-        hoverTooltipPos.value = clientX - rect.left;
-        hoverTooltipTime.value = pos * displayDuration.value;
+        hoverTooltipTime.value = calculateSeekbarTimeFromClientX(clientX);
         showHoverTooltip.value = true;
       });
+    }
+
+    function onSeekbarTouchStart(e) {
+      if (!displayDuration.value || !e.touches || !e.touches[0]) return;
+      isTouchScrubbing.value = true;
+      cachedSeekbarRect = seekbarRef.value ? seekbarRef.value.getBoundingClientRect() : null;
+      const clientX = e.touches[0].clientX;
+      hoverTooltipTime.value = calculateSeekbarTimeFromClientX(clientX);
+      showHoverTooltip.value = true;
+    }
+
+    function onSeekbarTouchMove(e) {
+      if (!isTouchScrubbing.value || !e.touches || !e.touches[0]) return;
+      const clientX = e.touches[0].clientX;
+      hoverTooltipTime.value = calculateSeekbarTimeFromClientX(clientX);
+      showHoverTooltip.value = true;
+    }
+
+    function onSeekbarTouchEnd(e) {
+      if (!isTouchScrubbing.value) return;
+      isTouchScrubbing.value = false;
+      if (hoverTooltipTime.value !== null && hoverTooltipTime.value !== undefined) {
+        const targetTime = playerToContent(hoverTooltipTime.value);
+        seekTo(targetTime);
+        unlockAchievementSilently("seeker");
+      }
+      setTimeout(() => {
+        if (!isTouchScrubbing.value) {
+          showHoverTooltip.value = false;
+        }
+      }, 400);
     }
 
     const nextEpHover = ref(false);
@@ -3759,7 +3798,7 @@ const PlayerPage = {
         padding: "6px 14px",
         borderRadius: "6px",
         position: "absolute",
-        bottom: controlsHidden.value ? "35px" : "105px",
+        bottom: controlsHidden.value ? "35px" : "130px",
         left: "50%",
         transform: "translateX(-50%)",
         zIndex: "14",
@@ -5031,6 +5070,71 @@ const PlayerPage = {
       return h > 0 ? `${h}:${mStr}:${sStr}` : `${mStr}:${sStr}`;
     }
 
+    const activeDynamicNotice = computed(() => {
+      // 1. Low Memory Banner (Highest Priority)
+      if (lowMemoryBanner.value) {
+        return {
+          type: "memory",
+          icon: recoveringMemory.value ? "ph ph-circle-notch spin" : "ph-bold ph-warning-circle",
+          title: "Low Memory Detected",
+          text: lowMemoryBanner.value.message || "Light mode active to preserve stability",
+          action: {
+            label: recoveringMemory.value ? "Cleaning…" : "Free Memory",
+            handler: freeMemoryAndRecover,
+            icon: recoveringMemory.value ? "ph ph-circle-notch spin" : "ph-bold ph-lightning"
+          },
+          dismiss: dismissLowMemoryBanner
+        };
+      }
+      // 2. 4K Stutter Banner
+      if (stutter4KBanner.value) {
+        return {
+          type: "stutter",
+          icon: "ph-bold ph-warning",
+          title: "Playback Struggling",
+          text: "4K playback is struggling on this device",
+          action: {
+            label: "Switch to 1080p",
+            handler: stutter4KAutoSwitch,
+            icon: "ph-bold ph-sliders-horizontal"
+          },
+          dismiss: () => { stutter4KBanner.value = null; }
+        };
+      }
+      // 3. Codec Notice Pill
+      if (codecNoticePill.value) {
+        return {
+          type: "codec",
+          icon: "ph-bold ph-film-slate",
+          title: "Codec Notice",
+          text: "Hardware decoding required",
+          tags: codecNoticePill.value.tags,
+          dismiss: dismissCodecNotice
+        };
+      }
+      // 4. Auto Switched 4K Notice
+      if (autoSwitched4K.value) {
+        return {
+          type: "autoswitch",
+          icon: "ph-bold ph-info",
+          title: "Video Adjusted",
+          text: `Switched to ${autoSwitched4K.value.label} — 4K may not play smoothly`,
+          dismiss: dismissAutoSwitched4K
+        };
+      }
+      // 5. Freeze / Playback Warning Notice
+      if (freezeWarningNotice.value) {
+        return {
+          type: "freeze",
+          icon: "ph-bold ph-warning",
+          title: "Notice",
+          text: freezeWarningNotice.value,
+          dismiss: () => { freezeWarningNotice.value = null; }
+        };
+      }
+      return null;
+    });
+
     function toggleSubtitlesShortcut() {
       if (!subtitles.value || subtitles.value.length === 0) {
         addToast("No subtitles available", "info");
@@ -5866,6 +5970,14 @@ const PlayerPage = {
       activeSkipButton,
       getSegmentStyle,
       performSkip,
+      activeDynamicNotice,
+      isTouchScrubbing,
+      hoverTooltipPosClamped,
+      hoverTimeDeltaSec,
+      hoverTimeDeltaStr,
+      onSeekbarTouchStart,
+      onSeekbarTouchMove,
+      onSeekbarTouchEnd,
       showHoverTooltip,
       hoverTooltipPos,
       hoverTooltipTime,

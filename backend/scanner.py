@@ -526,6 +526,12 @@ def scan_library(callback=None):
         except Exception as e:
             print(f"[Scanner] Missing-file prune failed: {e}")
         try:
+            healed = _heal_missing_artwork()
+            if healed:
+                _set_status(healed_artwork=healed)
+        except Exception as e:
+            print(f"[Scanner] Artwork healing failed: {e}")
+        try:
             new_episodes = _diff_new_episodes()
             if new_episodes:
                 _set_status(new_episodes=new_episodes)
@@ -585,6 +591,57 @@ def _prune_missing_files():
     conn.close()
     print(f"[Scanner] Pruned {len(to_delete)} library entries whose source file no longer exists.")
     return len(to_delete)
+
+
+def _heal_missing_artwork():
+    """
+    Automatic artwork healing: find online media items that have a TMDb match
+    but are missing local poster or backdrop files (e.g. after clearing cache
+    while drive was offline and then reconnecting), and re-download them using
+    their known TMDb ID.
+    """
+    try:
+        from backend.db import get_media_needing_recache, upsert_media
+        from backend.matcher import match_movie_by_id, match_show_by_id
+        items = get_media_needing_recache()
+        online_items = [it for it in items if it.get("is_mounted")]
+        if not online_items:
+            return 0
+
+        print(f"[Scanner] Healing artwork for {len(online_items)} media titles missing cache...")
+        healed = 0
+        conn = get_conn()
+        for item in online_items:
+            tmdb_id = item.get("tmdb_id")
+            mtype = item.get("type", "movie")
+            if not tmdb_id:
+                continue
+            try:
+                meta = match_show_by_id(tmdb_id, mtype) if mtype in ("series", "anime") else match_movie_by_id(tmdb_id)
+                if not meta:
+                    continue
+                rows = conn.execute("SELECT * FROM media WHERE tmdb_id=? AND type=?", (tmdb_id, mtype)).fetchall()
+                for r in rows:
+                    upsert_media({
+                        **meta,
+                        "file_path": r["file_path"],
+                        "file_size": r["file_size"] or 0,
+                        "season": r["season"],
+                        "episode": r["episode"],
+                        "ep_title": r["ep_title"],
+                        "tmdb_matched": 1,
+                    })
+                healed += 1
+                print(f"[Scanner] Restored artwork for {item.get('title')} (TMDb {tmdb_id})")
+            except Exception as e:
+                print(f"[Scanner] Failed healing artwork for {item.get('title')}: {e}")
+        conn.close()
+        return healed
+    except Exception as e:
+        print(f"[Scanner] Artwork healing failed: {e}")
+        return 0
+
+
 
 
 # ─── Background intro detection pass ─────────────────────────────────────────

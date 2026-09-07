@@ -81,20 +81,18 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                // Automatically activate TV layout mode when running inside this app.
-                // This mirrors what setLayoutMode("tv") does in app.js:
-                //   1. Persist the preference so it survives page reloads.
-                //   2. Update the reactive store so Vue components re-render immediately.
-                //   3. Add the CSS class so layout-tv-mode styles apply right away.
+                // Default Interface Layout Mode: Standard layout.
+                // Reverts any previously auto-activated TV mode and ensures standard layout is default.
                 view?.evaluateJavascript("""
                     (function() {
                         try {
-                            localStorage.setItem('capsstream_layout_mode', 'tv');
-                            if (window.store && window.store.layoutMode !== 'tv') {
-                                window.store.layoutMode = 'tv';
-                                document.body.classList.add('layout-tv-mode');
-                            } else if (!window.store) {
-                                document.body.classList.add('layout-tv-mode');
+                            if (!localStorage.getItem('capsstream_android_reverted_standard')) {
+                                localStorage.setItem('capsstream_android_reverted_standard', '1');
+                                localStorage.setItem('capsstream_layout_mode', 'standard');
+                                if (window.store && window.store.layoutMode !== 'standard') {
+                                    window.store.layoutMode = 'standard';
+                                    document.body.classList.remove('layout-tv-mode');
+                                }
                             }
                         } catch(e) {}
                     })();

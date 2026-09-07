@@ -48,6 +48,7 @@ from .media import (
     upsert_media,
     update_duration,
     get_unmatched,
+    get_media_needing_recache,
 )
 
 from .profiles import (
@@ -151,6 +152,7 @@ __all__ = [
     "upsert_media",
     "update_duration",
     "get_unmatched",
+    "get_media_needing_recache",
     "get_all_profiles",
     "get_profile",
     "create_profile",

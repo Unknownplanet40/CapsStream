@@ -1022,12 +1022,129 @@ def update_duration(media_id, duration):
 
 
 def get_unmatched():
+    """
+    Return all library media that have not been matched to TMDb (tmdb_matched=0).
+    Items with identical titles and types are grouped together so series or anime
+    with multiple episodes appear as a single entry with file count and combined size.
+    """
     conn = get_conn()
     rows = conn.execute(
-        "SELECT * FROM media WHERE tmdb_matched=0 ORDER BY title"
+        "SELECT * FROM media WHERE tmdb_matched=0 ORDER BY title ASC, season ASC, episode ASC"
     ).fetchall()
     conn.close()
-    return enrich_mounted_list([dict(r) for r in rows])
+    if not rows:
+        return []
+
+    # Group by (normalized title, type)
+    groups = {}
+    for r in rows:
+        d = dict(r)
+        norm_title = (d.get("title") or "Unknown Media").strip().lower()
+        key = (norm_title, d.get("type", "movie"))
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(d)
+
+    unmatched = []
+    for (norm_title, mtype), group_rows in groups.items():
+        first = group_rows[0]
+        mounted = any(is_drive_mounted(r.get("file_path")) for r in group_rows)
+        total_size = sum((r.get("file_size") or 0) for r in group_rows)
+        all_ids = [r["id"] for r in group_rows]
+
+        unmatched.append({
+            "id": first["id"],
+            "ids": all_ids,
+            "title": first.get("title") or "Unknown Media",
+            "type": mtype,
+            "year": first.get("year"),
+            "file_count": len(group_rows),
+            "file_path": first.get("file_path") or "",
+            "file_size": total_size,
+            "is_mounted": mounted,
+            "drive_letter": get_drive_identifier(first.get("file_path")),
+        })
+
+    return enrich_mounted_list(unmatched)
+
+
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_METADATA_DIR = os.path.join(_BASE_DIR, "data", "metadata")
+
+
+def get_media_needing_recache():
+    """
+    Find library media that have a TMDb match (tmdb_id is present) but are missing
+    their cached artwork (poster or backdrop) on disk or in the database.
+    Results are grouped by unique (tmdb_id, type) so movies and entire TV series
+    are presented as single clean entries with item counts and drive status.
+    """
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT * FROM media
+        WHERE tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id != 0
+        ORDER BY title ASC, season ASC, episode ASC
+    """).fetchall()
+    conn.close()
+
+    if not rows:
+        return []
+
+    # Group by (tmdb_id, type)
+    groups = {}
+    for r in rows:
+        d = dict(r)
+        key = (d["tmdb_id"], d["type"])
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(d)
+
+    needing_recache = []
+
+    for (tmdb_id, mtype), group_rows in groups.items():
+        first = group_rows[0]
+
+        # Check poster
+        poster_rel = first.get("poster_path")
+        missing_poster = True
+        if poster_rel:
+            p_full = os.path.join(_METADATA_DIR, str(poster_rel).replace("/", os.sep))
+            if os.path.isfile(p_full):
+                missing_poster = False
+
+        # Check backdrop
+        backdrop_rel = first.get("backdrop_path")
+        missing_backdrop = True
+        if backdrop_rel:
+            b_full = os.path.join(_METADATA_DIR, str(backdrop_rel).replace("/", os.sep))
+            if os.path.isfile(b_full):
+                missing_backdrop = False
+
+        # If either poster or backdrop is missing, add to list
+        if missing_poster or missing_backdrop:
+            # Check drive mount status: mounted if any file is on a mounted drive
+            mounted = any(is_drive_mounted(r.get("file_path")) for r in group_rows)
+            total_size = sum((r.get("file_size") or 0) for r in group_rows)
+
+            needing_recache.append({
+                "id": first["id"],
+                "tmdb_id": tmdb_id,
+                "title": first.get("title") or "Unknown Title",
+                "original_title": first.get("original_title"),
+                "year": first.get("year"),
+                "type": mtype,
+                "file_count": len(group_rows),
+                "file_path": first.get("file_path") or "",
+                "file_size": total_size,
+                "is_mounted": mounted,
+                "missing_poster": missing_poster,
+                "missing_backdrop": missing_backdrop,
+                "poster_path": poster_rel if not missing_poster else None,
+                "backdrop_path": backdrop_rel if not missing_backdrop else None,
+            })
+
+    return needing_recache
+
 
 
 # ─── Profile Queries ──────────────────────────────────────────────────────────

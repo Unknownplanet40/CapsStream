@@ -691,7 +691,10 @@ def get_cache_info():
 
 
 def clear_cache():
-    """Wipe cached images and temporary metadata files, and reset matched status in DB so scanning refetches fresh metadata."""
+    """
+    Wipe cached images, artwork, and metadata files on disk, and completely remove all
+    media records and associations from the database so that subsequent scans start completely fresh.
+    """
     cache_dir = os.path.join(ROOT_DIR, "data", "metadata")
     cleared_count = 0
     if os.path.exists(cache_dir):
@@ -703,29 +706,53 @@ def clear_cache():
                 except Exception:
                     pass
 
-    # Reset tmdb_matched status in database so scanner will re-fetch metadata
+        # Clean empty subdirectories
+        for root, dirs, files in os.walk(cache_dir, topdown=False):
+            for d in dirs:
+                try:
+                    os.rmdir(os.path.join(root, d))
+                except Exception:
+                    pass
+
+    # Ensure required metadata cache directory tree exists
+    for sub in ("images", "thumbs", "subtitles", "skip_times", "chapters", "hls_cache"):
+        os.makedirs(os.path.join(cache_dir, sub), exist_ok=True)
+
+    # Invalidate in-memory matcher and route caches
+    try:
+        from backend.matcher import _METADATA_CACHE, _POSTER_CACHE, _BACKDROPS_CACHE, _LOGOS_CACHE
+        _METADATA_CACHE.clear()
+        _POSTER_CACHE.clear()
+        _BACKDROPS_CACHE.clear()
+        _LOGOS_CACHE.clear()
+    except Exception:
+        pass
+
+    try:
+        from backend.routes.media import bust_home_cache
+        bust_home_cache()
+    except Exception:
+        pass
+
+    # Completely purge media records and related association rows from the database
     try:
         from backend.db import get_conn
         conn = get_conn()
-        conn.execute("""
-            UPDATE media SET
-                tmdb_matched = 0,
-                poster_path = NULL,
-                backdrop_path = NULL,
-                logo_path = NULL,
-                overview = NULL,
-                tagline = NULL,
-                cast_json = NULL,
-                genres = NULL,
-                rating = 0,
-                vote_count = 0
-            WHERE manually_overridden = 0
-        """)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM media")
+        cur.execute("DELETE FROM watch_progress")
+        cur.execute("DELETE FROM collection_items")
+        cur.execute("DELETE FROM favorites")
+        cur.execute("DELETE FROM playlist_items")
+        try:
+            cur.execute("DELETE FROM sqlite_sequence WHERE name IN ('media', 'watch_progress', 'collection_items', 'favorites', 'playlist_items')")
+        except Exception:
+            pass
         conn.commit()
         conn.close()
-        print("[Settings] Reset database media matching status for fresh rescan.")
+        print("[Settings] Cleared all media records and playback associations from database.")
     except Exception as e:
-        print("[Settings] Failed to reset media matching status in DB:", e)
+        print("[Settings] Failed to delete media records from DB:", e)
 
     return cleared_count
 

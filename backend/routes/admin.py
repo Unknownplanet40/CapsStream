@@ -63,6 +63,11 @@ def api_post_settings():
 
     ok, result = save_config(data)
     if ok:
+        try:
+            from .media import bust_home_cache
+            bust_home_cache()
+        except Exception:
+            pass
         if "library" in data and "scan_interval_hours" in (data.get("library") or {}):
             write_last_scheduled_scan(time.time())
         return jsonify({"ok": True, "config": result})
@@ -739,18 +744,22 @@ def api_system_drives_status():
     disabled_paths = cfg.get("disabled_paths", {})
 
     path_counts = {}
+    db_drives = set()
     try:
         conn = get_conn()
-        rows = conn.execute("SELECT file_path FROM media").fetchall()
+        rows = conn.execute("SELECT file_path, type FROM media").fetchall()
         for r in rows:
             fp = r["file_path"] if r else ""
             if fp:
                 norm_fp = fp.replace("\\", "/").lower()
                 path_counts[norm_fp] = path_counts.get(norm_fp, 0) + 1
+                dl = get_drive_identifier(fp)
+                if dl:
+                    db_drives.add((dl, r["type"] or "movies"))
     except Exception:
         pass
 
-    # Group exclusively by drives configured in Media Scanner Paths
+    # Group by drives configured in Media Scanner Paths
     drives_by_letter = {}
     for cat in ["movies", "series", "anime"]:
         for p in (media_paths.get(cat) or []):
@@ -777,6 +786,20 @@ def api_system_drives_status():
             is_p_disabled = norm_p in [os.path.normpath(dp) for dp in (disabled_paths.get(cat) or [])]
             if not is_p_disabled:
                 drives_by_letter[d_key]["all_disabled"] = False
+
+    # Also discover drives containing indexed media files that may not be in media_paths
+    for dl, cat in db_drives:
+        d_key = dl.upper()
+        if d_key not in drives_by_letter:
+            drive_root = (dl + "\\") if (os.name == "nt" and len(dl) == 2 and dl[1] == ":") else dl
+            drives_by_letter[d_key] = {
+                "drive_letter": dl,
+                "paths": [drive_root],
+                "categories": {cat},
+                "all_disabled": False,
+            }
+        else:
+            drives_by_letter[d_key]["categories"].add(cat)
 
     drives_list = []
     offline_letters = set()
@@ -809,6 +832,9 @@ def api_system_drives_status():
             path_key = p.replace("\\", "/").rstrip("/").lower()
             prefix = path_key + "/"
             m_count += sum(cnt for fp_norm, cnt in path_counts.items() if fp_norm == path_key or fp_norm.startswith(prefix))
+        if m_count == 0 and drive_letter:
+            dl_prefix = drive_letter.replace("\\", "/").rstrip("/").lower() + "/"
+            m_count = sum(cnt for fp_norm, cnt in path_counts.items() if fp_norm.startswith(dl_prefix))
 
         drives_list.append({
             "path": paths[0] if paths else drive_letter,

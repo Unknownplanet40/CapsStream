@@ -66,6 +66,72 @@ class TestMediaMatcher(unittest.TestCase):
             self.assertEqual(results[0]["title"], "Inception")
             self.assertEqual(results[0]["tmdb_id"], 27205)
 
+    def test_search_tmdb_series_and_anime(self):
+        """Verify search_tmdb properly routes series and anime queries to search/tv without dropping candidates."""
+        with patch("backend.matcher._tmdb_get") as mock_get:
+            mock_get.return_value = {
+                "results": [
+                    {
+                        "id": 1396,
+                        "name": "Breaking Bad",
+                        "first_air_date": "2008-01-20",
+                        "vote_average": 8.9,
+                        "overview": "A chemistry teacher diagnosed with lung cancer...",
+                        "poster_path": "/breaking_bad.jpg",
+                    }
+                ]
+            }
+
+            # Series test
+            results_series = search_tmdb(query="Breaking Bad", media_type="series")
+            mock_get.assert_called_with("search/tv", {"query": "Breaking Bad", "language": "en-US"})
+            self.assertEqual(len(results_series), 1)
+            self.assertEqual(results_series[0]["title"], "Breaking Bad")
+            self.assertEqual(results_series[0]["tmdb_id"], 1396)
+            self.assertEqual(results_series[0]["media_type"], "series")
+
+            # Anime test
+            results_anime = search_tmdb(query="Solo Leveling", media_type="anime")
+            self.assertEqual(len(results_anime), 1)
+            self.assertEqual(results_anime[0]["media_type"], "anime")
+
+    def test_search_tmdb_imdb_id(self):
+        """Verify search_tmdb supports direct IMDb ID searches via find/ endpoint."""
+        with patch("backend.matcher._tmdb_get") as mock_get:
+            mock_get.return_value = {
+                "tv_results": [
+                    {
+                        "id": 1396,
+                        "name": "Breaking Bad",
+                        "first_air_date": "2008-01-20",
+                        "vote_average": 8.9,
+                        "overview": "A high school chemistry teacher...",
+                        "poster_path": "/bb.jpg"
+                    }
+                ],
+                "movie_results": []
+            }
+            results = search_tmdb(query="tt0903747", media_type="series")
+            mock_get.assert_called_with("find/tt0903747", {"external_source": "imdb_id"})
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["tmdb_id"], 1396)
+
+    def test_search_tmdb_numeric_id(self):
+        """Verify search_tmdb supports direct numeric TMDb ID lookup."""
+        with patch("backend.matcher._tmdb_get") as mock_get:
+            mock_get.return_value = {
+                "id": 1396,
+                "name": "Breaking Bad",
+                "first_air_date": "2008-01-20",
+                "vote_average": 8.9,
+                "overview": "A high school chemistry teacher...",
+                "poster_path": "/bb.jpg"
+            }
+            results = search_tmdb(query="1396", media_type="series")
+            mock_get.assert_called_with("tv/1396", {"language": "en-US"})
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["tmdb_id"], 1396)
+
 
 if __name__ == "__main__":
     unittest.main()

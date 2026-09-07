@@ -585,59 +585,6 @@ def match_show(folder_name, media_type="series"):
     return _fetch_show_detail(best["id"], title, year, media_type)
 
 
-def search_tmdb(query, media_type="movie"):
-    """
-    Search TMDb directly for manual match override.
-    Supports IMDb IDs (tt...), TMDb IDs (digits), or title text.
-    """
-    query = (query or "").strip()
-    if not query:
-        return []
-
-    # Check if query is IMDb ID
-    if re.match(r'^tt\d{7,8}$', query, re.I):
-        data = _tmdb_get(f"find/{query}", {"external_source": "imdb_id"})
-        if not data:
-            return []
-        items = data.get("movie_results", []) if media_type == "movie" else data.get("tv_results", [])
-        return [{
-            "tmdb_id": item["id"],
-            "title": item.get("title") or item.get("name"),
-            "year": int(item.get("release_date" if media_type == "movie" else "first_air_date", "")[:4]) if (item.get("release_date") or item.get("first_air_date")) else None,
-            "poster_path": item.get("poster_path"),
-            "overview": item.get("overview")
-        } for item in items]
-
-    # Check if query is numeric TMDb ID
-    if query.isdigit():
-        detail = _tmdb_get(f"{'movie' if media_type == 'movie' else 'tv'}/{query}", {"language": "en-US"})
-        if detail and "id" in detail:
-            return [{
-                "tmdb_id": detail["id"],
-                "title": detail.get("title") or detail.get("name"),
-                "year": int(detail.get("release_date" if media_type == "movie" else "first_air_date", "")[:4]) if (detail.get("release_date") or detail.get("first_air_date")) else None,
-                "poster_path": detail.get("poster_path"),
-                "overview": detail.get("overview")
-            }]
-
-    # General text search
-    endpoint = "search/movie" if media_type == "movie" else "search/tv"
-    data = _tmdb_get(endpoint, {"query": query, "language": "en-US"})
-    if not data or not data.get("results"):
-        return []
-
-    out = []
-    for item in data.get("results", [])[:8]:
-        rel = item.get("release_date") if media_type == "movie" else item.get("first_air_date")
-        yr = int(rel[:4]) if rel and len(rel) >= 4 else None
-        out.append({
-            "tmdb_id": item["id"],
-            "title": item.get("title") or item.get("name"),
-            "year": yr,
-            "poster_path": item.get("poster_path"),
-            "overview": item.get("overview")
-        })
-    return out
 
 
 def fetch_season_episodes(tmdb_id, season_num):
@@ -777,63 +724,110 @@ def fetch_media_backdrops(tmdb_id, media_type="movie"):
 def search_tmdb(query, media_type="movie", year=None):
     """
     Search TMDb for movies or TV shows and return formatted list of candidates.
-    Supports media_type="movie", "tv", or "multi".
+    Supports media_type="movie", "series", "anime", "tv", "multi", or "all".
+    Supports IMDb IDs (tt...), numeric TMDb IDs (digits), and text search with optional year.
     """
+    query = str(query or "").strip()
     if not query:
         return []
-    is_multi = media_type in ("multi", "all")
-    if is_multi:
-        endpoint = "search/multi"
-    elif media_type == "tv":
-        endpoint = "search/tv"
-    else:
-        endpoint = "search/movie"
 
-    params = {"query": str(query).strip(), "language": "en-US"}
+    # Map CapsStream media types to TMDb search types
+    is_multi = media_type in ("multi", "all")
+    is_tv = media_type in ("tv", "series", "anime")
+    target_endpoint = "search/multi" if is_multi else ("search/tv" if is_tv else "search/movie")
+
+    def _format_item(r, forced_type=None):
+        r_type = forced_type or (r.get("media_type") if is_multi else ("tv" if is_tv else "movie"))
+        if r_type not in ("movie", "tv"):
+            return None
+        is_mov = (r_type == "movie")
+        title = r.get("title") if is_mov else r.get("name")
+        orig_title = r.get("original_title") if is_mov else r.get("original_name")
+        rel_date = r.get("release_date") if is_mov else r.get("first_air_date")
+        y = str(rel_date)[:4] if rel_date else ""
+        poster = r.get("poster_path")
+        backdrop = r.get("backdrop_path")
+        out_type = media_type if media_type in ("series", "anime") else r_type
+        return {
+            "tmdb_id": r.get("id"),
+            "title": title or "Unknown",
+            "original_title": orig_title,
+            "year": y,
+            "release_date": rel_date,
+            "overview": r.get("overview", ""),
+            "poster_path": f"https://image.tmdb.org/t/p/w500{poster}" if poster else None,
+            "backdrop_path": f"https://image.tmdb.org/t/p/original{backdrop}" if backdrop else None,
+            "vote_average": round(float(r.get("vote_average", 0)), 1),
+            "media_type": out_type,
+        }
+
+    # Strategy 1: Direct IMDb ID lookup (e.g. tt0903747)
+    if re.match(r'^tt\d{7,8}$', query, re.I):
+        data = _tmdb_get(f"find/{query}", {"external_source": "imdb_id"})
+        if data:
+            results = []
+            if is_tv or is_multi:
+                for item in data.get("tv_results", []):
+                    f = _format_item(item, forced_type="tv")
+                    if f:
+                        results.append(f)
+            if not is_tv or is_multi or not results:
+                for item in data.get("movie_results", []):
+                    f = _format_item(item, forced_type="movie")
+                    if f:
+                        results.append(f)
+            if results:
+                return results
+
+    # Strategy 2: Direct numeric TMDb ID lookup
+    if query.isdigit():
+        primary = "tv" if is_tv else "movie"
+        detail = _tmdb_get(f"{primary}/{query}", {"language": "en-US"})
+        if detail and "id" in detail:
+            f = _format_item(detail, forced_type=primary)
+            if f:
+                return [f]
+        secondary = "movie" if is_tv else "tv"
+        detail2 = _tmdb_get(f"{secondary}/{query}", {"language": "en-US"})
+        if detail2 and "id" in detail2:
+            f = _format_item(detail2, forced_type=secondary)
+            if f:
+                return [f]
+
+    # Strategy 3: Standard TMDb Search
+    params = {"query": query, "language": "en-US"}
     if year:
         try:
-            y = int(year)
-            if endpoint == "search/movie":
-                params["year"] = str(y)
-            elif endpoint == "search/tv":
-                params["first_air_date_year"] = str(y)
+            y_int = int(str(year).strip())
+            if is_tv:
+                params["first_air_date_year"] = str(y_int)
+            else:
+                params["year"] = str(y_int)
         except Exception:
             pass
 
-    res = _tmdb_get(endpoint, params)
+    res = _tmdb_get(target_endpoint, params)
+    # If no results and year was provided, retry without year restriction
     if (not res or not res.get("results")) and year:
         params.pop("year", None)
         params.pop("first_air_date_year", None)
-        res = _tmdb_get(endpoint, params)
+        res = _tmdb_get(target_endpoint, params)
 
-    if not res:
+    # Strategy 4: Fallback to search/multi if specific endpoint had no results
+    if (not res or not res.get("results")) and target_endpoint != "search/multi":
+        res = _tmdb_get("search/multi", {"query": query, "language": "en-US"})
+
+    if not res or not res.get("results"):
         return []
 
     results = []
     for r in res.get("results", [])[:15]:
-        r_type = r.get("media_type", "movie") if is_multi else media_type
-        if r_type not in ("movie", "tv"):
-            continue
-        is_movie = (r_type == "movie")
-        title = r.get("title") if is_movie else r.get("name")
-        orig_title = r.get("original_title") if is_movie else r.get("original_name")
-        release_date = r.get("release_date") if is_movie else r.get("first_air_date")
-        y = release_date[:4] if release_date else ""
-        poster_path = r.get("poster_path")
-        backdrop_path = r.get("backdrop_path")
-        results.append({
-            "tmdb_id": r.get("id"),
-            "title": title,
-            "original_title": orig_title,
-            "year": y,
-            "release_date": release_date,
-            "overview": r.get("overview", ""),
-            "poster_path": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None,
-            "backdrop_path": f"https://image.tmdb.org/t/p/original{backdrop_path}" if backdrop_path else None,
-            "vote_average": round(float(r.get("vote_average", 0)), 1),
-            "media_type": r_type
-        })
+        item_formatted = _format_item(r)
+        if item_formatted:
+            results.append(item_formatted)
+
     return results
+
 
 
 def get_tmdb_digital_release_status(tmdb_id, media_type="movie", season=None, episode=None):

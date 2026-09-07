@@ -143,7 +143,7 @@ const store = reactive({
   offlineDrivesCount: 0,
   offlineDriveLetters: [],
   drivesStatus: [],
-  hideOfflineMedia: typeof localStorage !== "undefined" && localStorage.getItem("caps_hide_offline") === "true",
+  hideOfflineMedia: typeof localStorage !== "undefined" ? (localStorage.getItem("caps_hide_offline") !== null ? localStorage.getItem("caps_hide_offline") === "true" : true) : true,
   updateInfo: null,      // set when an update is available
   pendingScanAfterCacheCleared: false, // triggers auto-scan when returning home after cache clear
   pendingUpdateCheck: false,           // triggers auto-check for updates when Settings opens from the banner
@@ -534,6 +534,9 @@ async function checkDrivesHealth() {
     store.drivesStatus = res.drives || [];
     if (res.hide_unmounted_items !== undefined) {
       store.hideOfflineMedia = !!res.hide_unmounted_items;
+      try {
+        localStorage.setItem("caps_hide_offline", store.hideOfflineMedia ? "true" : "false");
+      } catch (e) {}
     }
 
     if (prevOfflineDrives !== null) {
@@ -2032,6 +2035,9 @@ const TvContentRow = {
               <i :class="item.type === 'series' || item.type === 'anime' ? 'ph-bold ph-television' : 'ph-bold ph-film-strip'"></i>
               <span>{{ item.title }}</span>
             </div>
+            <div v-if="item.is_mounted === false" class="unmounted-badge">
+              <i class="ph-bold ph-hard-drive"></i> {{ item.drive_letter ? ('Offline (' + item.drive_letter + ')') : 'Offline' }}
+            </div>
             <div class="tv-poster-overlay">
               <span class="tv-poster-title">{{ item.title }}</span>
             </div>
@@ -2052,6 +2058,9 @@ const TvContentRow = {
             <div v-else class="tv-poster-fallback">
               <i :class="item.type === 'series' || item.type === 'anime' ? 'ph-bold ph-television' : 'ph-bold ph-film-strip'"></i>
               <span style="font-size:1.1rem">{{ item.title }}</span>
+            </div>
+            <div v-if="item.is_mounted === false" class="unmounted-badge">
+              <i class="ph-bold ph-hard-drive"></i> {{ item.drive_letter ? ('Offline (' + item.drive_letter + ')') : 'Offline' }}
             </div>
 
             <!-- Auto-Playing Trailer Embed / Video Stream (disabled in continue watching) -->
@@ -2231,6 +2240,7 @@ const TvContentRow = {
       const rowType = props.row?.type;
       for (const item of raw) {
         if (!item) continue;
+        if (store.hideOfflineMedia && item.is_mounted === false) continue;
         const key = getMediaDedupKey(item, rowType);
         if (key) {
           if (seen.has(key)) continue;
@@ -2928,6 +2938,7 @@ const ContentRow = {
 
       for (const item of raw) {
         if (!item) continue;
+        if (store.hideOfflineMedia && item.is_mounted === false) continue;
         const key = getMediaDedupKey(item, rowType);
         if (key) {
           if (seen.has(key)) continue;
@@ -3664,20 +3675,28 @@ const HomePage = {
     const kidsItemCount = ref(0);
 
     const displayRows = computed(() => {
-      return (rows.value || []).filter((r) => r && r.type !== "hero");
+      const base = (rows.value || []).filter((r) => r && r.type !== "hero");
+      if (!store.hideOfflineMedia) return base;
+      return base.filter((r) => {
+        const items = r.items || [];
+        return items.some((it) => it && it.is_mounted !== false);
+      });
     });
 
     const heroItems = computed(() => {
       if (!rows.value || !Array.isArray(rows.value)) return [];
       const heroRow = rows.value.find((r) => r && (r.type === "hero" || r.title === "Featured"));
       if (heroRow && heroRow.items && heroRow.items.length) {
-        return heroRow.items.filter((i) => i && i.backdrop_path).slice(0, 10);
+        return heroRow.items
+          .filter((i) => i && i.backdrop_path && (!store.hideOfflineMedia || i.is_mounted !== false))
+          .slice(0, 10);
       }
       const allItems = [];
       const seen = new Set();
       for (const r of rows.value) {
         if (r && r.type === "hero") continue;
         for (const item of (r?.items || [])) {
+          if (store.hideOfflineMedia && item?.is_mounted === false) continue;
           const key = item?.tmdb_id || item?.id || item?.title;
           if (key && !seen.has(key) && item?.backdrop_path) {
             seen.add(key);
@@ -4218,16 +4237,16 @@ const DetailPage = {
           </div>
 
           <!-- More Like This / Similar Media Shelf -->
-          <div class="detail-section" v-if="media.similar_items && media.similar_items.length > 0">
+          <div class="detail-section" v-if="displayedSimilarItems && displayedSimilarItems.length > 0">
             <div class="detail-section-header">
               <div class="detail-section-title" style="display:flex;align-items:center;gap:8px">
                 <i class="ph ph-sparkle" style="color:var(--accent)"></i>
                 <span>More Like This</span>
                 <span class="universe-card-badge" style="margin-left:6px;font-size:0.7rem;text-transform:uppercase">
-                  {{ media.similar_items.length }} Recommendations
+                  {{ displayedSimilarItems.length }} Recommendations
                 </span>
               </div>
-              <div class="row-header-controls" v-if="media.similar_items.length > 4">
+              <div class="row-header-controls" v-if="displayedSimilarItems.length > 4">
                 <button class="row-control-btn" @click="scrollSimilar(-400)" title="Scroll Left">
                   <i class="ph ph-caret-left"></i>
                 </button>
@@ -4238,7 +4257,7 @@ const DetailPage = {
             </div>
             <div class="cards-scroller" ref="similarScrollerRef" style="padding:4px 0 16px">
               <media-card
-                v-for="item in media.similar_items"
+                v-for="item in displayedSimilarItems"
                 :key="item.id"
                 :item="item"
                 @click="navigateToSibling(item)"
@@ -4510,6 +4529,32 @@ const DetailPage = {
             <div class="sk-line skeleton sk-pill" style="width:90px;height:24px"></div>
           </div>
           <div class="sk-line skeleton" style="width:60%;min-width:260px;height:38px;border-radius:8px;margin:4px 0"></div>
+
+          <!-- Slow loading notice for large media libraries (e.g. One Piece) -->
+          <transition name="skeleton-fade">
+            <div v-if="loadingSlow" class="detail-loading-indicator-card">
+              <div class="detail-loading-pulse-spinner">
+                <i class="ph-bold ph-hourglass-high detail-loading-spin-icon"></i>
+              </div>
+              <div class="detail-loading-text-wrap">
+                <div class="detail-loading-headline">
+                  <span>Loading Title & Episode Library</span>
+                  <span class="detail-loading-dots">
+                    <span>.</span><span>.</span><span>.</span>
+                  </span>
+                </div>
+                <div class="detail-loading-subtext">
+                  <span v-if="loadingVerySlow">
+                    Shows with massive episode catalogs take a bit longer to parse, assemble, and verify. Thank you for your patience!
+                  </span>
+                  <span v-else>
+                    Assembling season tracks, episode thumbnails, and streaming metadata. This may take a moment for large shows...
+                  </span>
+                </div>
+              </div>
+            </div>
+          </transition>
+
           <div style="display:flex;gap:14px;align-items:center;">
             <div class="sk-line skeleton" style="width:55px;height:16px"></div>
             <div class="sk-line skeleton" style="width:65px;height:16px"></div>
@@ -4553,6 +4598,15 @@ const DetailPage = {
     const router = VueRouter.useRouter();
     const media = ref(null);
     const loading = ref(true);
+    const loadingSlow = ref(false);
+    const loadingVerySlow = ref(false);
+    let slowTimer = null;
+    let verySlowTimer = null;
+
+    function clearLoadingTimers() {
+      if (slowTimer) { clearTimeout(slowTimer); slowTimer = null; }
+      if (verySlowTimer) { clearTimeout(verySlowTimer); verySlowTimer = null; }
+    }
     const activeSeason = ref("1");
     const seasonTabsRef = ref(null);
     const showCollectionModal = ref(false);
@@ -4634,6 +4688,15 @@ const DetailPage = {
         loading.value = true;
       }
       backdropFailed.value = false;   // reset fallback when loading a title
+      clearLoadingTimers();
+      loadingSlow.value = false;
+      loadingVerySlow.value = false;
+      slowTimer = setTimeout(() => {
+        if (loading.value) loadingSlow.value = true;
+      }, 1000);
+      verySlowTimer = setTimeout(() => {
+        if (loading.value) loadingVerySlow.value = true;
+      }, 3500);
       try {
         let url;
         if (type === "movie") {
@@ -4669,7 +4732,10 @@ const DetailPage = {
           media.value = null;
         }
       } finally {
+        clearLoadingTimers();
         loading.value = false;
+        loadingSlow.value = false;
+        loadingVerySlow.value = false;
       }
     }
 
@@ -4678,6 +4744,7 @@ const DetailPage = {
       window.addEventListener("scroll", onScroll, { passive: true });
     });
     onUnmounted(() => {
+      clearLoadingTimers();
       if (backdropCycleTimer) clearInterval(backdropCycleTimer);
       window.removeEventListener("scroll", onScroll);
     });
@@ -4984,10 +5051,24 @@ const DetailPage = {
     const displayedFranchiseItems = computed(() => {
       const f = media.value?.franchise;
       if (!f) return [];
+      let list = [];
       if (franchiseOrder.value === "timeline" && f.timeline_items && f.timeline_items.length) {
-        return f.timeline_items;
+        list = f.timeline_items;
+      } else {
+        list = f.items || [];
       }
-      return f.items || [];
+      if (store.hideOfflineMedia) {
+        list = list.filter(it => it.is_mounted !== false || it.id === media.value?.id || it.is_current);
+      }
+      return list;
+    });
+
+    const displayedSimilarItems = computed(() => {
+      const items = media.value?.similar_items || [];
+      if (store.hideOfflineMedia) {
+        return items.filter(it => it.is_mounted !== false);
+      }
+      return items;
     });
 
     const franchiseScrollerRef = ref(null);
@@ -5103,6 +5184,8 @@ const DetailPage = {
       store,
       media,
       loading,
+      loadingSlow,
+      loadingVerySlow,
       activeSeason,
       sortedSeasons,
       getStatusSlug,
@@ -5117,6 +5200,7 @@ const DetailPage = {
       searchCast,
       franchiseOrder,
       displayedFranchiseItems,
+      displayedSimilarItems,
       franchiseScrollerRef,
       scrollFranchise,
       similarScrollerRef,
@@ -6354,7 +6438,7 @@ const SettingsPage = {
             </div>
             <div style="display:flex;align-items:center;gap:8px">
               <span class="unmatched-count-badge" v-if="unmatchedList.length > 0">
-                <i class="ph ph-warning"></i> {{ unmatchedList.length }} Unmatched
+                <i class="ph ph-warning"></i> {{ unmatchedList.length }} Unmatched {{ unmatchedList.length === 1 ? 'Title' : 'Titles' }}
               </span>
               <button class="btn btn-secondary btn-sm" @click="loadUnmatched" :disabled="loadingUnmatched" id="btn-refresh-unmatched">
                 <i :class="loadingUnmatched ? 'ph ph-circle-notch' : 'ph ph-arrows-clockwise'" :style="loadingUnmatched ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
@@ -6392,8 +6476,11 @@ const SettingsPage = {
                 <tbody>
                   <tr v-for="item in unmatchedList" :key="item.id">
                     <td class="unmatched-title-cell" :title="item.title">
-                      {{ item.title }}
+                      <strong>{{ item.title }}</strong>
                       <span v-if="item.year" style="color:var(--text-muted);font-weight:normal"> ({{ item.year }})</span>
+                      <span v-if="item.file_count && item.file_count > 1" class="badge" style="font-size:0.72rem;margin-left:6px;background:rgba(229,9,20,0.15);color:var(--accent);border:1px solid rgba(229,9,20,0.3)">
+                        {{ item.file_count }} files
+                      </span>
                     </td>
                     <td>
                       <span class="badge" style="text-transform:capitalize;font-size:0.75rem">{{ item.type }}</span>
@@ -6407,6 +6494,133 @@ const SettingsPage = {
                     <td style="text-align:right">
                       <button class="btn btn-primary btn-sm" @click="openFixMatchForItem(item)">
                         <i class="ph ph-magic-wand" style="margin-right:4px"></i> Fix Match
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2d. Missing Artwork & Re-cache Manager -->
+        <div class="settings-section" id="settings-recache-section">
+          <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <i class="ph ph-image-broken" style="color:var(--accent)"></i>
+              <span>Missing Artwork & Re-cache Manager</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span class="unmatched-count-badge" v-if="recacheList.length > 0" style="background:rgba(239,68,68,0.15);color:#f87171;border-color:rgba(239,68,68,0.3)">
+                <i class="ph ph-warning"></i> {{ recacheList.length }} Need Re-cache
+              </span>
+              <button
+                class="btn btn-secondary btn-sm"
+                :style="hideOfflineRecache ? 'background:rgba(229,9,20,0.15);color:var(--accent);border-color:rgba(229,9,20,0.4)' : ''"
+                @click="hideOfflineRecache = !hideOfflineRecache"
+                id="btn-toggle-hide-offline-recache"
+                :title="hideOfflineRecache ? 'Showing only online titles (click to show all)' : 'Click to hide offline titles'"
+              >
+                <i :class="hideOfflineRecache ? 'ph-bold ph-eye-slash' : 'ph ph-eye'" style="margin-right:4px"></i>
+                {{ hideOfflineRecache ? 'Offline Hidden' : 'Hide Offline' }}
+              </button>
+              <button class="btn btn-secondary btn-sm" @click="loadNeedsRecache" :disabled="loadingRecache || recachingAll" id="btn-refresh-recache">
+                <i :class="loadingRecache ? 'ph ph-circle-notch' : 'ph ph-arrows-clockwise'" :style="loadingRecache ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                {{ loadingRecache ? 'Refreshing...' : 'Refresh List' }}
+              </button>
+              <button class="btn btn-primary btn-sm" @click="recacheAllMissing" :disabled="loadingRecache || recachingAll || !recacheList.some(it => it.is_mounted)" id="btn-recache-all" v-if="recacheList.length > 0">
+                <i :class="recachingAll ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="recachingAll ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                {{ recachingAll ? 'Re-caching (' + recacheProgress.current + '/' + recacheProgress.total + ')...' : 'Re-cache All (' + recacheList.filter(it => it.is_mounted).length + ' Online)' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-desc" style="margin-bottom:1rem">
+              Library media matched to TMDb whose local posters or backdrops are missing from cache (e.g. after clearing cache while external drives were disconnected). Re-cache will automatically download the missing artwork and metadata.
+            </div>
+
+            <!-- Live Batch Re-cache Progress Bar -->
+            <div v-if="recachingAll" class="recache-progress-card">
+              <div class="recache-progress-header">
+                <span>Downloading artwork: <strong style="color:var(--text-primary)">{{ recacheProgress.currentTitle }}</strong></span>
+                <span style="font-weight:700;color:var(--accent)">{{ recacheProgress.current }} / {{ recacheProgress.total }} ({{ Math.round((recacheProgress.current / recacheProgress.total) * 100) }}%)</span>
+              </div>
+              <div class="recache-progress-track">
+                <div class="recache-progress-fill" :style="{ width: Math.round((recacheProgress.current / recacheProgress.total) * 100) + '%' }"></div>
+              </div>
+            </div>
+
+            <div v-if="loadingRecache" style="display:flex;justify-content:center;padding:2rem">
+              <div class="loading-spinner"></div>
+            </div>
+
+            <div v-else-if="recacheList.length === 0" style="padding:1.5rem;text-align:center;background:rgba(255,255,255,0.02);border-radius:12px;border:1px dashed rgba(255,255,255,0.1)">
+              <div style="font-size:1.5rem;margin-bottom:4px;color:#10b981"><i class="ph-bold ph-check-circle"></i></div>
+              <div style="font-weight:700;color:var(--text-primary)">All Library Artwork Cached!</div>
+              <div style="font-size:0.8rem;color:var(--text-muted)">All matched movies and series have valid local posters and backdrops on disk.</div>
+            </div>
+
+            <div v-else-if="displayedRecacheList.length === 0" style="padding:1.5rem;text-align:center;background:rgba(255,255,255,0.02);border-radius:12px;border:1px dashed rgba(255,255,255,0.1)">
+              <div style="font-size:1.5rem;margin-bottom:4px;color:var(--text-muted)"><i class="ph ph-hard-drives"></i></div>
+              <div style="font-weight:700;color:var(--text-primary)">All {{ recacheList.length }} Offline Titles Hidden</div>
+              <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px">Titles needing re-cache are on disconnected drives. Reconnect external drives or click below to inspect.</div>
+              <button class="btn btn-secondary btn-sm" @click="hideOfflineRecache = false">
+                <i class="ph ph-eye" style="margin-right:4px"></i> Show All (Include Offline)
+              </button>
+            </div>
+
+            <div v-else class="unmatched-container">
+              <table class="unmatched-table">
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Type</th>
+                    <th>Scope</th>
+                    <th>Missing Assets</th>
+                    <th>Drive Status</th>
+                    <th style="text-align:right">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in displayedRecacheList" :key="item.tmdb_id + '_' + item.type">
+                    <td class="unmatched-title-cell" :title="item.title">
+                      <strong>{{ item.title }}</strong>
+                      <span v-if="item.year" style="color:var(--text-muted);font-weight:normal"> ({{ item.year }})</span>
+                    </td>
+                    <td>
+                      <span class="badge" style="text-transform:capitalize;font-size:0.75rem">{{ item.type }}</span>
+                    </td>
+                    <td style="color:var(--text-muted);font-size:0.8rem">
+                      {{ item.file_count === 1 ? '1 file' : item.file_count + ' episodes/files' }}
+                    </td>
+                    <td>
+                      <div style="display:flex;gap:4px;flex-wrap:wrap">
+                        <span v-if="item.missing_poster" class="recache-asset-badge missing-poster">
+                          <i class="ph ph-image"></i> Poster
+                        </span>
+                        <span v-if="item.missing_backdrop" class="recache-asset-badge missing-backdrop">
+                          <i class="ph ph-monitor"></i> Backdrop
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <span v-if="item.is_mounted" class="drive-status-badge online" title="Drive is connected and accessible">
+                        <i class="ph-fill ph-circle" style="font-size:0.5rem"></i> Online
+                      </span>
+                      <span v-else class="drive-status-badge offline" title="Drive or storage path is currently offline">
+                        <i class="ph-fill ph-warning-circle"></i> Offline Drive
+                      </span>
+                    </td>
+                    <td style="text-align:right">
+                      <button
+                        class="btn btn-primary btn-sm"
+                        @click="recacheSingleItem(item)"
+                        :disabled="!item.is_mounted || recachingMap[item.tmdb_id] || recachingAll"
+                        :title="!item.is_mounted ? 'Cannot re-cache while drive is disconnected' : 'Download missing artwork and metadata'"
+                      >
+                        <i :class="recachingMap[item.tmdb_id] ? 'ph ph-circle-notch' : 'ph ph-arrows-clockwise'" :style="recachingMap[item.tmdb_id] ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                        {{ recachingMap[item.tmdb_id] ? 'Re-caching...' : 'Re-cache' }}
                       </button>
                     </td>
                   </tr>
@@ -6738,8 +6952,8 @@ const SettingsPage = {
             <!-- Cache row -->
             <div class="settings-row" id="settings-cache-row">
               <div class="settings-label-container">
-                <div class="settings-label">Cached Metadata & Images</div>
-                <div class="settings-desc">Cached posters, backdrops, and JSON metadata stored on disk.</div>
+                <div class="settings-label">Cached Metadata, Images & Database Media</div>
+                <div class="settings-desc">Wipes all cached artwork files, JSON metadata, and removes all library media from the database so a fresh rescan repopulates from scratch.</div>
                 <div style="font-size:0.85rem;color:var(--text-primary);font-weight:700;margin-top:4px">
                   Current Cache Usage: <span style="color:var(--accent)">{{ cacheInfo.size_formatted || '0 KB' }}</span> ({{ cacheInfo.file_count || 0 }} files)
                 </div>
@@ -7177,6 +7391,12 @@ const SettingsPage = {
             },
             playback: { ...form.value.playback, ...(data.playback || {}) },
           };
+          if (data.hide_unmounted_items !== undefined) {
+            store.hideOfflineMedia = !!data.hide_unmounted_items;
+            try {
+              localStorage.setItem("caps_hide_offline", store.hideOfflineMedia ? "true" : "false");
+            } catch (err) {}
+          }
         }
         initialFormJson.value = JSON.stringify(form.value);
         await validatePaths();
@@ -7511,6 +7731,7 @@ const SettingsPage = {
       loadSystemInfo();
       loadAllProfiles();
       loadUnmatched();
+      loadNeedsRecache();
       loadNetworkRequests();
       loadAutoBackupStatus();
       if (!store.profile?.is_kids) loadKidsOverrides();
@@ -7713,9 +7934,18 @@ const SettingsPage = {
     async function handleClearCache() {
       clearingCache.value = true;
       try {
+        if (typeof _API_CACHE !== "undefined" && _API_CACHE && _API_CACHE.clear) {
+          _API_CACHE.clear();
+        }
         const res = await API.del("/api/system/cache");
-        addToast(`Cache cleared! (${res.cleared || 0} files removed) — scanning for new metadata…`, "success");
+        addToast(`Cache & media database cleared! (${res.cleared || 0} files removed) — starting fresh scan…`, "success");
         await loadCacheInfo();
+        if (typeof loadUnmatched === "function") {
+          await loadUnmatched();
+        }
+        if (typeof loadNeedsRecache === "function") {
+          await loadNeedsRecache();
+        }
         // Signal HomePage to auto-start a scan when we arrive there
         store.pendingScanAfterCacheCleared = true;
         router.push("/");
@@ -7840,6 +8070,105 @@ const SettingsPage = {
       });
     }
 
+    // ─── Missing Artwork & Re-cache Manager ──────────────────────
+    const recacheList = ref([]);
+    const loadingRecache = ref(false);
+    const recachingAll = ref(false);
+    const recacheProgress = ref({ current: 0, total: 0, currentTitle: "" });
+    const recachingMap = ref({});
+    const hideOfflineRecache = ref(localStorage.getItem("capsstream_hide_offline_recache") === "true");
+
+    watch(hideOfflineRecache, (val) => {
+      try {
+        localStorage.setItem("capsstream_hide_offline_recache", val ? "true" : "false");
+      } catch (e) {}
+    });
+
+    const displayedRecacheList = computed(() => {
+      if (hideOfflineRecache.value) {
+        return recacheList.value.filter(it => it.is_mounted);
+      }
+      return recacheList.value;
+    });
+
+    async function loadNeedsRecache() {
+      loadingRecache.value = true;
+      try {
+        const res = await API.get("/api/media/needs-recache");
+        recacheList.value = res || [];
+      } catch (e) {
+        addToast("Failed to load items needing re-cache", "error");
+      } finally {
+        loadingRecache.value = false;
+      }
+    }
+
+    async function recacheSingleItem(item) {
+      if (!item || !item.tmdb_id) return;
+      recachingMap.value[item.tmdb_id] = true;
+      try {
+        const res = await API.post("/api/recache", {
+          tmdb_id: item.tmdb_id,
+          type: item.type || "movie"
+        });
+        if (res?.ok) {
+          addToast(`Re-cached metadata and artwork for "${item.title}"`, "success");
+          recacheList.value = recacheList.value.filter(it => it.tmdb_id !== item.tmdb_id || it.type !== item.type);
+        } else {
+          addToast(res?.error || `Failed to re-cache "${item.title}"`, "error");
+        }
+      } catch (e) {
+        addToast(`Error re-caching "${item.title}": ${e?.message || e}`, "error");
+      } finally {
+        recachingMap.value[item.tmdb_id] = false;
+      }
+    }
+
+    async function recacheAllMissing() {
+      const onlineItems = recacheList.value.filter(it => it.is_mounted);
+      if (!onlineItems.length) {
+        addToast("No online items available to re-cache", "warning");
+        return;
+      }
+      recachingAll.value = true;
+      recacheProgress.value = { current: 0, total: onlineItems.length, currentTitle: "" };
+      let succeeded = 0;
+      let failed = 0;
+
+      for (let i = 0; i < onlineItems.length; i++) {
+        const item = onlineItems[i];
+        recacheProgress.value.current = i + 1;
+        recacheProgress.value.currentTitle = item.title;
+        recachingMap.value[item.tmdb_id] = true;
+        try {
+          const res = await API.post("/api/recache", {
+            tmdb_id: item.tmdb_id,
+            type: item.type || "movie"
+          });
+          if (res?.ok) {
+            succeeded++;
+            recacheList.value = recacheList.value.filter(it => it.tmdb_id !== item.tmdb_id || it.type !== item.type);
+          } else {
+            failed++;
+          }
+        } catch (err) {
+          failed++;
+        } finally {
+          recachingMap.value[item.tmdb_id] = false;
+        }
+      }
+
+      recachingAll.value = false;
+      if (succeeded > 0) {
+        addToast(`Re-cached ${succeeded} item${succeeded > 1 ? 's' : ''} successfully!`, "success");
+      }
+      if (failed > 0) {
+        addToast(`${failed} item${failed > 1 ? 's' : ''} could not be re-cached. Check internet or TMDb connection.`, "warning");
+      }
+      await loadNeedsRecache();
+    }
+
+
     // ─── Outgoing Network Activity & Request Inspector ──────────
     const networkList = ref([]);
     const networkSummary = ref({ total: 0, success: 0, failed: 0, success_rate: 100, avg_latency_ms: 0 });
@@ -7942,6 +8271,7 @@ const SettingsPage = {
       }
       store.layoutMode = mode;
       localStorage.setItem("capsstream_layout_mode", mode);
+      localStorage.setItem("capsstream_android_reverted_standard", "1");
       if (mode === "tv") {
         document.body.classList.add("layout-tv-mode");
         addToast("TV Layout activated!", "info");
@@ -8188,6 +8518,16 @@ const SettingsPage = {
       closeCurrentWindow,
       showNamingGuide,
       activeNamingTab,
+      recacheList,
+      displayedRecacheList,
+      hideOfflineRecache,
+      loadingRecache,
+      recachingAll,
+      recacheProgress,
+      recachingMap,
+      loadNeedsRecache,
+      recacheSingleItem,
+      recacheAllMissing,
     };
   },
 };
@@ -11792,20 +12132,20 @@ const SearchPage = {
         </div>
 
         <!-- Dynamic Results Header -->
-        <div v-else-if="results.length" class="search-results-header">
+        <div v-else-if="filteredResults.length" class="search-results-header">
           <div class="search-results-count">
-            Found <strong style="color:var(--text-primary)">{{ results.length }}</strong> {{ results.length === 1 ? 'title' : 'titles' }}
+            Found <strong style="color:var(--text-primary)">{{ filteredResults.length }}</strong> {{ filteredResults.length === 1 ? 'title' : 'titles' }}
             <span v-if="query"> matching "<strong style="color:var(--accent)">{{ query }}</strong>"</span>
           </div>
         </div>
 
         <!-- Results Grid -->
-        <div v-if="!loading && results.length" class="search-grid">
+        <div v-if="!loading && filteredResults.length" class="search-grid">
           <MediaCard v-for="item in paginatedResults" :key="item.id || item.tmdb_id" :item="item" @click="handleClick" />
         </div>
 
         <!-- Classic Page Number Bar Pagination -->
-        <div v-if="!loading && results.length > 0" class="pagination-bar">
+        <div v-if="!loading && filteredResults.length > 0" class="pagination-bar">
           <button class="pagination-btn" :disabled="currentPage === 1" @click="setPage(1)" title="First Page">
             « First
           </button>
@@ -11827,7 +12167,7 @@ const SearchPage = {
 
           <span class="pagination-info">
             Page <strong>{{ currentPage }}</strong> of <strong>{{ totalPages }}</strong>
-            <span style="font-size:0.75rem;color:var(--text-muted);margin-left:6px">({{ results.length }} total matches)</span>
+            <span style="font-size:0.75rem;color:var(--text-muted);margin-left:6px">({{ filteredResults.length }} total matches)</span>
           </span>
 
           <button class="pagination-btn" :disabled="currentPage === totalPages" @click="setPage(currentPage + 1)" title="Next Page">
@@ -11925,13 +12265,21 @@ const SearchPage = {
       }
     }
 
+    const filteredResults = computed(() => {
+      let list = results.value || [];
+      if (store.hideOfflineMedia) {
+        list = list.filter((item) => item && item.is_mounted !== false);
+      }
+      return list;
+    });
+
     const totalPages = computed(() => {
-      return Math.ceil(results.value.length / pageSize.value) || 1;
+      return Math.ceil(filteredResults.value.length / pageSize.value) || 1;
     });
 
     const paginatedResults = computed(() => {
       const start = (currentPage.value - 1) * pageSize.value;
-      return results.value.slice(start, start + pageSize.value);
+      return filteredResults.value.slice(start, start + pageSize.value);
     });
 
     const visiblePageNumbers = computed(() => {
@@ -12033,7 +12381,7 @@ const SearchPage = {
 
     return {
       store, searchInputRef, query, selectedType, selectedGenre, selectedSort,
-      results, paginatedResults, currentPage, pageSize, totalPages, visiblePageNumbers, setPage, loading, searched, genresList, typeOptions,
+      results, filteredResults, paginatedResults, currentPage, pageSize, totalPages, visiblePageNumbers, setPage, loading, searched, genresList, typeOptions,
       performSearch, onQueryInput, clearSearch, selectType, quickSearch, handleClick
     };
   }
@@ -16875,6 +17223,12 @@ router.beforeEach((to, from, next) => {
 // ─── Floating Scan Progress Widget ───────────────────────────
 
 const ScanProgressWidget = {
+  props: {
+    hasBottomNav: {
+      type: Boolean,
+      default: false,
+    },
+  },
   template: `
     <div class="scan-floating-widget-root">
       <!-- 1. Full Screen Mode Overlay -->
@@ -17038,7 +17392,11 @@ const ScanProgressWidget = {
       </teleport>
 
       <!-- 2. Bottom-Left Floating Widget (When NOT in Fullscreen) -->
-      <div class="scan-floating-widget" v-if="!isFullscreen && (store.scanRunning || showCompleted)">
+      <div
+        class="scan-floating-widget"
+        :class="{ 'has-bottom-nav': hasBottomNav }"
+        v-if="!isFullscreen && (store.scanRunning || showCompleted)"
+      >
         <!-- Minimized Pill View -->
         <div v-if="isMinimized" class="scan-widget-pill" @click="isMinimized = false" id="scan-widget-pill">
           <div class="scan-widget-pill-text">
@@ -17131,7 +17489,7 @@ const ScanProgressWidget = {
       </div>
     </div>
   `,
-  setup() {
+  setup(props) {
     const isMinimized = ref(false);
     const isFullscreen = ref(false);
     const showCompleted = ref(false);
@@ -17299,6 +17657,7 @@ const ScanProgressWidget = {
 
     return {
       store,
+      hasBottomNav: computed(() => props.hasBottomNav),
       isMinimized,
       isFullscreen,
       showCompleted,
@@ -17373,7 +17732,11 @@ const App = {
               </div>
               <div class="profile-dropdown-item" @click.stop="goStats" id="tv-dd-stats">
                 <i class="ph-bold ph-chart-polar" style="font-size:1.1rem;color:#f59e0b"></i>
-                <span>Analytics</span>
+                <span>Analytics & Wrapped</span>
+              </div>
+              <div class="profile-dropdown-item" @click.stop="openShortcuts" id="tv-dd-shortcuts">
+                <i class="ph-bold ph-keyboard" style="font-size:1.1rem;color:#38bdf8"></i>
+                <span>Keyboard Shortcuts</span>
               </div>
               <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="tv-dd-settings">
                 <i class="ph-bold ph-gear-six" style="font-size:1.1rem;color:#94a3b8"></i>
@@ -17453,11 +17816,6 @@ const App = {
               <i class="ph ph-magnifying-glass" style="font-size:1.1rem"></i>
             </div>
 
-            <!-- Shortcuts button -->
-            <div class="nav-search-btn" @click="showShortcuts = true" id="nav-shortcuts" data-tooltip="Keyboard Shortcuts (?)">
-              <i class="ph ph-keyboard" style="font-size:1.1rem"></i>
-            </div>
-
             <!-- Scan button (Admin only) -->
             <div v-if="store.profile?.is_admin || !store.profile" class="nav-search-btn" @click="triggerScan" id="nav-scan" data-tooltip="Refresh Library" style="position:relative">
               <i class="ph ph-arrows-clockwise" style="font-size:1.1rem" :style="{ animation: store.scanRunning ? 'spin 1s linear infinite' : 'none' }"></i>
@@ -17511,6 +17869,10 @@ const App = {
                 <div class="profile-dropdown-item" @click.stop="goStats" id="dd-stats">
                   <i class="ph-bold ph-chart-polar" style="font-size:1.1rem;color:#f59e0b"></i>
                   <span>Analytics & Wrapped</span>
+                </div>
+                <div class="profile-dropdown-item" @click.stop="openShortcuts" id="dd-shortcuts">
+                  <i class="ph-bold ph-keyboard" style="font-size:1.1rem;color:#38bdf8"></i>
+                  <span>Keyboard Shortcuts</span>
                 </div>
                 <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="dd-settings">
                   <i class="ph-bold ph-gear-six" style="font-size:1.1rem;color:#94a3b8"></i>
@@ -17676,7 +18038,7 @@ const App = {
       <shortcuts-modal v-if="showShortcuts" @close="showShortcuts = false" />
 
       <!-- Bottom-Left Floating Scan Progress Widget -->
-      <scan-progress-widget />
+      <scan-progress-widget :has-bottom-nav="isBottomNavVisible" />
 
       <!-- Onboarding Preparation Overlay (First Run Setup) -->
       <div class="onboarding-overlay" v-if="store.onboardingWaiting">
@@ -18642,18 +19004,22 @@ const App = {
     const isPlayerRoute = computed(() => route.path.startsWith("/watch"));
     const isDetailRoute = computed(() => !route.path.startsWith("/title"));
 
+    const isBottomNavVisible = computed(() => {
+      return showNav.value && !isPlayerRoute.value && !!store.profile && !isMobileNavHidden.value;
+    });
+
     function isRoute(path) {
       return route.path === path || route.fullPath === path;
     }
 
     const navItems = computed(() => {
+      const isMobile = store.isMobileScreen;
       if (store.profile?.is_kids) {
         return [
           { name: "Home", path: "/", id: "nav-home", isMatch: (r) => r.path === "/" },
-          { name: "Shows & Cartoons", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
+          { name: isMobile ? "Shows" : "Shows & Cartoons", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
           { name: "Movies", path: "/browse?type=movie", id: "nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
           { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
-          { name: "Analytics & Wrapped", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
         ];
       }
       return [
@@ -18661,7 +19027,6 @@ const App = {
         { name: "Movies", path: "/browse?type=movie", id: "nav-movies", isMatch: (r) => r.fullPath === "/browse?type=movie" },
         { name: "Series", path: "/browse?type=series", id: "nav-series", isMatch: (r) => r.fullPath === "/browse?type=series" },
         { name: "Anime", path: "/browse?type=anime", id: "nav-anime", isMatch: (r) => r.fullPath === "/browse?type=anime" },
-        { name: "Analytics & Wrapped", path: "/stats", id: "nav-stats", isMatch: (r) => r.path === "/stats" },
       ];
     });
 
@@ -19168,6 +19533,7 @@ const App = {
 
       window.addEventListener("resize", () => {
         if (contextMenuState.show) closeGlobalContextMenu();
+        updatePillPosition();
       }, { passive: true });
 
       window.addEventListener("click", handleOutsideClick);
@@ -19268,6 +19634,11 @@ const App = {
     function goStats() {
       showProfileMenu.value = false;
       router.push("/stats");
+    }
+
+    function openShortcuts() {
+      showProfileMenu.value = false;
+      showShortcuts.value = true;
     }
 
     function dismissToast(id) {
@@ -19484,6 +19855,7 @@ const App = {
       showShortcuts,
       appLoading,
       showNav,
+      isBottomNavVisible,
       updateBannerDismissed,
       remoteBannerDismissed,
       isPlayerRoute,
@@ -19495,6 +19867,7 @@ const App = {
       goCollections,
       goRequests,
       goStats,
+      openShortcuts,
       goSettings,
       goAbout,
       editCurrentProfile,
@@ -19605,6 +19978,9 @@ const FixMatchModal = {
               {{ target?.title || 'Unknown Media' }}
               <span v-if="target?.year" style="color:var(--text-muted);font-weight:normal"> ({{ target.year }})</span>
               <span v-if="target?.type" class="badge" style="margin-left:6px;text-transform:capitalize;font-size:0.72rem">{{ target.type }}</span>
+              <span v-if="target?.file_count && target.file_count > 1" class="badge" style="margin-left:6px;font-size:0.72rem;background:rgba(229,9,20,0.15);color:var(--accent);border:1px solid rgba(229,9,20,0.3)">
+                {{ target.file_count }} files/episodes
+              </span>
             </div>
             <div v-if="target?.file_path" class="unmatched-path-cell" style="display:block;margin-top:4px;max-width:100%;font-size:0.78rem">
               {{ target.file_path }}
@@ -19786,6 +20162,7 @@ const FixMatchModal = {
       try {
         const payload = {
           media_id: props.target?.id,
+          media_ids: props.target?.ids || (props.target?.id ? [props.target.id] : []),
           old_tmdb_id: props.target?.tmdb_id,
           tmdb_id: item.tmdb_id,
           type: selectedType.value
