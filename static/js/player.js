@@ -444,8 +444,8 @@ const PlayerPage = {
                 </div>
               </div>
 
-              <!-- Subtitles Menu -->
-              <div style="position:relative">
+              <!-- Subtitles Menu (Only shown in controller if multiple subtitle tracks) -->
+              <div style="position:relative" v-if="subtitles && subtitles.length > 1">
                 <button class="ctrl-btn" @click="showSubMenu = !showSubMenu; showSpeedMenu = false; showAudioMenu = false; showQualityMenu = false; showSleepMenu = false" title="Subtitles" id="ctrl-subs" style="font-size:0.85rem;font-weight:700">
                   <i class="ph ph-closed-captioning" style="font-size:1.35rem"></i>
                 </button>
@@ -621,7 +621,19 @@ const PlayerPage = {
                       </div>
                     </div>
 
-                    <!-- 5. Chapters Submenu Row (if chapters exist) -->
+                    <!-- 5a. Subtitles Submenu Row (always shown in settings when subtitles exist) -->
+                    <div v-if="subtitles && subtitles.length" class="player-menu-nav-row" @click="openSettingsSubmenu('subtitles')" id="settings-nav-subtitles">
+                      <div class="player-nav-row-left">
+                        <i class="ph ph-closed-captioning"></i>
+                        <span>Subtitles</span>
+                      </div>
+                      <div class="player-nav-row-right">
+                        <span class="player-nav-value">{{ selectedSub === -1 ? 'Off' : (subtitles[selectedSub]?.label || 'On') }}</span>
+                        <i class="ph ph-caret-right"></i>
+                      </div>
+                    </div>
+
+                    <!-- 5b. Chapters Submenu Row (if chapters exist) -->
                     <div v-if="chapters && chapters.length" class="player-menu-nav-row" @click="openSettingsSubmenu('chapters')" id="settings-nav-chapters">
                       <div class="player-nav-row-left">
                         <i class="ph ph-bookmarks"></i>
@@ -641,6 +653,41 @@ const PlayerPage = {
                       </div>
                       <div class="player-nav-row-right">
                         <span v-if="store.queue && store.queue.length" class="player-nav-value">{{ store.queue.length }} items</span>
+                        <i class="ph ph-caret-right"></i>
+                      </div>
+                    </div>
+
+                    <!-- 7. Picture-in-Picture Navigation Row -->
+                    <div
+                      v-if="isPipSupported"
+                      class="player-menu-nav-row"
+                      :class="{ active: isPipActive }"
+                      @click="togglePip(); showQualityMenu = false"
+                      id="player-menu-pip"
+                    >
+                      <div class="player-nav-row-left">
+                        <i :class="isPipActive ? 'ph-fill ph-screencast' : 'ph ph-screencast'"></i>
+                        <span>Picture-in-Picture (P)</span>
+                      </div>
+                      <div class="player-nav-row-right">
+                        <span v-if="isPipActive" class="player-nav-value highlight">Active</span>
+                        <i v-if="isPipActive" class="ph-bold ph-check" style="color:var(--accent)"></i>
+                        <i v-else class="ph ph-caret-right"></i>
+                      </div>
+                    </div>
+
+                    <!-- 8. Edit Skip Markers Navigation Row -->
+                    <div
+                      v-if="!store.profile?.is_kids"
+                      class="player-menu-nav-row"
+                      @click="showSkipModal = true; showQualityMenu = false"
+                      id="player-menu-skip-markers"
+                    >
+                      <div class="player-nav-row-left">
+                        <i class="ph ph-sliders-horizontal"></i>
+                        <span>Edit Skip Markers</span>
+                      </div>
+                      <div class="player-nav-row-right">
                         <i class="ph ph-caret-right"></i>
                       </div>
                     </div>
@@ -684,28 +731,6 @@ const PlayerPage = {
                           {{ opt.label }}
                         </button>
                       </div>
-                    </div>
-
-                    <!-- Picture-in-Picture Toggle inside Player Options -->
-                    <div
-                      v-if="isPipSupported"
-                      class="player-menu-item"
-                      :class="{ active: isPipActive }"
-                      @click="togglePip(); showQualityMenu = false"
-                      id="player-menu-pip"
-                      style="display:flex;align-items:center;justify-content:space-between;padding:9px 16px"
-                    >
-                      <span style="display:flex;align-items:center;gap:10px">
-                        <i :class="isPipActive ? 'ph-fill ph-screencast' : 'ph ph-screencast'" style="font-size:1.15rem"></i> Picture-in-Picture (P)
-                      </span>
-                      <i v-if="isPipActive" class="ph-bold ph-check" style="color:var(--accent)"></i>
-                    </div>
-
-                    <!-- Edit Skip Markers -->
-                    <div v-if="!store.profile?.is_kids" class="player-menu-item" @click="showSkipModal = true; showQualityMenu = false" id="player-menu-skip-markers" style="padding:9px 16px">
-                      <span style="display:flex;align-items:center;gap:10px">
-                        <i class="ph ph-sliders-horizontal" style="font-size:1.15rem"></i> Edit Skip Markers
-                      </span>
                     </div>
                   </div>
 
@@ -855,6 +880,46 @@ const PlayerPage = {
                           {{ opt.label }}
                         </button>
                       </div>
+                    </div>
+                  </div>
+
+                  <!-- ── Submenu: Subtitles ── -->
+                  <div v-else-if="activeSettingsSubmenu === 'subtitles'" class="player-menu-pane">
+                    <div class="player-submenu-header">
+                      <button class="player-submenu-back-btn" @click="closeSettingsSubmenu" title="Back">
+                        <i class="ph-bold ph-caret-left"></i>
+                      </button>
+                      <span class="player-submenu-title">Subtitles</span>
+                      <button class="player-menu-close-btn" @click="showQualityMenu = false" title="Close">
+                        <i class="ph ph-x"></i>
+                      </button>
+                    </div>
+                    <div class="player-submenu-list" style="max-height:260px;overflow-y:auto">
+                      <div class="player-menu-item" :class="{ active: selectedSub === -1 }" @click="selectSub(-1); closeSettingsSubmenu()">
+                        Off
+                      </div>
+                      <div
+                        v-for="(sub, i) in subtitles"
+                        :key="sub.url"
+                        class="player-menu-item"
+                        :class="{ active: selectedSub === i }"
+                        @click="selectSub(i); closeSettingsSubmenu()"
+                        :title="sub.label || sub.raw_filename || sub.filename"
+                      >
+                        {{ sub.label }}
+                      </div>
+                      <div class="profile-dropdown-divider"></div>
+                      <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="openOnlineSubModal">
+                        <i class="ph ph-magnifying-glass" style="margin-right:4px"></i> Search Online Subtitles
+                      </div>
+                      <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="downloadSubtitles">
+                        <i :class="downloadingSubs ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="downloadingSubs ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                        {{ downloadingSubs ? 'Searching OpenSubtitles…' : 'Auto-Download Subtitles' }}
+                      </div>
+                      <label class="player-menu-item" style="cursor:pointer;color:var(--accent);font-weight:600">
+                        <i class="ph ph-plus" style="margin-right:4px"></i> Load .srt / .vtt
+                        <input type="file" accept=".vtt,.srt" @change="handleCustomSubFile" style="display:none" />
+                      </label>
                     </div>
                   </div>
 

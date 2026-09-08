@@ -6540,17 +6540,25 @@ main::-webkit-scrollbar {
   width: 0;
   height: 32px;
   overflow: hidden;
-  transition: width var(--transition-med);
+  opacity: 0;
+  pointer-events: none;
+  padding: 0;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  padding: 0 8px;
-  box-sizing: border-box;
+  transition: width var(--transition-med, 0.2s ease), opacity 0.15s ease, padding var(--transition-med, 0.2s ease);
 }
 
 .volume-group:hover .volume-slider-container,
-.volume-group:focus-within .volume-slider-container {
+.volume-group:focus-within .volume-slider-container,
+.volume-slider-container:hover,
+.volume-slider-container:focus-within {
   width: 96px;
+  opacity: 1;
+  pointer-events: auto;
+  padding: 0 8px;
 }
+
 
 .volume-slider {
   width: 76px;
@@ -6562,20 +6570,26 @@ main::-webkit-scrollbar {
   outline: none;
   cursor: pointer;
   margin: 0;
-  overflow: visible;
+  flex-shrink: 0;
+}
+
+.volume-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #ffffff;
   border: 2px solid var(--accent, #6366f1);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6), 0 0 8px rgba(99, 102, 241, 0.4);
   cursor: pointer;
-  margin-top: -6px;
+  margin-top: -5px;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   position: relative;
   z-index: 2;
@@ -6587,9 +6601,15 @@ main::-webkit-scrollbar {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.7), 0 0 14px var(--accent-glow, rgba(99, 102, 241, 0.6));
 }
 
+.volume-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
 .volume-slider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #ffffff;
   border: 2px solid var(--accent, #6366f1);
@@ -6603,6 +6623,7 @@ main::-webkit-scrollbar {
   transform: scale(1.2);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.7), 0 0 14px var(--accent-glow, rgba(99, 102, 241, 0.6));
 }
+
 
 /* Menu Popups (Subtitles, Audio & Playback Speed) */
 .player-popup-menu {
@@ -14008,7 +14029,7 @@ body.kids-mode-theme .suggestion-tag:hover {
 /* ─── Dynamic Island Notification Capsule (Above Bottom Dock) ── */
 .player-dynamic-island {
   position: absolute;
-  bottom: calc(135px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(165px + env(safe-area-inset-bottom, 0px));
   top: auto;
   left: 50%;
   transform: translateX(-50%);
@@ -14026,30 +14047,42 @@ body.kids-mode-theme .suggestion-tag:hover {
   pointer-events: auto;
   user-select: none;
   max-width: min(92vw, 560px);
-  animation: dynamic-island-in 0.32s cubic-bezier(0.16, 1, 0.3, 1);
-  transition: bottom 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.24s ease;
+  will-change: transform, opacity, filter;
+  transition: bottom 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.dynamic-island-anim-enter-active,
+/* ─── Smooth In & Out Transitions for Dynamic Island ─── */
+.dynamic-island-anim-enter-active {
+  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.35s ease-out,
+              filter 0.35s ease-out;
+}
+
 .dynamic-island-anim-leave-active {
-  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.24s ease;
-}
-.dynamic-island-anim-enter-from,
-.dynamic-island-anim-leave-to {
-  transform: translate(-50%, 18px) scale(0.92);
-  opacity: 0;
+  transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.25s ease-in,
+              filter 0.25s ease-in;
 }
 
-@keyframes dynamic-island-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 18px) scale(0.92);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0) scale(1);
-  }
+.dynamic-island-anim-enter-from {
+  transform: translate(-50%, 20px) scale(0.88);
+  opacity: 0;
+  filter: blur(8px);
 }
+
+.dynamic-island-anim-enter-to,
+.dynamic-island-anim-leave-from {
+  transform: translate(-50%, 0) scale(1);
+  opacity: 1;
+  filter: blur(0px);
+}
+
+.dynamic-island-anim-leave-to {
+  transform: translate(-50%, 14px) scale(0.92);
+  opacity: 0;
+  filter: blur(6px);
+}
+
 
 .player-dynamic-island.notice-memory {
   border-color: rgba(245, 158, 11, 0.45);
@@ -18699,7 +18732,7 @@ h1, h2, h3,
   .player-dynamic-island {
     position: absolute !important;
     top: auto !important;
-    bottom: calc(84px + env(safe-area-inset-bottom, 0px)) !important;
+    bottom: calc(108px + env(safe-area-inset-bottom, 0px)) !important;
     left: 50% !important;
     transform: translateX(-50%) !important;
     max-width: min(94vw, 440px) !important;
@@ -20010,7 +20043,7 @@ h1, h2, h3,
   .player-dynamic-island {
     position: absolute !important;
     top: auto !important;
-    bottom: calc(76px + env(safe-area-inset-bottom, 0px)) !important;
+    bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
     left: 50% !important;
     transform: translateX(-50%) !important;
     max-width: min(92vw, 440px) !important;
@@ -23507,8 +23540,62 @@ body:has(.settings-save-fab) .back-to-top-btn,
 
 .player-volume-range {
   width: 80px;
-  accent-color: var(--accent, #e50914);
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 99px;
+  outline: none;
   cursor: pointer;
+  margin: 0;
+  overflow: visible;
+}
+
+.player-volume-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.player-volume-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--accent, #e50914);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  margin-top: -5px;
+  transition: transform 0.15s ease;
+}
+
+.player-volume-range:hover::-webkit-slider-thumb,
+.player-volume-range:active::-webkit-slider-thumb {
+  transform: scale(1.2);
+}
+
+.player-volume-range::-moz-range-track {
+  height: 4px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.player-volume-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--accent, #e50914);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.player-volume-range:hover::-moz-range-thumb,
+.player-volume-range:active::-moz-range-thumb {
+  transform: scale(1.2);
 }
 
 .player-time-label {
@@ -25030,33 +25117,55 @@ body:has(.settings-save-fab) .back-to-top-btn,
 .story-top-actions {
   position: absolute;
   top: 28px;
-  left: 18px;
-  right: 18px;
+  left: 14px;
+  right: 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   z-index: 30;
 }
 
 .story-top-left-chips {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
 }
 
 .story-profile-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
-  background: rgba(0, 0, 0, 0.55);
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  padding: 5px 12px;
+  padding: 5px 10px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   font-weight: 700;
   color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.story-profile-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80px;
+  flex-shrink: 1;
+}
+
+.story-profile-sub {
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0.75;
 }
 
 /* ─── Wrapped Background Music Pill & Popover ────────────── */
@@ -25121,7 +25230,7 @@ body:has(.settings-save-fab) .back-to-top-btn,
 }
 
 .story-music-name {
-  max-width: 100px;
+  max-width: 72px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -25280,7 +25389,7 @@ body:has(.settings-save-fab) .back-to-top-btn,
 
 .story-slide-content {
   flex: 1;
-  padding: 85px 26px 40px;
+  padding: 100px 22px 44px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -25469,6 +25578,793 @@ body:has(.settings-save-fab) .back-to-top-btn,
   width: 100%;
   height: auto;
   display: block;
+}
+
+/* ─── Story Slide Inner Layout ──────────────────────────────── */
+.story-slide-inner {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.story-slide-title {
+  font-size: 1.75rem;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  color: #fff;
+  margin: 0 0 4px;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.5);
+}
+
+.story-slide-subtitle {
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.72);
+  margin: 0 0 10px;
+  line-height: 1.45;
+  max-width: 310px;
+}
+
+/* ─── Desktop Side Navigation Arrows ────────────────────────── */
+.story-nav-desktop {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 1.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 9999999;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: all 0.2s ease;
+}
+
+.story-nav-desktop:hover {
+  background: rgba(255, 255, 255, 0.18);
+  transform: translateY(-50%) scale(1.08);
+}
+
+.story-nav-desktop-prev {
+  left: calc(50% - 300px);
+}
+
+.story-nav-desktop-next {
+  right: calc(50% - 300px);
+}
+
+.story-top-right-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ─── Slide 0: Watch Time Hero Card ─────────────────────────── */
+.story-stat-hero-card {
+  width: 100%;
+  max-width: 330px;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 28px;
+  padding: 28px 24px 22px;
+  text-align: center;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  margin-top: 8px;
+}
+
+.story-stat-hero-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 10px;
+}
+
+.story-stat-hero-value {
+  font-size: 4.2rem;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: #fff;
+  line-height: 1;
+  text-shadow: 0 0 40px rgba(229, 9, 20, 0.5);
+}
+
+.story-stat-hero-unit {
+  font-size: 2rem;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+.story-stat-hero-sub {
+  font-size: 0.88rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 8px;
+  font-weight: 500;
+}
+
+/* ─── Slide 1: Obsession Spotlight ──────────────────────────── */
+.obsession-backdrop-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1a0a2e, #0c0618);
+  font-size: 3rem;
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.obsession-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.obsession-year {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 600;
+}
+
+.obsession-title {
+  font-size: 1.2rem;
+  font-weight: 900;
+  color: #fff;
+  margin: 0 0 12px;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.obsession-metrics-grid {
+  display: flex;
+  gap: 16px;
+}
+
+.obsession-metric-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.obsession-metric-lbl {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.obsession-metric-val {
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.02em;
+}
+
+.obsession-metric-val.gold {
+  color: #ffd700;
+  text-shadow: 0 0 16px rgba(255, 215, 0, 0.45);
+}
+
+/* ─── Slide 2: Genre Leaderboard ─────────────────────────────── */
+.wrapped-leaderboard-list {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wrapped-leaderboard-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.wrapped-leaderboard-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  border-radius: 18px;
+  border-right: 2px solid;
+  pointer-events: none;
+  transition: width 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.wrapped-leaderboard-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+}
+
+.wrapped-leaderboard-rank {
+  font-size: 0.78rem;
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.5);
+  min-width: 24px;
+}
+
+.wrapped-leaderboard-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.wrapped-leaderboard-pct {
+  font-size: 0.88rem;
+  font-weight: 900;
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+/* ─── Slide 3: Speed Binge Card ──────────────────────────────── */
+.story-binge-card {
+  width: 100%;
+  max-width: 360px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 26px;
+  padding: 22px 20px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 4px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+}
+
+.story-binge-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+
+.story-binge-tag {
+  font-size: 0.65rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.45);
+  margin-bottom: 2px;
+}
+
+.story-binge-name {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.story-binge-desc {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.4;
+}
+
+.story-binge-marathon {
+  text-align: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.story-binge-val {
+  font-size: 3rem;
+  font-weight: 900;
+  color: #f97316;
+  letter-spacing: -0.04em;
+  text-shadow: 0 0 24px rgba(249, 115, 22, 0.5);
+}
+
+.story-binge-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 14px;
+}
+
+.story-binge-stat {
+  flex: 1;
+  text-align: center;
+}
+
+.story-binge-stat-lbl {
+  font-size: 0.67rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.45);
+  margin-bottom: 4px;
+}
+
+.story-binge-stat-num {
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: #fff;
+}
+
+.story-binge-stat-num.orange {
+  color: #f97316;
+}
+
+.story-binge-stat-num.blue {
+  color: #38bdf8;
+}
+
+.story-binge-stat-num .unit {
+  font-size: 0.85rem;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.story-binge-divider {
+  width: 1px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* ─── Slide 4: Audio & Subtitle DNA Card ─────────────────────── */
+.story-dna-card {
+  width: 100%;
+  max-width: 360px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 26px;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  margin-top: 4px;
+}
+
+.story-dna-badge {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.25), rgba(236, 72, 153, 0.2));
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  color: #c084fc;
+  font-size: 0.88rem;
+  font-weight: 800;
+  padding: 7px 16px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+
+.story-dna-quote {
+  font-size: 0.92rem;
+  color: rgba(255, 255, 255, 0.65);
+  font-style: italic;
+  line-height: 1.5;
+  text-align: center;
+  margin: 0;
+}
+
+.dna-spec-lbl {
+  font-size: 0.67rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.45);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.dna-spec-val {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #fff;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dna-spec-val.gold {
+  color: #ffd700;
+}
+
+.dna-spec-val.green {
+  color: #4ade80;
+}
+
+.story-dna-footer {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.65);
+  text-align: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 10px;
+  width: 100%;
+}
+
+/* ─── Slide 5: Viewing Rhythm Card ───────────────────────────── */
+.story-rhythm-card {
+  width: 100%;
+  max-width: 360px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 26px;
+  padding: 24px 22px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.story-rhythm-lbl {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.split-pill-track {
+  width: 100%;
+  height: 36px;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.split-weekday-fill {
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  height: 100%;
+  transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.split-weekend-fill {
+  background: linear-gradient(90deg, #f97316, #fb923c);
+  height: 100%;
+  flex: 1;
+}
+
+.story-rhythm-split-text {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.story-peak-window-box {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.story-peak-window-lbl {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.story-peak-window-val {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #fff;
+}
+
+/* ─── Slide 6: Talent Grid ───────────────────────────────────── */
+.wrapped-talent-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  width: 100%;
+  max-width: 340px;
+  margin-top: 6px;
+}
+
+.wrapped-talent-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 10px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.wrapped-talent-card:hover {
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateY(-3px);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.talent-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.talent-avatar-fallback {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+}
+
+.wrapped-talent-name {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #fff;
+  text-align: center;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wrapped-talent-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent, #e50914);
+}
+
+/* ─── Slide 7: Tech Specs Card ───────────────────────────────── */
+.story-tech-card {
+  width: 100%;
+  max-width: 360px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 26px;
+  padding: 26px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5), 0 0 30px rgba(56, 189, 248, 0.08);
+  margin-top: 4px;
+}
+
+.story-tech-lbl {
+  font-size: 0.67rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(56, 189, 248, 0.8);
+  margin-bottom: 4px;
+}
+
+.story-tech-val {
+  font-size: 3.8rem;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.04em;
+  text-shadow: 0 0 30px rgba(56, 189, 248, 0.4);
+}
+
+.story-tech-val .unit {
+  font-size: 1.8rem;
+  font-weight: 700;
+  opacity: 0.7;
+}
+
+/* ─── Slide 8: Archetype Reveal ──────────────────────────────── */
+.story-archetype-card {
+  width: 100%;
+  max-width: 360px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 2px solid;
+  border-radius: 28px;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  margin-top: 4px;
+}
+
+.archetype-preview-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+}
+
+.story-archetype-title {
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.02em;
+  text-align: center;
+}
+
+.story-archetype-tagline {
+  font-size: 0.92rem;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.story-archetype-desc {
+  font-size: 0.88rem;
+  color: rgba(255, 255, 255, 0.65);
+  text-align: center;
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* ─── Slide 9: Poster & Download ─────────────────────────────── */
+.story-poster-inner {
+  justify-content: flex-start;
+  padding-top: 12px;
+  gap: 12px;
+}
+
+.story-poster-title {
+  font-size: 1.15rem;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.02em;
+  margin: 0 0 2px;
+  text-align: center;
+}
+
+.story-poster-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.story-poster-dl-btn {
+  font-size: 0.88rem;
+  padding: 9px 18px;
+}
+
+.story-poster-replay-btn {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 1rem;
+}
+
+/* ─── Shared Story Components ────────────────────────────────── */
+.story-empty-hint {
+  font-size: 0.92rem;
+  color: rgba(255, 255, 255, 0.45);
+  text-align: center;
+  font-style: italic;
+  padding: 24px;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 18px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.story-footer-hint {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+  z-index: 25;
+  pointer-events: none;
+  letter-spacing: 0.03em;
+}
+
+/* ─── Rarity Badges (Wrapped + Achievements) ─────────────────── */
+.rarity-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid;
+}
+
+.rarity-badge.bronze {
+  background: rgba(180, 120, 60, 0.2);
+  color: #cd7f32;
+  border-color: rgba(205, 127, 50, 0.4);
+}
+
+.rarity-badge.silver {
+  background: rgba(192, 192, 192, 0.15);
+  color: #c0c0c0;
+  border-color: rgba(192, 192, 192, 0.35);
+}
+
+.rarity-badge.gold {
+  background: rgba(255, 215, 0, 0.18);
+  color: #ffd700;
+  border-color: rgba(255, 215, 0, 0.4);
+  text-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+}
+
+.rarity-badge.platinum {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(56, 189, 248, 0.15));
+  color: #c084fc;
+  border-color: rgba(168, 85, 247, 0.4);
 }
 
 /* ─── Onboarding Preparation Overlay (First Run) ──────────── */
