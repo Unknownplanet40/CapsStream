@@ -2847,6 +2847,43 @@ const ContentRow = {
       @card-click="(item, r) => $emit('card-click', item, r)"
       @remove-continue="(item) => $emit('remove-continue', item)"
     />
+
+    <!-- Top 10 Netflix-style row -->
+    <div v-else-if="row?.type === 'top10'" class="top10-row">
+      <div class="row-header">
+        <div class="row-title">
+          <i class="ph-bold ph-ranking" style="color:var(--accent);margin-right:8px;font-size:1.1rem"></i>
+          {{ row.title }}
+          <span class="row-arrow">›</span>
+        </div>
+        <div class="row-header-controls">
+          <button class="row-control-btn" :disabled="!canScrollLeft" @click="scrollLeft" title="Scroll Left">
+            <i class="ph ph-caret-left"></i>
+          </button>
+          <button class="row-control-btn" :disabled="!canScrollRight" @click="scrollRight" title="Scroll Right">
+            <i class="ph ph-caret-right"></i>
+          </button>
+        </div>
+      </div>
+      <div class="row-scroller-wrapper">
+        <div class="top10-scroller" ref="scrollerRef" @scroll="onRowScroll">
+          <div
+            v-for="item in visibleItems"
+            :key="getItemKey(item)"
+            class="top10-card-wrapper"
+            @click="$emit('card-click', item, row)"
+          >
+            <div class="top10-rank-number" :data-rank="item.rank">{{ item.rank }}</div>
+            <media-card
+              :item="item"
+              :is-continue="false"
+              @click.stop="$emit('card-click', item, row)"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div v-else :class="row?.type === 'continue' ? 'continue-watching-section' : 'content-row'">
       <!-- Custom header for continue watching -->
       <div v-if="row?.type === 'continue'" class="continue-watching-header">
@@ -8748,7 +8785,7 @@ const PlayerPage = window.PlayerPage;
 // ─── Browse Page ──────────────────────────────────────────────
 
 const BrowsePage = {
-  components: { MediaCard, TvContentRow },
+  components: { MediaCard, TvContentRow, ContentRow },
   template: `
     <div class="browse-page">
       <div class="browse-header">
@@ -8775,6 +8812,14 @@ const BrowsePage = {
           </select>
         </div>
       </div>
+
+      <!-- Top 10 row — shown on Movies / Series / Anime tabs when there's data -->
+      <content-row
+        v-if="top10Row && !loading"
+        :row="top10Row"
+        :row-index="0"
+        @card-click="handleClick"
+      />
 
       <div v-if="loading" class="media-grid" aria-hidden="true">
         <div
@@ -8887,6 +8932,35 @@ const BrowsePage = {
       return "Browse All";
     });
 
+    const top10Items = ref([]);
+
+    const top10Row = computed(() => {
+      const t = activeType.value;
+      if (!top10Items.value.length) return null;
+      // Map 'anime' to 'series' for the API; both benefit from the series top10
+      const label = t === "movie" ? "Top 10 Movies Today" : t === "series" ? "Top 10 TV Shows Today" : t === "anime" ? "Top 10 Anime Today" : null;
+      if (!label) return null;
+      return { title: label, type: "top10", media_type: t === "movie" ? "movie" : "series", items: top10Items.value };
+    });
+
+    async function loadTop10() {
+      const t = activeType.value;
+      if (!t || t === "") { top10Items.value = []; return; }
+      // Map anime → series for the backend query
+      const apiType = t === "anime" ? "series" : t;
+      try {
+        const data = await API.get(`/api/top10?type=${apiType}`);
+        // For anime tab, filter to only anime type items
+        if (t === "anime" && data) {
+          top10Items.value = kidsFilter((data || []).filter(i => i.type === "anime"));
+        } else {
+          top10Items.value = kidsFilter(data || []);
+        }
+      } catch (e) {
+        top10Items.value = [];
+      }
+    }
+
     async function load() {
       loading.value = true;
       try {
@@ -8945,6 +9019,7 @@ const BrowsePage = {
       if (route.query.type) activeType.value = route.query.type;
       if (route.query.genre) selectedGenre.value = route.query.genre;
       load();
+      loadTop10();
       API.get("/api/genres").then((g) => { genres.value = g || []; }).catch(() => {});
     });
 
@@ -8954,6 +9029,7 @@ const BrowsePage = {
         activeType.value = newType || "";
         currentPage.value = 1;
         load();
+        loadTop10();
       },
     );
 
@@ -9066,6 +9142,8 @@ const BrowsePage = {
       totalPages,
       visiblePageNumbers,
       setPage,
+      top10Items,
+      top10Row,
     };
   },
 };

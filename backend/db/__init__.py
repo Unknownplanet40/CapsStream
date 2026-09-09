@@ -41,6 +41,7 @@ from .media import (
     get_unique_shows,
     get_recently_added,
     get_top_rated,
+    get_top_10,
     get_by_genre,
     get_random_pick,
     get_hero_featured,

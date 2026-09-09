@@ -860,6 +860,124 @@ def get_top_rated(limit=20, media_type=None):
     return enrich_mounted_list(items[:limit])
 
 
+def get_top_10(media_type="movie", profile_id=None, limit=10):
+    """
+    Return Top 10 unique titles for a given media_type using a hybrid ranking:
+      Stage 1 — Active profile watch time (if profile_id given)
+      Stage 2 — Global server watch time across all profiles (fallback)
+      Stage 3 — TMDb rating/vote_count (final fallback)
+
+    media_type: 'movie' for movies, 'series' for series+anime.
+    Each returned item has an extra 'rank' (1-based) field.
+    """
+    conn = get_conn()
+    disabled_roots = get_disabled_path_roots()
+
+    # Resolve type clause — 'series' encompasses both series and anime
+    if media_type == "movie":
+        type_sql = "m.type = 'movie'"
+    else:
+        type_sql = "m.type IN ('series', 'anime')"
+
+    seen_groups: set = set()  # tracks COALESCE(tmdb_id, title) to avoid duplicates
+    results = []
+
+    def _best_row_for_group(rows_iter):
+        """From a list of dicts with 'grp', pick one representative per group."""
+        out = []
+        for r in rows_iter:
+            grp = str(r.get("grp") or r.get("tmdb_id") or r.get("title") or "")
+            if grp and grp not in seen_groups:
+                seen_groups.add(grp)
+                out.append(r)
+        return out
+
+    # ── Stage 1: Profile watch history ─────────────────────────────────────
+    if profile_id and len(results) < limit:
+        need = (limit - len(results)) * 3  # over-fetch to absorb disabled paths
+        rows = conn.execute(f"""
+            SELECT m.*,
+                   COALESCE(CAST(m.tmdb_id AS TEXT), m.title) AS grp,
+                   SUM(wp.position) AS total_seconds,
+                   COUNT(wp.id) AS play_count
+            FROM watch_progress wp
+            JOIN media m ON m.id = wp.media_id
+            WHERE wp.profile_id = ?
+              AND {type_sql}
+              AND wp.position > 30
+            GROUP BY grp
+            ORDER BY total_seconds DESC, play_count DESC
+            LIMIT ?
+        """, (profile_id, need)).fetchall()
+
+        candidates = [dict(r) for r in rows]
+        if disabled_roots:
+            candidates = [r for r in candidates if not is_file_path_disabled(r.get("file_path", ""), disabled_roots)]
+        results.extend(_best_row_for_group(candidates)[:limit - len(results)])
+
+    # ── Stage 2: Global household watch history ─────────────────────────────
+    if len(results) < limit:
+        need = (limit - len(results)) * 3
+        rows = conn.execute(f"""
+            SELECT m.*,
+                   COALESCE(CAST(m.tmdb_id AS TEXT), m.title) AS grp,
+                   SUM(wp.position) AS total_seconds,
+                   COUNT(wp.id) AS play_count
+            FROM watch_progress wp
+            JOIN media m ON m.id = wp.media_id
+            WHERE {type_sql}
+              AND wp.position > 30
+            GROUP BY grp
+            ORDER BY total_seconds DESC, play_count DESC
+            LIMIT ?
+        """, (need,)).fetchall()
+
+        candidates = [dict(r) for r in rows]
+        if disabled_roots:
+            candidates = [r for r in candidates if not is_file_path_disabled(r.get("file_path", ""), disabled_roots)]
+        results.extend(_best_row_for_group(candidates)[:limit - len(results)])
+
+    # ── Stage 3: TMDb rating fallback ──────────────────────────────────────
+    if len(results) < limit:
+        need = (limit - len(results)) * 3
+        rows = conn.execute(f"""
+            SELECT m.*,
+                   COALESCE(CAST(m.tmdb_id AS TEXT), m.title) AS grp,
+                   NULL AS total_seconds,
+                   0 AS play_count
+            FROM media m
+            JOIN (
+                SELECT
+                    COALESCE(CAST(tmdb_id AS TEXT), title) AS grp,
+                    MAX(rating) AS best_rating,
+                    MAX(vote_count) AS best_votes,
+                    MIN(CASE WHEN poster_path IS NOT NULL AND poster_path != ''
+                             THEN id ELSE NULL END) AS poster_id,
+                    MIN(id) AS fallback_id
+                FROM media
+                WHERE {type_sql} AND rating > 0
+                GROUP BY grp
+            ) g ON m.id = COALESCE(g.poster_id, g.fallback_id)
+            ORDER BY g.best_rating DESC, g.best_votes DESC
+            LIMIT ?
+        """, (need,)).fetchall()
+
+        candidates = [dict(r) for r in rows]
+        if disabled_roots:
+            candidates = [r for r in candidates if not is_file_path_disabled(r.get("file_path", ""), disabled_roots)]
+        results.extend(_best_row_for_group(candidates)[:limit - len(results)])
+
+    conn.close()
+
+    enriched = enrich_mounted_list(results[:limit])
+
+    # Assign 1-based rank number to each item
+    for i, item in enumerate(enriched):
+        item["rank"] = i + 1
+
+    return enriched
+
+
 def get_by_genre(genre, limit=20):
     conn = get_conn()
     rows = conn.execute("""

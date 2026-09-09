@@ -14,7 +14,7 @@ from .middleware import (
 from backend.db import (
     get_all_media, get_media_by_id, get_media_by_tmdb, get_best_media_source,
     get_media_quality_options, search_media as db_search_media, get_unique_shows,
-    get_recently_added, get_top_rated, get_by_genre, get_all_genres,
+    get_recently_added, get_top_rated, get_top_10, get_by_genre, get_all_genres,
     get_random_pick, get_hero_featured, get_continue_watching, get_profile_recommendations, get_similar_media, get_progress, is_favorite,
     get_unmatched, get_media_needing_recache, upsert_media,
     delete_media_by_id, delete_media_by_tmdb, delete_media_by_title_and_type,
@@ -235,6 +235,17 @@ def api_home():
     else:
         recs = []
 
+    # ── Top 10 rows (profile-scoped, not cached since they change per user) ──
+    top10_movies = get_top_10("movie", profile_id=pid, limit=10)
+    top10_series = get_top_10("series", profile_id=pid, limit=10)
+    if kids:
+        top10_movies = filter_for_profile(top10_movies)
+        top10_series = filter_for_profile(top10_series)
+    if top10_movies:
+        final_rows.append({"title": "Top 10 Movies Today", "type": "top10", "media_type": "movie", "items": top10_movies})
+    if top10_series:
+        final_rows.append({"title": "Top 10 TV Shows Today", "type": "top10", "media_type": "series", "items": top10_series})
+
     rec_idx = 0
     for i, r in enumerate(rows):
         final_rows.append(r)
@@ -270,6 +281,23 @@ def api_home():
         final_rows.insert(0, {"title": "Featured", "type": "hero", "items": hero_items})
 
     return jsonify(final_rows)
+
+
+@media_bp.route("/api/top10", methods=["GET"])
+def api_top10():
+    """Standalone endpoint for Top 10 rows used by Movies/Series library tabs."""
+    media_type = request.args.get("type", "movie")  # 'movie' or 'series'
+    pid = current_profile()
+    kids = active_is_kids()
+
+    if media_type not in ("movie", "series"):
+        return jsonify({"error": "type must be 'movie' or 'series'"}), 400
+
+    items = get_top_10(media_type, profile_id=pid, limit=10)
+    if kids:
+        items = filter_for_profile(items)
+
+    return jsonify(items)
 
 
 @media_bp.route("/api/library", methods=["GET"])

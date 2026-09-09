@@ -29021,3 +29021,133 @@ body:has(.navbar-tv) .hero-backdrop-container::before,
 
 
 
+/* ═══════════════════════════════════════════════════════════
+   TOP 10 ROW — Netflix-style with giant rank numbers
+   ═══════════════════════════════════════════════════════════ */
+
+.top10-row {
+  margin-bottom: 40px;
+  padding-left: 0;
+}
+
+.top10-row .row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--page-gutter, 28px) 14px;
+}
+
+.top10-row .row-title {
+  display: flex;
+  align-items: center;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+
+.top10-scroller {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px var(--page-gutter, 28px) 20px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.top10-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+/* Each card wrapper: rank number + poster card side by side */
+.top10-card-wrapper {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  flex-shrink: 0;
+  cursor: pointer;
+  scroll-snap-align: start;
+  margin-left: -28px;
+  transition: transform 0.22s ease;
+}
+
+.top10-card-wrapper:first-child {
+  margin-left: 0;
+}
+
+.top10-card-wrapper:hover {
+  transform: scale(1.04);
+  z-index: 2;
+}
+
+/* Giant rank number — the signature Netflix look */
+.top10-rank-number {
+  position: relative;
+  flex-shrink: 0;
+  font-size: clamp(72px, 9vw, 115px);
+  font-weight: 900;
+  line-height: 1;
+  color: transparent;
+  -webkit-text-stroke: 3px rgba(255, 255, 255, 0.55);
+  text-stroke: 3px rgba(255, 255, 255, 0.55);
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.75) 0%,
+    rgba(180, 180, 220, 0.5) 60%,
+    rgba(120, 120, 200, 0.35) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  letter-spacing: -0.04em;
+  user-select: none;
+  pointer-events: none;
+  z-index: 1;
+  align-self: flex-end;
+  padding-bottom: 8px;
+  margin-right: -18px;
+  min-width: 72px;
+  text-align: right;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.6));
+}
+
+.top10-rank-number[data-rank="10"] {
+  font-size: clamp(58px, 7.5vw, 95px);
+  min-width: 88px;
+}
+
+.top10-card-wrapper .media-card {
+  flex-shrink: 0;
+  z-index: 2;
+  width: clamp(120px, 13vw, 168px);
+}
+
+@media (max-width: 640px) {
+  .top10-rank-number {
+    font-size: 58px;
+    min-width: 52px;
+    margin-right: -14px;
+    -webkit-text-stroke-width: 2px;
+  }
+
+  .top10-rank-number[data-rank="10"] {
+    font-size: 46px;
+    min-width: 66px;
+  }
+
+  .top10-card-wrapper {
+    margin-left: -22px;
+  }
+
+  .top10-card-wrapper .media-card {
+    width: 104px;
+  }
+
+  .top10-scroller {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
