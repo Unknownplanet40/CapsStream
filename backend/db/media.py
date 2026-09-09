@@ -874,10 +874,14 @@ def get_top_10(media_type="movie", profile_id=None, limit=10):
     disabled_roots = get_disabled_path_roots()
 
     # Resolve type clause — 'series' encompasses both series and anime
+    # type_sql: used in outer queries where table is aliased as 'm'
+    # type_sql_bare: used inside subqueries that have no alias (plain 'media')
     if media_type == "movie":
         type_sql = "m.type = 'movie'"
+        type_sql_bare = "type = 'movie'"
     else:
         type_sql = "m.type IN ('series', 'anime')"
+        type_sql_bare = "type IN ('series', 'anime')"
 
     seen_groups: set = set()  # tracks COALESCE(tmdb_id, title) to avoid duplicates
     results = []
@@ -955,7 +959,7 @@ def get_top_10(media_type="movie", profile_id=None, limit=10):
                              THEN id ELSE NULL END) AS poster_id,
                     MIN(id) AS fallback_id
                 FROM media
-                WHERE {type_sql} AND rating > 0
+                WHERE {type_sql_bare} AND rating > 0
                 GROUP BY grp
             ) g ON m.id = COALESCE(g.poster_id, g.fallback_id)
             ORDER BY g.best_rating DESC, g.best_votes DESC
