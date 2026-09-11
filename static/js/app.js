@@ -18012,20 +18012,6 @@ const App = {
             <button class="update-banner-dismiss" @click="remoteBannerDismissed = true" title="Dismiss">
               <i class="ph ph-x"></i>
             </button>
-          </div>
-        </transition>
-
-        <!-- Global Server Offline / Disconnected Banner -->
-        <transition name="fade">
-          <div
-            class="update-banner offline-banner"
-            v-if="store.serverOnline === false"
-          >
-            <i class="ph-fill ph-warning-octagon"></i>
-            <span>
-              <strong>Server Offline</strong> — CapsStream backend is unreachable. Reconnecting automatically...
-            </span>
-          </div>
         </transition>
       </div>
 
@@ -18761,7 +18747,33 @@ const App = {
           </div>
         </div>
       </transition>
+
+      <!-- Floating Dynamic Island Connection Loss Banner -->
+      <transition name="connection-island-anim">
+        <div
+          v-if="connectionIsland.visible"
+          class="connection-island"
+          :class="connectionIsland.status"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="connection-island-dot" :class="connectionIsland.status"></span>
+          <i :class="connectionIsland.icon" class="connection-island-icon"></i>
+          <span class="connection-island-text">{{ connectionIsland.text }}</span>
+          <button
+            v-if="connectionIsland.status === 'offline'"
+            class="connection-island-retry"
+            @click="retryConnectionNow"
+            :disabled="isRetryingConnection"
+            title="Retry connection"
+          >
+            <i class="ph-bold ph-arrows-clockwise" :class="{ 'spin-anim': isRetryingConnection }"></i>
+            <span>{{ isRetryingConnection ? 'Checking...' : 'Retry' }}</span>
+          </button>
+        </div>
+      </transition>
     </template>
+
   `,
   setup() {
     const route = VueRouter.useRoute();
@@ -18803,6 +18815,88 @@ const App = {
         }
       }, 300);
     }
+
+    // ── Floating Dynamic Island Connection Loss Monitor ──
+    const isDeviceOnline = ref(typeof navigator !== "undefined" ? navigator.onLine : true);
+    const isRetryingConnection = ref(false);
+    const connectionIsland = reactive({
+      visible: false,
+      status: "offline",
+      icon: "ph-bold ph-wifi-slash",
+      text: "Connection Lost — Reconnecting..."
+    });
+    let reconnectDismissTimer = null;
+    let wasConnectionOffline = false;
+
+    function updateConnectionState() {
+      const isOnline = isDeviceOnline.value && store.serverOnline !== false;
+
+      if (!isOnline) {
+        wasConnectionOffline = true;
+        if (reconnectDismissTimer) {
+          clearTimeout(reconnectDismissTimer);
+          reconnectDismissTimer = null;
+        }
+        connectionIsland.status = "offline";
+        if (!isDeviceOnline.value) {
+          connectionIsland.icon = "ph-bold ph-wifi-slash";
+          connectionIsland.text = "Device Offline — Check Network";
+        } else {
+          connectionIsland.icon = "ph-bold ph-cloud-slash";
+          connectionIsland.text = "Connection Lost — Reconnecting...";
+        }
+        connectionIsland.visible = true;
+      } else if (wasConnectionOffline) {
+        wasConnectionOffline = false;
+        connectionIsland.status = "online";
+        connectionIsland.icon = "ph-bold ph-check-circle";
+        connectionIsland.text = "Back Online";
+        connectionIsland.visible = true;
+        if (reconnectDismissTimer) clearTimeout(reconnectDismissTimer);
+        reconnectDismissTimer = setTimeout(() => {
+          if (connectionIsland.status === "online") {
+            connectionIsland.visible = false;
+          }
+        }, 2500);
+      } else {
+        connectionIsland.visible = false;
+      }
+    }
+
+    function onNetworkOffline() {
+      isDeviceOnline.value = false;
+      updateConnectionState();
+    }
+
+    function onNetworkOnline() {
+      isDeviceOnline.value = true;
+      retryConnectionNow();
+    }
+
+    async function retryConnectionNow() {
+      if (isRetryingConnection.value) return;
+      isRetryingConnection.value = true;
+      try {
+        const res = await fetch("/api/health?t=" + Date.now(), { cache: "no-store" });
+        if (res.ok) {
+          store.serverOnline = true;
+          isDeviceOnline.value = true;
+          updateConnectionState();
+        } else {
+          store.serverOnline = false;
+          updateConnectionState();
+        }
+      } catch (e) {
+        store.serverOnline = false;
+        updateConnectionState();
+      } finally {
+        isRetryingConnection.value = false;
+      }
+    }
+
+    watch(() => store.serverOnline, () => {
+      updateConnectionState();
+    });
 
     // Profile presence heartbeat watchdog & session eviction detection
     const showSessionEvictedModal = ref(false);
@@ -19012,6 +19106,12 @@ const App = {
           );
         }
       } catch (e) {}
+
+      window.addEventListener("offline", onNetworkOffline);
+      window.addEventListener("online", onNetworkOnline);
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        updateConnectionState();
+      }
     });
     let updateQuietChecked = false;
     async function checkUpdateQuiet() {
@@ -19696,6 +19796,9 @@ const App = {
       window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("resize", updateTvDropdownPosition);
       window.removeEventListener("scroll", updateTvDropdownPosition, true);
+      window.removeEventListener("offline", onNetworkOffline);
+      window.removeEventListener("online", onNetworkOnline);
+      if (reconnectDismissTimer) clearTimeout(reconnectDismissTimer);
       clearInterval(scanPollTimer);
     });
 
@@ -19921,6 +20024,9 @@ const App = {
     });
 
     return {
+      connectionIsland,
+      isRetryingConnection,
+      retryConnectionNow,
       store,
       route,
       navItems,

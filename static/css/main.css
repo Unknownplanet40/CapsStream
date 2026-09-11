@@ -2940,40 +2940,40 @@ main::-webkit-scrollbar {
   display: none;
 }
 
-/* ─── Media Card (Double-Bezel Hardware Architecture) ─────── */
+/* ─── Media Card (Clean Full-Bleed Architecture) ─────── */
 .media-card {
   flex: 0 0 var(--card-width);
   background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: var(--radius-outer);
-  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 0;
   overflow: hidden;
   cursor: pointer;
   position: relative;
   scroll-snap-align: start;
   transition:
-    transform 250ms cubic-bezier(0.32, 0.72, 0, 1),
-    border-color 250ms ease,
-    box-shadow 250ms ease;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.75);
 }
 
 .card-inner {
   position: relative;
   width: 100%;
   height: 100%;
-  border-radius: var(--radius-inner);
+  border-radius: 4px;
   overflow: hidden;
   background: var(--bg-card);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.12);
+}
+
+.card-poster {
+  border-radius: 4px;
 }
 
 .media-card:hover {
-  transform: translateY(-5px) scale(1.02);
+  transform: none;
   border-color: rgba(255, 255, 255, 0.25);
-  box-shadow:
-    0 20px 50px rgba(0, 0, 0, 0.85),
-    0 0 30px rgba(229, 9, 20, 0.18);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.85);
   z-index: 10;
 }
 
@@ -3543,13 +3543,13 @@ main::-webkit-scrollbar {
 }
 
 .continue-card:hover .card-poster {
-  transform: scale(1.05);
+  transform: none;
 }
 
 .continue-card:hover {
-  transform: translateY(-6px);
+  transform: none;
   border-color: rgba(229, 9, 20, 0.4);
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.6), 0 0 28px rgba(229, 9, 20, 0.16);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7), 0 0 28px rgba(229, 9, 20, 0.16);
 }
 
 /* Episode tag badge (top-left) */
@@ -14227,6 +14227,162 @@ body.kids-mode-theme .suggestion-tag:hover {
 .dynamic-island-btn-dismiss:hover {
   background: rgba(255, 255, 255, 0.2);
   color: #ffffff;
+}
+
+/* ─── Floating Dynamic Island Connection Loss Banner ─── */
+.connection-island {
+  position: fixed;
+  top: calc(18px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 999999;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px 8px 12px;
+  border-radius: 9999px;
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  pointer-events: auto;
+  user-select: none;
+  max-width: min(92vw, 520px);
+  will-change: transform, opacity, filter;
+  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.connection-island.offline {
+  background: rgba(26, 12, 14, 0.92);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(239, 68, 68, 0.25);
+}
+
+.connection-island.online {
+  background: rgba(12, 26, 18, 0.92);
+  border: 1px solid rgba(34, 197, 94, 0.5);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(34, 197, 94, 0.25);
+}
+
+/* Pulsing Status Dot */
+.connection-island-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.connection-island-dot.offline {
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+  animation: connectionPulseRed 1.8s ease-in-out infinite;
+}
+
+.connection-island-dot.online {
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+}
+
+@keyframes connectionPulseRed {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.65;
+  }
+}
+
+.connection-island-icon {
+  font-size: 1.15rem;
+  flex-shrink: 0;
+}
+
+.connection-island.offline .connection-island-icon {
+  color: #ef4444;
+}
+
+.connection-island.online .connection-island-icon {
+  color: #22c55e;
+}
+
+.connection-island-text {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #ffffff;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.connection-island-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  margin-left: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+  color: #ffffff;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.18s ease, transform 0.18s ease;
+}
+
+.connection-island-retry:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.22);
+  transform: scale(1.04);
+}
+
+.connection-island-retry:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.connection-island-retry:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.connection-island-retry .spin-anim {
+  animation: spinIsland 0.9s linear infinite;
+}
+
+@keyframes spinIsland {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Enter / Leave Transitions */
+.connection-island-anim-enter-active {
+  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.35s ease-out,
+              filter 0.35s ease-out;
+}
+
+.connection-island-anim-leave-active {
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.28s ease-in,
+              filter 0.28s ease-in;
+}
+
+.connection-island-anim-enter-from {
+  transform: translate(-50%, -24px) scale(0.9);
+  opacity: 0;
+  filter: blur(8px);
+}
+
+.connection-island-anim-enter-to,
+.connection-island-anim-leave-from {
+  transform: translate(-50%, 0) scale(1);
+  opacity: 1;
+  filter: blur(0);
+}
+
+.connection-island-anim-leave-to {
+  transform: translate(-50%, -20px) scale(0.94);
+  opacity: 0;
+  filter: blur(6px);
 }
 
 /* ─── Floating In-Player Notices & Banners (Fallback Compatibility) ───── */
@@ -29030,6 +29186,13 @@ body:has(.navbar-tv) .hero-backdrop-container::before,
 .top10-row {
   margin-bottom: 40px;
   padding-left: 0;
+  --top10-h: 260px;
+}
+
+@media (max-width: 640px) {
+  .top10-row {
+    --top10-h: 165px;
+  }
 }
 
 .top10-row .row-header {
@@ -29048,36 +29211,43 @@ body:has(.navbar-tv) .hero-backdrop-container::before,
   letter-spacing: 0.01em;
 }
 
+.top10-row .row-scroller-wrapper {
+  overflow-x: visible;
+  overflow-y: clip;
+}
+
 .top10-scroller {
   display: flex;
   flex-direction: row;
   align-items: flex-end; /* anchor all wrappers to the same baseline */
   gap: 0;
   overflow-x: auto;
+  overflow-y: hidden; /* prevents any vertical scrollbar */
   scroll-snap-type: x mandatory;
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
-  /* left/top/bottom use the page gutter; right is wider so the last rank+card is never clipped */
-  padding: 8px var(--page-gutter, 28px) 24px;
-  padding-right: calc(var(--page-gutter, 28px) + 56px);
+  padding: 12px var(--page-gutter, 28px) 24px;
+  padding-right: calc(var(--page-gutter, 28px) + 60px);
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 
 .top10-scroller::-webkit-scrollbar {
   display: none;
+  width: 0;
+  height: 0;
 }
 
 /* Each card wrapper: rank number + poster card side by side */
 .top10-card-wrapper {
   position: relative;
   display: flex;
-  align-items: flex-end; /* number sits at bottom of card */
+  align-items: flex-end;
+  height: var(--top10-h);
   flex-shrink: 0;
   cursor: pointer;
   scroll-snap-align: start;
-  margin-left: -20px;
-  margin-right: 38px;
+  margin-right: 44px;
   transition: none;
 }
 
@@ -29086,77 +29256,91 @@ body:has(.navbar-tv) .hero-backdrop-container::before,
 }
 
 .top10-card-wrapper:hover {
-  z-index: 3;
+  z-index: 10;
 }
 
-/* ── Giant rank number ── */
+/* ── Giant rank number — matched to card height & Netflix look ── */
 .top10-rank-number {
   position: relative;
   flex-shrink: 0;
-  /* Size: big enough to feel Netflix-scale */
-  font-size: clamp(80px, 10vw, 130px);
-  font-weight: 900;
-  line-height: 0.85; /* pull the number up so its baseline sits at card bottom */
-  letter-spacing: -0.06em;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  height: var(--top10-h);
+  font-family: "Bebas Neue", "Anton", Impact, "Arial Black", sans-serif;
+  font-weight: 400;
+  /* Font size scaled so glyph height exactly matches card height */
+  font-size: calc(var(--top10-h) * 1.25);
+  line-height: var(--top10-h);
+  letter-spacing: -0.04em;
   user-select: none;
   pointer-events: none;
   z-index: 1;
 
-  /* ── Color fix: solid dark fill + crisp white stroke ── */
-  color: #0d0e15; /* near-black fill — the page background color */
-  -webkit-text-stroke: 3.5px rgba(255, 255, 255, 0.9);
-  text-stroke: 3.5px rgba(255, 255, 255, 0.9);
-  paint-order: stroke fill; /* stroke paints underneath fill for crispy edges */
+  /* Inactive: sleek dark grey outline like card #6 in mockup */
+  color: #000; /* dark fill matching background */
+  -webkit-text-stroke: 3.5px rgba(255, 255, 255, 0.35);
+  text-stroke: 3.5px rgba(255, 255, 255, 0.35);
+  paint-order: stroke fill;
+  filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.85));
 
-  /* Subtle depth shadow */
-  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.85));
-
-  /* Overlap: number right edge goes behind card */
-  margin-right: -22px;
-  min-width: 68px;
+  /* Overlap: card sits on top of right side of the number */
+  margin-right: -42px;
+  min-width: calc(var(--top10-h) * 0.4);
   text-align: right;
-
-  /* Vertical alignment: baseline of number aligns with bottom of card */
-  align-self: flex-end;
-  padding-bottom: 6px; /* fine-tune so number bottom matches card bottom edge */
+  transition: -webkit-text-stroke 0.2s ease, text-stroke 0.2s ease, filter 0.2s ease;
 }
 
-/* Two-digit "10" is slightly wider */
+/* Two-digit "10" */
 .top10-rank-number[data-rank="10"] {
-  font-size: clamp(62px, 8vw, 105px);
-  min-width: 86px;
-  margin-right: -24px;
+  font-size: calc(var(--top10-h) * 1.05);
+  min-width: calc(var(--top10-h) * 0.72);
+  margin-right: -52px;
 }
 
 /* The media card inside the wrapper sits in front of the number */
 .top10-card-wrapper .media-card {
+  height: var(--top10-h) !important;
+  width: calc(var(--top10-h) * 2 / 3) !important;
+  flex: 0 0 calc(var(--top10-h) * 2 / 3) !important;
   flex-shrink: 0;
   z-index: 2;
-  width: clamp(130px, 13.5vw, 175px);
+  border-radius: 4px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.75);
+  transition: border 0.2s ease, box-shadow 0.2s ease;
+}
+
+.top10-card-wrapper .media-card .card-inner,
+.top10-card-wrapper .media-card .card-poster {
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+/* ── Hover / Active State: glow effect only applied to the numbers ── */
+.top10-card-wrapper:hover .top10-rank-number {
+  -webkit-text-stroke: 4px rgba(255, 255, 255, 0.95);
+  text-stroke: 4px rgba(255, 255, 255, 0.95);
+  filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.35)) drop-shadow(0 8px 24px rgba(0, 0, 0, 0.95));
 }
 
 /* ── Mobile ── */
 @media (max-width: 640px) {
+  .top10-card-wrapper {
+    margin-right: 30px;
+  }
+
   .top10-rank-number {
-    font-size: 62px;
-    min-width: 48px;
-    margin-right: -16px;
+    margin-right: -28px;
     -webkit-text-stroke-width: 2.5px;
-    padding-bottom: 4px;
   }
 
   .top10-rank-number[data-rank="10"] {
-    font-size: 50px;
-    min-width: 64px;
-    margin-right: -18px;
-  }
-
-  .top10-card-wrapper {
-    margin-left: -16px;
-  }
-
-  .top10-card-wrapper .media-card {
-    width: 108px;
+    margin-right: -36px;
   }
 
   .top10-scroller {
