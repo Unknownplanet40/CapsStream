@@ -171,6 +171,9 @@ const store = reactive({
   layoutMode: localStorage.getItem("capsstream_layout_mode") || "standard",
   isMobileScreen: typeof window !== "undefined" ? window.innerWidth < 768 : false,
   tvFocus: { rowIndex: 0, cardIndex: 0 },
+  playback: {
+    enable_trailers: true,
+  },
 });
 
 window.store = store;
@@ -895,6 +898,10 @@ const globalTrailerState = reactive({
 
 async function openGlobalTrailer(item) {
   if (!item) return;
+  if (store.playback?.enable_trailers === false) {
+    addToast("Trailers are disabled in Settings", "info");
+    return;
+  }
   const mediaId = item.id || item.tmdb_id;
   if (!mediaId) return;
   try {
@@ -1548,7 +1555,7 @@ const MediaCard = {
 
             <!-- Official TMDB Trailer Frame (Primary) -->
             <iframe
-              v-if="trailerEmbedUrl"
+              v-if="trailerEmbedUrl && store.playback?.enable_trailers !== false"
               :src="trailerEmbedUrl"
               class="popout-trailer-frame"
               :class="{ 'is-playing': isVideoPlaying }"
@@ -1559,7 +1566,7 @@ const MediaCard = {
 
             <!-- Video Stream Overlay (Fallback for local files) -->
             <video
-              v-else-if="previewVideoUrl"
+              v-else-if="previewVideoUrl && store.playback?.enable_trailers !== false"
               :src="previewVideoUrl"
               class="popout-video"
               :class="{ 'is-playing': isVideoPlaying }"
@@ -1826,8 +1833,9 @@ const MediaCard = {
           isMuted.value = true;
 
           clearTimeout(trailerTimer);
+          if (store.playback?.enable_trailers === false) return;
           trailerTimer = setTimeout(async () => {
-            if (!isPopoutActive.value) return;
+            if (!isPopoutActive.value || store.playback?.enable_trailers === false) return;
             const item = cardItem.value;
             const id = item.id || item.tmdb_id;
 
@@ -2064,7 +2072,7 @@ const TvContentRow = {
             </div>
 
             <!-- Auto-Playing Trailer Embed / Video Stream (disabled in continue watching) -->
-            <template v-if="row?.type !== 'continue'">
+            <template v-if="row?.type !== 'continue' && store.playback?.enable_trailers !== false">
               <iframe
                 v-if="activeTrailerUrl"
                 :src="activeTrailerUrl"
@@ -2167,7 +2175,7 @@ const TvContentRow = {
               {{ isFavorite(activeItem) ? 'In Watchlist' : 'Watchlist' }}
             </button>
             <button
-              v-if="activeItem.id || activeItem.tmdb_id"
+              v-if="(activeItem.id || activeItem.tmdb_id) && store.playback?.enable_trailers !== false"
               class="tv-action-btn tv-btn-secondary"
               @click="quickTrailer(activeItem)"
               title="Watch Trailer"
@@ -2664,6 +2672,7 @@ const TvContentRow = {
       if (!item) return;
       if (props.row?.type === "continue") return;
       if (store.profile?.is_kids) return;
+      if (store.playback?.enable_trailers === false) return;
       if (!isFocusedRow.value && !isRowHovered.value) return;
 
       trailerTimer = setTimeout(async () => {
@@ -3109,7 +3118,7 @@ const HeroBanner = {
     <div class="hero" v-if="current" @mouseenter="isHeroHovered = true" @mouseleave="isHeroHovered = false">
       <div class="hero-backdrop-container">
         <!-- Ambient Video Trailer Layer -->
-        <div v-if="videoPreviewActive && videoPreviewUrl" class="hero-video-wrap" :class="{ 'fade-in': videoLoaded }">
+        <div v-if="videoPreviewActive && videoPreviewUrl && store.playback?.enable_trailers !== false" class="hero-video-wrap" :class="{ 'fade-in': videoLoaded }">
           <iframe
             v-if="isIframeTrailer"
             :src="videoPreviewUrl"
@@ -3168,7 +3177,7 @@ const HeroBanner = {
               <i class="ph-fill ph-play" style="font-size:0.9rem"></i>
             </div>
           </button>
-          <button v-if="!store.profile?.is_kids" class="btn btn-secondary btn-lg" @click="$emit('trailer', current)" id="hero-trailer-btn" title="Trailer">
+          <button v-if="!store.profile?.is_kids && store.playback?.enable_trailers !== false" class="btn btn-secondary btn-lg" @click="$emit('trailer', current)" id="hero-trailer-btn" title="Trailer">
             <i class="ph ph-film-strip" style="font-size:1.15rem"></i>
           </button>
           <button class="btn btn-secondary btn-lg" @click="$emit('detail', current)" id="hero-info-btn" title="More Info">
@@ -3427,6 +3436,7 @@ const HeroBanner = {
       const item = current.value;
       if (!item) return;
       if (store.profile?.is_kids) return;
+      if (store.playback?.enable_trailers === false) return;
       try {
         const id = item.id || item.tmdb_id;
         let trailerData = null;
@@ -3493,6 +3503,7 @@ const HeroBanner = {
 
     function schedulePreview() {
       clearTimeout(previewTimer);
+      if (store.playback?.enable_trailers === false) return;
       if (isScrolledPastHero.value) return;
       previewTimer = setTimeout(() => {
         loadVideoPreview();
@@ -4124,7 +4135,7 @@ const DetailPage = {
               <span>Source drive <strong>{{ media.drive_letter || 'External' }}</strong> is disconnected. Connect it to watch.</span>
             </div>
             <div class="detail-quick-actions">
-              <button v-if="!store.profile?.is_kids" class="detail-action-circle" @click="watchTrailer" id="detail-trailer-btn" title="Trailer">
+              <button v-if="!store.profile?.is_kids && store.playback?.enable_trailers !== false" class="detail-action-circle" @click="watchTrailer" id="detail-trailer-btn" title="Trailer">
                 <div class="detail-action-icon"><i class="ph ph-film-strip"></i></div>
                 <span class="detail-action-label">Trailer</span>
               </button>
@@ -5061,6 +5072,10 @@ const DetailPage = {
 
     async function watchTrailer() {
       if (!media.value) return;
+      if (store.playback?.enable_trailers === false) {
+        addToast("Trailers are disabled in Settings", "info");
+        return;
+      }
       const mediaId = media.value.id || media.value.seasons?.[sortedSeasons.value[0]]?.[0]?.id;
       if (!mediaId) return;
       try {
@@ -5837,6 +5852,17 @@ const SettingsPage = {
               </div>
               <label class="toggle-switch">
                 <input type="checkbox" v-model="form.playback.start_muted" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
+                <div class="settings-label">Trailers &amp; Video Previews</div>
+                <div class="settings-desc">Play video trailers and ambient previews on the homepage hero banner, TV layout, and media cards.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.playback.enable_trailers" id="setting-trailers-toggle" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -7350,6 +7376,7 @@ const SettingsPage = {
         resume_behavior: "ask",
         auto_fullscreen: false,
         start_muted: false,
+        enable_trailers: true,
       },
     });
 
@@ -7449,6 +7476,9 @@ const SettingsPage = {
       try {
         await API.post("/api/settings", form.value);
         initialFormJson.value = JSON.stringify(form.value);
+        if (form.value.playback) {
+          store.playback = { ...store.playback, ...form.value.playback };
+        }
         if (form.value.hide_unmounted_items !== undefined) {
           store.hideOfflineMedia = !!form.value.hide_unmounted_items;
           try {
@@ -19667,8 +19697,15 @@ const App = {
       window.addEventListener("scroll", handleScroll, { passive: true });
 
       try {
-        const feats = await API.get("/api/features").catch(() => null);
+        const [feats, cfg] = await Promise.all([
+          API.get("/api/features").catch(() => null),
+          API.get("/api/settings").catch(() => null),
+        ]);
         if (feats) store.features = { ...store.features, ...feats };
+        if (cfg) {
+          if (cfg.features) store.features = { ...store.features, ...cfg.features };
+          if (cfg.playback) store.playback = { ...store.playback, ...cfg.playback };
+        }
       } catch (e) {}
 
       try {

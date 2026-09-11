@@ -64,7 +64,8 @@ DEFAULT_CONFIG = {
         "default_speed": 1,
         "resume_behavior": "ask",
         "auto_fullscreen": False,
-        "start_muted": False
+        "start_muted": False,
+        "enable_trailers": True
     },
     "profiles": {
         "max_profiles": 8
