@@ -335,12 +335,12 @@ const PlayerPage = {
               </button>
 
               <!-- Skip -10s -->
-              <button class="ctrl-btn hide-on-mobile" @click="skip(-10)" title="Rewind 10s (Left Arrow)" id="ctrl-rewind">
+              <button class="ctrl-btn hide-on-mobile" @click.stop="skip(-10, true)" title="Rewind 10s (Left Arrow)" id="ctrl-rewind">
                 <i class="ph ph-arrow-counter-clockwise"></i>
               </button>
 
               <!-- Skip +10s -->
-              <button class="ctrl-btn hide-on-mobile" @click="skip(10)" title="Forward 10s (Right Arrow)" id="ctrl-forward">
+              <button class="ctrl-btn hide-on-mobile" @click.stop="skip(10, true)" title="Forward 10s (Right Arrow)" id="ctrl-forward">
                 <i class="ph ph-arrow-clockwise"></i>
               </button>
 
@@ -1495,6 +1495,14 @@ const PlayerPage = {
     const isBuffering = ref(false);
     const isFullscreen = ref(false);
     const controlsHidden = ref(false);
+    let suppressControlsUntil = 0;
+    function isDesktopDevice() {
+      if (typeof window === "undefined") return false;
+      const isFinePointer = Boolean(window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches);
+      const isWideScreen = window.innerWidth >= 768;
+      const isTouchDevice = Boolean(("ontouchstart" in window) || (navigator.maxTouchPoints > 0));
+      return isFinePointer || (isWideScreen && !isTouchDevice);
+    }
     const playerError = ref(null);
     const autoSwitched4K = ref(null);  // { label, original4kOption }
     const stutter4KBanner = ref(false);
@@ -2758,6 +2766,9 @@ const PlayerPage = {
     });
 
     function showControls() {
+      if (isDesktopDevice() && Date.now() < suppressControlsUntil) {
+        return;
+      }
       controlsHidden.value = false;
       clearTimeout(hideTimer);
       // Never auto-hide if a settings/selection submenu or modal is open
@@ -3047,8 +3058,13 @@ const PlayerPage = {
       toggleFullscreen();
     }
 
-    function skip(seconds) {
+    function skip(seconds, suppressControls = false) {
       if (!videoRef.value) return;
+      if (suppressControls && isDesktopDevice()) {
+        controlsHidden.value = true;
+        clearTimeout(hideTimer);
+        suppressControlsUntil = Date.now() + 1000;
+      }
       const step = seconds !== undefined && seconds !== null ? seconds : playerSettings.value?.playback?.seek_step || 10;
       const basePos = pendingSeekTarget !== null ? pendingSeekTarget : playerToContent(currentTime.value || 0);
       const maxDur = media.value?.duration || duration.value || 0;
@@ -3612,6 +3628,9 @@ const PlayerPage = {
       // Instantly resume the remote audio track with the video
       if (isRemoteAudioActive() && remoteAudioEl) {
         remoteAudioEl.play().catch(() => {});
+      }
+      if (isDesktopDevice() && (controlsHidden.value || Date.now() < suppressControlsUntil)) {
+        return;
       }
       showControls();
     }
@@ -5296,6 +5315,11 @@ const PlayerPage = {
       if (e.key >= "0" && e.key <= "9" && !e.ctrlKey && !e.altKey && !e.metaKey) {
         if (duration.value > 0) {
           e.preventDefault();
+          if (isDesktopDevice()) {
+            controlsHidden.value = true;
+            clearTimeout(hideTimer);
+            suppressControlsUntil = Date.now() + 1000;
+          }
           const targetPct = parseInt(e.key, 10) / 10;
           seekTo(duration.value * targetPct);
           addToast(`Seek: ${parseInt(e.key, 10) * 10}%`, "info");
@@ -5330,7 +5354,7 @@ const PlayerPage = {
           if (e.altKey) {
             seekToNextChapter();
           } else {
-            skip(e.shiftKey ? 30 : step);
+            skip(e.shiftKey ? 30 : step, true);
           }
           break;
         case "ArrowLeft":
@@ -5340,7 +5364,7 @@ const PlayerPage = {
           if (e.altKey) {
             seekToPrevChapter();
           } else {
-            skip(e.shiftKey ? -30 : -step);
+            skip(e.shiftKey ? -30 : -step, true);
           }
           break;
         case "ArrowUp":
@@ -5370,12 +5394,12 @@ const PlayerPage = {
         case "MediaFastForward":
         case "FastForward":
           e.preventDefault();
-          skip(30);
+          skip(30, true);
           break;
         case "MediaRewind":
         case "Rewind":
           e.preventDefault();
-          skip(-30);
+          skip(-30, true);
           break;
         case "f":
         case "F":
