@@ -621,8 +621,8 @@ const PlayerPage = {
                       </div>
                     </div>
 
-                    <!-- 5a. Subtitles Submenu Row (always shown in settings when subtitles exist) -->
-                    <div v-if="subtitles && subtitles.length" class="player-menu-nav-row" @click="openSettingsSubmenu('subtitles')" id="settings-nav-subtitles">
+                    <!-- 5a. Subtitles Submenu Row (shown in settings only if 1 or 0 subtitles, omitted if multiple because controller has it) -->
+                    <div v-if="subtitles && subtitles.length <= 1" class="player-menu-nav-row" @click="openSettingsSubmenu('subtitles')" id="settings-nav-subtitles">
                       <div class="player-nav-row-left">
                         <i class="ph ph-closed-captioning"></i>
                         <span>Subtitles</span>
