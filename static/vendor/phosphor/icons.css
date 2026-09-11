@@ -1,0 +1,6 @@
+@import "./regular/style.css";
+@import "./bold/style.css";
+@import "./fill/style.css";
+@import "./thin/style.css";
+@import "./light/style.css";
+@import "./duotone/style.css";

@@ -7,7 +7,7 @@
  * 4. Automatic purge of old caches on activation.
  */
 
-const CACHE_NAME = "capsstream-core-v2.22.3";
+const CACHE_NAME = "capsstream-core-v2.60.0";
 const OFFLINE_FALLBACK_URL = "/offline.html";
 
 const PRECACHE_ASSETS = [
@@ -96,11 +96,32 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 5. Immutable Third-Party CDNs (Fonts, Phosphor Icons, Vue) - Cache-First
+  // 5. Immutable Local Vendor Libraries & Local Fonts (Cache-First)
+  if (
+    url.pathname.startsWith("/static/vendor/") ||
+    url.pathname.startsWith("/static/fonts/")
+  ) {
+    event.respondWith(
+      caches.match(req).then((cachedRes) => {
+        if (cachedRes) return cachedRes;
+        return fetch(req).then((networkRes) => {
+          if (networkRes && networkRes.status === 200) {
+            const resClone = networkRes.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone));
+          }
+          return networkRes;
+        });
+      })
+    );
+    return;
+  }
+
+  // 6. Immutable Third-Party CDNs (Legacy Fallback) - Cache-First
   const isCDN = (
     url.hostname.includes("fonts.googleapis.com") ||
     url.hostname.includes("fonts.gstatic.com") ||
-    url.hostname.includes("unpkg.com")
+    url.hostname.includes("unpkg.com") ||
+    url.hostname.includes("jsdelivr.net")
   );
 
   if (isCDN) {
@@ -119,7 +140,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 6. App Scripts & Styles (Network-First so local server changes apply immediately)
+  // 7. App Scripts & Styles (Network-First so local server changes apply immediately)
   if (url.pathname.startsWith("/static/js/") || url.pathname.startsWith("/static/css/")) {
     event.respondWith(
       fetch(req)

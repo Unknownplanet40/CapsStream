@@ -12,13 +12,8 @@
   <meta name="description" content="CapsStream — Your personal cinematic streaming library. Watch local media with a Netflix-style interface.">
   <title>CapsStream</title>
 
-  <!-- Fonts & CDN Preconnections -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://unpkg.com" crossorigin>
-  <link rel="dns-prefetch" href="https://unpkg.com">
-  <link rel="dns-prefetch" href="https://image.tmdb.org">
-  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Geist:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
+  <!-- Fonts (Locally Bundled for 100% Offline Self-Hosting) -->
+  <link rel="stylesheet" href="/static/fonts/fonts.css?v={{ version }}&t={{ t }}">
 
   <!-- PWA Web App Manifest -->
   <link rel="manifest" href="/manifest.webmanifest">
@@ -42,15 +37,13 @@
   <link rel="apple-touch-icon" sizes="192x192" href="/static/img/icon-192.png">
   <link rel="apple-touch-icon" sizes="512x512" href="/static/img/icon-512.png">
 
-  <!-- Icons (Phosphor) -->
-  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <!-- Icons (Phosphor - Locally Bundled) -->
+  <link rel="stylesheet" href="/static/vendor/phosphor/icons.css?v={{ version }}&t={{ t }}">
 
-
-
-  <!-- Vue 3 + Vue Router 4 + Hls.js -->
-  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script src="https://unpkg.com/vue-router@4/dist/vue-router.global.prod.js"></script>
-  <script src="https://unpkg.com/hls.js/dist/hls.min.js"></script>
+  <!-- Vue 3 + Vue Router 4 + Hls.js (Locally Bundled) -->
+  <script src="/static/vendor/vue.global.prod.js?v={{ version }}&t={{ t }}"></script>
+  <script src="/static/vendor/vue-router.global.prod.js?v={{ version }}&t={{ t }}"></script>
+  <script src="/static/vendor/hls.min.js?v={{ version }}&t={{ t }}"></script>
 
   <!-- Driver.js Interactive Product Tour (Locally Bundled) -->
   <link rel="stylesheet" href="/static/css/driver.min.css?v={{ version }}&t={{ t }}">
