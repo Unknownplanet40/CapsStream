@@ -19685,8 +19685,42 @@ const App = {
           if (path === "/profiles") {
             router.push("/");
           }
+        } else if (profiles && profiles.length === 1 && !profiles[0].has_pin) {
+          // Exactly one profile and it has no PIN — automatically use it and redirect to homepage
+          const singleProfile = profiles[0];
+          let clientSessionId = sessionStorage.getItem("cs_session_id");
+          if (!clientSessionId) {
+            clientSessionId = "sess_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+            sessionStorage.setItem("cs_session_id", clientSessionId);
+          }
+          const deviceName = (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ? "iPhone / iPad" : /android/.test(navigator.userAgent.toLowerCase()) ? "Android Device" : /macintosh|mac os x/.test(navigator.userAgent.toLowerCase()) ? "Mac" : "Windows PC");
+
+          try {
+            const res = await API.post("/api/profiles/auth", {
+              profile_id: singleProfile.id,
+              pin: "",
+              force_takeover: true,
+              session_id: clientSessionId,
+              device_name: deviceName,
+            });
+            if (res && res.ok && res.profile) {
+              store.profile = res.profile;
+              router.push("/").then(() => {
+                startLibraryScan();
+                if (typeof window.checkPostUpdateWhatsNew === "function") {
+                  window.checkPostUpdateWhatsNew();
+                }
+              });
+            } else {
+              store.profile = null;
+              router.push("/profiles");
+            }
+          } catch (authErr) {
+            store.profile = null;
+            router.push("/profiles");
+          }
         } else {
-          // No session — show the "Who's Watching?" screen (never force logout server-side)
+          // Multiple profiles, or single profile has a PIN — start with profile selection screen
           store.profile = null;
           router.push("/profiles");
         }
