@@ -242,8 +242,8 @@ body::before {
   transform: translate(-50%, -50%);
   width: min(520px, 75vw);
   height: min(520px, 75vw);
-  -webkit-mask: url("/static/img/icon-512.png") no-repeat center center / contain;
-  mask: url("/static/img/icon-512.png") no-repeat center center / contain;
+  -webkit-mask: url("/static/img/new-logo.png") no-repeat center center / contain;
+  mask: url("/static/img/new-logo.png") no-repeat center center / contain;
   background-color: var(--accent, #e50914);
   pointer-events: none;
   z-index: 0;
@@ -29242,7 +29242,7 @@ body:has(.navbar-tv) .hero-backdrop-container::before,
 .top10-card-wrapper {
   position: relative;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   height: var(--top10-h);
   flex-shrink: 0;
   cursor: pointer;
@@ -29264,14 +29264,15 @@ body:has(.navbar-tv) .hero-backdrop-container::before,
   position: relative;
   flex-shrink: 0;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
   height: var(--top10-h);
   font-family: "Bebas Neue", "Anton", Impact, "Arial Black", sans-serif;
   font-weight: 400;
-  /* Font size scaled so glyph height exactly matches card height */
-  font-size: calc(var(--top10-h) * 1.25);
-  line-height: var(--top10-h);
+  /* Font size & vertical alignment calibrated so visible glyph height equals media card height */
+  font-size: calc(var(--top10-h) * 1.41);
+  transform: translateY(calc(var(--top10-h) * 0.05));
+  line-height: 1;
   letter-spacing: -0.04em;
   user-select: none;
   pointer-events: none;
@@ -29293,9 +29294,9 @@ body:has(.navbar-tv) .hero-backdrop-container::before,
 
 /* Two-digit "10" */
 .top10-rank-number[data-rank="10"] {
-  font-size: calc(var(--top10-h) * 1.05);
+  font-size: calc(var(--top10-h) * 1.41);
   min-width: calc(var(--top10-h) * 0.72);
-  margin-right: -52px;
+  margin-right: -64px;
 }
 
 /* The media card inside the wrapper sits in front of the number */
@@ -29340,7 +29341,7 @@ body:has(.navbar-tv) .hero-backdrop-container::before,
   }
 
   .top10-rank-number[data-rank="10"] {
-    margin-right: -36px;
+    margin-right: -42px;
   }
 
   .top10-scroller {
