@@ -10150,6 +10150,43 @@ input:checked + .toggle-slider:before {
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.12);
 }
 
+/* 4K Playback Compatibility Warning Modal */
+.fourk-warning-card {
+  border: 1px solid rgba(245, 158, 11, 0.35) !important;
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.95),
+    0 0 45px rgba(245, 158, 11, 0.18) !important;
+}
+
+.fourk-warning-card .shortcuts-modal-inner {
+  background: radial-gradient(circle at top, rgba(245, 158, 11, 0.08) 0%, rgba(15, 15, 22, 0.98) 70%), var(--bg-card) !important;
+}
+
+#fourk-convert-btn {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
+  color: #000 !important;
+  font-weight: 800 !important;
+  box-shadow: 0 4px 18px rgba(245, 158, 11, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+#fourk-convert-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(245, 158, 11, 0.45);
+}
+
+#fourk-direct-btn {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  font-weight: 600 !important;
+}
+
+#fourk-direct-btn:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+}
+
 /* Responsive Overrides */
 @media (max-width: 768px) {
   .keyboard-shortcuts-backdrop {

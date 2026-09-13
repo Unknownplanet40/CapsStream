@@ -386,6 +386,22 @@ def api_media_detail(media_id):
         from backend.matcher import ensure_media_logo
         ensure_media_logo(media)
 
+    # Ensure duration is populated from container metadata if missing in DB
+    if not media.get("duration") or media["duration"] <= 0:
+        if media.get("file_path"):
+            try:
+                from backend.video_probe import probe_video_duration
+                dur = probe_video_duration(media["file_path"])
+                if dur > 0:
+                    media["duration"] = dur
+                    from backend.db import get_conn
+                    conn = get_conn()
+                    conn.execute("UPDATE media SET duration=? WHERE id=?", (dur, media_id))
+                    conn.commit()
+                    conn.close()
+            except Exception:
+                pass
+
     if media.get("tmdb_id") and not media.get("imdb_id"):
         from backend.matcher import fetch_imdb_id
         imdb_id = fetch_imdb_id(media["tmdb_id"], media.get("type", "movie"))

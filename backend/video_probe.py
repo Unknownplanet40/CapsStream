@@ -120,6 +120,46 @@ def format_resolution_label(width, height):
     return "Standard Quality"
 
 
+def probe_video_duration(file_path):
+    """
+    Probes video file using ffprobe container format to retrieve exact duration in seconds.
+    Results are cached by (path, size, mtime).
+    """
+    if not file_path or not os.path.isfile(file_path) or not os.path.exists(FFPROBE_BIN):
+        return 0
+
+    try:
+        st = os.stat(file_path)
+        cache_key = ("video_dur", os.path.abspath(file_path), st.st_size, st.st_mtime)
+        cached = probe_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        cmd = [
+            FFPROBE_BIN,
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            "-show_streams",
+            file_path
+        ]
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=8,
+                                      creationflags=CREATE_NO_WINDOW)
+        data = json.loads(out.decode("utf-8", errors="ignore"))
+        fmt = data.get("format", {})
+        dur_str = fmt.get("duration")
+        if not dur_str:
+            for s in data.get("streams", []):
+                if s.get("codec_type") == "video" and s.get("duration"):
+                    dur_str = s.get("duration")
+                    break
+        dur = int(float(dur_str)) if dur_str else 0
+        probe_cache.put(cache_key, dur)
+        return dur
+    except Exception:
+        return 0
+
+
 def probe_video_details(file_path):
     """
     Detailed probe of media streams including video codec, pixel format,

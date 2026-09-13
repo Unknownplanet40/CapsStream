@@ -174,6 +174,13 @@ const store = reactive({
   playback: {
     enable_trailers: true,
   },
+  fourKWarningModal: {
+    show: false,
+    mediaTitle: "",
+    reason: "",
+    onTranscode: null,
+    onDirect: null,
+  },
 });
 
 window.store = store;
@@ -1369,6 +1376,72 @@ async function check4KCompatibility() {
   };
 }
 
+function is4KString(str) {
+  if (!str) return false;
+  const s = String(str).toLowerCase();
+  return s.includes("4k") || s.includes("2160") || s.includes("uhd") || s.includes("3840x2160");
+}
+
+function isItemOnly4K(item) {
+  if (!item) return false;
+  // If quality options are present, check if any direct non-4K option exists
+  if (Array.isArray(item.quality_options) && item.quality_options.length > 0) {
+    const hasDirectNon4K = item.quality_options.some(
+      (o) => !o.is_transcode && !is4KString(`${o.base_label || ""} ${o.resolution || ""} ${o.file_path || ""}`)
+    );
+    if (hasDirectNon4K) return false;
+  }
+  const str = `${item.resolution || ""} ${item.base_label || ""} ${item.file_path || ""}`.toLowerCase();
+  const hasExplicitLowerRes = (item.video_info?.height > 0 && item.video_info?.height < 2160) ||
+                              (item.height > 0 && item.height < 2160) ||
+                              str.includes("1080p") || str.includes("720p") || str.includes("480p");
+  if (hasExplicitLowerRes) return false;
+  return is4KString(str) || (item.video_info?.height >= 2160 || item.video_info?.width >= 3840) || (item.height >= 2160 || item.width >= 3840);
+}
+
+async function playWith4KCheck(item, defaultUrl, routerInstance) {
+  if (!item) return;
+  const isOnly4K = isItemOnly4K(item);
+  if (isOnly4K) {
+    const compat = await check4KCompatibility();
+    if (!compat.compatible) {
+      store.fourKWarningModal = {
+        show: true,
+        mediaTitle: item.title || item.ep_title || "This Title",
+        reason: (compat.reasons && compat.reasons.length > 0) ? compat.reasons[0] : "Hardware specs below recommended 4K requirements",
+        onTranscode: () => {
+          store.fourKWarningModal.show = false;
+          const target = defaultUrl.includes("?") ? `${defaultUrl}&transcode=1` : `${defaultUrl}?transcode=1`;
+          if (routerInstance && typeof routerInstance.push === "function") {
+            routerInstance.push(target);
+          } else {
+            window.location.hash = `#${target}`;
+          }
+        },
+        onDirect: () => {
+          store.fourKWarningModal.show = false;
+          const target = defaultUrl.includes("?") ? `${defaultUrl}&force_4k=1` : `${defaultUrl}?force_4k=1`;
+          if (routerInstance && typeof routerInstance.push === "function") {
+            routerInstance.push(target);
+          } else {
+            window.location.hash = `#${target}`;
+          }
+        },
+      };
+      return;
+    }
+  }
+  if (routerInstance && typeof routerInstance.push === "function") {
+    routerInstance.push(defaultUrl);
+  } else {
+    window.location.hash = `#${defaultUrl}`;
+  }
+}
+
+window.is4KString = is4KString;
+window.isItemOnly4K = isItemOnly4K;
+window.playWith4KCheck = playWith4KCheck;
+
 function formatRating(r) {
   return r ? r.toFixed(1) : "—";
 }
@@ -1928,7 +2001,7 @@ const MediaCard = {
         return;
       }
       if (item.id) {
-        window.location.hash = `#/watch/${item.id}`;
+        playWith4KCheck(item, `/watch/${item.id}`, router);
       } else {
         emit("click", item);
       }
@@ -2602,7 +2675,7 @@ const TvContentRow = {
         return;
       }
       if (item.id) {
-        window.location.hash = `#/watch/${item.id}`;
+        playWith4KCheck(item, `/watch/${item.id}`);
       } else {
         emit("card-click", item, props.row);
       }
@@ -3925,7 +3998,7 @@ const HomePage = {
       }
       if (row?.type === "continue" || item.position > 0) {
         if (item.id) {
-          router.push(`/watch/${item.id}`);
+          playWith4KCheck(item, `/watch/${item.id}`, router);
           return;
         }
       }
@@ -3961,7 +4034,7 @@ const HomePage = {
         return;
       }
       if (item.type === "movie" && item.id) {
-        router.push(`/watch/${item.id}`);
+        playWith4KCheck(item, `/watch/${item.id}`, router);
       } else {
         handleCardClick(item);
       }
@@ -4879,12 +4952,12 @@ const DetailPage = {
         return;
       }
       if (media.value.type === "movie") {
-        router.push(`/watch/${media.value.id}`);
+        playWith4KCheck(media.value, `/watch/${media.value.id}`, router);
       } else {
         const seasonEps = media.value.seasons?.[activeSeason.value] || [];
         const playableEp = seasonEps.find((e) => e.is_local !== false && e.is_mounted !== false);
         if (playableEp) {
-          router.push(`/watch/${playableEp.id}`);
+          playWith4KCheck(playableEp, `/watch/${playableEp.id}`, router);
         } else {
           const d = media.value.drive_letter ? `[${media.value.drive_letter}] ` : "";
           addToast(`Episodes on drive ${d}are currently offline. Reconnect drive to watch.`, "warning");
@@ -4939,7 +5012,7 @@ const DetailPage = {
         addToast(`Source drive ${d}is not connected. Reconnect drive to play this episode.`, "warning");
         return;
       }
-      router.push(`/watch/${ep.id}`);
+      playWith4KCheck(ep, `/watch/${ep.id}`, router);
     }
 
     async function toggleFav() {
@@ -18902,6 +18975,60 @@ const App = {
           </button>
         </div>
       </transition>
+
+      <!-- Global 4K Ultra HD Playback Warning Modal -->
+      <transition name="fade">
+        <div v-if="store.fourKWarningModal && store.fourKWarningModal.show" class="modal-backdrop" style="z-index:9999999;background:rgba(0,0,0,0.85);backdrop-filter:blur(20px);" @click.self="close4KWarningModal">
+          <div class="shortcuts-modal-card fourk-warning-card" style="max-width:480px;border-radius:var(--radius-outer);border:1px solid rgba(245,158,11,0.3);box-shadow:0 24px 70px rgba(0,0,0,0.95)" @click.stop>
+            <div class="shortcuts-modal-inner" style="text-align:left">
+              <div class="shortcuts-modal-header" style="margin-bottom:1.1rem;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:0.75rem">
+                <div class="shortcuts-header-title" style="color:var(--text-primary);display:flex;align-items:center;gap:10px;font-size:1.15rem;font-weight:800">
+                  <div style="width:34px;height:34px;border-radius:10px;background:rgba(245,158,11,0.18);display:flex;align-items:center;justify-content:center;border:1px solid rgba(245,158,11,0.35)">
+                    <i class="ph-fill ph-warning" style="color:#f59e0b;font-size:1.25rem"></i>
+                  </div>
+                  <span>4K Ultra HD Playback Notice</span>
+                </div>
+                <button class="shortcuts-close-btn" @click="close4KWarningModal">
+                  <i class="ph ph-x"></i>
+                </button>
+              </div>
+
+              <div style="margin-bottom:1rem">
+                <div style="font-size:1rem;font-weight:700;color:var(--text-primary);margin-bottom:0.4rem">
+                  {{ store.fourKWarningModal.mediaTitle }}
+                </div>
+                <div style="font-size:0.88rem;color:var(--text-secondary);line-height:1.55">
+                  This title is only available in <strong>4K Ultra HD</strong>. Your device hardware may experience severe stuttering or freeze the application during direct playback.
+                </div>
+              </div>
+
+              <div v-if="store.fourKWarningModal.reason" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:10px;margin-bottom:0.85rem">
+                <i class="ph-bold ph-cpu" style="color:#f59e0b;font-size:1.1rem;flex-shrink:0"></i>
+                <span style="font-size:0.8rem;color:var(--text-muted)">{{ store.fourKWarningModal.reason }}</span>
+              </div>
+
+              <div style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.18);border-radius:12px;padding:9px 12px;display:flex;align-items:flex-start;gap:8px;margin-bottom:1.15rem;font-size:0.78rem;color:rgba(255,255,255,0.7);line-height:1.45">
+                <i class="ph-bold ph-info" style="color:#38bdf8;font-size:1rem;margin-top:1px;flex-shrink:0"></i>
+                <span><strong>Conversion Notice:</strong> Real-time 4K downscaling requires intensive host CPU/GPU processing. The stream may take a few seconds to buffer or experience loading delays on lower-spec hardware.</span>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:0.65rem">
+                <button class="btn btn-primary" style="background:linear-gradient(135deg, #f59e0b, #d97706);color:#000;font-weight:800;border-radius:12px;padding:12px 18px;display:flex;align-items:center;justify-content:center;gap:8px;border:none" @click="handle4KModalTranscode" id="fourk-convert-btn">
+                  <i class="ph-bold ph-arrows-clockwise"></i>
+                  <span>Convert to 1080p (Recommended)</span>
+                </button>
+                <button class="btn btn-secondary" style="border-radius:12px;padding:10px 16px;display:flex;align-items:center;justify-content:center;gap:8px" @click="handle4KModalDirect" id="fourk-direct-btn">
+                  <i class="ph-bold ph-play"></i>
+                  <span>Play in 4K Anyway</span>
+                </button>
+                <button class="btn btn-ghost" style="border-radius:12px;padding:8px 16px;color:var(--text-muted)" @click="close4KWarningModal" id="fourk-cancel-btn">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
     </template>
 
   `,
@@ -20032,9 +20159,9 @@ const App = {
         return;
       }
       if (item.type === "movie" && item.id) {
-        router.push(`/watch/${item.id}`);
+        playWith4KCheck(item, `/watch/${item.id}`, router);
       } else if (item.position > 0 && item.id) {
-        router.push(`/watch/${item.id}`);
+        playWith4KCheck(item, `/watch/${item.id}`, router);
       } else if (item.type === "movie") {
         router.push(`/title/movie/${item.id || item.tmdb_id}`);
       } else {
@@ -20212,7 +20339,32 @@ const App = {
       return null;
     });
 
+    function handle4KModalTranscode() {
+      if (store.fourKWarningModal && typeof store.fourKWarningModal.onTranscode === "function") {
+        store.fourKWarningModal.onTranscode();
+      } else if (store.fourKWarningModal) {
+        store.fourKWarningModal.show = false;
+      }
+    }
+
+    function handle4KModalDirect() {
+      if (store.fourKWarningModal && typeof store.fourKWarningModal.onDirect === "function") {
+        store.fourKWarningModal.onDirect();
+      } else if (store.fourKWarningModal) {
+        store.fourKWarningModal.show = false;
+      }
+    }
+
+    function close4KWarningModal() {
+      if (store.fourKWarningModal) {
+        store.fourKWarningModal.show = false;
+      }
+    }
+
     return {
+      handle4KModalTranscode,
+      handle4KModalDirect,
+      close4KWarningModal,
       connectionIsland,
       isRetryingConnection,
       retryConnectionNow,

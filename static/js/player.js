@@ -312,7 +312,7 @@ const PlayerPage = {
                 v-for="ch in visibleChapters"
                 :key="ch.id"
                 class="seekbar-chapter-tick"
-                :style="{ left: (ch.start / duration * 100) + '%' }"
+                :style="{ left: (ch.start / (displayDuration || duration || 1) * 100) + '%' }"
                 :title="ch.title"
               ></div>
               <div class="seekbar-fill" :style="{ width: progressPercent + '%' }">
@@ -2402,7 +2402,7 @@ const PlayerPage = {
       API.get(`/api/media/${option.media_id}`).then((newMedia) => {
         if (newMedia) {
           media.value = newMedia;
-          if (newMedia.duration) displayDuration.value = newMedia.duration;
+          if (newMedia.duration) duration.value = newMedia.duration;
           subtitles.value = newMedia.subtitles || [];
         }
       }).catch(() => {});
@@ -2832,16 +2832,17 @@ const PlayerPage = {
     });
     const displayTime = computed(() => playerToContent(currentTime.value));
     const progressPercent = computed(() => {
-      if (!displayDuration.value) return 0;
-      const pct = (Math.min(displayTime.value, displayDuration.value) / displayDuration.value) * 100;
+      const total = displayDuration.value || duration.value || 0;
+      if (!total) return 0;
+      const pct = (Math.min(displayTime.value, total) / total) * 100;
       return Math.max(0, Math.min(100, pct));
     });
 
     // Wall-clock time the title will finish, e.g. "11:42 PM" (updates live)
     const endClockTime = computed(() => {
-      const dur = Number(duration.value) || Number(media.value?.duration) || 0;
+      const dur = displayDuration.value || Number(duration.value) || Number(media.value?.duration) || 0;
       if (!dur || dur <= 0) return "";
-      const remainingSec = Math.max(0, dur - (Number(currentTime.value) || 0));
+      const remainingSec = Math.max(0, dur - (Number(displayTime.value) || 0));
       if (!isFinite(remainingSec)) return "";
       const d = new Date(Date.now() + remainingSec * 1000);
       let h = d.getHours();
@@ -3413,10 +3414,10 @@ const PlayerPage = {
     }
 
     function seekToClick(e) {
-      if (!seekbarRef.value || !duration.value) return;
+      if (!seekbarRef.value || !displayDuration.value) return;
       cachedSeekbarRect = seekbarRef.value.getBoundingClientRect();
       const targetTime = calculateSeekbarTimeFromClientX(e.clientX);
-      seekTo(playerToContent(targetTime));
+      seekTo(targetTime);
       unlockAchievementSilently("seeker");
     }
 
@@ -3450,7 +3451,7 @@ const PlayerPage = {
       if (!isTouchScrubbing.value) return;
       isTouchScrubbing.value = false;
       if (hoverTooltipTime.value !== null && hoverTooltipTime.value !== undefined) {
-        const targetTime = playerToContent(hoverTooltipTime.value);
+        const targetTime = hoverTooltipTime.value;
         seekTo(targetTime);
         unlockAchievementSilently("seeker");
       }
@@ -3484,9 +3485,10 @@ const PlayerPage = {
     const showNextEp = computed(() => hasNextEp.value);
 
     const showAutoAdvanceOverlay = computed(() => {
-      if (!hasNextEp.value || !duration.value || duration.value === 0) return false;
-      const remaining = displayDuration.value - displayTime.value;
-      return remaining <= 90 || (displayDuration.value && displayTime.value / displayDuration.value >= 0.85);
+      const dur = displayDuration.value || duration.value || 0;
+      if (!hasNextEp.value || !dur || dur === 0) return false;
+      const remaining = dur - displayTime.value;
+      return remaining <= 90 || (dur > 0 && displayTime.value / dur >= 0.85);
     });
 
     function selectSpeed(rate) {
@@ -4473,12 +4475,9 @@ const PlayerPage = {
 
     function onLoadedMetadata() {
       if (!videoRef.value) return;
-      if (streamState.transcode) {
-        // Piped converted streams report bogus/fragment durations — never
-        // adopt them. displayDuration falls back to the DB value instead.
-      } else if (media.value && media.value.duration > 0) {
+      if (media.value && media.value.duration > 0) {
         duration.value = media.value.duration;
-      } else if (videoRef.value.duration && isFinite(videoRef.value.duration) && videoRef.value.duration > 10) {
+      } else if (!streamState.transcode && videoRef.value.duration && isFinite(videoRef.value.duration) && videoRef.value.duration > 10) {
         duration.value = videoRef.value.duration;
       }
       if (playbackRate.value) {
@@ -5781,6 +5780,9 @@ const PlayerPage = {
       try {
         media.value = await API.get(`/api/media/${mediaId}`);
         subtitles.value = media.value.subtitles || [];
+        if (media.value?.duration > 0) {
+          duration.value = media.value.duration;
+        }
 
         // Drive health check on initial entry: if drive is unmounted, halt playback and show recovery overlay
         if (media.value.is_mounted === false) {
@@ -5790,6 +5792,15 @@ const PlayerPage = {
 
         // Wait for quality options to finish loading so fallback options are available
         try { await qualityOptionsPromise; } catch (e) {}
+
+        // Check URL query parameters for explicit playback mode flags
+        const routeQuery = route.query || {};
+        if (routeQuery.transcode === "1" || routeQuery.transcode === "true") {
+          streamState.transcode = true;
+          streamState.maxHeight = 1080;
+          isTranscodeInitialLoading.value = true;
+        }
+        const force4k = routeQuery.force_4k === "1" || routeQuery.force_4k === "true";
 
         // Pre-emptive compatibility check: if media is HEVC and browser lacks native decode support
         const vInfo = media.value.video_info || {};
@@ -5816,7 +5827,7 @@ const PlayerPage = {
                             (media.value?.height >= 2160 || media.value?.width >= 3840));
 
         const check4KEnabled = playerSettings.value?.playback?.check_4k_compat !== false;
-        if (is4KInitial && !streamState.transcode && check4KEnabled) {
+        if (is4KInitial && !streamState.transcode && check4KEnabled && !force4k) {
           const compat = await check4KCompatibility();
           if (!compat.compatible) {
             const currentOpt = (qualityOptions.value || []).find((o) => o.media_id === selectedQualityMediaId.value);
