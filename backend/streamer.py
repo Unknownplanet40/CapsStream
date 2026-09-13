@@ -347,8 +347,8 @@ def _build_convert_cmd(file_path, audio_track_index, effective_start, max_height
         # When transcoding 4K / UHD on-the-fly for web browser playback, cap max height to 1080p
         # unless direct-playing, so real-time playback never stutters or pegs the CPU.
         effective_max_h = max_height if (max_height and max_height > 0) else (1080 if (src_h > 1080 or src_w > 1920) else 0)
-        if effective_max_h and src_h > effective_max_h:
-            vf_filters.append(f"scale=-2:{int(effective_max_h)}:flags=fast_bilinear")
+        if effective_max_h and (src_h == 0 or src_h > effective_max_h):
+            vf_filters.append(f"scale=-2:'min(ih,{int(effective_max_h)})':flags=fast_bilinear")
 
         # Use native pixel format for encoder (nv12 for QSV, yuv420p for others)
         pix_fmt = "nv12" if encoder_name == "h264_qsv" else "yuv420p"

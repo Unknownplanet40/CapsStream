@@ -978,12 +978,12 @@ const PlayerPage = {
         <div
           v-if="isBuffering"
           class="player-buffering-overlay"
-          :class="{ 'is-transcoding': streamState.transcode }"
+          :class="{ 'is-transcoding': streamState.transcode && (isTranscodeInitialLoading || transcodeElapsedSec >= 3) }"
         >
           <div class="loading-spinner" style="width:52px;height:52px;border-width:4px"></div>
 
           <!-- Converted Media Detailed Status Card -->
-          <div v-if="streamState.transcode" class="transcode-loading-card">
+          <div v-if="streamState.transcode && (isTranscodeInitialLoading || transcodeElapsedSec >= 3)" class="transcode-loading-card">
             <div class="transcode-loading-header">
               <div class="transcode-loading-title">
                 <i class="ph-bold ph-arrows-clockwise transcode-spin-icon"></i>
@@ -2338,6 +2338,7 @@ const PlayerPage = {
         dismissAutoSwitched4K();
         stutter4KBanner.value = null;
         trackPlayerFeature("quality");
+        isTranscodeInitialLoading.value = true;
         selectedQualityMediaId.value = option.media_id;
         streamState.mediaId = option.media_id;
         enableCompatPlayback(true, { maxHeight: option.target_height || 1080 });
@@ -2346,14 +2347,15 @@ const PlayerPage = {
       }
 
       // ── 4K Compatibility Smart Auto-Switch ──────────────────────────
-      const is4KOption = (option.base_label || option.resolution || "").startsWith("4K");
+      const optStr = `${option.base_label || ""} ${option.resolution || ""} ${option.file_path || ""}`.toLowerCase();
+      const is4KOption = optStr.includes("4k") || optStr.includes("2160") || optStr.includes("uhd") || (option.target_height >= 2160);
       const check4KEnabled = playerSettings.value?.playback?.check_4k_compat !== false;
       if (is4KOption && !bypassCheck && check4KEnabled) {
         const compat = await check4KCompatibility();
         if (!compat.compatible) {
           showQualityMenu.value = false;
           const fallback = (qualityOptions.value || []).find(
-            (o) => !o.is_transcode && o.media_id !== option.media_id && !(o.base_label || o.resolution || "").startsWith("4K")
+            (o) => !o.is_transcode && o.media_id !== option.media_id && !(o.base_label || o.resolution || "").toLowerCase().includes("4k") && !(o.base_label || o.resolution || "").toLowerCase().includes("2160")
           ) || (qualityOptions.value || []).find((o) => o.is_transcode && (o.target_height === 1080 || !o.target_height))
             || (qualityOptions.value || []).find((o) => o.is_transcode);
           if (fallback) {
@@ -2366,6 +2368,7 @@ const PlayerPage = {
             });
           } else if (!streamState.transcode) {
             // No lower quality available — switch to converted playback silently
+            isTranscodeInitialLoading.value = true;
             enableCompatPlayback(true, { maxHeight: 1080 });
           }
           return;
@@ -2687,11 +2690,14 @@ const PlayerPage = {
         .catch(() => { compatInfo.value = { available: false }; });
     }
 
+    const isTranscodeInitialLoading = ref(false);
+
     async function enableCompatPlayback(force = false, options = {}) {
       if (!media.value) return;
       fetchCompatCaps();
       suppressResume = true;
       isBuffering.value = true;
+      isTranscodeInitialLoading.value = true;
       const token = ++reloadToken;
       const at = currentContentTime();
       const startAt = await alignedStreamStart(at);
@@ -2713,6 +2719,7 @@ const PlayerPage = {
       streamState.forceSoftware = false;
       streamState.maxHeight = null;
       streamState.streamStart = 0;
+      isTranscodeInitialLoading.value = false;
       reloadToken++;
       swapStream(currentContentTime());
     }
@@ -2732,7 +2739,7 @@ const PlayerPage = {
         (m.video_info && (m.video_info.height >= 2160 || m.video_info.width >= 3840)) ||
         res.includes("2160") || res.includes("4k") || res.includes("uhd") ||
         base.includes("4k") || base.includes("uhd") ||
-        path.includes("2160p") || path.includes("4k")
+        path.includes("2160p") || path.includes("4k") || path.includes("uhd")
       );
     });
 
@@ -2766,7 +2773,9 @@ const PlayerPage = {
       () => isBuffering.value && streamState.transcode,
       (active) => {
         if (active) {
-          transcodeElapsedSec.value = 0;
+          if (isTranscodeInitialLoading.value) {
+            transcodeElapsedSec.value = 0;
+          }
           if (transcodeTimer) clearInterval(transcodeTimer);
           transcodeTimer = setInterval(() => {
             transcodeElapsedSec.value++;
@@ -2777,7 +2786,9 @@ const PlayerPage = {
             clearInterval(transcodeTimer);
             transcodeTimer = null;
           }
-          transcodeElapsedSec.value = 0;
+          if (!isTranscodeInitialLoading.value) {
+            transcodeElapsedSec.value = 0;
+          }
         }
       },
       { immediate: true }
@@ -3625,7 +3636,8 @@ const PlayerPage = {
 
     function checkVideoRenderingHealth() {
       const v = videoRef.value;
-      if (!v || v.paused || v.ended || v.seeking || !media.value || isRecovering.value) {
+      // Do not run rendering health watchdog if paused, seeking, or already in converted/transcode playback
+      if (!v || v.paused || v.ended || v.seeking || !media.value || isRecovering.value || streamState.transcode) {
         consecutiveZeroFrameChecks = 0;
         return;
       }
@@ -3641,11 +3653,13 @@ const PlayerPage = {
 
       // Read total decoded/rendered video frames from standard or browser APIs
       let decodedFrames = -1;
+      let hasFrameMetrics = false;
       try {
         if (typeof v.getVideoPlaybackQuality === "function") {
           const q = v.getVideoPlaybackQuality();
           if (q && typeof q.totalVideoFrames === "number") {
             decodedFrames = q.totalVideoFrames;
+            hasFrameMetrics = true;
           }
         }
       } catch (e) {}
@@ -3653,21 +3667,24 @@ const PlayerPage = {
       if (decodedFrames < 0) {
         if (typeof v.webkitDecodedFrameCount === "number") {
           decodedFrames = v.webkitDecodedFrameCount;
+          hasFrameMetrics = true;
         } else if (typeof v.mozDecodedFrames === "number") {
           decodedFrames = v.mozDecodedFrames;
-        } else {
+          hasFrameMetrics = true;
+        } else if ("requestVideoFrameCallback" in v) {
           decodedFrames = lastRenderedFrameCount;
+          hasFrameMetrics = true;
         }
       }
 
       // Check 1: Video dimensions are 0 (e.g., container demuxed audio but dropped video stream)
       const zeroDimensions = v.videoWidth === 0 && v.videoHeight === 0;
 
-      // Check 2: Zero decoded/rendered frames while audio has been playing for > 2.2s
-      const zeroDecodedFrames = decodedFrames === 0 && lastRenderedFrameCount === 0;
+      // Check 2: Zero decoded/rendered frames while audio has been playing for > 2.2s (only valid if browser supports frame metrics)
+      const zeroDecodedFrames = hasFrameMetrics && decodedFrames === 0 && lastRenderedFrameCount === 0;
 
       // Check 3: Frame rendering froze > 4.5s ago while currentTime continues to advance
-      const frameRendererFrozen = lastRenderedFrameTime > 0 && (now - lastRenderedFrameTime > 4500) && (now - lastPlaybackStartTime > 5000);
+      const frameRendererFrozen = hasFrameMetrics && lastRenderedFrameTime > 0 && (now - lastRenderedFrameTime > 4500) && (now - lastPlaybackStartTime > 5000);
 
       if (zeroDimensions || zeroDecodedFrames || frameRendererFrozen) {
         consecutiveZeroFrameChecks++;
@@ -3695,6 +3712,7 @@ const PlayerPage = {
     function onVideoPlaying() {
       isPlaying.value = true;
       isBuffering.value = false;
+      isTranscodeInitialLoading.value = false;
       playerError.value = null;
       lastPlaybackStartTime = Date.now();
       setupVideoFrameCallback();
@@ -4999,7 +5017,12 @@ const PlayerPage = {
           if (currentToken !== recoveryToken) return;
 
           // Rebuild and re-anchor stream at position
-          swapStream(atPos, true);
+          if (streamState.transcode) {
+            streamState.streamStart = atPos;
+            swapStream(0, true);
+          } else {
+            swapStream(atPos, true);
+          }
           return;
         }
 
@@ -5090,7 +5113,8 @@ const PlayerPage = {
       // 1. Decoder stuck with buffer (browser has >= 0.5s buffered data, readyState >= 3, but PTS frozen > 2500ms)
       // 2. Network buffering / initial stream startup (no buffer ahead or readyState < 3 -> wait up to 8000ms before soft recovery)
       const isDecoderStuck = hasBufferAhead && bufferAheadSec >= 0.5 && (v.readyState >= 3);
-      const stallThreshold = isDecoderStuck ? 2500 : 8000;
+      // When converting on-the-fly, allow the server pipeline time to buffer fragments without false restarts
+      const stallThreshold = streamState.transcode ? (isDecoderStuck ? 12000 : 30000) : (isDecoderStuck ? 2500 : 8000);
 
       if (stallDurationMs >= stallThreshold && !isRecovering.value) {
         const freezeReason = isDecoderStuck
@@ -5717,7 +5741,7 @@ const PlayerPage = {
       isEnded.value = false;
 
       selectedQualityMediaId.value = Number(mediaId);
-      loadQualityOptions(mediaId);
+      const qualityOptionsPromise = loadQualityOptions(mediaId);
 
       autoSkippedOp.value = false;
       autoSkippedEd.value = false;
@@ -5764,6 +5788,9 @@ const PlayerPage = {
           return;
         }
 
+        // Wait for quality options to finish loading so fallback options are available
+        try { await qualityOptionsPromise; } catch (e) {}
+
         // Pre-emptive compatibility check: if media is HEVC and browser lacks native decode support
         const vInfo = media.value.video_info || {};
         const codecTag = (vInfo.codec || "").toLowerCase();
@@ -5773,17 +5800,20 @@ const PlayerPage = {
         if (isHevc && !hevcSupported && !streamState.transcode) {
           console.info("[Player] HEVC content detected on browser without native HEVC decoder. Starting in converted mode...");
           streamState.transcode = true;
+          isTranscodeInitialLoading.value = true;
         }
 
         // ── 4K Hardware / Browser Compatibility Guard (Smart Auto-Switch) ──
+        const mediaResStr = `${media.value?.base_label || ""} ${media.value?.resolution || ""} ${codecTag} ${filePath}`.toLowerCase();
         const hasExplicitLowerRes = (media.value?.video_info?.height > 0 && media.value?.video_info?.height < 2160) ||
                                     (media.value?.height > 0 && media.value?.height < 2160) ||
                                     filePath.includes("1080p") || filePath.includes("720p") || filePath.includes("480p");
         const is4KInitial = !hasExplicitLowerRes && (
-                            (media.value?.base_label || "").startsWith("4K") ||
+                            mediaResStr.includes("4k") ||
+                            mediaResStr.includes("2160") ||
+                            mediaResStr.includes("uhd") ||
                             (media.value?.video_info?.height >= 2160 || media.value?.video_info?.width >= 3840) ||
-                            (media.value?.height >= 2160 || media.value?.width >= 3840) ||
-                            (filePath.includes("2160p") || filePath.includes("4k") || filePath.includes("3840x2160")));
+                            (media.value?.height >= 2160 || media.value?.width >= 3840));
 
         const check4KEnabled = playerSettings.value?.playback?.check_4k_compat !== false;
         if (is4KInitial && !streamState.transcode && check4KEnabled) {
@@ -5805,14 +5835,13 @@ const PlayerPage = {
               const transcodeOpt = (qualityOptions.value || []).find(
                 (o) => o.is_transcode && (o.target_height === 1080 || !o.target_height)
               ) || (qualityOptions.value || []).find((o) => o.is_transcode);
-              if (transcodeOpt) {
-                setAutoSwitched4K({
-                  label: transcodeOpt.display_label || "1080p (Converted)",
-                  original4kOption: currentOpt || null,
-                });
-                streamState.transcode = true;
-                streamState.maxHeight = transcodeOpt.target_height || 1080;
-              }
+              setAutoSwitched4K({
+                label: transcodeOpt?.display_label || "1080p (Converted)",
+                original4kOption: currentOpt || null,
+              });
+              streamState.transcode = true;
+              streamState.maxHeight = transcodeOpt?.target_height || 1080;
+              isTranscodeInitialLoading.value = true;
             }
           }
         }
@@ -6341,6 +6370,7 @@ const PlayerPage = {
       stutter4KBanner,
       force4KPlayback,
       stutter4KAutoSwitch,
+      isTranscodeInitialLoading,
       lowMemoryBanner,
       isLightMode,
       recoveringMemory,

@@ -1282,12 +1282,33 @@ async function check4KCompatibility() {
   // 1. Display resolution check using raw screen dimensions
   const screenW = window.screen?.width || 0;
   const screenH = window.screen?.height || 0;
-  if (screenW > 0 && screenH > 0 && screenW < 3840 && screenH < 2160) {
+  const is4KDisplay = screenW >= 3800 && screenH >= 2100;
+  if (!is4KDisplay) {
     displayCapable = false;
     reasons.push(`Display is ${screenW}×${screenH} (native 4K is 3840×2160)`);
   }
 
-  // 2. Hardware Decoding capabilities via Media Capabilities API
+  // 2. Hardware specs check for older/lower-spec devices
+  const cores = navigator.hardwareConcurrency || 0;
+  if (cores > 0 && cores <= 4) {
+    decodeCapable = false;
+    reasons.push(`Low-spec processor (${cores} CPU cores; smooth 4K playback requires at least 6-8 cores or dedicated modern GPU)`);
+  }
+
+  const memory = navigator.deviceMemory || 0;
+  if (memory > 0 && memory <= 4) {
+    decodeCapable = false;
+    reasons.push(`Low-spec device memory (${memory}GB RAM; high-bitrate 4K stream buffering requires >= 6GB RAM)`);
+  }
+
+  const isMobile = (typeof store !== "undefined" && store.isMobileScreen) ||
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent || "");
+  if (isMobile) {
+    decodeCapable = false;
+    reasons.push("Mobile/handheld viewport — converted playback recommended for battery, thermal, and network efficiency");
+  }
+
+  // 3. Hardware Decoding capabilities via Media Capabilities API
   if (navigator.mediaCapabilities && navigator.mediaCapabilities.decodingInfo) {
     try {
       const hevcConfig = {
@@ -1329,6 +1350,14 @@ async function check4KCompatibility() {
       }
     } catch (e) {
       console.warn('[4K Check] Error querying media capabilities:', e);
+    }
+  } else {
+    // Older browser/device without MediaCapabilities API
+    const testEl = document.createElement("video");
+    const canHevc = testEl.canPlayType('video/mp4; codecs="hev1.1.6.L150.B0"') || testEl.canPlayType('video/mp4; codecs="hevc"');
+    if (!canHevc || canHevc === "") {
+      decodeCapable = false;
+      reasons.push("Browser lacks native hardware 4K HEVC decoder");
     }
   }
 

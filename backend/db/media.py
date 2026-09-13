@@ -367,8 +367,13 @@ def get_media_quality_options(media_id):
 
     # Detect if source includes 4K / UHD or high-resolution content
     is_4k_source = any(
-        (h >= 2160 or w >= 3840 or "4k" in base.lower() or "2160" in res.lower() or "uhd" in res.lower())
-        for (_, res, base, _, h, w) in probed
+        (
+            h >= 2160 or w >= 3840 or
+            "4k" in base.lower() or "2160" in res.lower() or "uhd" in res.lower() or
+            "4k" in str(s.get("resolution") or "").lower() or "2160" in str(s.get("resolution") or "").lower() or "uhd" in str(s.get("resolution") or "").lower() or
+            "4k" in str(s.get("file_path") or "").lower() or "2160p" in str(s.get("file_path") or "").lower() or "uhd" in str(s.get("file_path") or "").lower()
+        )
+        for (s, res, base, _, h, w) in probed
     )
 
     # Offer on-the-fly conversion streams when source is 4K/UHD, 1080p, etc.
