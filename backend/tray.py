@@ -140,6 +140,63 @@ if IS_WINDOWS:
     shell32.Shell_NotifyIconW.restype = wintypes.BOOL
 
 
+def enable_windows_dark_mode(hwnd=None, force: bool = True):
+    """
+    Enable native Windows Dark Mode for the tray popup menu and receiver window.
+    Leverages uxtheme.dll ordinals (Windows 10 1809+ / Windows 11) for zero-dependency
+    native dark theme integration.
+    """
+    if not IS_WINDOWS:
+        return
+    try:
+        uxtheme = ctypes.windll.uxtheme
+        # 1. SetPreferredAppMode (ordinal 135 on Win10 1903+ / Win11)
+        # 0 = Default, 1 = AllowDark, 2 = ForceDark, 3 = ForceLight
+        mode = 2 if force else 1
+        try:
+            fn_mode = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_int)((135, uxtheme))
+            fn_mode(mode)
+        except Exception:
+            # Fallback for Windows 10 1809 (AllowDarkModeForApp)
+            try:
+                fn_app = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.BOOL)((135, uxtheme))
+                fn_app(True)
+            except Exception:
+                pass
+
+        # 2. FlushMenuThemes (ordinal 136) — refreshes Win32 menu theme cache
+        try:
+            fn_flush = ctypes.WINFUNCTYPE(None)((136, uxtheme))
+            fn_flush()
+        except Exception:
+            pass
+
+        # 3. Apply dark mode styling to receiver window if provided
+        if hwnd:
+            try:
+                fn_win = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.BOOL)((133, uxtheme))
+                fn_win(hwnd, True)
+            except Exception:
+                pass
+
+            try:
+                uxtheme.SetWindowTheme(hwnd, "DarkMode_Explorer", None)
+            except Exception:
+                pass
+
+            try:
+                dwmapi = ctypes.windll.dwmapi
+                val = ctypes.c_int(1)
+                # DWMWA_USE_IMMERSIVE_DARK_MODE = 20 (Windows 10 2004+ / Windows 11)
+                hr = dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(val), ctypes.sizeof(val))
+                if hr != 0:
+                    # Fallback for Windows 10 1809/1903 (attribute 19)
+                    dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(val), ctypes.sizeof(val))
+            except Exception:
+                pass
+    except Exception as e:
+        logger.debug(f"Dark mode setup notice: {e}")
+
 
 def copy_to_clipboard(text: str) -> bool:
     """Copy text string to Windows clipboard natively using Win32 API."""
@@ -221,6 +278,7 @@ class CapsStreamTray:
         media_paths: Optional[Dict[str, str]] = None,
         log_dir: Optional[str] = None,
         data_dir: Optional[str] = None,
+        dark_mode: bool = True,
     ):
         self.local_url = local_url
         self.lan_url = lan_url
@@ -231,6 +289,7 @@ class CapsStreamTray:
         self.media_paths = media_paths or {}
         self.log_dir = log_dir
         self.data_dir = data_dir
+        self.dark_mode = dark_mode
 
         self._hwnd = None
         self._hicon = None
@@ -326,12 +385,17 @@ class CapsStreamTray:
             0, class_name, "CapsStream Tray Receiver",
             0, 0, 0, 0, 0, None, None, hinst, None
         )
+        if hwnd and self.dark_mode:
+            enable_windows_dark_mode(hwnd, force=True)
         return hwnd
 
     def _show_context_menu(self):
         """Construct and display the tray popup menu at cursor position."""
         if not self._hwnd:
             return
+
+        if self.dark_mode:
+            enable_windows_dark_mode(self._hwnd, force=True)
 
         class POINT(ctypes.Structure):
             _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]

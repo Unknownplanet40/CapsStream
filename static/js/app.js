@@ -11066,7 +11066,7 @@ const ProfilesPage = {
             </div>
           </div>
 
-          <div class="pin-pad-grid">
+          <div class="pin-pad-grid" :class="{ 'force-visible': showVirtualKeypad }">
             <button
               v-for="k in pinKeyLayout"
               :key="k.val"
@@ -11092,7 +11092,13 @@ const ProfilesPage = {
           </div>
 
           <div class="pin-keyboard-hint">
-            <span>Use your keyboard or the on-screen keypad</span>
+            <span class="pin-hint-touch-text">Use your keyboard or the on-screen keypad</span>
+            <span class="pin-hint-desktop-text"><i class="ph ph-keyboard"></i> Type PIN using your keyboard</span>
+            <div>
+              <button type="button" class="pin-keypad-toggle-btn" @click="showVirtualKeypad = !showVirtualKeypad">
+                {{ showVirtualKeypad ? 'Hide keypad' : 'Use on-screen keypad' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -11127,7 +11133,7 @@ const ProfilesPage = {
             </div>
           </div>
 
-          <div class="pin-pad-grid">
+          <div class="pin-pad-grid" :class="{ 'force-visible': showVirtualKeypad }">
             <button
               v-for="k in pinKeyLayout"
               :key="k.val"
@@ -11153,7 +11159,13 @@ const ProfilesPage = {
           </div>
 
           <div class="pin-keyboard-hint">
-            <span>Use your keyboard or the on-screen keypad</span>
+            <span class="pin-hint-touch-text">Use your keyboard or the on-screen keypad</span>
+            <span class="pin-hint-desktop-text"><i class="ph ph-keyboard"></i> Type PIN using your keyboard</span>
+            <div>
+              <button type="button" class="pin-keypad-toggle-btn" @click="showVirtualKeypad = !showVirtualKeypad">
+                {{ showVirtualKeypad ? 'Hide keypad' : 'Use on-screen keypad' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -11187,7 +11199,7 @@ const ProfilesPage = {
             </div>
           </div>
 
-          <div class="pin-pad-grid">
+          <div class="pin-pad-grid" :class="{ 'force-visible': showVirtualKeypad }">
             <button
               v-for="k in pinKeyLayout"
               :key="k.val"
@@ -11212,7 +11224,13 @@ const ProfilesPage = {
           </div>
 
           <div class="pin-keyboard-hint">
-            <span>Use your keyboard or the on-screen keypad</span>
+            <span class="pin-hint-touch-text">Use your keyboard or the on-screen keypad</span>
+            <span class="pin-hint-desktop-text"><i class="ph ph-keyboard"></i> Type answer using your keyboard</span>
+            <div>
+              <button type="button" class="pin-keypad-toggle-btn" @click="showVirtualKeypad = !showVirtualKeypad">
+                {{ showVirtualKeypad ? 'Hide keypad' : 'Use on-screen keypad' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -11242,7 +11260,7 @@ const ProfilesPage = {
             </div>
           </div>
 
-          <div class="pin-pad-grid">
+          <div class="pin-pad-grid" :class="{ 'force-visible': showVirtualKeypad }">
             <button
               v-for="k in pinKeyLayout"
               :key="k.val"
@@ -11268,7 +11286,13 @@ const ProfilesPage = {
           </div>
 
           <div class="pin-keyboard-hint">
-            <span>Use your keyboard or the on-screen keypad</span>
+            <span class="pin-hint-touch-text">Use your keyboard or the on-screen keypad</span>
+            <span class="pin-hint-desktop-text"><i class="ph ph-keyboard"></i> Type Admin PIN using your keyboard</span>
+            <div>
+              <button type="button" class="pin-keypad-toggle-btn" @click="showVirtualKeypad = !showVirtualKeypad">
+                {{ showVirtualKeypad ? 'Hide keypad' : 'Use on-screen keypad' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -11303,6 +11327,7 @@ const ProfilesPage = {
     const mathAnswer = ref("");
     const mathGateError = ref("");
     const mathProblem = reactive({ num1: 7, num2: 8, answer: 15 });
+    const showVirtualKeypad = ref(false);
 
     const editAvatarFileInput = ref(null);
 
@@ -11401,6 +11426,7 @@ const ProfilesPage = {
       adminPin.value = "";
       adminPinError.value = "";
       adminPinCallback.value = actionCallback;
+      showVirtualKeypad.value = false;
       adminPinModalTarget.value = true;
     }
 
@@ -11476,6 +11502,7 @@ const ProfilesPage = {
     }
 
     function generateMathProblem() {
+      showVirtualKeypad.value = false;
       const n1 = Math.floor(Math.random() * 8) + 4;
       const n2 = Math.floor(Math.random() * 8) + 3;
       mathProblem.num1 = n1;
@@ -11728,6 +11755,7 @@ const ProfilesPage = {
     }
 
     function selectProfile(profile) {
+      showVirtualKeypad.value = false;
       if (profile.has_pin) {
         pinTarget.value = profile;
         pin.value = "";
@@ -11743,6 +11771,7 @@ const ProfilesPage = {
       const target = takeoverTarget.value;
       takeoverTarget.value = null;
       if (!target) return;
+      showVirtualKeypad.value = false;
       if (target.has_pin) {
         pinTarget.value = target;
         pin.value = "";
@@ -11890,6 +11919,17 @@ const ProfilesPage = {
           e.preventDefault();
           deletePinTarget.value = null;
         }
+      } else if (mathGateTarget.value) {
+        if (e.key >= "0" && e.key <= "9") {
+          e.preventDefault();
+          handleMathKey(e.key);
+        } else if (e.key === "Backspace") {
+          e.preventDefault();
+          handleMathKey("⌫");
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          mathGateTarget.value = null;
+        }
       } else if (takeoverTarget.value) {
         if (e.key === "Escape") {
           e.preventDefault();
@@ -11972,6 +12012,7 @@ const ProfilesPage = {
       isAdminUnlocked,
       exitEditView,
       imgUrl,
+      showVirtualKeypad,
     };
   },
 };
@@ -17322,6 +17363,30 @@ const router = createRouter({
 });
 
 router.beforeEach((to, from, next) => {
+  // If navigating away from player or switching played media, terminate any active conversion process
+  if (from.path && from.path.startsWith("/watch")) {
+    if (!to.path.startsWith("/watch")) {
+      try {
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon("/api/stream/stop-all");
+        } else {
+          fetch("/api/stream/stop-all", { method: "POST", keepalive: true }).catch(() => {});
+        }
+      } catch (e) {}
+    } else if (from.path !== to.path) {
+      const fromId = from.params?.id || from.path.split("/").filter(Boolean).pop();
+      if (fromId) {
+        try {
+          if (navigator.sendBeacon) {
+            navigator.sendBeacon(`/api/stream/stop/${fromId}`);
+          } else {
+            fetch(`/api/stream/stop/${fromId}`, { method: "POST", keepalive: true }).catch(() => {});
+          }
+        } catch (e) {}
+      }
+    }
+  }
+
   if (to.path === "/requests" && !store.features?.requests) {
     return next("/");
   }
@@ -18219,7 +18284,7 @@ const App = {
             </div>
           </div>
 
-          <div class="pin-pad-grid">
+          <div class="pin-pad-grid" :class="{ 'force-visible': showAppVirtualKeypad }">
             <button
               v-for="n in [1,2,3,4,5,6,7,8,9,'',0,'⌫']"
               :key="n"
@@ -18244,7 +18309,13 @@ const App = {
           </div>
 
           <div class="pin-keyboard-hint">
-            <span>Use your keyboard or the on-screen keypad</span>
+            <span class="pin-hint-touch-text">Use your keyboard or the on-screen keypad</span>
+            <span class="pin-hint-desktop-text"><i class="ph ph-keyboard"></i> Type answer using your keyboard</span>
+            <div>
+              <button type="button" class="pin-keypad-toggle-btn" @click="showAppVirtualKeypad = !showAppVirtualKeypad">
+                {{ showAppVirtualKeypad ? 'Hide keypad' : 'Use on-screen keypad' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -19453,12 +19524,14 @@ const App = {
     }
 
     const appMathGateShow = ref(false);
+    const showAppVirtualKeypad = ref(false);
     const appMathAnswer = ref("");
     const appMathError = ref("");
     const appMathProblem = reactive({ num1: 7, num2: 8, answer: 15 });
     let appMathCallback = null;
 
     function generateAppMathProblem(cb) {
+      showAppVirtualKeypad.value = false;
       const n1 = Math.floor(Math.random() * 8) + 4;
       const n2 = Math.floor(Math.random() * 8) + 3;
       appMathProblem.num1 = n1;
@@ -19651,6 +19724,22 @@ const App = {
     }
 
     function handleGlobalKeyDown(e) {
+      if (appMathGateShow.value) {
+        if (e.key >= "0" && e.key <= "9") {
+          e.preventDefault();
+          handleAppMathKey(e.key);
+          return;
+        } else if (e.key === "Backspace") {
+          e.preventDefault();
+          handleAppMathKey("⌫");
+          return;
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          appMathGateShow.value = false;
+          return;
+        }
+      }
+
       if (e.key === "Escape") {
         if (store.whatsNewModalOpen) {
           closeWhatsNewModal();
@@ -20204,6 +20293,7 @@ const App = {
       closeWhatsNewModal,
       tvDropdownStyle,
       tvDropdownRef,
+      showAppVirtualKeypad,
     };
   },
 };

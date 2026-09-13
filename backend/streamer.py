@@ -21,6 +21,35 @@ import uuid
 _STREAM_LOCK = threading.Lock()
 _ACTIVE_STREAMS = {}
 
+
+def stop_active_stream(media_id=None, file_path=None):
+    """
+    Terminates active FFmpeg transcode/remux processes matching media_id or file_path.
+    If neither is supplied, terminates all active transcode streams.
+    Returns the count of killed processes.
+    """
+    killed = 0
+    with _STREAM_LOCK:
+        for stream_id, proc in list(_ACTIVE_STREAMS.items()):
+            match = False
+            if media_id is not None and getattr(proc, "_media_id", None) == media_id:
+                match = True
+            elif file_path is not None and getattr(proc, "_file_path", None) == file_path:
+                match = True
+            elif media_id is None and file_path is None:
+                match = True
+
+            if match:
+                try:
+                    if proc.poll() is None:
+                        proc.kill()
+                        killed += 1
+                except Exception:
+                    pass
+                _ACTIVE_STREAMS.pop(stream_id, None)
+    return killed
+
+
 # Keyframe lookup cache: (path, size, mtime, requested_t) -> keyframe_time
 _KEYFRAME_CACHE = {}
 _KEYFRAME_CACHE_MAX = 2048
@@ -349,7 +378,7 @@ def _build_convert_cmd(file_path, audio_track_index, effective_start, max_height
     return cmd
 
 
-def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_height=0, remux_video=None, boost_audio=True, force_sw=False):
+def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_height=0, remux_video=None, boost_audio=True, force_sw=False, media_id=None):
     """
     High-performance real-time conversion/remuxing to widely-supported H.264/AAC MP4.
     If video stream is already H.264 compatible and no resolution scaling is requested,
@@ -403,6 +432,8 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
             creationflags=proc_flags,
             bufsize=2 * 1024 * 1024,
         )
+        proc._media_id = media_id
+        proc._file_path = file_path
         with _STREAM_LOCK:
             _ACTIVE_STREAMS[stream_id] = proc
 
@@ -438,6 +469,8 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
                         creationflags=proc_flags,
                         bufsize=2 * 1024 * 1024,
                     )
+                    current_proc._media_id = media_id
+                    current_proc._file_path = file_path
                     with _STREAM_LOCK:
                         _ACTIVE_STREAMS[stream_id] = current_proc
                     chunk = current_proc.stdout.read(chunk_size)
@@ -471,7 +504,7 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
         return stream_file(file_path)
 
 
-def stream_audio_only(file_path, track_index, start_time=0.0):
+def stream_audio_only(file_path, track_index, start_time=0.0, media_id=None):
     """
     Stream ONLY the selected audio track as AAC (ADTS) over HTTP.
 
@@ -510,6 +543,8 @@ def stream_audio_only(file_path, track_index, start_time=0.0):
     stream_id = uuid.uuid4().hex
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY)
+        proc._media_id = media_id
+        proc._file_path = file_path
         with _STREAM_LOCK:
             _ACTIVE_STREAMS[stream_id] = proc
 
@@ -543,7 +578,7 @@ def stream_audio_only(file_path, track_index, start_time=0.0):
         abort(500, description="Failed to start audio stream")
 
 
-def stream_transcoded(file_path, audio_track_index=0, start_time=0.0):
+def stream_transcoded(file_path, audio_track_index=0, start_time=0.0, media_id=None):
     """
     Remuxes/streams video via FFmpeg with specific audio track index.
     '-c:v copy' preserves original video frames without CPU load.
@@ -612,6 +647,8 @@ def stream_transcoded(file_path, audio_track_index=0, start_time=0.0):
             creationflags=CREATE_NO_WINDOW,
             bufsize=2 * 1024 * 1024,
         )
+        proc._media_id = media_id
+        proc._file_path = file_path
         with _STREAM_LOCK:
             _ACTIVE_STREAMS[stream_id] = proc
 

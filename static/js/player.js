@@ -172,11 +172,6 @@ const PlayerPage = {
         </div>
       </transition>
 
-      <!-- Buffering Spinner -->
-      <div v-if="isBuffering" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;pointer-events:none">
-        <div class="loading-spinner" style="width:56px;height:56px;border-width:4px"></div>
-      </div>
-
       <!-- Sleep Timer Pre-Expiry Warning Toast (15s fade-out window) -->
       <transition name="fade">
         <div v-if="sleepExpiringWarning" class="player-sleep-warning-toast" @click.stop="extendSleepTimer(15)">
@@ -815,16 +810,17 @@ const PlayerPage = {
                     <div class="player-submenu-list">
                       <div
                         v-for="opt in (qualityOptions.length ? qualityOptions : [{ display_label: 'Default', media_id: selectedQualityMediaId }])"
-                        :key="opt.media_id"
+                        :key="opt.quality_id || (opt.media_id + '_' + (opt.target_height || 'direct'))"
                         class="player-choice-item"
-                        :class="{ active: selectedQualityMediaId === opt.media_id, disabled: !canSwitchQuality }"
+                        :class="{ active: isQualityOptionActive(opt), disabled: !canSwitchQuality }"
                         @click="canSwitchQuality && selectQualityAndClose(opt)"
                       >
                         <div style="display:flex;align-items:center;gap:8px">
                           <span>{{ opt.display_label }}</span>
                           <span v-if="opt.size_str" style="font-size:0.75rem;color:var(--text-muted)">({{ opt.size_str }})</span>
+                          <span v-else-if="opt.is_transcode" style="font-size:0.68rem;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(229,9,20,0.18);color:var(--accent);border:1px solid rgba(229,9,20,0.35);text-transform:uppercase">Convert</span>
                         </div>
-                        <i v-if="selectedQualityMediaId === opt.media_id" class="ph-bold ph-check player-check-icon"></i>
+                        <i v-if="isQualityOptionActive(opt)" class="ph-bold ph-check player-check-icon"></i>
                       </div>
                       <div v-if="!canSwitchQuality" style="font-size:0.72rem;color:var(--text-muted);padding:8px 16px">
                         No alternative video quality streams available
@@ -976,6 +972,55 @@ const PlayerPage = {
           <i class="ph ph-sliders-horizontal"></i>
         </button>
       </div>
+
+      <!-- Buffering Spinner & Transcode Status (strictly in front of all player controls and paused content) -->
+      <transition name="fade">
+        <div
+          v-if="isBuffering"
+          class="player-buffering-overlay"
+          :class="{ 'is-transcoding': streamState.transcode }"
+        >
+          <div class="loading-spinner" style="width:52px;height:52px;border-width:4px"></div>
+
+          <!-- Converted Media Detailed Status Card -->
+          <div v-if="streamState.transcode" class="transcode-loading-card">
+            <div class="transcode-loading-header">
+              <div class="transcode-loading-title">
+                <i class="ph-bold ph-arrows-clockwise transcode-spin-icon"></i>
+                <span>Converting Stream ({{ streamState.maxHeight || 1080 }}p)</span>
+              </div>
+              <span class="transcode-elapsed-badge">{{ transcodeElapsedSec }}s</span>
+            </div>
+
+            <div class="transcode-step-row">
+              <i class="ph-bold ph-circle-notch ph-spin" style="color:var(--accent);font-size:0.95rem"></i>
+              <span class="transcode-step-text">{{ transcodeStatusStep }}</span>
+            </div>
+
+            <div class="transcode-meta-row">
+              <span
+                class="transcode-hw-badge"
+                :class="isHardwareTranscoding ? 'hw-active' : 'hw-software'"
+              >
+                <i :class="isHardwareTranscoding ? 'ph-bold ph-lightning' : 'ph-bold ph-cpu'"></i>
+                {{ transcodeEncoderLabel }}
+              </span>
+              <span v-if="isSource4K" class="transcode-res-pill">
+                4K UHD Source
+              </span>
+            </div>
+
+            <div class="transcode-reason-note">
+              <i class="ph-fill ph-info"></i>
+              <span>Real-time conversion downscales high-resolution video on the fly so your device can play it smoothly without stuttering.</span>
+            </div>
+
+            <div v-if="transcodeElapsedSec >= 12" class="transcode-tip-note">
+              <span>Tip: High-bitrate 4K conversion requires significant processing power. If it feels slow to start, consider selecting 720p or 480p in Video Quality.</span>
+            </div>
+          </div>
+        </div>
+      </transition>
 
       <!-- Skip Timestamps Editor Modal -->
       <skip-timestamps-modal
@@ -2206,8 +2251,20 @@ const PlayerPage = {
       !!media.value && qualityOptions.value.length > 1
     );
 
+    function isQualityOptionActive(opt) {
+      if (!opt) return false;
+      if (opt.is_transcode) {
+        return !!streamState.transcode && (streamState.maxHeight || 1080) === (opt.target_height || 1080);
+      }
+      return !streamState.transcode && selectedQualityMediaId.value === opt.media_id;
+    }
+
     const activeQualityBadge = computed(() => {
-      const activeOpt = (qualityOptions.value || []).find((o) => o.media_id === selectedQualityMediaId.value);
+      if (streamState.transcode) {
+        const h = streamState.maxHeight || 1080;
+        return `${h}p`;
+      }
+      const activeOpt = (qualityOptions.value || []).find((o) => !o.is_transcode && o.media_id === selectedQualityMediaId.value);
       if (activeOpt && (activeOpt.resolution || activeOpt.display_label || activeOpt.base_label)) {
         const text = (activeOpt.resolution || activeOpt.display_label || activeOpt.base_label).toLowerCase();
         if (text.includes("2160") || text.includes("4k")) return "4K";
@@ -2231,12 +2288,13 @@ const PlayerPage = {
       try {
         const opts = await API.get(`/api/quality-options/${mediaId}`);
         qualityOptions.value = opts || [];
-        if (!selectedQualityMediaId.value || !qualityOptions.value.some((o) => o.media_id === selectedQualityMediaId.value)) {
-          const current = qualityOptions.value.find((o) => o.is_current);
+        if (!selectedQualityMediaId.value || !qualityOptions.value.some((o) => !o.is_transcode && o.media_id === selectedQualityMediaId.value)) {
+          const current = qualityOptions.value.find((o) => o.is_current && !o.is_transcode);
           if (current) {
             selectedQualityMediaId.value = current.media_id;
           } else if (qualityOptions.value.length > 0) {
-            selectedQualityMediaId.value = qualityOptions.value[0].media_id;
+            const firstDirect = qualityOptions.value.find((o) => !o.is_transcode) || qualityOptions.value[0];
+            selectedQualityMediaId.value = firstDirect.media_id;
           }
         }
       } catch (e) {
@@ -2258,18 +2316,32 @@ const PlayerPage = {
     function stutter4KAutoSwitch() {
       stutter4KBanner.value = null;
       const fallback = (qualityOptions.value || []).find(
-        (o) => !(o.base_label || o.resolution || "").startsWith("4K") && o.media_id !== selectedQualityMediaId.value
-      );
+        (o) => !o.is_transcode && !(o.base_label || o.resolution || "").startsWith("4K") && o.media_id !== selectedQualityMediaId.value
+      ) || (qualityOptions.value || []).find((o) => o.is_transcode && (o.target_height === 1080 || !o.target_height))
+        || (qualityOptions.value || []).find((o) => o.is_transcode);
       if (fallback) {
         selectQuality(fallback, true);
       } else if (!streamState.transcode) {
-        enableCompatPlayback(true);
+        enableCompatPlayback(true, { maxHeight: 1080 });
       }
     }
 
     async function selectQuality(option, bypassCheck = false) {
-      if (!option || option.media_id === selectedQualityMediaId.value) {
+      if (!option || isQualityOptionActive(option)) {
         showQualityMenu.value = false;
+        return;
+      }
+
+      // If user selected a transcode preset (e.g. Convert to 1080p / 720p / 480p)
+      if (option.is_transcode) {
+        showQualityMenu.value = false;
+        dismissAutoSwitched4K();
+        stutter4KBanner.value = null;
+        trackPlayerFeature("quality");
+        selectedQualityMediaId.value = option.media_id;
+        streamState.mediaId = option.media_id;
+        enableCompatPlayback(true, { maxHeight: option.target_height || 1080 });
+        API.post("/api/achievements/unlock", { achievement_id: "quality_switcher" }).catch(() => {});
         return;
       }
 
@@ -2281,8 +2353,9 @@ const PlayerPage = {
         if (!compat.compatible) {
           showQualityMenu.value = false;
           const fallback = (qualityOptions.value || []).find(
-            (o) => o.media_id !== option.media_id && !(o.base_label || o.resolution || "").startsWith("4K")
-          ) || null;
+            (o) => !o.is_transcode && o.media_id !== option.media_id && !(o.base_label || o.resolution || "").startsWith("4K")
+          ) || (qualityOptions.value || []).find((o) => o.is_transcode && (o.target_height === 1080 || !o.target_height))
+            || (qualityOptions.value || []).find((o) => o.is_transcode);
           if (fallback) {
             // Silently switch to fallback and show undo pill
             const original4kOption = option;
@@ -2293,7 +2366,7 @@ const PlayerPage = {
             });
           } else if (!streamState.transcode) {
             // No lower quality available — switch to converted playback silently
-            enableCompatPlayback(true);
+            enableCompatPlayback(true, { maxHeight: 1080 });
           }
           return;
         }
@@ -2316,6 +2389,10 @@ const PlayerPage = {
       const atContent = currentContentTime();
       selectedQualityMediaId.value = option.media_id;
       streamState.mediaId = option.media_id;
+      streamState.transcode = false;
+      streamState.forceSoftware = false;
+      streamState.maxHeight = null;
+      streamState.streamStart = 0;
       triggerCodecNotice(option.file_path || media.value?.file_path || "");
 
       // Refresh metadata, audio tracks, subtitles, skip-times, and thumb sheet for new quality file
@@ -2612,6 +2689,7 @@ const PlayerPage = {
 
     async function enableCompatPlayback(force = false, options = {}) {
       if (!media.value) return;
+      fetchCompatCaps();
       suppressResume = true;
       isBuffering.value = true;
       const token = ++reloadToken;
@@ -2622,6 +2700,9 @@ const PlayerPage = {
       if (options && options.forceSoftware) {
         streamState.forceSoftware = true;
       }
+      if (options && options.maxHeight) {
+        streamState.maxHeight = options.maxHeight;
+      }
       streamState.streamStart = startAt;
       swapStream(0, force);
     }
@@ -2630,10 +2711,77 @@ const PlayerPage = {
       suppressResume = true;
       streamState.transcode = false;
       streamState.forceSoftware = false;
+      streamState.maxHeight = null;
       streamState.streamStart = 0;
       reloadToken++;
       swapStream(currentContentTime());
     }
+
+    // ── Converted Media Loading & Transcode Status Tracking ─────────
+    const transcodeElapsedSec = ref(0);
+    let transcodeTimer = null;
+
+    const isSource4K = computed(() => {
+      const m = media.value;
+      if (!m) return false;
+      const res = String(m.resolution || "").toLowerCase();
+      const base = String(m.base_label || "").toLowerCase();
+      const path = String(m.file_path || "").toLowerCase();
+      return (
+        (m.height >= 2160 || m.width >= 3840) ||
+        (m.video_info && (m.video_info.height >= 2160 || m.video_info.width >= 3840)) ||
+        res.includes("2160") || res.includes("4k") || res.includes("uhd") ||
+        base.includes("4k") || base.includes("uhd") ||
+        path.includes("2160p") || path.includes("4k")
+      );
+    });
+
+    const isHardwareTranscoding = computed(() => {
+      if (streamState.forceSoftware) return false;
+      return !!(compatInfo.value && compatInfo.value.hardware);
+    });
+
+    const transcodeEncoderLabel = computed(() => {
+      if (streamState.forceSoftware) return "Software Encoding (CPU)";
+      if (!compatInfo.value) return "Detecting hardware encoder...";
+      const enc = compatInfo.value.encoder;
+      if (!enc || enc === "libx264") return "Software Encoding (CPU)";
+      if (enc.includes("qsv")) return "Intel Quick Sync (GPU)";
+      if (enc.includes("nvenc")) return "NVIDIA NVENC (GPU)";
+      if (enc.includes("amf")) return "AMD AMF (GPU)";
+      if (enc.includes("mf")) return "Windows MediaFoundation (GPU)";
+      return `${enc} (GPU)`;
+    });
+
+    const transcodeStatusStep = computed(() => {
+      const s = transcodeElapsedSec.value;
+      const target = (streamState.maxHeight || 1080) + "p";
+      if (s < 3) return "Starting FFmpeg conversion pipeline...";
+      if (s < 7) return `Decoding source frames & downscaling to ${target}...`;
+      if (s < 12) return "Buffering initial playback segments from server...";
+      return "High-bitrate stream processing · Almost ready to play...";
+    });
+
+    watch(
+      () => isBuffering.value && streamState.transcode,
+      (active) => {
+        if (active) {
+          transcodeElapsedSec.value = 0;
+          if (transcodeTimer) clearInterval(transcodeTimer);
+          transcodeTimer = setInterval(() => {
+            transcodeElapsedSec.value++;
+          }, 1000);
+          fetchCompatCaps();
+        } else {
+          if (transcodeTimer) {
+            clearInterval(transcodeTimer);
+            transcodeTimer = null;
+          }
+          transcodeElapsedSec.value = 0;
+        }
+      },
+      { immediate: true }
+    );
 
     // Fetch encoder capabilities once when codec notice appears
     watch(codecNoticePill, (pill) => {
@@ -5535,6 +5683,7 @@ const PlayerPage = {
 
     async function initPlayer() {
       const mediaId = route.params.id;
+      fetchCompatCaps();
       playerError.value = null;
       showResumeModal.value = false;
       resumeTime.value = 0;
@@ -5549,6 +5698,8 @@ const PlayerPage = {
       streamState.mediaId = Number(mediaId);
       streamState.audioTrack = null;
       streamState.transcode = false;
+      streamState.forceSoftware = false;
+      streamState.maxHeight = null;
       streamState.streamStart = 0;
       // Fresh session — drop any previous remote-audio element state
       detachRemoteAudio();
@@ -5640,7 +5791,7 @@ const PlayerPage = {
           if (!compat.compatible) {
             const currentOpt = (qualityOptions.value || []).find((o) => o.media_id === selectedQualityMediaId.value);
             const fallback = (qualityOptions.value || []).find(
-              (o) => !(o.base_label || o.resolution || "").startsWith("4K") && o.media_id !== selectedQualityMediaId.value
+              (o) => !o.is_transcode && !(o.base_label || o.resolution || "").startsWith("4K") && o.media_id !== selectedQualityMediaId.value
             ) || null;
             if (fallback) {
               // Silently switch to fallback quality and show undo pill (non-blocking)
@@ -5650,11 +5801,22 @@ const PlayerPage = {
               });
               selectedQualityMediaId.value = fallback.media_id;
               streamState.mediaId = fallback.media_id;
+            } else {
+              const transcodeOpt = (qualityOptions.value || []).find(
+                (o) => o.is_transcode && (o.target_height === 1080 || !o.target_height)
+              ) || (qualityOptions.value || []).find((o) => o.is_transcode);
+              if (transcodeOpt) {
+                setAutoSwitched4K({
+                  label: transcodeOpt.display_label || "1080p (Converted)",
+                  original4kOption: currentOpt || null,
+                });
+                streamState.transcode = true;
+                streamState.maxHeight = transcodeOpt.target_height || 1080;
+              }
             }
           }
         }
 
-        // ── Codec Compatibility Notice (HEVC / 10-Bit Color / AV1) ──
         const activeOpt = (qualityOptions.value || []).find((o) => o.media_id === selectedQualityMediaId.value);
         const activePath = activeOpt?.file_path || media.value?.file_path || filePath || "";
         triggerCodecNotice(activePath);
@@ -5775,8 +5937,59 @@ const PlayerPage = {
       showControls();
     }
 
+    function stopActiveConversion(mediaId = null) {
+      const targetId = mediaId || streamState.mediaId || route.params.id;
+      try {
+        if (targetId) {
+          if (navigator.sendBeacon) {
+            navigator.sendBeacon(`/api/stream/stop/${targetId}`);
+          } else {
+            fetch(`/api/stream/stop/${targetId}`, { method: "POST", keepalive: true }).catch(() => {});
+          }
+        } else {
+          if (navigator.sendBeacon) {
+            navigator.sendBeacon("/api/stream/stop-all");
+          } else {
+            fetch("/api/stream/stop-all", { method: "POST", keepalive: true }).catch(() => {});
+          }
+        }
+      } catch (e) {}
+    }
+
+    function cleanupPlayback(options = {}) {
+      reloadToken++;
+      isBuffering.value = false;
+      const prevMediaId = options.mediaId || streamState.mediaId || route.params.id;
+
+      detachRemoteAudio();
+      const v = videoRef.value;
+      if (v) {
+        try {
+          v.pause();
+          v.removeAttribute("src");
+          v.load();
+        } catch (e) {}
+      }
+
+      stopActiveConversion(prevMediaId);
+
+      streamState.transcode = false;
+      streamState.forceSoftware = false;
+      streamState.maxHeight = null;
+      streamState.streamStart = 0;
+      if (options.clearMediaId !== false) {
+        streamState.mediaId = null;
+      }
+      if (transcodeTimer) {
+        clearInterval(transcodeTimer);
+        transcodeTimer = null;
+      }
+      transcodeElapsedSec.value = 0;
+    }
+
     async function goBack() {
       await saveProgressNow();
+      cleanupPlayback();
       if (media.value) {
         if (media.value.type === "movie" && media.value.id) {
           router.push(`/title/movie/${media.value.id}`);
@@ -5794,6 +6007,7 @@ const PlayerPage = {
 
     async function goHome() {
       await saveProgressNow();
+      cleanupPlayback();
       router.push("/");
     }
 
@@ -5809,10 +6023,7 @@ const PlayerPage = {
       } else {
         consecutiveAutoAdvances.value = 0;
       }
-      if (videoRef.value) {
-        videoRef.value.pause();
-        try { videoRef.value.currentTime = 0; } catch (e) {}
-      }
+      cleanupPlayback({ clearMediaId: true });
       currentTime.value = 0;
       showResumeModal.value = false;
       resumeTime.value = 0;
@@ -5826,6 +6037,7 @@ const PlayerPage = {
 
     onMounted(() => {
       initPlayer();
+      window.addEventListener("beforeunload", cleanupPlayback);
       document.addEventListener("fullscreenchange", handleFullscreenChange);
       document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
       if (videoRef.value) {
@@ -5840,12 +6052,13 @@ const PlayerPage = {
     });
 
     onUnmounted(() => {
+      window.removeEventListener("beforeunload", cleanupPlayback);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
       document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
       unlockOrientation();
       cancelAutoAdvance();
       saveProgressNow();
-      detachRemoteAudio();
+      cleanupPlayback();
       stopDriveRemountPoller();
       clearInterval(progressTimer);
       clearInterval(stallTimer);
@@ -5866,6 +6079,7 @@ const PlayerPage = {
       pendingSeekTarget = null;
       if (playerAchTimer) clearTimeout(playerAchTimer);
       if (hoverRafId) cancelAnimationFrame(hoverRafId);
+      if (transcodeTimer) { clearInterval(transcodeTimer); transcodeTimer = null; }
 
       window.removeEventListener("pagehide", flushProgressOnHide);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -5916,7 +6130,7 @@ const PlayerPage = {
 
     watch(
       () => route.params.id,
-      () => {
+      (newId, oldId) => {
         cancelAutoAdvance();
         clearInterval(progressTimer);
         clearInterval(stallTimer);
@@ -5924,10 +6138,7 @@ const PlayerPage = {
         if (memoryHealthTimer) clearInterval(memoryHealthTimer);
         if (seekDebounceTimer) { clearTimeout(seekDebounceTimer); seekDebounceTimer = null; }
         pendingSeekTarget = null;
-        if (videoRef.value) {
-          videoRef.value.pause();
-          try { videoRef.value.currentTime = 0; } catch (e) {}
-        }
+        cleanupPlayback({ mediaId: oldId || streamState.mediaId });
         currentTime.value = 0;
         duration.value = 0;
         media.value = null;
@@ -6007,6 +6218,12 @@ const PlayerPage = {
       selectedQualityMediaId,
       showQualityMenu,
       selectQuality,
+      isQualityOptionActive,
+      transcodeElapsedSec,
+      transcodeStatusStep,
+      transcodeEncoderLabel,
+      isHardwareTranscoding,
+      isSource4K,
       skipTimes,
       downloadingSubs,
       downloadSubtitles,

@@ -20,6 +20,7 @@ from backend.streamer import (
     stream_video_convert,
     stream_audio_only,
     stream_transcoded,
+    stop_active_stream,
     find_keyframe_before,
     describe_hw_encoder,
     _build_convert_cmd
@@ -201,6 +202,40 @@ class TestVideoStreaming(unittest.TestCase):
             data = b"".join(response.response)
             self.assertEqual(data, b"adts_chunk_1")
 
+    def test_stop_active_stream_matching_media_id(self):
+        """Verify stop_active_stream terminates matching processes and leaves others intact."""
+        from backend.streamer import _ACTIVE_STREAMS, _STREAM_LOCK
+        proc1 = MagicMock()
+        proc1.poll.return_value = None
+        proc1._media_id = 101
+        proc1._file_path = "/path/to/media1.mkv"
+
+        proc2 = MagicMock()
+        proc2.poll.return_value = None
+        proc2._media_id = 102
+        proc2._file_path = "/path/to/media2.mkv"
+
+        with _STREAM_LOCK:
+            _ACTIVE_STREAMS["stream_1"] = proc1
+            _ACTIVE_STREAMS["stream_2"] = proc2
+
+        try:
+            killed = stop_active_stream(media_id=101)
+            self.assertEqual(killed, 1)
+            proc1.kill.assert_called_once()
+            proc2.kill.assert_not_called()
+            self.assertNotIn("stream_1", _ACTIVE_STREAMS)
+            self.assertIn("stream_2", _ACTIVE_STREAMS)
+
+            # Terminate all remaining
+            killed_all = stop_active_stream()
+            self.assertEqual(killed_all, 1)
+            proc2.kill.assert_called_once()
+            self.assertEqual(len(_ACTIVE_STREAMS), 0)
+        finally:
+            with _STREAM_LOCK:
+                _ACTIVE_STREAMS.clear()
+
 
 class TestStreamingRouteIntegration(unittest.TestCase):
     def setUp(self):
@@ -235,7 +270,8 @@ class TestStreamingRouteIntegration(unittest.TestCase):
             "/path/to/hevc.mkv",
             audio_track_index=1,
             start_time=45.5,
-            max_height=720
+            max_height=720,
+            media_id=2
         )
 
     @patch("backend.routes.streaming.get_best_media_source")
@@ -251,7 +287,8 @@ class TestStreamingRouteIntegration(unittest.TestCase):
         mock_audio.assert_called_once_with(
             "/path/to/anime.mkv",
             2,
-            start_time=120.0
+            start_time=120.0,
+            media_id=3
         )
 
     @patch("backend.routes.streaming.get_best_media_source")
@@ -269,9 +306,91 @@ class TestStreamingRouteIntegration(unittest.TestCase):
             audio_track_index=0,
             start_time=0.0,
             max_height=1080,
+            media_id=4,
             force_sw=True
         )
+
+    @patch("backend.streamer.stop_active_stream")
+    def test_api_stop_stream_route(self, mock_stop):
+        """Verify POST /api/stream/stop/<id> terminates the active conversion for that media ID."""
+        mock_stop.return_value = 1
+        resp = self.client.post("/api/stream/stop/42")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("stopped"))
+        self.assertEqual(data.get("media_id"), 42)
+        self.assertEqual(data.get("killed"), 1)
+        mock_stop.assert_called_once_with(media_id=42)
+
+    @patch("backend.streamer.stop_active_stream")
+    def test_api_stop_all_streams_route(self, mock_stop):
+        """Verify POST /api/stream/stop-all terminates all active transcode streams."""
+        mock_stop.return_value = 2
+        resp = self.client.post("/api/stream/stop-all")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("stopped"))
+        self.assertEqual(data.get("killed"), 2)
+        mock_stop.assert_called_once_with()
+
+    @patch("backend.routes.streaming.get_media_quality_options")
+    def test_api_quality_options_route(self, mock_get_opts):
+        """Verify GET /api/quality-options/<id> returns options formatted by get_media_quality_options."""
+        mock_get_opts.return_value = [
+            {"media_id": 10, "quality_id": "10_direct", "type": "direct", "display_label": "4K UHD", "is_transcode": False},
+            {"media_id": 10, "quality_id": "10_transcode_1080", "type": "transcode", "display_label": "Convert to 1080p (Full HD)", "is_transcode": True, "target_height": 1080},
+            {"media_id": 10, "quality_id": "10_transcode_720", "type": "transcode", "display_label": "Convert to 720p (HD)", "is_transcode": True, "target_height": 720},
+            {"media_id": 10, "quality_id": "10_transcode_480", "type": "transcode", "display_label": "Convert to 480p (SD)", "is_transcode": True, "target_height": 480},
+        ]
+        resp = self.client.get("/api/quality-options/10")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(len(data), 4)
+        self.assertTrue(any(o.get("is_transcode") and o.get("target_height") == 1080 for o in data))
+
+    @patch("backend.db.media.get_all_sources_for_media")
+    @patch("backend.db.media.get_media_by_id")
+    @patch("backend.video_probe.probe_video_resolution")
+    def test_get_media_quality_options_generates_transcode_presets_for_4k(self, mock_probe, mock_get_media, mock_get_sources):
+        """Verify get_media_quality_options automatically generates downscaled conversion options for 4K media."""
+        from backend.db.media import get_media_quality_options
+        mock_media = {
+            "id": 99,
+            "file_path": "C:\\Media\\Movies\\Interstellar.2014.2160p.UHD.BluRay.x265.mkv",
+            "file_size": 25000000000,
+            "is_mounted": True,
+        }
+        mock_get_media.return_value = mock_media
+        mock_get_sources.return_value = [mock_media]
+        mock_probe.return_value = {
+            "height": 2160,
+            "width": 3840,
+            "label": "4K UHD (2160p)",
+            "base_label": "4K",
+        }
+
+        opts = get_media_quality_options(99)
+        self.assertTrue(len(opts) >= 4)
+
+        # Verify direct 4K option
+        direct_opts = [o for o in opts if not o.get("is_transcode")]
+        self.assertEqual(len(direct_opts), 1)
+        self.assertEqual(direct_opts[0]["quality_id"], "99_direct")
+        self.assertEqual(direct_opts[0]["target_height"], 2160)
+
+        # Verify downscaled transcode presets
+        transcode_opts = [o for o in opts if o.get("is_transcode")]
+        target_heights = [o["target_height"] for o in transcode_opts]
+        self.assertIn(1080, target_heights)
+        self.assertIn(720, target_heights)
+        self.assertIn(480, target_heights)
+
+        opt_1080 = next(o for o in transcode_opts if o["target_height"] == 1080)
+        self.assertEqual(opt_1080["quality_id"], "99_transcode_1080")
+        self.assertEqual(opt_1080["display_label"], "Convert to 1080p (Full HD)")
+        self.assertTrue(opt_1080["is_transcode"])
 
 
 if __name__ == "__main__":
     unittest.main()
+

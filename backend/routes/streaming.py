@@ -108,7 +108,7 @@ def api_stream(media_id):
         at = request.args.get("at", type=float, default=0.0)
         if not audio_track.isdigit():
             abort(400, description="audio_track required for audio-only mode")
-        return streamer.stream_audio_only(media["file_path"], int(audio_track), start_time=at)
+        return streamer.stream_audio_only(media["file_path"], int(audio_track), start_time=at, media_id=media_id)
 
     if request.args.get("transcode") in ("1", "true"):
         audio_track = request.args.get("audio_track", "")
@@ -120,6 +120,7 @@ def api_stream(media_id):
         return streamer.stream_video_convert(
             media["file_path"], audio_track_index=track_idx,
             start_time=start_time, max_height=max_height,
+            media_id=media_id,
             **kwargs
         )
 
@@ -128,9 +129,28 @@ def api_stream(media_id):
 
     if audio_track is not None and audio_track != "" and str(audio_track).isdigit():
         track_idx = int(audio_track)
-        return streamer.stream_transcoded(media["file_path"], audio_track_index=track_idx, start_time=start_time)
+        return streamer.stream_transcoded(media["file_path"], audio_track_index=track_idx, start_time=start_time, media_id=media_id)
 
     return stream_file(media["file_path"])
+
+
+@streaming_bp.route("/api/stream/stop/<int:media_id>", methods=["GET", "POST"])
+def api_stop_stream(media_id):
+    """
+    Terminates any active on-the-fly FFmpeg conversion or remux processes for a specific media ID.
+    Called when a user exits the player, switches titles, or returns to the home page.
+    """
+    killed = streamer.stop_active_stream(media_id=media_id)
+    return jsonify({"stopped": True, "media_id": media_id, "killed": killed})
+
+
+@streaming_bp.route("/api/stream/stop-all", methods=["GET", "POST"])
+def api_stop_all_streams():
+    """
+    Terminates all active on-the-fly FFmpeg processes when leaving the playback experience.
+    """
+    killed = streamer.stop_active_stream()
+    return jsonify({"stopped": True, "killed": killed})
 
 
 @streaming_bp.route("/api/system/health-status")

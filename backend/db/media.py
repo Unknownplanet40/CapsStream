@@ -321,38 +321,26 @@ def get_media_quality_options(media_id):
     # Sort sources by file size descending (prefer higher quality / higher bitrate)
     mounted_sources.sort(key=lambda s: s.get("file_size") or 0, reverse=True)
 
-    # Probe every source once and extract resolution label and drive letter
+    # Probe every source once and extract resolution label, drive letter, and dimensions
     probed = []
+    max_h = 0
+    max_w = 0
     for s in mounted_sources:
         fp = s.get("file_path") or ""
         drive = os.path.splitdrive(fp)[0].upper() if fp else ""
         probe_res = probe_video_resolution(fp)
+        h = int(probe_res.get("height") or 0)
+        w = int(probe_res.get("width") or 0)
+        if h > max_h:
+            max_h = h
+        if w > max_w:
+            max_w = w
         res_label = probe_res.get("label") or "Standard Quality"
         base_label = probe_res.get("base_label") or "Standard"
-        probed.append((s, res_label, base_label, drive))
-
-    # If only 1 source exists, return standard single option
-    if len(probed) <= 1:
-        s, res_label, base_label, drive = probed[0] if probed else (media, "Default", "Default", "")
-        size_str = format_file_size_bytes(s.get("file_size"))
-        lbl = f"{res_label} ({size_str})" if size_str else res_label
-        if drive:
-            lbl += f" — {drive}"
-        return [{
-            "media_id": s["id"],
-            "file_path": s.get("file_path", ""),
-            "drive": drive,
-            "resolution": res_label,
-            "base_label": base_label,
-            "display_label": lbl,
-            "size_str": size_str,
-            "file_size": s.get("file_size") or 0,
-            "is_current": True,
-            "is_mounted": bool(s.get("is_mounted", True)),
-        }]
+        probed.append((s, res_label, base_label, drive, h, w))
 
     options = []
-    for idx, (s, res_label, base_label, drive) in enumerate(probed):
+    for idx, (s, res_label, base_label, drive, h, w) in enumerate(probed):
         size_str = format_file_size_bytes(s.get("file_size"))
         display_label = res_label
         if size_str:
@@ -362,6 +350,9 @@ def get_media_quality_options(media_id):
 
         options.append({
             "media_id": s["id"],
+            "quality_id": f"{s['id']}_direct",
+            "type": "direct",
+            "target_height": h,
             "file_path": s.get("file_path", ""),
             "drive": drive,
             "resolution": res_label,
@@ -369,9 +360,59 @@ def get_media_quality_options(media_id):
             "display_label": display_label,
             "size_str": size_str,
             "file_size": s.get("file_size") or 0,
-            "is_current": (s["id"] == media_id),
+            "is_current": (s["id"] == media_id if len(probed) > 1 else True),
+            "is_transcode": False,
             "is_mounted": bool(s.get("is_mounted", True)),
         })
+
+    # Detect if source includes 4K / UHD or high-resolution content
+    is_4k_source = any(
+        (h >= 2160 or w >= 3840 or "4k" in base.lower() or "2160" in res.lower() or "uhd" in res.lower())
+        for (_, res, base, _, h, w) in probed
+    )
+
+    # Offer on-the-fly conversion streams when source is 4K/UHD, 1080p, etc.
+    target_presets = []
+    if is_4k_source or max_h >= 2000 or max_w >= 3500:
+        target_presets = [
+            (1080, "1080p", "Convert to 1080p (Full HD)"),
+            (720, "720p", "Convert to 720p (HD)"),
+            (480, "480p", "Convert to 480p (SD)"),
+        ]
+    elif max_h >= 1080 or max_w >= 1900:
+        target_presets = [
+            (720, "720p", "Convert to 720p (HD)"),
+            (480, "480p", "Convert to 480p (SD)"),
+        ]
+    elif max_h >= 720 or max_w >= 1200:
+        target_presets = [
+            (480, "480p", "Convert to 480p (SD)"),
+        ]
+
+    # Only add conversion presets where a physical copy of roughly that resolution does not already exist
+    primary_source = probed[0][0] if probed else media
+    for t_h, base_lbl, disp_lbl in target_presets:
+        already_has_physical = any(
+            abs(h - t_h) <= 120 or base_lbl.lower() in b_lbl.lower()
+            for (_, _, b_lbl, _, h, _) in probed if h > 0
+        )
+        if not already_has_physical:
+            options.append({
+                "media_id": primary_source["id"],
+                "quality_id": f"{primary_source['id']}_transcode_{t_h}",
+                "type": "transcode",
+                "target_height": t_h,
+                "file_path": primary_source.get("file_path", ""),
+                "drive": "",
+                "resolution": f"{base_lbl} (Converted)",
+                "base_label": base_lbl,
+                "display_label": disp_lbl,
+                "size_str": "",
+                "file_size": 0,
+                "is_current": False,
+                "is_transcode": True,
+                "is_mounted": True,
+            })
 
     return options
 

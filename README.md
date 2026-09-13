@@ -1,4 +1,4 @@
-# CapsStream
+# <img src="static/img/new-logo.png" alt="CapsStream" width="42" height="42" valign="middle" style="vertical-align: middle; margin-right: 6px;"> CapsStream
 
 <p align="center">
   <strong>A modern, self-hosted, cinematic personal media server for your movies, series, and anime collection.</strong>
@@ -24,74 +24,79 @@ Point CapsStream to your media folders. It automatically matches your titles aga
 ## Screenshots
 
 <p align="center">
-  <img src="static/img/Previews/Home Page.png" alt="Home Page" width="100%">
+  <img src="static/img/Previews/home-page-hero-backdrop.png" alt="Home Page Hero" width="100%">
 </p>
-<p align="center"><em>Home — Cinematic hero banner with genre carousels and continue-watching row</em></p>
+<p align="center"><em>Home — Cinematic hero backdrop banner with instant playback & details</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/Movie Page.png" alt="Movie Page" width="100%">
+  <img src="static/img/Previews/home-page-top-10.png" alt="Home Top 10" width="100%">
 </p>
-<p align="center"><em>Movies — Browse your full movie collection with posters, ratings, and filters</em></p>
+<p align="center"><em>Top 10 — Ranked Top 10 carousel with prominent stylized typographic numbers</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/Series.png" alt="Series Page" width="100%">
+  <img src="static/img/Previews/home-page-continue-watching.png" alt="Continue Watching" width="100%">
 </p>
-<p align="center"><em>Series — Organized TV show library with season and episode breakdowns</em></p>
+<p align="center"><em>Continue Watching — Dedicated resume shelf with exact visual progress tracking</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/Details view.png" alt="Details View" width="100%">
+  <img src="static/img/Previews/movie-library.png" alt="Movie Library" width="100%">
 </p>
-<p align="center"><em>Details — Full metadata view with backdrop, cast, overview, and episode list</em></p>
+<p align="center"><em>Movies — Full movie collection with interactive genre chips, ratings, and video quality badges</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/Search.png" alt="Search" width="100%">
+  <img src="static/img/Previews/series-library.png" alt="Series Library" width="100%">
 </p>
-<p align="center"><em>Search — Instant fuzzy search across your entire library</em></p>
+<p align="center"><em>Series & Anime — Organized TV library with season counts, episode badges, and missing episode tracking</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/Change video quality.png" alt="Change Video Quality" width="100%">
+  <img src="static/img/Previews/details-view.png" alt="Details View" width="100%">
 </p>
-<p align="center"><em>Player — Hardware-accelerated video player with quality selection</em></p>
+<p align="center"><em>Details — Full metadata view with backdrop artwork, synopsis, cast roster, and interactive season drawer</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/Resume Playback.png" alt="Resume Playback" width="100%">
+  <img src="static/img/Previews/player-playback.png" alt="Video Player" width="100%">
 </p>
-<p align="center"><em>Resume Playback — Pick up right where you left off</em></p>
+<p align="center"><em>Player — Modern floating glassmorphic dock controller with audio/subtitle track pickers and speed controls</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/Auto Next Episode.png" alt="Auto Next Episode" width="100%">
+  <img src="static/img/Previews/player-resume-playback.png" alt="Resume Playback" width="100%">
 </p>
-<p align="center"><em>Auto Next Episode — Seamless binge-watching with automatic episode advancement</em></p>
+<p align="center"><em>Resume Playback — Non-intrusive resume card allowing seamless pickup right where you left off</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/unavailable Season & Episode.png" alt="Unavailable Season & Episode" width="100%">
+  <img src="static/img/Previews/next-episode-card.png" alt="Next Episode Overlay" width="100%">
 </p>
-<p align="center"><em>Missing Episodes — Spot gaps in your collection at a glance</em></p>
+<p align="center"><em>Next Episode Overlay — 1:1 Netflix-style bottom-right floating card with circular countdown SVG ring and replay action</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/Select Account.png" alt="Select Account" width="100%">
+  <img src="static/img/Previews/keyboard-shortcuts.png" alt="Keyboard Shortcuts" width="100%">
 </p>
-<p align="center"><em>Multi-Profile — Family profiles with custom avatars and PIN protection</em></p>
+<p align="center"><em>Shortcuts Cheatsheet — Real-time searchable keyboard shortcuts cheatsheet modal (Press '?' anytime)</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/achievement and trophy.png" alt="Achievements & Trophies" width="100%">
+  <img src="static/img/Previews/missing-episodes.png" alt="Missing Episodes" width="100%">
 </p>
-<p align="center"><em>Achievements — Unlock streaming milestones and level up your profile</em></p>
+<p align="center"><em>Missing Episodes — TMDb-matched gap detection highlighting missing episodes and seasons at a glance</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/Stats.png" alt="Watch Stats" width="100%">
+  <img src="static/img/Previews/profiles-screen.png" alt="Profiles" width="100%">
 </p>
-<p align="center"><em>Stats — Track your hours watched, media breakdown, and viewing habits</em></p>
+<p align="center"><em>Profiles — Multi-profile support with customizable avatars, PIN protection, and dedicated Kids mode</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/Setting.png" alt="Settings" width="100%">
+  <img src="static/img/Previews/achievements-trophies.png" alt="Achievements & Trophies" width="100%">
 </p>
-<p align="center"><em>Settings — Configure media paths, API keys, transcoding, and preferences</em></p>
+<p align="center"><em>Achievements — Unlock streaming milestones, earn trophies, and level up your viewer profile</em></p>
 
 <p align="center">
-  <img src="static/img/Previews/About.png" alt="About" width="100%">
+  <img src="static/img/Previews/watch-stats.png" alt="Watch Stats" width="100%">
 </p>
-<p align="center"><em>About — Version info and application details</em></p>
+<p align="center"><em>Stats & Analytics — Track total hours watched, weekly viewing trends, and library breakdown</em></p>
+
+<p align="center">
+  <img src="static/img/Previews/settings-panel.png" alt="Settings" width="100%">
+</p>
+<p align="center"><em>Settings — Configure media library paths, TMDb API keys, hardware acceleration, and preferences</em></p>
 
 ---
 
@@ -171,18 +176,19 @@ Then open **http://127.0.0.1:8000** in your browser (Microsoft Edge or Google Ch
 
 ## Key Features
 
-* **Cinematic Streaming Interface**: Responsive modern UI with smooth carousels, genre filters, backdrop hero banners, and personalized watch lists.
-* **Seekbar Thumbnail Previews**: Hover over the player progress bar to see instant visual video frame previews.
-* **Skip Intro & Outro Markers**: Skip recap, intro, outro, and preview sequences with one click or auto-skip (powered by AniSkip + custom markers).
-* **Hardware-Accelerated Transcoding**: Seamless direct play for native formats and hardware transcoding (NVIDIA NVENC, Intel QSV, AMD AMF) for heavy 4K HEVC / HDR codecs.
-* **Subtitle System**: Embedded subtitle extraction, external `.srt`/`.vtt` support, OpenSubtitles search & download, and custom subtitle sizing & styling.
-* **Missing Episodes & Seasons Detection**: Easily spot missing episodes or gaps in multi-season shows.
-* **Achievements & Watch Stats**: Track hours watched, media stats, unlock streaming milestones, and level up your profile.
-* **Multi-Profile & Kids Mode**: Create individual family profiles with custom avatars, PIN protection, and independent watch histories.
-* **1-Click Backup & Restore**: Secure your library metadata, playlists, and watch histories from the Settings menu.
+* **1:1 Netflix-Style Next Episode Overlay**: Non-blocking floating bottom-right preview card with a circular SVG countdown progress ring, episode synopsis, duration badge, and instant Play Next / Replay actions.
+* **Floating Glassmorphic Player Dock**: Elevated player controller dock with specular border reflections, tactile controls, audio/subtitle selector drawers, playback speed menu, and chapter navigation.
+* **Searchable Keyboard Shortcuts Cheatsheet**: Press `?` or `/` anywhere in the app to summon an elevated cheatsheet card with instant real-time search filtering.
+* **Smart HLS & Hardware-Accelerated Transcoding**: Direct streaming with zero overhead, automatic GPU hardware transcoding (NVIDIA NVENC, Intel QSV, AMD AMF), and resilient CPU fallback for 4K HEVC, 10-bit HDR, and AV1 video.
+* **Interactive Genre Chips & Quality Badges**: Sleek interactive genre chips and video quality badges adhering strictly to media source token priority (e.g. 1080p/720p UHD BluRay encodes accurately badged without defaulting to 4K).
+* **Seekbar Frame Previews & Skip Markers**: Instant visual frame previews when hovering over the progress bar, plus one-click or automated skipping for intro, recap, and outro sequences (powered by AniSkip + custom markers).
+* **Missing Episodes & Seasons Detection**: Automatically compares local files against TMDb seasons to identify missing episodes and collection gaps at a glance.
+* **Multi-Profile, Kids Mode & Family PIN**: Custom avatar profiles, PIN-protected profiles, and automated age-appropriate content filtering for kids.
+* **Achievements, Milestones & Profile Stats**: Gamified viewing statistics, level progression, and unlockable badges for binge sessions and milestones.
+* **1-Click Backup & Restore**: Secure your library metadata, playlists, and watch histories directly from the Settings menu.
 * **Built-in Auto-Updater**: One-click update check (`update.bat`) that pulls improvements without wiping your database, settings, or media paths.
-* **Android TV Companion App**: Native Android app with automatic LAN discovery, TV layout auto-activation, and D-pad / remote control support.
-* **Windows System Tray Companion**: Keeps CapsStream running silently in the background with a tray icon — server stays alive even after the browser window closes.
+* **Android TV Companion App**: Native Kotlin Android TV companion app with automatic UDP LAN discovery, TV layout auto-activation, and full D-pad remote control support.
+* **Windows System Tray Companion**: Keeps CapsStream running silently in the background with a native tray icon — server stays alive even after the browser window closes.
 
 ---
 
@@ -282,6 +288,7 @@ CapsStream/
 ├── silent_launcher.py          # Background runner, tray companion & app-mode window manager
 ├── backend/
 │   ├── tray.py                 # Windows system tray companion (pure Win32 ctypes)
+│   ├── hls_transcoder.py       # Smart HLS & hardware-accelerated transcoding engine
 │   └── ...                     # Library scanner, matcher, transcoding, database
 ├── clients/
 │   └── android-tv/             # Android TV / Android companion app (Kotlin + Leanback)

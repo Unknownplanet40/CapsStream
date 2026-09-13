@@ -59,6 +59,18 @@ class TestTrayUtils(unittest.TestCase):
         tray._handle_command(CapsStreamTray.CMD_EXIT)
         self.assertTrue(tray.is_exit_requested())
 
+    def test_tray_dark_mode(self):
+        from backend.tray import enable_windows_dark_mode
+        tray = CapsStreamTray(
+            local_url="http://127.0.0.1:8000",
+            lan_url="http://192.168.1.100:8000",
+            dark_mode=True,
+        )
+        self.assertTrue(tray.dark_mode)
+        # Verify enable_windows_dark_mode runs without raising exceptions
+        enable_windows_dark_mode(None, force=True)
+        enable_windows_dark_mode(None, force=False)
+
     def test_window_detection_filtering(self):
         """Verify is_capsstream_title ignores GitHub, searches, and matches actual app."""
         from silent_launcher import is_capsstream_title
