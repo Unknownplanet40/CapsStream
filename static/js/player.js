@@ -960,7 +960,7 @@ const PlayerPage = {
       </div>
 
       <!-- Floating Skip Intro / Recap Action -->
-      <div v-if="activeSkipAction && !(showCreditsShrink && hasNextEp) && activeSkipAction.type !== 'Next'" class="player-skip-container" :class="['skip-type-' + (activeSkipAction.type || '').toLowerCase(), { 'controls-hidden': controlsHidden }]" :style="{ bottom: controlsHidden ? '36px' : '135px' }" @click.stop>
+      <div v-if="activeSkipAction && !((showCreditsShrink || isEnded) && hasNextEp) && activeSkipAction.type !== 'Next'" class="player-skip-container" :class="['skip-type-' + (activeSkipAction.type || '').toLowerCase(), { 'controls-hidden': controlsHidden }]" :style="{ bottom: controlsHidden ? '36px' : '135px' }" @click.stop>
         <button class="player-skip-btn" @click="executeSkipAction" id="player-skip-btn">
           <div class="player-skip-icon">
             <i class="ph ph-fast-forward"></i>
@@ -1060,22 +1060,17 @@ const PlayerPage = {
         </div>
       </div>
 
-      <!-- Netflix / Disney+ Floating Right-Side Next Episode Card (Outro/Credits Stage 1) -->
+      <!-- Netflix-Style Floating Bottom-Right Next Episode Card -->
       <transition name="fade">
-        <div v-if="showCreditsShrink && hasNextEp && !isEnded" class="next-ep-floating-card" @click.stop>
+        <div v-if="(showCreditsShrink || isEnded) && hasNextEp && !creditsShrinkDismissed" class="next-ep-floating-card" :class="{ 'controls-hidden': controlsHidden }" @click.stop>
           <div class="next-ep-floating-header">
             <div class="next-ep-floating-badge">
-              <i class="ph ph-hourglass-high"></i>
-              <span>Next Episode in {{ Math.ceil(nextEpCountdownSeconds) }}s</span>
+              <span class="next-ep-badge-label">Up Next</span>
+              <span class="next-ep-countdown-pill">{{ Math.ceil(nextEpCountdownSeconds) }}s</span>
             </div>
-            <button class="next-ep-floating-close" @click="dismissCreditsShrink" title="Dismiss (Watch Credits)">
+            <button class="next-ep-floating-close" @click="dismissCreditsShrink" title="Dismiss">
               <i class="ph ph-x"></i>
             </button>
-          </div>
-
-          <!-- Progress countdown line -->
-          <div class="next-ep-floating-progress-bar">
-            <div class="next-ep-floating-progress-fill" :style="{ width: nextEpProgressPercent + '%' }"></div>
           </div>
 
           <!-- Preview Body -->
@@ -1090,118 +1085,39 @@ const PlayerPage = {
               <div v-else class="next-ep-floating-thumb-fallback">
                 <i class="ph ph-film-strip"></i>
               </div>
-              <div class="next-ep-floating-play-icon">
-                <i class="ph-fill ph-play"></i>
-              </div>
+              <span v-if="nextEp.duration" class="next-ep-floating-dur-badge">{{ formatDuration(nextEp.duration) }}</span>
             </div>
 
             <div class="next-ep-floating-info">
               <div class="next-ep-floating-ep-code">
-                S{{ (nextEp.season || activeDrawerSeason).toString().padStart(2,'0') }}E{{ (nextEp.episode || 1).toString().padStart(2,'0') }}
+                S{{ (nextEp.season || activeDrawerSeason || 1).toString().padStart(2,'0') }} · E{{ (nextEp.episode || 1).toString().padStart(2,'0') }}
               </div>
               <div class="next-ep-floating-title" :title="nextEp.ep_title || nextEp.title">
                 {{ nextEp.ep_title || nextEp.title || ('Episode ' + nextEp.episode) }}
               </div>
-              <div v-if="nextEp.duration" class="next-ep-floating-duration">
-                {{ formatDuration(nextEp.duration) }}
-              </div>
+              <p v-if="nextEp.overview" class="next-ep-floating-overview">{{ nextEp.overview }}</p>
             </div>
           </div>
 
-          <!-- Actions -->
+          <!-- Actions Row: Netflix Circular SVG Countdown Play Button + Watch Credits / Replay -->
           <div class="next-ep-floating-actions">
-            <button class="btn btn-primary btn-full" @click="handleNextEpClick" id="btn-next-ep-play-now">
-              <i class="ph-fill ph-play"></i>
-              <span>Play Next</span>
+            <button class="next-ep-netflix-play-btn" @click="handleNextEpClick" title="Play Next Episode Now" id="btn-next-ep-play-now">
+              <div class="netflix-countdown-ring-wrap">
+                <svg class="netflix-countdown-svg" viewBox="0 0 44 44">
+                  <circle class="netflix-countdown-track" cx="22" cy="22" r="18"></circle>
+                  <circle class="netflix-countdown-progress" cx="22" cy="22" r="18" :style="{ strokeDashoffset: countdownRingOffset }"></circle>
+                </svg>
+                <i class="ph-fill ph-play netflix-countdown-icon"></i>
+              </div>
+              <span class="next-ep-play-text">Play Next</span>
             </button>
-            <button class="btn btn-secondary btn-full" @click="dismissCreditsShrink" id="btn-next-ep-dismiss">
+            <button v-if="isEnded" class="next-ep-replay-btn" @click="replayCurrentEpisode" id="btn-next-ep-replay" title="Replay Episode">
+              <i class="ph ph-arrow-counter-clockwise"></i>
+              <span>Replay</span>
+            </button>
+            <button v-else class="next-ep-dismiss-btn" @click="dismissCreditsShrink" id="btn-next-ep-dismiss" title="Dismiss and watch credits">
               <span>Watch Credits</span>
             </button>
-          </div>
-        </div>
-      </transition>
-
-      <!-- Stage 2: Two-Stage Cinematic End-of-Episode Backdrop Screen -->
-      <transition name="fade">
-        <div v-if="isEnded && hasNextEp" class="player-cinematic-endcard" @click.stop>
-          <div
-            class="cinematic-backdrop-layer"
-            :style="{ backgroundImage: 'url(' + imgUrl(nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path || media?.backdrop_path) + ')' }"
-          ></div>
-          <div class="cinematic-vignette-layer"></div>
-          <div class="cinematic-content-card">
-            <div class="cinematic-card-header">
-              <div class="cinematic-badge">
-                <i class="ph ph-hourglass-high"></i>
-                <span>Next Episode in {{ Math.ceil(nextEpCountdownSeconds) }}s</span>
-              </div>
-              <div style="display:flex;align-items:center;gap:8px">
-                <button
-                  class="cinematic-ambient-btn"
-                  :class="{ active: ambientAudioEnabled }"
-                  @click="toggleAmbientAudio"
-                  title="Toggle ambient soundscape"
-                >
-                  <i :class="ambientAudioEnabled ? 'ph ph-speaker-high' : 'ph ph-speaker-slash'"></i>
-                  <span>Ambient {{ ambientAudioEnabled ? 'On' : 'Off' }}</span>
-                </button>
-                <button class="next-ep-floating-close" @click="cancelAutoAdvance" title="Close">
-                  <i class="ph ph-x"></i>
-                </button>
-              </div>
-            </div>
-
-            <div class="cinematic-card-body">
-              <div class="cinematic-thumb-container" @click="handleNextEpClick">
-                <img
-                  v-if="nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path"
-                  :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path)"
-                  class="cinematic-thumb-img"
-                  @error="e => e.target.style.display = 'none'"
-                />
-                <div v-else class="cinematic-thumb-fallback">
-                  <i class="ph ph-film-strip"></i>
-                </div>
-                <div class="cinematic-thumb-overlay">
-                  <i class="ph-fill ph-play"></i>
-                </div>
-              </div>
-
-              <div class="cinematic-info">
-                <div class="cinematic-ep-code">
-                  S{{ (nextEp.season || activeDrawerSeason).toString().padStart(2,'0') }}E{{ (nextEp.episode || 1).toString().padStart(2,'0') }}
-                  <span v-if="nextEp.duration"> · {{ formatDuration(nextEp.duration) }}</span>
-                </div>
-                <div class="cinematic-ep-title">
-                  {{ nextEp.ep_title || nextEp.title || ('Episode ' + nextEp.episode) }}
-                </div>
-                <div class="cinematic-ep-overview" v-if="nextEp.overview">
-                  {{ nextEp.overview }}
-                </div>
-              </div>
-            </div>
-
-            <div class="cinematic-progress-wrap">
-              <div class="cinematic-progress-bar">
-                <div class="cinematic-progress-fill" :style="{ width: nextEpProgressPercent + '%' }"></div>
-              </div>
-            </div>
-
-            <div class="cinematic-actions">
-              <div class="cinematic-action-buttons">
-                <button class="btn btn-primary" @click="handleNextEpClick" id="btn-cinematic-play-next">
-                  <i class="ph-fill ph-play"></i>
-                  <span>Play Next (Enter)</span>
-                </button>
-                <button class="btn btn-secondary" @click="replayCurrentEpisode" id="btn-cinematic-replay">
-                  <i class="ph ph-arrow-counter-clockwise"></i>
-                  <span>Replay</span>
-                </button>
-              </div>
-              <button class="btn btn-secondary" @click="cancelAutoAdvance" id="btn-cinematic-dismiss">
-                <span>Dismiss</span>
-              </button>
-            </div>
           </div>
         </div>
       </transition>
@@ -2510,9 +2426,20 @@ const PlayerPage = {
       suppressResume = true;
       pendingSeekTarget = validTarget;
       currentTime.value = contentToPlayer(validTarget);
-
       if (seekDebounceTimer) {
         clearTimeout(seekDebounceTimer);
+      }
+
+      // Reset credits shrink dismissal when seeking backward before credits/outro
+      const dur = displayDuration.value || maxDur || 0;
+      const edStart = skipTimes.value?.ed?.start || media.value?.outro_start;
+      const outroThreshold = (edStart && edStart > 0) ? (edStart - 5) : (dur > 35 ? dur - 35 : 0);
+      if (validTarget < outroThreshold) {
+        creditsShrinkDismissed.value = false;
+        if (showCreditsShrink.value) {
+          showCreditsShrink.value = false;
+          cancelAutoAdvance();
+        }
       }
 
     // Smooth seek debouncing (120ms): accumulates multiple rapid skip/seek requests
@@ -4467,28 +4394,30 @@ const PlayerPage = {
     const creditsShrinkDismissed = ref(false);
 
     function checkCreditsShrink() {
-      if (!isSeriesMedia.value || !hasNextEp.value || creditsShrinkDismissed.value || isEnded.value) {
+      if (!hasNextEp.value || creditsShrinkDismissed.value) {
         return;
       }
-      const curr = currentTime.value;
-      const dur = displayDuration.value;
+      const curr = displayTime.value || currentTime.value || 0;
+      const dur = displayDuration.value || (videoRef.value ? videoRef.value.duration : 0) || 0;
       let shouldShrink = false;
 
-      if (skipTimes.value?.ed && skipTimes.value.ed.start > 0) {
-        if (curr >= skipTimes.value.ed.start) {
-          shouldShrink = true;
-        }
-      } else if (media.value?.outro_start && media.value.outro_start > 0) {
-        if (curr >= media.value.outro_start) {
-          shouldShrink = true;
-        }
-      } else if (dur > 90 && (dur - curr) <= 30) {
+      const edStart = skipTimes.value?.ed?.start;
+      const outroStart = media.value?.outro_start;
+
+      if (edStart && edStart > 0 && curr >= edStart) {
+        shouldShrink = true;
+      } else if (outroStart && outroStart > 0 && curr >= outroStart) {
+        shouldShrink = true;
+      }
+
+      // Universal fallback: within the last 35 seconds of media or >= 96% of media duration
+      if (!shouldShrink && dur > 0 && ((dur - curr) <= 35 || (curr / dur >= 0.96))) {
         shouldShrink = true;
       }
 
       if (shouldShrink && !showCreditsShrink.value) {
         showCreditsShrink.value = true;
-        startAutoAdvanceCountdown(10.0);
+        startAutoAdvanceCountdown(10.0, false);
       }
     }
 
@@ -4499,9 +4428,17 @@ const PlayerPage = {
     }
 
     const isEnded = ref(false);
-    const nextEpCountdownSeconds = ref(5);
+    const nextEpCountdownSeconds = ref(10);
     const nextEpProgressPercent = ref(0);
     let autoAdvanceInterval = null;
+
+    // Netflix circular countdown ring circumference (2 * pi * 18 = 113.1)
+    const countdownCircumference = 113.1;
+    const countdownRingOffset = computed(() => {
+      const maxSec = 10.0;
+      const sec = Math.max(0, Math.min(maxSec, nextEpCountdownSeconds.value));
+      return countdownCircumference * (1 - (sec / maxSec));
+    });
 
     // ─── Procedural Web Audio Ambient Soundscape ────────────────
     let ambientAudioCtx = null;
@@ -4538,15 +4475,17 @@ const PlayerPage = {
         const filter = ambientAudioCtx.createBiquadFilter();
         filter.type = "lowpass";
         filter.frequency.value = 380;
+        ambientGain.connect(filter);
+        filter.connect(ambientAudioCtx.destination);
 
         ambientOsc1 = ambientAudioCtx.createOscillator();
         ambientOsc1.type = "sine";
-        ambientOsc1.frequency.value = 110; // Warm A2 drone
+        ambientOsc1.frequency.setValueAtTime(55, ambientAudioCtx.currentTime);
+        ambientOsc1.connect(ambientGain);
+        ambientOsc1.start();
 
         ambientOsc2 = ambientAudioCtx.createOscillator();
         ambientOsc2.type = "triangle";
-        ambientOsc2.frequency.value = 164.81; // Gentle E3 fifth harmony
-
         ambientOsc1.connect(filter);
         ambientOsc2.connect(filter);
         filter.connect(ambientGain);
@@ -4580,6 +4519,8 @@ const PlayerPage = {
     function replayCurrentEpisode() {
       cancelAutoAdvance();
       stopAmbientSoundscape();
+      creditsShrinkDismissed.value = false;
+      showCreditsShrink.value = false;
       if (videoRef.value) {
         seekTo(0);
         videoRef.value.play().catch(() => {});
@@ -4587,13 +4528,15 @@ const PlayerPage = {
       }
     }
 
-    function startAutoAdvanceCountdown(durationSec = 5.0) {
+    function startAutoAdvanceCountdown(durationSec = 10.0, markEnded = false) {
       cancelAutoAdvance();
-      isEnded.value = true;
+      if (markEnded) {
+        isEnded.value = true;
+        startAmbientSoundscape();
+      }
       controlsHidden.value = false;
       nextEpCountdownSeconds.value = durationSec;
       nextEpProgressPercent.value = 0;
-      startAmbientSoundscape();
 
       const startTime = Date.now();
 
@@ -4788,7 +4731,11 @@ const PlayerPage = {
       // 3. Fallback to normal auto-play next episode
       const autoNext = playerSettings.value?.playback?.auto_play_next !== false;
       if (showNextEp.value && autoNext) {
-        startAutoAdvanceCountdown();
+        showCreditsShrink.value = true;
+        startAutoAdvanceCountdown(10.0, true);
+      } else if (showNextEp.value) {
+        showCreditsShrink.value = true;
+        isEnded.value = true;
       }
     }
 
@@ -5614,6 +5561,9 @@ const PlayerPage = {
       currentTime.value = 0;
       duration.value = 0;
       media.value = null;
+      showCreditsShrink.value = false;
+      creditsShrinkDismissed.value = false;
+      isEnded.value = false;
 
       selectedQualityMediaId.value = Number(mediaId);
       loadQualityOptions(mediaId);
@@ -5755,24 +5705,32 @@ const PlayerPage = {
       defaultAudioIndex.value = targetAudio ? targetAudio.index : 0;
       streamState.audioTrack = defaultAudioIndex.value;
 
-      if (media.value.type !== "movie" && media.value.tmdb_id) {
-        try {
-          const show = await API.get(`/api/show/${media.value.tmdb_id}?type=${media.value.type}`);
-          seriesData.value = show;
+      let foundNext = null;
+      if (media.value.type !== "movie") {
+        let show = null;
+        if (media.value.tmdb_id) {
+          try {
+            show = await API.get(`/api/show/${media.value.tmdb_id}?type=${media.value.type}`);
+          } catch (e) {}
+        }
+        if (!show && media.value.seasons) {
+          show = { seasons: media.value.seasons, backdrop_path: media.value.backdrop_path };
+        }
+        seriesData.value = show;
+        if (show?.seasons) {
           if (media.value.season) {
             activeDrawerSeason.value = Number(media.value.season) || 1;
           }
           const allEps = Object.values(show.seasons || {})
             .flat()
             .sort((a, b) => {
-              if (a.season !== b.season) return (a.season || 0) - (b.season || 0);
-              return (a.episode || 0) - (b.episode || 0);
+              if (Number(a.season) !== Number(b.season)) return (Number(a.season) || 0) - (Number(b.season) || 0);
+              return (Number(a.episode) || 0) - (Number(b.episode) || 0);
             });
           const idx = allEps.findIndex(
-            (e) => e.id === Number(mediaId) || (e.season === media.value.season && e.episode === media.value.episode)
+            (e) => Number(e.id) === Number(mediaId) || (Number(e.season) === Number(media.value.season) && Number(e.episode) === Number(media.value.episode))
           );
           if (idx >= 0) {
-            let foundNext = null;
             for (let i = idx + 1; i < allEps.length; i++) {
               const candidate = allEps[i];
               if (candidate && candidate.id && candidate.is_local !== false && candidate.is_mounted !== false) {
@@ -5780,18 +5738,16 @@ const PlayerPage = {
                 break;
               }
             }
-            nextEp.value = foundNext;
-          } else {
-            nextEp.value = null;
           }
-        } catch (e) {
-          nextEp.value = null;
-          seriesData.value = null;
         }
-      } else {
-        nextEp.value = null;
-        seriesData.value = null;
       }
+
+      // Queue fallback: if no next episode found in series or media is in a queue
+      if (!foundNext && store.queue && store.queue.length > 0 && store.queueIndex + 1 < store.queue.length) {
+        foundNext = store.queue[store.queueIndex + 1];
+      }
+
+      nextEp.value = foundNext;
 
       if (store.profile) {
         progressTimer = setInterval(() => {
@@ -6127,6 +6083,7 @@ const PlayerPage = {
       isEnded,
       nextEpCountdownSeconds,
       nextEpProgressPercent,
+      countdownRingOffset,
       handleNextEpClick,
       cancelAutoAdvance,
       audioEnhancerMode,

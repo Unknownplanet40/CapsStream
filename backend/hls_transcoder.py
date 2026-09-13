@@ -265,6 +265,59 @@ def get_or_generate_segment(
             creationflags=CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY,
         )
 
+        # Automatic fallback to CPU libx264 if GPU hardware encoder fails
+        if proc.returncode != 0 and encoder != "libx264":
+            print(f"[HLSTranscoder] Hardware encoder '{encoder}' failed (code {proc.returncode}). Retrying with libx264 ultrafast...")
+            fallback_cmd = [
+                FFMPEG_BIN,
+                "-hide_banner",
+                "-loglevel", "error",
+                "-ss", f"{start_t:.3f}",
+                "-t", f"{SEGMENT_DURATION:.3f}",
+                "-i", file_path,
+                "-map", "0:V:0?",
+            ]
+            if has_audio:
+                fallback_cmd.extend(["-map", f"0:a:{audio_track_index}?"])
+            else:
+                fallback_cmd.extend(["-an"])
+            fallback_cmd.extend(["-map", "-0:s?"])
+
+            fb_vf = []
+            if src_h > target_h:
+                fb_vf.append(f"scale=-2:{target_h}:flags=fast_bilinear")
+            fb_vf.append("format=yuv420p")
+            fallback_cmd.extend(["-vf", ",".join(fb_vf)])
+            fallback_cmd.extend([
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-b:v", cfg["video_bitrate"],
+                "-maxrate", cfg["maxrate"],
+                "-bufsize", cfg["bufsize"],
+                "-tune", "zerolatency",
+                "-pix_fmt", "yuv420p",
+            ])
+            if has_audio:
+                fallback_cmd.extend([
+                    "-c:a", "aac",
+                    "-ac", "2",
+                    "-b:a", cfg["audio_bitrate"],
+                    "-af", "aresample=async=1:first_pts=0",
+                ])
+            fallback_cmd.extend([
+                "-f", "mpegts",
+                "-muxdelay", "0",
+                "-avoid_negative_ts", "make_zero",
+                "-y",
+                temp_file,
+            ])
+            proc = subprocess.run(
+                fallback_cmd,
+                capture_output=True,
+                timeout=40,
+                creationflags=CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY,
+            )
+
         if os.path.isfile(temp_file) and os.path.getsize(temp_file) > 512:
             os.replace(temp_file, seg_file)
             return seg_file
