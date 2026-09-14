@@ -1427,6 +1427,10 @@ async function playWith4KCheck(item, defaultUrl, routerInstance) {
             window.location.hash = `#${target}`;
           }
         },
+        onDefaultPlayer: () => {
+          store.fourKWarningModal.show = false;
+          openInDefaultPlayer(item);
+        },
       };
       return;
     }
@@ -1438,9 +1442,64 @@ async function playWith4KCheck(item, defaultUrl, routerInstance) {
   }
 }
 
+function isDesktopClient() {
+  if (typeof window === "undefined") return true;
+  const ua = navigator.userAgent || "";
+  return !/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+}
+
+async function openInDefaultPlayer(itemOrId) {
+  let targetId = null;
+  let title = "Media";
+  if (itemOrId && typeof itemOrId === "object") {
+    if (itemOrId.type === "movie" || itemOrId.file_path) {
+      targetId = itemOrId.id;
+    } else if (itemOrId.seasons) {
+      const sKeys = Object.keys(itemOrId.seasons || {});
+      const sNum = itemOrId.activeSeason || (sKeys.length ? sKeys[0] : 1);
+      const seasonEps = itemOrId.seasons[sNum] || [];
+      const ep = seasonEps.find(e => e.is_local !== false && e.is_mounted !== false);
+      if (ep) targetId = ep.id;
+      else if (itemOrId.id) targetId = itemOrId.id;
+    } else {
+      targetId = itemOrId.id || itemOrId.media_id;
+    }
+    title = itemOrId.title || itemOrId.ep_title || title;
+  } else {
+    targetId = itemOrId;
+  }
+  if (!targetId) {
+    if (typeof addToast === "function") addToast("Could not find playable file for this title", "warning");
+    return;
+  }
+  try {
+    if (typeof addToast === "function") addToast("Opening in default device player...", "info");
+    const res = await API.post(`/api/media/${targetId}/open-default`, {});
+    if (res && res.ok) {
+      if (res.method === "system") {
+        if (typeof addToast === "function") addToast(`Playing in default device player (${res.file || title})`, "success");
+      } else if (res.stream_url) {
+        if (typeof addToast === "function") addToast("Downloading stream playlist for your device player...", "success");
+        const a = document.createElement("a");
+        a.href = res.stream_url;
+        a.download = res.filename || "stream.m3u";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    } else {
+      if (typeof addToast === "function") addToast((res && res.error) || "Could not launch default player", "warning");
+    }
+  } catch (err) {
+    if (typeof addToast === "function") addToast(err.message || "Failed to open default player", "error");
+  }
+}
+
 window.is4KString = is4KString;
 window.isItemOnly4K = isItemOnly4K;
 window.playWith4KCheck = playWith4KCheck;
+window.isDesktopClient = isDesktopClient;
+window.openInDefaultPlayer = openInDefaultPlayer;
 
 function formatRating(r) {
   return r ? r.toFixed(1) : "—";
@@ -1524,7 +1583,7 @@ const MediaCard = {
          :class="{ 'continue-card': isContinue, 'is-unmounted': cardItem.is_mounted === false, 'has-popout': isPopoutActive }"
          @mouseenter="onMouseEnter"
          @mouseleave="onMouseLeave"
-         @click="handleCardClick"
+         @click.stop="handleCardClick"
          @contextmenu.prevent="openCardMenu($event)"
          :id="'card-' + (cardItem.id || 'card')">
 
@@ -2026,7 +2085,10 @@ const MediaCard = {
       addToast(isLiked.value ? "Added to your favorites!" : "Removed from favorites", "info");
     }
 
-    function handleCardClick() {
+    function handleCardClick(e) {
+      if (e && typeof e.stopPropagation === "function") {
+        e.stopPropagation();
+      }
       clearTimeout(hoverTimer);
       clearTimeout(trailerTimer);
       clearTimeout(closeTimer);
@@ -2988,7 +3050,7 @@ const ContentRow = {
             <media-card
               :item="item"
               :is-continue="false"
-              @click.stop="$emit('card-click', item, row)"
+              @click="$emit('card-click', item, row)"
             />
           </div>
         </div>
@@ -4232,6 +4294,19 @@ const DetailPage = {
               <i :class="media.is_mounted !== false ? 'ph-fill ph-play' : 'ph-bold ph-hard-drive'"></i>
               <span>{{ media.is_mounted !== false ? resumeLabel : ('Drive Disconnected (' + (media.drive_letter || 'External') + ')') }}</span>
             </button>
+            <button
+              v-if="isDesktop"
+              class="detail-default-player-btn"
+              @click="openInDefaultPlayer(media)"
+              :disabled="media.is_mounted === false"
+              title="Play using default device player (e.g. VLC, Windows Media Player)"
+              id="detail-default-player-btn"
+            >
+              <div class="detail-default-player-icon-wrapper">
+                <i class="ph-bold ph-monitor-play"></i>
+              </div>
+              <span>Default Player</span>
+            </button>
             <div v-if="media.is_mounted === false" class="detail-offline-banner">
               <i class="ph-bold ph-warning" style="color:var(--warning);font-size:1.1rem"></i>
               <span>Source drive <strong>{{ media.drive_letter || 'External' }}</strong> is disconnected. Connect it to watch.</span>
@@ -4428,9 +4503,14 @@ const DetailPage = {
                     <span class="file-path-label">STORAGE LOCATION</span>
                     <div class="file-path-text" :title="media.file_path">{{ media.file_path }}</div>
                   </div>
-                  <button class="btn btn-secondary btn-sm" @click="copyFilePath" title="Copy file path to clipboard" id="btn-copy-filepath">
-                    <i class="ph ph-copy" style="font-size:0.95rem"></i> Copy Path
-                  </button>
+                  <div style="display:flex;gap:6px">
+                    <button v-if="isDesktop" class="btn btn-secondary btn-sm" @click="openInDefaultPlayer(media)" :disabled="media.is_mounted === false" title="Open in default desktop video player" id="btn-open-default-player">
+                      <i class="ph-bold ph-arrow-square-out" style="font-size:0.95rem;color:var(--accent)"></i> Open in Player
+                    </button>
+                    <button class="btn btn-secondary btn-sm" @click="copyFilePath" title="Copy file path to clipboard" id="btn-copy-filepath">
+                      <i class="ph ph-copy" style="font-size:0.95rem"></i> Copy Path
+                    </button>
+                  </div>
                 </div>
 
                 <!-- Badges Row -->
@@ -4587,6 +4667,18 @@ const DetailPage = {
                       >
                         <i class="ph-bold ph-paper-plane-tilt"></i>
                         <span>Request</span>
+                      </button>
+
+                      <!-- Play in default device player button -->
+                      <button
+                        v-if="ep.id && isDesktop && ep.is_local !== false"
+                        class="episode-skip-btn"
+                        @click.stop="openInDefaultPlayer(ep)"
+                        :disabled="ep.is_mounted === false"
+                        :title="'Play S' + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0') + ' in default player (e.g. VLC)'"
+                        style="margin-left: 4px;"
+                      >
+                        <i class="ph-bold ph-arrow-square-out"></i>
                       </button>
 
                       <!-- Per-episode skip marker editor -->
@@ -5406,6 +5498,8 @@ const DetailPage = {
       formatAirDate,
       formatAiredDate,
       requestMissingEpisode,
+      openInDefaultPlayer,
+      isDesktop: isDesktopClient(),
     };
   },
 };
@@ -19017,6 +19111,16 @@ const App = {
                   <i class="ph-bold ph-arrows-clockwise"></i>
                   <span>Convert to 1080p (Recommended)</span>
                 </button>
+                <button
+                  v-if="isDesktopClient()"
+                  class="btn btn-secondary"
+                  style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);border-radius:12px;padding:11px 18px;display:flex;align-items:center;justify-content:center;gap:8px"
+                  @click="handle4KModalDefaultPlayer"
+                  id="fourk-default-player-btn"
+                >
+                  <i class="ph-bold ph-arrow-square-out" style="color:var(--accent)"></i>
+                  <span>Play in Default Device Player (VLC / Native)</span>
+                </button>
                 <button class="btn btn-secondary" style="border-radius:12px;padding:10px 16px;display:flex;align-items:center;justify-content:center;gap:8px" @click="handle4KModalDirect" id="fourk-direct-btn">
                   <i class="ph-bold ph-play"></i>
                   <span>Play in 4K Anyway</span>
@@ -20355,6 +20459,14 @@ const App = {
       }
     }
 
+    function handle4KModalDefaultPlayer() {
+      if (store.fourKWarningModal && typeof store.fourKWarningModal.onDefaultPlayer === "function") {
+        store.fourKWarningModal.onDefaultPlayer();
+      } else if (store.fourKWarningModal) {
+        store.fourKWarningModal.show = false;
+      }
+    }
+
     function close4KWarningModal() {
       if (store.fourKWarningModal) {
         store.fourKWarningModal.show = false;
@@ -20364,6 +20476,7 @@ const App = {
     return {
       handle4KModalTranscode,
       handle4KModalDirect,
+      handle4KModalDefaultPlayer,
       close4KWarningModal,
       connectionIsland,
       isRetryingConnection,

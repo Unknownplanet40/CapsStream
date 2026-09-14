@@ -332,6 +332,61 @@ class TestRouteMedia(unittest.TestCase):
         self.assertEqual(data.get("updated"), 2)
         self.assertEqual(mock_upsert.call_count, 2)
 
+    @patch("os.path.isfile", return_value=True)
+    @patch("backend.routes.media.get_media_by_id")
+    def test_open_default_player_local(self, mock_get_media, mock_isfile):
+        """Verify local client triggers system default player launch."""
+        mock_get_media.return_value = {
+            "id": 42,
+            "title": "Inception",
+            "file_path": r"C:\Movies\Inception (2010).mkv"
+        }
+        with patch("os.startfile", create=True) as mock_startfile:
+            resp = self.client.post("/api/media/42/open-default", json={})
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data.get("ok"))
+            self.assertTrue(data.get("launched"))
+            self.assertEqual(data.get("method"), "system")
+            mock_startfile.assert_called_once()
+
+    @patch("os.path.isfile", return_value=True)
+    @patch("backend.routes.media.get_media_by_id")
+    def test_open_default_player_remote(self, mock_get_media, mock_isfile):
+        """Verify remote LAN client receives stream playlist URL instead of host system launch."""
+        mock_get_media.return_value = {
+            "id": 42,
+            "title": "Inception",
+            "file_path": r"C:\Movies\Inception (2010).mkv"
+        }
+        resp = self.client.post(
+            "/api/media/42/open-default",
+            json={},
+            environ_overrides={"REMOTE_ADDR": "192.168.1.105"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("ok"))
+        self.assertFalse(data.get("launched"))
+        self.assertEqual(data.get("method"), "playlist")
+        self.assertEqual(data.get("stream_url"), "/api/media/42/playlist.m3u")
+
+    @patch("backend.routes.media.get_media_by_id")
+    def test_media_playlist_m3u(self, mock_get_media):
+        """Verify GET /api/media/<id>/playlist.m3u returns valid Extended M3U playlist."""
+        mock_get_media.return_value = {
+            "id": 42,
+            "title": "Inception",
+            "duration": 8880
+        }
+        resp = self.client.get("/api/media/42/playlist.m3u")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("mpegurl", resp.content_type)
+        body = resp.get_data(as_text=True)
+        self.assertTrue(body.startswith("#EXTM3U"))
+        self.assertIn("#EXTINF:8880,Inception", body)
+        self.assertIn("/api/stream/42", body)
+
 
 if __name__ == "__main__":
     unittest.main()

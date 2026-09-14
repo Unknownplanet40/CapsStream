@@ -7,7 +7,6 @@ import time
 import threading
 
 from flask import Blueprint, jsonify, request, session
-from flask_limiter import Limiter
 
 from .middleware import (
     current_profile, require_profile, require_admin, is_admin,
@@ -23,8 +22,13 @@ from backend.db import (
 
 profiles_bp = Blueprint("profiles", __name__)
 
+try:
+    from flask_limiter import Limiter
+except ImportError:
+    Limiter = object
+
 # ─── Limiter reference (injected from app.py at registration time) ─────────────
-_limiter: Limiter = None
+_limiter = None
 
 
 def init_limiter(limiter_instance):

@@ -821,3 +821,91 @@ def api_recache_media():
         "title": meta.get("title"),
         "year": meta.get("year"),
     })
+
+
+@media_bp.route("/api/media/<int:media_id>/open-default", methods=["POST"])
+def api_open_in_default_player(media_id):
+    media = get_media_by_id(media_id)
+    if not media:
+        media = get_best_media_source(media_id)
+    if not media:
+        return jsonify({"ok": False, "error": "Media not found"}), 404
+
+    file_path = media.get("file_path")
+    if not file_path and media.get("tmdb_id"):
+        from backend.db.media import get_media_by_tmdb
+        eps = get_media_by_tmdb(media.get("tmdb_id"), media.get("type", "series"))
+        if eps:
+            for ep in eps:
+                if ep.get("file_path") and ep.get("is_mounted", True):
+                    media = ep
+                    file_path = ep.get("file_path")
+                    break
+    if not file_path:
+        return jsonify({"ok": False, "error": "Media file path not found"}), 404
+
+    import os
+    import sys
+    import subprocess
+
+    norm_path = os.path.normpath(os.path.abspath(file_path))
+    if not os.path.isfile(norm_path):
+        return jsonify({"ok": False, "error": f"File does not exist or drive is disconnected: {os.path.basename(norm_path)}"}), 404
+
+    client_ip = request.remote_addr or ""
+    is_local_client = client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith("127.")
+    force_playlist = request.args.get("playlist") == "1" or (request.is_json and request.json and request.json.get("playlist"))
+
+    if is_local_client and not force_playlist:
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(norm_path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", norm_path])
+            else:
+                subprocess.Popen(["xdg-open", norm_path])
+            return jsonify({
+                "ok": True,
+                "launched": True,
+                "method": "system",
+                "file": os.path.basename(norm_path),
+                "title": media.get("title") or os.path.basename(norm_path)
+            })
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Failed to launch default player: {e}"}), 500
+    else:
+        stream_url = f"/api/media/{media['id']}/playlist.m3u"
+        return jsonify({
+            "ok": True,
+            "launched": False,
+            "method": "playlist",
+            "stream_url": stream_url,
+            "filename": f"{media.get('title', 'video')}.m3u"
+        })
+
+
+@media_bp.route("/api/media/<int:media_id>/playlist.m3u", methods=["GET"])
+def api_media_playlist_m3u(media_id):
+    media = get_media_by_id(media_id)
+    if not media:
+        media = get_best_media_source(media_id)
+    if not media:
+        return "Media not found", 404
+
+    title = media.get("ep_title") or media.get("title") or "Video"
+    host_url = request.host_url.rstrip("/")
+    stream_url = f"{host_url}/api/stream/{media['id']}"
+
+    duration = int(media.get("duration") or -1)
+    content = f"#EXTM3U\n#EXTINF:{duration},{title}\n{stream_url}\n"
+
+    from flask import Response
+    safe_title = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip() or "video"
+    return Response(
+        content,
+        mimetype="application/x-mpegurl",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_title}.m3u"',
+            "Cache-Control": "no-cache"
+        }
+    )

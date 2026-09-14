@@ -544,6 +544,18 @@ const PlayerPage = {
                 </button>
               </div>
 
+              <!-- Direct Launch in Default Player button (Desktop) -->
+              <div style="position:relative" v-if="isDesktopDevice()">
+                <button
+                  class="ctrl-btn"
+                  @click="launchDefaultPlayer"
+                  title="Play in Default Device Player (e.g. VLC, Windows Media Player)"
+                  id="ctrl-open-default-player"
+                >
+                  <i class="ph-bold ph-arrow-square-out" style="font-size:1.35rem"></i>
+                </button>
+              </div>
+
               <!-- Multi-Page Player Settings Menu (Gear Icon) -->
               <div style="position:relative">
                 <button
@@ -683,6 +695,24 @@ const PlayerPage = {
                         <span>Edit Skip Markers</span>
                       </div>
                       <div class="player-nav-row-right">
+                        <i class="ph ph-caret-right"></i>
+                      </div>
+                    </div>
+
+                    <!-- 9. Play in Default Player (Desktop only) -->
+                    <div
+                      v-if="isDesktopDevice()"
+                      class="player-menu-nav-row"
+                      @click="launchDefaultPlayer(); showQualityMenu = false"
+                      id="player-menu-default-player"
+                      title="Open and play this media in your system's default media player (e.g. VLC, Windows Media Player)"
+                    >
+                      <div class="player-nav-row-left">
+                        <i class="ph-bold ph-arrow-square-out"></i>
+                        <span>Default Media Player</span>
+                      </div>
+                      <div class="player-nav-row-right">
+                        <span class="player-nav-value">VLC / Native</span>
                         <i class="ph ph-caret-right"></i>
                       </div>
                     </div>
@@ -1458,11 +1488,9 @@ const PlayerPage = {
     const controlsHidden = ref(false);
     let suppressControlsUntil = 0;
     function isDesktopDevice() {
-      if (typeof window === "undefined") return false;
-      const isFinePointer = Boolean(window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches);
-      const isWideScreen = window.innerWidth >= 768;
-      const isTouchDevice = Boolean(("ontouchstart" in window) || (navigator.maxTouchPoints > 0));
-      return isFinePointer || (isWideScreen && !isTouchDevice);
+      if (typeof window === "undefined") return true;
+      const ua = navigator.userAgent || "";
+      return !/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
     }
     const playerError = ref(null);
     const autoSwitched4K = ref(null);  // { label, original4kOption }
@@ -4232,6 +4260,34 @@ const PlayerPage = {
       toggleQueueDrawer();
     }
 
+    async function launchDefaultPlayer() {
+      if (!mediaId.value) return;
+      try {
+        if (typeof addToast === "function") addToast("Opening in default device player...", "info");
+        if (videoRef.value && !videoRef.value.paused) {
+          videoRef.value.pause();
+        }
+        const res = await API.post(`/api/media/${mediaId.value}/open-default`, {});
+        if (res && res.ok) {
+          if (res.method === "system") {
+            if (typeof addToast === "function") addToast(`Playing in default device player (${res.file || 'video'})`, "success");
+          } else if (res.stream_url) {
+            if (typeof addToast === "function") addToast("Launching stream in your device player...", "success");
+            const a = document.createElement("a");
+            a.href = res.stream_url;
+            a.download = res.filename || "stream.m3u";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }
+        } else {
+          if (typeof addToast === "function") addToast((res && res.error) || "Could not launch default player", "warning");
+        }
+      } catch (err) {
+        if (typeof addToast === "function") addToast(err.message || "Failed to open default player", "error");
+      }
+    }
+
     const sleepTimerDisplayStatus = computed(() => {
       if (!sleepTimer.active) return "Off";
       if (sleepTimer.mode === "end_of_episode") return "End of Episode";
@@ -6438,6 +6494,8 @@ const PlayerPage = {
       checkDriveNow,
       returnToBrowse,
       showDriveOfflineScreen,
+      launchDefaultPlayer,
+      isDesktopDevice,
     };
   },
 };
