@@ -17650,24 +17650,26 @@ const ScanProgressWidget = {
             <!-- Header -->
             <div class="scan-fullscreen-header">
               <div class="scan-fullscreen-brand">
-                <div class="scan-fullscreen-logo-glow">
-                  <img src="/static/img/favicon.png" alt="CapsStream" />
+                <div class="scan-fullscreen-status-icon">
+                  <i v-if="store.scanRunning" class="ph ph-circle-notch" style="animation:spin 1.2s linear infinite"></i>
+                  <i v-else class="ph-bold ph-check" style="color:var(--success, #22c55e)"></i>
                 </div>
                 <div class="scan-fullscreen-title-col">
-                  <div class="scan-fullscreen-title">{{ store.scanRunning ? 'Library Scanner' : 'Scan Complete!' }}</div>
+                  <div class="scan-fullscreen-title">{{ store.scanRunning ? 'Library Scanner' : 'Scan Complete' }}</div>
                   <div class="scan-fullscreen-subtitle" v-if="store.scanRunning">
-                    <span class="scan-phase-badge" :class="store.scanPhase">
-                      <i :class="phaseIcon"></i> {{ phaseLabel }} Phase
-                    </span>
+                    {{ phaseLabel }} media files&hellip;
+                  </div>
+                  <div class="scan-fullscreen-subtitle" v-else>
+                    {{ store.scanCount || 0 }} files indexed
                   </div>
                 </div>
               </div>
               <div class="scan-fullscreen-actions">
-                <button class="scan-widget-btn scan-fullscreen-btn-top" @click="exitFullscreen" title="Exit Full Screen" id="scan-widget-fullscreen-exit-btn">
-                  <i class="ph ph-arrows-in"></i>
-                </button>
                 <button class="scan-widget-btn scan-fullscreen-btn-top" @click="collapseAndClose" title="Run in Background" id="scan-widget-minimize-bg-btn">
-                  <i class="ph ph-minus"></i>
+                  <i class="ph ph-arrow-down-left"></i>
+                </button>
+                <button class="scan-widget-btn scan-fullscreen-btn-top" @click="exitFullscreen" title="Close Dialog" id="scan-widget-fullscreen-exit-btn">
+                  <i class="ph ph-x"></i>
                 </button>
               </div>
             </div>
@@ -17680,24 +17682,25 @@ const ScanProgressWidget = {
                   <div v-else class="scan-fullscreen-poster-fallback">
                     <i :class="typeIcon"></i>
                   </div>
-                  <div class="scan-fullscreen-poster-badge">{{ typeLabel }}</div>
                 </div>
                 <div class="scan-fullscreen-item-details">
                   <div class="scan-fullscreen-item-eyebrow">
-                    <span class="scan-fullscreen-badge-type"><i :class="typeIcon"></i> {{ typeLabel }}</span>
-                    <span class="scan-item-se" v-if="isEpisode">Season {{ pad2(store.scanItem.season) }} &middot; Episode {{ pad2(store.scanItem.episode) }}</span>
+                    <span class="scan-fullscreen-badge-type">{{ typeLabel }}</span>
+                    <span class="scan-item-se" v-if="isEpisode">&bull; S{{ pad2(store.scanItem.season) }}E{{ pad2(store.scanItem.episode) }}</span>
+                    <span v-if="store.scanItem.year">&bull; {{ store.scanItem.year }}</span>
                   </div>
-                  <h3 class="scan-fullscreen-item-title">{{ store.scanItem.matched_title || store.scanItem.title }}</h3>
+                  <h3 class="scan-fullscreen-item-title" :title="store.scanItem.matched_title || store.scanItem.title">
+                    {{ store.scanItem.matched_title || store.scanItem.title }}
+                  </h3>
                   <div class="scan-fullscreen-meta-row" v-if="store.scanItem.matched_title">
-                    <span class="scan-fullscreen-meta-tag" v-if="store.scanItem.year"><i class="ph ph-calendar-blank"></i> {{ store.scanItem.year }}</span>
+                    <span class="scan-fullscreen-match-pill"><i class="ph-bold ph-check"></i> Matched</span>
                     <span class="scan-fullscreen-meta-tag" v-if="store.scanItem.rating"><i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ Number(store.scanItem.rating).toFixed(1) }}</span>
-                    <span class="scan-fullscreen-match-pill"><i class="ph ph-check-circle"></i> TMDb Matched</span>
                   </div>
                   <div class="scan-fullscreen-searching-row" v-else>
-                    <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite"></i> Searching metadata on TMDb...
+                    <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite"></i> Searching TMDb&hellip;
                   </div>
                   <div class="scan-fullscreen-filename" :title="store.scanItem.file_name">
-                    <i class="ph ph-file-code"></i> {{ store.scanItem.file_name }}<span v-if="itemSize"> &middot; {{ itemSize }}</span>
+                    {{ store.scanItem.file_name }}<span v-if="itemSize"> &middot; {{ itemSize }}</span>
                   </div>
                 </div>
               </div>
@@ -17706,12 +17709,12 @@ const ScanProgressWidget = {
                 <div class="scan-fullscreen-spinner-wrap">
                   <i class="ph ph-circle-notch" style="animation:spin 1.2s linear infinite"></i>
                 </div>
-                <div class="scan-fullscreen-idle-text">{{ store.scanProgress || 'Discovering media files across your folders...' }}</div>
+                <div class="scan-fullscreen-idle-text">{{ store.scanProgress || 'Discovering media files across folders&hellip;' }}</div>
               </div>
 
               <div class="scan-fullscreen-progress-section">
                 <div class="scan-fullscreen-progress-header">
-                  <span>Overall Progress</span>
+                  <span>{{ store.scanCount || 0 }} of {{ store.scanTotal || '?' }} files</span>
                   <span class="scan-fullscreen-percent-num">{{ store.scanPercent || 0 }}%</span>
                 </div>
                 <div class="scan-fullscreen-progress-track">
@@ -17725,25 +17728,16 @@ const ScanProgressWidget = {
 
               <div class="scan-fullscreen-stats-grid">
                 <div class="scan-fullscreen-stat-card">
-                  <div class="scan-fullscreen-stat-icon"><i class="ph ph-files"></i></div>
-                  <div class="scan-fullscreen-stat-info">
-                    <span class="scan-fullscreen-stat-val">{{ store.scanCount || 0 }} / {{ store.scanTotal || '?' }}</span>
-                    <span class="scan-fullscreen-stat-lbl">Processed Files</span>
-                  </div>
+                  <span class="scan-fullscreen-stat-val">{{ store.scanCount || 0 }}</span>
+                  <span class="scan-fullscreen-stat-lbl">Processed</span>
                 </div>
                 <div class="scan-fullscreen-stat-card">
-                  <div class="scan-fullscreen-stat-icon matched"><i class="ph ph-checks"></i></div>
-                  <div class="scan-fullscreen-stat-info">
-                    <span class="scan-fullscreen-stat-val">{{ store.scanMatched || 0 }}</span>
-                    <span class="scan-fullscreen-stat-lbl">Matched to TMDb</span>
-                  </div>
+                  <span class="scan-fullscreen-stat-val">{{ store.scanMatched || 0 }}</span>
+                  <span class="scan-fullscreen-stat-lbl">Matched</span>
                 </div>
                 <div class="scan-fullscreen-stat-card">
-                  <div class="scan-fullscreen-stat-icon timer"><i class="ph ph-timer"></i></div>
-                  <div class="scan-fullscreen-stat-info">
-                    <span class="scan-fullscreen-stat-val">{{ fmtElapsed(store.scanElapsed) }}</span>
-                    <span class="scan-fullscreen-stat-lbl">Time Elapsed</span>
-                  </div>
+                  <span class="scan-fullscreen-stat-val">{{ fmtElapsed(store.scanElapsed) }}</span>
+                  <span class="scan-fullscreen-stat-lbl">Elapsed</span>
                 </div>
               </div>
 
@@ -17758,32 +17752,15 @@ const ScanProgressWidget = {
             <template v-else>
               <div class="scan-fullscreen-celebration-stage">
                 <div class="scan-fullscreen-celebration-icon">
-                  <i class="ph ph-popcorn"></i>
+                  <i class="ph-bold ph-check"></i>
                 </div>
-                <h2 class="scan-fullscreen-celebration-title">Library Scan Complete!</h2>
+                <h2 class="scan-fullscreen-celebration-title">Scan Complete</h2>
                 <p class="scan-fullscreen-celebration-desc">
-                  Successfully indexed your media library with rich TMDb posters, synopses, cast information, and episode metadata.
+                  {{ store.scanCount || 0 }} media files indexed &middot; {{ store.scanMatched || 0 }} matched to TMDb.
                 </p>
-                <div class="scan-fullscreen-stats-grid celebration">
-                  <div class="scan-fullscreen-stat-card">
-                    <div class="scan-fullscreen-stat-icon"><i class="ph ph-film-strip"></i></div>
-                    <div class="scan-fullscreen-stat-info">
-                      <span class="scan-fullscreen-stat-val">{{ store.scanCount || 0 }}</span>
-                      <span class="scan-fullscreen-stat-lbl">Files Processed</span>
-                    </div>
-                  </div>
-                  <div class="scan-fullscreen-stat-card">
-                    <div class="scan-fullscreen-stat-icon matched"><i class="ph ph-sparkle"></i></div>
-                    <div class="scan-fullscreen-stat-info">
-                      <span class="scan-fullscreen-stat-val">{{ store.scanMatched || 0 }}</span>
-                      <span class="scan-fullscreen-stat-lbl">TMDb Matched</span>
-                    </div>
-                  </div>
-                </div>
                 <div class="scan-fullscreen-celebration-actions">
-                  <button class="btn btn-primary btn-lg" @click="exploreLibrary" id="scan-fullscreen-explore-btn">
-                    <i class="ph ph-play-circle" style="font-size:1.3rem;margin-right:8px"></i>
-                    Explore Library <span v-if="countdown > 0">({{ countdown }}s)</span>
+                  <button class="btn btn-primary" @click="exploreLibrary" id="scan-fullscreen-explore-btn">
+                    Done <span v-if="countdown > 0">({{ countdown }}s)</span>
                   </button>
                 </div>
               </div>

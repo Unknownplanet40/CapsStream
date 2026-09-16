@@ -75,5 +75,35 @@ class TestSubtitles(unittest.TestCase):
             self.assertTrue(any("Matrix.1999.1080p.es.srt" in u for u in urls))
 
 
+    def test_online_subtitles_search_requires_api_key(self):
+        """Verify GET /api/subtitles/online/search returns 400 when opensubtitles_api_key is empty."""
+        from flask import Flask
+        from backend.routes.streaming import streaming_bp
+        app = Flask(__name__)
+        app.register_blueprint(streaming_bp)
+        client = app.test_client()
+
+        with patch("backend.settings.load_config", return_value={"subtitles": {"opensubtitles_api_key": ""}}):
+            resp = client.get("/api/subtitles/online/search?media_id=1")
+            self.assertEqual(resp.status_code, 400)
+            data = resp.get_json()
+            self.assertIn("No OpenSubtitles API key configured", data.get("error", ""))
+
+    def test_online_subtitles_download_requires_api_key(self):
+        """Verify POST /api/subtitles/online/download returns 400 when opensubtitles_api_key is empty."""
+        from flask import Flask
+        from backend.routes.streaming import streaming_bp
+        app = Flask(__name__)
+        app.register_blueprint(streaming_bp)
+        client = app.test_client()
+
+        with patch("backend.settings.load_config", return_value={"subtitles": {"opensubtitles_api_key": ""}}):
+            resp = client.post("/api/subtitles/online/download", json={"media_id": 1, "slug": "test-slug"})
+            self.assertEqual(resp.status_code, 400)
+            data = resp.get_json()
+            self.assertIn("No OpenSubtitles API key configured", data.get("error", ""))
+
+
 if __name__ == "__main__":
     unittest.main()
+

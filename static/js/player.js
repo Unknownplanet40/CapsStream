@@ -454,14 +454,16 @@ const PlayerPage = {
                   <div v-for="(sub, i) in subtitles" :key="sub.url" class="player-menu-item" :class="{ active: selectedSub === i }" @click="selectSub(i)" :title="sub.label || sub.raw_filename || sub.filename">
                     {{ sub.label }}
                   </div>
-                  <div class="profile-dropdown-divider"></div>
-                  <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="openOnlineSubModal">
-                    <i class="ph ph-magnifying-glass" style="margin-right:4px"></i> Search Online Subtitles
-                  </div>
-                  <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="downloadSubtitles" :id="'ctrl-download-subs'">
-                    <i :class="downloadingSubs ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="downloadingSubs ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
-                    {{ downloadingSubs ? 'Searching OpenSubtitles…' : 'Auto-Download Subtitles' }}
-                  </div>
+                  <template v-if="hasOpenSubtitles">
+                    <div class="profile-dropdown-divider"></div>
+                    <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="openOnlineSubModal">
+                      <i class="ph ph-magnifying-glass" style="margin-right:4px"></i> Search Online Subtitles
+                    </div>
+                    <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="downloadSubtitles" :id="'ctrl-download-subs'">
+                      <i :class="downloadingSubs ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="downloadingSubs ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                      {{ downloadingSubs ? 'Searching OpenSubtitles…' : 'Auto-Download Subtitles' }}
+                    </div>
+                  </template>
                   <label class="player-menu-item" style="cursor:pointer;color:var(--accent);font-weight:600">
                     <i class="ph ph-plus" style="margin-right:4px"></i> Load .srt / .vtt
                     <input type="file" accept=".vtt,.srt" @change="handleCustomSubFile" style="display:none" />
@@ -934,14 +936,16 @@ const PlayerPage = {
                       >
                         {{ sub.label }}
                       </div>
-                      <div class="profile-dropdown-divider"></div>
-                      <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="openOnlineSubModal">
-                        <i class="ph ph-magnifying-glass" style="margin-right:4px"></i> Search Online Subtitles
-                      </div>
-                      <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="downloadSubtitles">
-                        <i :class="downloadingSubs ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="downloadingSubs ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
-                        {{ downloadingSubs ? 'Searching OpenSubtitles…' : 'Auto-Download Subtitles' }}
-                      </div>
+                      <template v-if="hasOpenSubtitles">
+                        <div class="profile-dropdown-divider"></div>
+                        <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="openOnlineSubModal">
+                          <i class="ph ph-magnifying-glass" style="margin-right:4px"></i> Search Online Subtitles
+                        </div>
+                        <div class="player-menu-item" style="cursor:pointer;color:#38bdf8;font-weight:600" @click="downloadSubtitles">
+                          <i :class="downloadingSubs ? 'ph ph-circle-notch' : 'ph ph-download-simple'" :style="downloadingSubs ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                          {{ downloadingSubs ? 'Searching OpenSubtitles…' : 'Auto-Download Subtitles' }}
+                        </div>
+                      </template>
                       <label class="player-menu-item" style="cursor:pointer;color:var(--accent);font-weight:600">
                         <i class="ph ph-plus" style="margin-right:4px"></i> Load .srt / .vtt
                         <input type="file" accept=".vtt,.srt" @change="handleCustomSubFile" style="display:none" />
@@ -1850,12 +1854,18 @@ const PlayerPage = {
       triggerSleepHUD("Waking up • Resumed");
     }
 
+    const hasOpenSubtitles = computed(() => {
+      const key = playerSettings.value?.subtitles?.opensubtitles_api_key;
+      return typeof key === "string" && key.trim().length > 0;
+    });
+
     const showOnlineSubModal = ref(false);
     const onlineSubResults = ref([]);
     const loadingOnlineSubs = ref(false);
     const downloadingSubId = ref(null);
 
     async function openOnlineSubModal() {
+      if (!hasOpenSubtitles.value) return;
       showSubMenu.value = false;
       showOnlineSubModal.value = true;
       loadingOnlineSubs.value = true;
@@ -4261,13 +4271,14 @@ const PlayerPage = {
     }
 
     async function launchDefaultPlayer() {
-      if (!mediaId.value) return;
+      const targetId = selectedQualityMediaId.value || media.value?.id || route.params.id;
+      if (!targetId) return;
       try {
         if (typeof addToast === "function") addToast("Opening in default device player...", "info");
         if (videoRef.value && !videoRef.value.paused) {
           videoRef.value.pause();
         }
-        const res = await API.post(`/api/media/${mediaId.value}/open-default`, {});
+        const res = await API.post(`/api/media/${targetId}/open-default`, {});
         if (res && res.ok) {
           if (res.method === "system") {
             if (typeof addToast === "function") addToast(`Playing in default device player (${res.file || 'video'})`, "success");
@@ -4359,6 +4370,7 @@ const PlayerPage = {
     }
 
     async function downloadSubtitles() {
+      if (!hasOpenSubtitles.value) return;
       const mediaId = media.value?.id || route.params.id;
       if (!mediaId || downloadingSubs.value) return;
       downloadingSubs.value = true;
@@ -6288,6 +6300,7 @@ const PlayerPage = {
       selectedSub,
       showSpeedMenu,
       showSubMenu,
+      hasOpenSubtitles,
       showOnlineSubModal,
       onlineSubResults,
       loadingOnlineSubs,

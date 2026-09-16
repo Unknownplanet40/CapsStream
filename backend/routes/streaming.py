@@ -348,6 +348,13 @@ def api_subtitles(media_id, filename):
 
 @streaming_bp.route("/api/subtitles/online/search", methods=["GET"])
 def api_search_online_subtitles():
+    from backend.settings import load_config
+    cfg = load_config()
+    sub_cfg = cfg.get("subtitles") or {}
+    api_key = (sub_cfg.get("opensubtitles_api_key") or "").strip()
+    if not api_key:
+        return jsonify({"error": "No OpenSubtitles API key configured — add one in Settings → Player & Subtitle Defaults."}), 400
+
     media_id = request.args.get("media_id")
     if not media_id:
         return jsonify({"error": "media_id is required"}), 400
@@ -366,6 +373,13 @@ def api_search_online_subtitles():
 
 @streaming_bp.route("/api/subtitles/online/download", methods=["POST"])
 def api_download_online_subtitle():
+    from backend.settings import load_config
+    cfg = load_config()
+    sub_cfg = cfg.get("subtitles") or {}
+    api_key = (sub_cfg.get("opensubtitles_api_key") or "").strip()
+    if not api_key:
+        return jsonify({"error": "No OpenSubtitles API key configured — add one in Settings → Player & Subtitle Defaults."}), 400
+
     data = request.json or {}
     slug = data.get("slug") or data.get("id")
     media_id = data.get("media_id")
