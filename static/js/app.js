@@ -3395,6 +3395,7 @@ const HeroBanner = {
     let lastKnownCurrentTime = 0;
     let lastKnownDuration = 0;
     let durationTimerSet = false;
+    let previewLoadToken = 0; // incremented on every load attempt; stale async responses are discarded
 
     function pauseSlideTimer() {
       if (slideTimer) {
@@ -3598,7 +3599,7 @@ const HeroBanner = {
 
     async function loadVideoPreview() {
       if (isScrolledPastHero.value) return;
-      const targetIdx = currentIdx.value;
+      const myToken = ++previewLoadToken; // snapshot token before any await
       const item = current.value;
       if (!item) return;
       if (store.profile?.is_kids) return;
@@ -3612,10 +3613,8 @@ const HeroBanner = {
           } catch (_) {}
         }
 
-        // GUARD: Ensure user is still on the same slide that triggered the request
-        if (currentIdx.value !== targetIdx || !current.value || (current.value.id !== item.id && current.value.tmdb_id !== item.tmdb_id)) {
-          return;
-        }
+        // Discard if a newer load has been scheduled (slide changed, resetPreview called, etc.)
+        if (myToken !== previewLoadToken) return;
 
         if (trailerData && (trailerData.embed_url || trailerData.key)) {
           let key = trailerData.key;
@@ -3649,7 +3648,7 @@ const HeroBanner = {
 
         // Fallback: If no official TMDB trailer is available and it's a local movie, play a 25-second preview clip
         if (item.id && item.type === "movie") {
-          if (currentIdx.value !== targetIdx) return;
+          if (myToken !== previewLoadToken) return;
           videoPreviewUrl.value = `/api/stream/${item.id}?start=60&transcode=1`;
           isIframeTrailer.value = false;
           videoPreviewActive.value = true;
@@ -3679,6 +3678,7 @@ const HeroBanner = {
     function resetPreview() {
       clearTimeout(previewTimer);
       cleanupTrailerTimers();
+      ++previewLoadToken; // invalidate any in-flight loadVideoPreview
       lastKnownCurrentTime = 0;
       lastKnownDuration = 0;
       durationTimerSet = false;
