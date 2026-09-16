@@ -7773,6 +7773,16 @@ video::cue {
   margin-top: 2px;
 }
 
+.settings-warn {
+  font-size: 0.78rem;
+  color: #f97316;
+  margin-top: 5px;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  line-height: 1.45;
+}
+
 /* Host Address Local Network Device IP Card */
 .host-ip-card {
   margin-top: 10px;

@@ -7219,6 +7219,7 @@ const SettingsPage = {
               <div class="settings-label-container">
                 <div class="settings-label">Cached Metadata, Images & Database Media</div>
                 <div class="settings-desc">Wipes all cached artwork files, JSON metadata, and removes all library media from the database so a fresh rescan repopulates from scratch.</div>
+                <div class="settings-warn"><i class="ph ph-warning" style="margin-right:5px"></i><strong>This also permanently deletes:</strong> watch history, play stats, favorites, and playlist items. These cannot be recovered.</div>
                 <div style="font-size:0.85rem;color:var(--text-primary);font-weight:700;margin-top:4px">
                   Current Cache Usage: <span style="color:var(--accent)">{{ cacheInfo.size_formatted || '0 KB' }}</span> ({{ cacheInfo.file_count || 0 }} files)
                 </div>
