@@ -12219,11 +12219,12 @@ const ProfilesPage = {
     }
 
     async function authProfile(profile, enteredPin, forceTakeover = false) {
-      let clientSessionId = sessionStorage.getItem("cs_session_id");
+      let clientSessionId = localStorage.getItem("cs_session_id") || sessionStorage.getItem("cs_session_id");
       if (!clientSessionId) {
         clientSessionId = "sess_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-        sessionStorage.setItem("cs_session_id", clientSessionId);
       }
+      try { localStorage.setItem("cs_session_id", clientSessionId); } catch (e) {}
+      try { sessionStorage.setItem("cs_session_id", clientSessionId); } catch (e) {}
       const deviceName = (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ? "iPhone / iPad" : /android/.test(navigator.userAgent.toLowerCase()) ? "Android Device" : /macintosh|mac os x/.test(navigator.userAgent.toLowerCase()) ? "Mac" : "Windows PC");
 
       try {
@@ -19470,7 +19471,7 @@ const App = {
 
     async function sendProfileHeartbeat() {
       if (!store.profile || !store.profile.id) return;
-      const sessionId = sessionStorage.getItem("cs_session_id") || "";
+      const sessionId = localStorage.getItem("cs_session_id") || sessionStorage.getItem("cs_session_id") || "";
       const deviceName = (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ? "iPhone / iPad" : /android/.test(navigator.userAgent.toLowerCase()) ? "Android Device" : /macintosh|mac os x/.test(navigator.userAgent.toLowerCase()) ? "Mac" : "Windows PC");
       try {
         const res = await API.post("/api/profiles/heartbeat", {
@@ -19500,11 +19501,7 @@ const App = {
     }
 
     function handleWindowUnload() {
-      const sessionId = sessionStorage.getItem("cs_session_id");
-      if (sessionId && navigator.sendBeacon) {
-        const blob = new Blob([JSON.stringify({ session_id: sessionId, profile_id: store.profile?.id })], { type: "application/json" });
-        navigator.sendBeacon("/api/profiles/release", blob);
-      }
+      // Passive unload handler; session cleanup is safely governed by the 45s heartbeat expiry.
     }
 
     watch(
@@ -20279,11 +20276,12 @@ const App = {
         } else if (profiles && profiles.length === 1 && !profiles[0].has_pin) {
           // Exactly one profile and it has no PIN — automatically use it and redirect to homepage
           const singleProfile = profiles[0];
-          let clientSessionId = sessionStorage.getItem("cs_session_id");
+          let clientSessionId = localStorage.getItem("cs_session_id") || sessionStorage.getItem("cs_session_id");
           if (!clientSessionId) {
             clientSessionId = "sess_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-            sessionStorage.setItem("cs_session_id", clientSessionId);
           }
+          try { localStorage.setItem("cs_session_id", clientSessionId); } catch (e) {}
+          try { sessionStorage.setItem("cs_session_id", clientSessionId); } catch (e) {}
           const deviceName = (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ? "iPhone / iPad" : /android/.test(navigator.userAgent.toLowerCase()) ? "Android Device" : /macintosh|mac os x/.test(navigator.userAgent.toLowerCase()) ? "Mac" : "Windows PC");
 
           try {

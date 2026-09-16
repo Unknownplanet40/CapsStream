@@ -13,8 +13,12 @@ from backend.db.connection import release_conn
 from backend.db.profiles import create_profile, get_profile
 
 
+from backend.routes.middleware import ACTIVE_PROFILE_SESSIONS
+
+
 class TestRouteProfiles(unittest.TestCase):
     def setUp(self):
+        ACTIVE_PROFILE_SESSIONS.clear()
         self.db_path, self.cleanup_db = create_isolated_test_db()
         self.app = Flask(__name__)
         self.app.secret_key = "test_profiles_secret"
@@ -23,6 +27,7 @@ class TestRouteProfiles(unittest.TestCase):
         self.client = self.app.test_client()
 
     def tearDown(self):
+        ACTIVE_PROFILE_SESSIONS.clear()
         self.cleanup_db()
 
     @patch("backend.routes.profiles.get_all_profiles")
@@ -92,6 +97,71 @@ class TestRouteProfiles(unittest.TestCase):
         prof_after = get_profile(pid)
         self.assertEqual(prof_after.get("has_completed_tour"), 1)
 
+    def test_heartbeat_does_not_falsely_evict_after_api_me(self):
+        """Verify that heartbeat does not evict after /api/profiles/me initializes presence."""
+        pid = create_profile(name="Test User", pin_hash=None, is_admin=False)
+        with self.client.session_transaction() as sess:
+            sess["profile_id"] = pid
+
+        # Page refresh/load calls api_me
+        resp_me = self.client.get("/api/profiles/me")
+        self.assertEqual(resp_me.status_code, 200)
+
+        # Frontend heartbeat watchdog fires with browser session ID
+        resp_hb = self.client.post("/api/profiles/heartbeat", json={
+            "session_id": "sess_client_123",
+            "device_name": "Windows PC",
+        })
+        self.assertEqual(resp_hb.status_code, 200)
+        data = resp_hb.get_json()
+        self.assertFalse(data.get("evicted"))
+        self.assertEqual(data.get("status"), "ok")
+
+    def test_heartbeat_multi_tab_same_browser_no_eviction(self):
+        """Verify sibling tabs in the same browser sharing localStorage session_id do not evict each other."""
+        pid = create_profile(name="Multi Tab User", pin_hash=None, is_admin=False)
+        with self.client.session_transaction() as sess:
+            sess["profile_id"] = pid
+
+        # Tab 1 sends heartbeat with browser's localStorage session_id
+        hb1 = self.client.post("/api/profiles/heartbeat", json={"session_id": "sess_browser_shared"}).get_json()
+        self.assertFalse(hb1.get("evicted"))
+
+        # Tab 2 in the same browser sends heartbeat with the shared session_id
+        hb2 = self.client.post("/api/profiles/heartbeat", json={"session_id": "sess_browser_shared"}).get_json()
+        self.assertFalse(hb2.get("evicted"))
+
+    def test_heartbeat_evicts_only_upon_explicit_takeover(self):
+        """Verify session is only evicted when another device takes over with force_takeover=True."""
+        pid = create_profile(name="Owner", pin_hash=None, is_admin=False)
+
+        # Device 1 authenticates
+        resp_auth1 = self.client.post("/api/profiles/auth", json={
+            "profile_id": pid,
+            "session_id": "device_1_sess",
+            "device_name": "Device 1",
+        })
+        self.assertEqual(resp_auth1.status_code, 200)
+
+        # Device 2 forces takeover
+        resp_auth2 = self.client.post("/api/profiles/auth", json={
+            "profile_id": pid,
+            "session_id": "device_2_sess",
+            "device_name": "Device 2",
+            "force_takeover": True,
+        })
+        self.assertEqual(resp_auth2.status_code, 200)
+
+        # Device 1 now sends heartbeat and receives eviction notice
+        with self.client.session_transaction() as sess:
+            sess["profile_id"] = pid
+        hb_dev1 = self.client.post("/api/profiles/heartbeat", json={
+            "session_id": "device_1_sess",
+        }).get_json()
+        self.assertTrue(hb_dev1.get("evicted"))
+        self.assertEqual(hb_dev1.get("status"), "evicted")
+
 
 if __name__ == "__main__":
     unittest.main()
+

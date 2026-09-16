@@ -332,7 +332,7 @@ def api_auth_profile():
 
     with ACTIVE_PROFILE_LOCK:
         old_sess = ACTIVE_PROFILE_SESSIONS.get(profile_id)
-        if old_sess and client_session_id and old_sess.get("session_id") != client_session_id:
+        if old_sess and client_session_id and old_sess.get("session_id") and old_sess.get("session_id") != client_session_id:
             old_sess["evicted"] = True
         ACTIVE_PROFILE_SESSIONS[profile_id] = {
             "session_id": client_session_id,
@@ -342,8 +342,10 @@ def api_auth_profile():
         }
 
     session["profile_id"] = profile_id
+    session["session_id"] = client_session_id
     session["is_kids"] = bool(profile.get("is_kids", 0))
     session["is_admin"] = bool(profile.get("is_admin", 0))
+    session.permanent = True
     return jsonify({"ok": True, "profile": sanitize_profile(profile)})
 
 
@@ -360,13 +362,18 @@ def api_profile_heartbeat():
     with ACTIVE_PROFILE_LOCK:
         sess = ACTIVE_PROFILE_SESSIONS.get(pid)
         if sess:
-            if sess.get("evicted") or (client_session_id and sess.get("session_id") != client_session_id):
+            # Check if this profile session was explicitly marked evicted, or taken over by another distinct session
+            if sess.get("evicted") or (sess.get("session_id") and client_session_id and sess.get("session_id") != client_session_id):
                 return jsonify({"status": "evicted", "evicted": True})
+            # If in-memory session_id was empty or missing, adopt the client's session ID
+            if not sess.get("session_id") and client_session_id:
+                sess["session_id"] = client_session_id
             sess["last_seen"] = now
-            sess["device_name"] = device_name
+            if device_name:
+                sess["device_name"] = device_name
         else:
             ACTIVE_PROFILE_SESSIONS[pid] = {
-                "session_id": client_session_id,
+                "session_id": client_session_id or session.get("session_id", ""),
                 "device_name": device_name,
                 "last_seen": now,
                 "evicted": False,
@@ -395,6 +402,7 @@ def api_me():
     profile = get_profile(pid)
     if not profile:
         session.pop("profile_id", None)
+        session.pop("session_id", None)
         session.pop("is_kids", None)
         session.pop("is_admin", None)
         return jsonify(None)
@@ -403,21 +411,25 @@ def api_me():
     now = time.time()
     with ACTIVE_PROFILE_LOCK:
         sess = ACTIVE_PROFILE_SESSIONS.get(pid)
+        sess_id = session.get("session_id", "")
         if not sess:
             ACTIVE_PROFILE_SESSIONS[pid] = {
-                "session_id": session.get("session_id", ""),
+                "session_id": sess_id,
                 "device_name": "Active Session",
                 "last_seen": now,
                 "evicted": False,
             }
         elif not sess.get("evicted"):
             sess["last_seen"] = now
+            if sess_id and not sess.get("session_id"):
+                sess["session_id"] = sess_id
     return jsonify(sanitize_profile(profile))
 
 
 @profiles_bp.route("/api/profiles/logout", methods=["POST"])
 def api_logout():
     pid = session.pop("profile_id", None)
+    session.pop("session_id", None)
     session.pop("is_kids", None)
     session.pop("is_admin", None)
     if pid:
