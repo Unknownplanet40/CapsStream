@@ -546,18 +546,6 @@ const PlayerPage = {
                 </button>
               </div>
 
-              <!-- Direct Launch in Default Player button (Desktop) -->
-              <div style="position:relative" v-if="isDesktopDevice()">
-                <button
-                  class="ctrl-btn"
-                  @click="launchDefaultPlayer"
-                  title="Play in Default Device Player (e.g. VLC, Windows Media Player)"
-                  id="ctrl-open-default-player"
-                >
-                  <i class="ph-bold ph-arrow-square-out" style="font-size:1.35rem"></i>
-                </button>
-              </div>
-
               <!-- Multi-Page Player Settings Menu (Gear Icon) -->
               <div style="position:relative">
                 <button

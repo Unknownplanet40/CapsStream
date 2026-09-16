@@ -4087,6 +4087,12 @@ main::-webkit-scrollbar {
   flex-shrink: 0;
 }
 
+.episode-action-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .episode-card-runtime {
   font-size: 0.75rem;
   font-weight: 600;
@@ -4114,6 +4120,173 @@ main::-webkit-scrollbar {
   .episode-thumb-container {
     width: 100%;
     min-width: 100%;
+  }
+  .episode-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .episode-card-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .episode-action-btns {
+    margin-left: auto;
+  }
+}
+
+/* ─── Episodes View Toggle (List vs Grid) ────────────────────── */
+.episodes-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill, 9999px);
+  padding: 3px;
+  gap: 3px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-sm);
+}
+
+.episodes-view-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill, 9999px);
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all var(--transition-fast, 0.15s ease);
+}
+
+.episodes-view-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.episodes-view-btn.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* ─── Landscape Card Grid View for Episodes ─────────────────── */
+.episodes-list.grid-view {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 1.25rem;
+  margin-top: 1rem;
+}
+
+.episodes-list.grid-view .episode-card {
+  flex-direction: column;
+  padding: 0;
+  gap: 0;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  height: 100%;
+  background: var(--bg-card);
+  animation: epCardFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.episodes-list:not(.grid-view) .episode-card {
+  animation: epListFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes epCardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes epListFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.episodes-list.grid-view .episode-thumb-container {
+  width: 100%;
+  min-width: 100%;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.episodes-list.grid-view .episode-card-body {
+  padding: 0.95rem 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  justify-content: flex-start;
+}
+
+.episodes-list.grid-view .episode-card-header {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+  width: 100%;
+}
+
+.episodes-list.grid-view .episode-card-number {
+  font-size: 0.95rem;
+  line-height: 1.35;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.episodes-list.grid-view .episode-card-actions {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.episodes-list.grid-view .episode-action-btns {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.episodes-list.grid-view .episode-card-overview {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: auto;
+  padding-top: 0.25rem;
+}
+
+@media (max-width: 480px) {
+  .episodes-list.grid-view {
+    grid-template-columns: 1fr;
+    gap: 1rem;
   }
 }
 /* ─── Detail Page & Immersive Backdrop Banner ─────────────── */
@@ -12777,6 +12950,13 @@ body.kids-mode-theme .suggestion-tag:hover {
   gap: 1rem;
   margin-bottom: 0.75rem;
   flex-wrap: wrap;
+}
+
+.season-tabs-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
 }
 
 .season-dropdown-select {
@@ -29762,8 +29942,8 @@ body:has(.navbar-tv) .hero-backdrop-container::before,
   font-family: "Bebas Neue", "Anton", Impact, "Arial Black", sans-serif;
   font-weight: 400;
   /* Font size & vertical alignment calibrated so visible glyph height equals media card height */
-  font-size: calc(var(--top10-h) * 1.41);
-  transform: translateY(calc(var(--top10-h) * 0.13));
+  font-size: calc(var(--top10-h) * 1.35);
+  transform: translateY(calc(var(--top10-h) * 0.080));
   line-height: 1;
   letter-spacing: -0.04em;
   user-select: none;
@@ -29786,7 +29966,7 @@ body:has(.navbar-tv) .hero-backdrop-container::before,
 
 /* Two-digit "10" */
 .top10-rank-number[data-rank="10"] {
-  font-size: calc(var(--top10-h) * 1.41);
+  font-size: calc(var(--top10-h) * 1.35);
   min-width: calc(var(--top10-h) * 0.72);
   margin-right: -64px;
 }

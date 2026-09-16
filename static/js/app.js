@@ -4563,12 +4563,36 @@ const DetailPage = {
           <div class="seasons-section" v-if="media.seasons && Object.keys(media.seasons).length">
             <div class="season-tabs-header">
               <h3>Episodes</h3>
-              <div v-if="sortedSeasons.length > 3" class="season-select-container">
-                <select v-model="activeSeason" class="season-dropdown-select" id="season-dropdown-select">
-                  <option v-for="season in sortedSeasons" :key="season" :value="season">
-                    Season {{ season }} ({{ getSeasonMeta(season).localCount }}/{{ getSeasonMeta(season).totalCount }})
-                  </option>
-                </select>
+              <div class="season-tabs-actions">
+                <div v-if="sortedSeasons.length > 3" class="season-select-container">
+                  <select v-model="activeSeason" class="season-dropdown-select" id="season-dropdown-select">
+                    <option v-for="season in sortedSeasons" :key="season" :value="season">
+                      Season {{ season }} ({{ getSeasonMeta(season).localCount }}/{{ getSeasonMeta(season).totalCount }})
+                    </option>
+                  </select>
+                </div>
+
+                <!-- View Layout Toggle: List vs Landscape Card Grid -->
+                <div class="episodes-view-toggle">
+                  <button
+                    class="episodes-view-btn"
+                    :class="{ active: episodeLayout === 'list' }"
+                    @click="episodeLayout = 'list'"
+                    title="List View"
+                    id="btn-episodes-view-list"
+                  >
+                    <i class="ph-bold ph-list-dashes"></i>
+                  </button>
+                  <button
+                    class="episodes-view-btn"
+                    :class="{ active: episodeLayout === 'grid' }"
+                    @click="episodeLayout = 'grid'"
+                    title="Card View (Landscape)"
+                    id="btn-episodes-view-grid"
+                  >
+                    <i class="ph-bold ph-squares-four"></i>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -4609,7 +4633,7 @@ const DetailPage = {
               </span>
             </div>
 
-            <div class="episodes-list">
+            <div class="episodes-list" :class="{ 'grid-view': episodeLayout === 'grid' }">
               <div
                 v-for="ep in media.seasons[activeSeason]"
                 :key="ep.id || ('missing-' + ep.season + '-' + ep.episode)"
@@ -4666,39 +4690,40 @@ const DetailPage = {
                         {{ formatDuration(ep.duration) }}
                       </div>
 
-                      <!-- Request Episode Button for missing aired episodes -->
-                      <button
-                        v-if="ep.is_local === false && !ep.is_unaired && store.features?.requests && !store.profile?.is_kids"
-                        class="episode-request-btn"
-                        @click.stop="requestMissingEpisode(ep)"
-                        :title="'Request Season ' + activeSeason + ' Episode ' + ep.episode"
-                      >
-                        <i class="ph-bold ph-paper-plane-tilt"></i>
-                        <span>Request</span>
-                      </button>
+                      <div class="episode-action-btns">
+                        <!-- Request Episode Button for missing aired episodes -->
+                        <button
+                          v-if="ep.is_local === false && !ep.is_unaired && store.features?.requests && !store.profile?.is_kids"
+                          class="episode-request-btn"
+                          @click.stop="requestMissingEpisode(ep)"
+                          :title="'Request Season ' + activeSeason + ' Episode ' + ep.episode"
+                        >
+                          <i class="ph-bold ph-paper-plane-tilt"></i>
+                          <span>Request</span>
+                        </button>
 
-                      <!-- Play in default device player button -->
-                      <button
-                        v-if="ep.id && isDesktop && ep.is_local !== false"
-                        class="episode-skip-btn"
-                        @click.stop="openInDefaultPlayer(ep)"
-                        :disabled="ep.is_mounted === false"
-                        :title="'Play S' + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0') + ' in default player (e.g. VLC)'"
-                        style="margin-left: 4px;"
-                      >
-                        <i class="ph-bold ph-arrow-square-out"></i>
-                      </button>
+                        <!-- Play in default device player button -->
+                        <button
+                          v-if="ep.id && isDesktop && ep.is_local !== false"
+                          class="episode-skip-btn"
+                          @click.stop="openInDefaultPlayer(ep)"
+                          :disabled="ep.is_mounted === false"
+                          :title="'Play S' + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0') + ' in default player (e.g. VLC)'"
+                        >
+                          <i class="ph-bold ph-arrow-square-out"></i>
+                        </button>
 
-                      <!-- Per-episode skip marker editor -->
-                      <button
-                        v-if="ep.id && !store.profile?.is_kids"
-                        class="episode-skip-btn"
-                        :class="{ 'has-markers': episodeHasMarkers(ep) }"
-                        @click.stop="openEpisodeSkipModal(ep)"
-                        :title="'Edit skip markers for S' + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0')"
-                      >
-                        <i class="ph ph-timer"></i>
-                      </button>
+                        <!-- Per-episode skip marker editor -->
+                        <button
+                          v-if="ep.id && !store.profile?.is_kids"
+                          class="episode-skip-btn"
+                          :class="{ 'has-markers': episodeHasMarkers(ep) }"
+                          @click.stop="openEpisodeSkipModal(ep)"
+                          :title="'Edit skip markers for S' + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0')"
+                        >
+                          <i class="ph ph-timer"></i>
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <div class="episode-card-overview">
@@ -4858,6 +4883,7 @@ const DetailPage = {
       if (verySlowTimer) { clearTimeout(verySlowTimer); verySlowTimer = null; }
     }
     const activeSeason = ref("1");
+    const episodeLayout = ref("list");
     const seasonTabsRef = ref(null);
     const showCollectionModal = ref(false);
     const collections = ref([]);
@@ -5441,6 +5467,7 @@ const DetailPage = {
       loadingSlow,
       loadingVerySlow,
       activeSeason,
+      episodeLayout,
       sortedSeasons,
       getStatusSlug,
       getStatusIcon,
