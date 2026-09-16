@@ -2149,7 +2149,8 @@ const MediaCard = {
       toggleFavorite,
       toggleLike,
       openDetail,
-      handleCardClick
+      handleCardClick,
+      store,
     };
   },
 };
@@ -3002,6 +3003,7 @@ const TvContentRow = {
       toggleMute,
       onRowEnter,
       onRowLeave,
+      store,
     };
   }
 };
