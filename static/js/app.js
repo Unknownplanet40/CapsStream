@@ -168,6 +168,7 @@ const store = reactive({
   whatsNewModalOpen: false, // What's New post-update modal visibility
   whatsNewData: null,       // Loaded release notes/changelog payload
   whatsNewLoading: false,   // Loading state for changelog fetch
+  updateState: { status: "idle", current: "", latest: "", changelog: "", last_checked: "", message: "" }, // persisted across nav
   layoutMode: localStorage.getItem("capsstream_layout_mode") || "standard",
   isMobileScreen: typeof window !== "undefined" ? window.innerWidth < 768 : false,
   tvFocus: { rowIndex: 0, cardIndex: 0 },
@@ -7750,13 +7751,11 @@ const SettingsPage = {
 
     // ─── Updates ──────────────────────────────────────────────
     const sysInfo = ref(store.sysInfo || null);
-    const updateState = ref({
-      status: "idle",
-      current: "",
-      latest: "",
-      changelog: "",
-      last_checked: "",
-      message: "",
+    // updateState lives in store so it survives Settings re-mounts and navigation.
+    // Read/write as a computed so all existing code works unchanged.
+    const updateState = Vue.computed({
+      get: () => store.updateState,
+      set: (v) => { store.updateState = v; },
     });
     const updateChecking = ref(false);
       const updateInstalling = ref(false);
