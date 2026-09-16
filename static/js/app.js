@@ -4107,6 +4107,10 @@ const HomePage = {
     }
 
     async function triggerScanFromHome() {
+      if (!store.profile) {
+        addToast("Select a profile before scanning the library", "warning");
+        return;
+      }
       try {
         await API.post("/api/scan", {});
         store.scanRunning = true;

@@ -310,8 +310,28 @@ _SCAN_SCHEDULE_FILE = None
 @admin_bp.route("/api/scan", methods=["POST"])
 def api_scan():
     from .media import bust_home_cache
-    # Scans must only run for an authenticated, active profile session.
-    if not current_profile() or not has_active_profile_session():
+    # Scans can be triggered by an admin or any authenticated profile session.
+    if not is_admin() and not current_profile():
+        abort(401, description="No active profile session")
+
+    pid = current_profile()
+    if pid and not is_admin():
+        from backend.routes.middleware import ACTIVE_PROFILE_SESSIONS, ACTIVE_PROFILE_LOCK
+        with ACTIVE_PROFILE_LOCK:
+            sess = ACTIVE_PROFILE_SESSIONS.get(pid)
+            if sess and sess.get("evicted"):
+                abort(401, description="Profile session was evicted")
+            if not sess:
+                ACTIVE_PROFILE_SESSIONS[pid] = {
+                    "session_id": session.get("session_id", ""),
+                    "device_name": "Active Session",
+                    "last_seen": time.time(),
+                    "evicted": False,
+                }
+            else:
+                sess["last_seen"] = time.time()
+
+    if not is_admin() and not has_active_profile_session(pid):
         abort(401, description="No active profile session")
     global _scan_thread
     from backend.scanner import scan_library, get_scan_status

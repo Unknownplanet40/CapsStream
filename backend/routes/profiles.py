@@ -400,6 +400,18 @@ def api_me():
         return jsonify(None)
     session["is_kids"] = bool(profile.get("is_kids", 0))
     session["is_admin"] = bool(profile.get("is_admin", 0))
+    now = time.time()
+    with ACTIVE_PROFILE_LOCK:
+        sess = ACTIVE_PROFILE_SESSIONS.get(pid)
+        if not sess:
+            ACTIVE_PROFILE_SESSIONS[pid] = {
+                "session_id": session.get("session_id", ""),
+                "device_name": "Active Session",
+                "last_seen": now,
+                "evicted": False,
+            }
+        elif not sess.get("evicted"):
+            sess["last_seen"] = now
     return jsonify(sanitize_profile(profile))
 
 

@@ -81,6 +81,16 @@ class TestRouteAdmin(unittest.TestCase):
         data = resp.get_json()
         self.assertTrue(data["ok"])
 
+    @patch("backend.routes.admin.current_profile", return_value=None)
+    @patch("backend.routes.admin.is_admin", return_value=True)
+    @patch("backend.scanner.get_scan_status", create=True, return_value={"running": True, "phase": "scanning"})
+    def test_api_scan_authorized_as_admin_without_profile(self, mock_status, mock_admin, mock_prof):
+        """Verify POST /api/scan succeeds for admin even when no profile is active."""
+        resp = self.client.post("/api/scan", json={})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data["ok"])
+
     @patch("backend.routes.admin.require_admin")
     @patch("backend.settings.reset_application")
     def test_api_system_reset(self, mock_reset, mock_admin):
