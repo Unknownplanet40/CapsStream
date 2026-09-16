@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    CapsStream — Vue 3 SPA (No Build Step)
    All components defined inline using Vue.defineComponent
    ============================================================ */
@@ -17600,11 +17600,11 @@ const ScanProgressWidget = {
   },
   template: `
     <div class="scan-floating-widget-root">
-      <!-- 1. Full Screen Mode Overlay -->
+      <!-- 1. Fullscreen Panel (teleported to body) -->
       <teleport to="body">
         <div class="scan-fullscreen-overlay" v-if="isFullscreen && (store.scanRunning || showCompleted)">
           <div class="scan-fullscreen-backdrop" @click="exitFullscreen"></div>
-          <div class="scan-fullscreen-card" id="scan-fullscreen-card">
+          <div class="scan-fullscreen-panel" id="scan-fullscreen-card">
             <!-- Header -->
             <div class="scan-fullscreen-header">
               <div class="scan-fullscreen-brand">
@@ -17624,15 +17624,14 @@ const ScanProgressWidget = {
                 <button class="scan-widget-btn scan-fullscreen-btn-top" @click="exitFullscreen" title="Exit Full Screen" id="scan-widget-fullscreen-exit-btn">
                   <i class="ph ph-arrows-in"></i>
                 </button>
-                <button class="scan-widget-btn scan-fullscreen-btn-top" @click="minimizeToBackground" title="Run in Background" id="scan-widget-minimize-bg-btn">
+                <button class="scan-widget-btn scan-fullscreen-btn-top" @click="collapseAndClose" title="Run in Background" id="scan-widget-minimize-bg-btn">
                   <i class="ph ph-minus"></i>
                 </button>
               </div>
             </div>
 
-            <!-- Content Stage -->
+            <!-- Running content -->
             <template v-if="store.scanRunning">
-              <!-- Active Item Stage -->
               <div class="scan-fullscreen-item-stage" v-if="store.scanItem && store.scanItem.file_name">
                 <div class="scan-fullscreen-poster-wrap">
                   <img v-if="store.scanItem.poster_path" :src="imgUrl(store.scanItem.poster_path)" class="scan-fullscreen-poster-img" :alt="store.scanItem.matched_title || store.scanItem.title" />
@@ -17641,30 +17640,26 @@ const ScanProgressWidget = {
                   </div>
                   <div class="scan-fullscreen-poster-badge">{{ typeLabel }}</div>
                 </div>
-
                 <div class="scan-fullscreen-item-details">
                   <div class="scan-fullscreen-item-eyebrow">
                     <span class="scan-fullscreen-badge-type"><i :class="typeIcon"></i> {{ typeLabel }}</span>
-                    <span class="scan-item-se" v-if="isEpisode">Season {{ pad2(store.scanItem.season) }} · Episode {{ pad2(store.scanItem.episode) }}</span>
+                    <span class="scan-item-se" v-if="isEpisode">Season {{ pad2(store.scanItem.season) }} &middot; Episode {{ pad2(store.scanItem.episode) }}</span>
                   </div>
                   <h3 class="scan-fullscreen-item-title">{{ store.scanItem.matched_title || store.scanItem.title }}</h3>
-                  
                   <div class="scan-fullscreen-meta-row" v-if="store.scanItem.matched_title">
                     <span class="scan-fullscreen-meta-tag" v-if="store.scanItem.year"><i class="ph ph-calendar-blank"></i> {{ store.scanItem.year }}</span>
-                    <span class="scan-fullscreen-meta-tag rating" v-if="store.scanItem.rating"><i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ Number(store.scanItem.rating).toFixed(1) }}</span>
+                    <span class="scan-fullscreen-meta-tag" v-if="store.scanItem.rating"><i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ Number(store.scanItem.rating).toFixed(1) }}</span>
                     <span class="scan-fullscreen-match-pill"><i class="ph ph-check-circle"></i> TMDb Matched</span>
                   </div>
                   <div class="scan-fullscreen-searching-row" v-else>
                     <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite"></i> Searching metadata on TMDb...
                   </div>
-
                   <div class="scan-fullscreen-filename" :title="store.scanItem.file_name">
-                    <i class="ph ph-file-code"></i> {{ store.scanItem.file_name }}<span v-if="itemSize"> · {{ itemSize }}</span>
+                    <i class="ph ph-file-code"></i> {{ store.scanItem.file_name }}<span v-if="itemSize"> &middot; {{ itemSize }}</span>
                   </div>
                 </div>
               </div>
 
-              <!-- Idle / Discovering Stage -->
               <div class="scan-fullscreen-idle-stage" v-else>
                 <div class="scan-fullscreen-spinner-wrap">
                   <i class="ph ph-circle-notch" style="animation:spin 1.2s linear infinite"></i>
@@ -17672,7 +17667,6 @@ const ScanProgressWidget = {
                 <div class="scan-fullscreen-idle-text">{{ store.scanProgress || 'Discovering media files across your folders...' }}</div>
               </div>
 
-              <!-- Progress Bar -->
               <div class="scan-fullscreen-progress-section">
                 <div class="scan-fullscreen-progress-header">
                   <span>Overall Progress</span>
@@ -17687,7 +17681,6 @@ const ScanProgressWidget = {
                 </div>
               </div>
 
-              <!-- Statistics Grid -->
               <div class="scan-fullscreen-stats-grid">
                 <div class="scan-fullscreen-stat-card">
                   <div class="scan-fullscreen-stat-icon"><i class="ph ph-files"></i></div>
@@ -17712,15 +17705,14 @@ const ScanProgressWidget = {
                 </div>
               </div>
 
-              <!-- Action Footer -->
               <div class="scan-fullscreen-footer-bar">
-                <button class="btn btn-secondary btn-sm" @click="minimizeToBackground" id="scan-fullscreen-bg-btn">
+                <button class="btn btn-secondary btn-sm" @click="collapseAndClose" id="scan-fullscreen-bg-btn">
                   <i class="ph ph-arrow-down-left" style="margin-right:6px"></i> Run in Background
                 </button>
               </div>
             </template>
 
-            <!-- Completed Celebration Stage -->
+            <!-- Completed Celebration -->
             <template v-else>
               <div class="scan-fullscreen-celebration-stage">
                 <div class="scan-fullscreen-celebration-icon">
@@ -17730,7 +17722,6 @@ const ScanProgressWidget = {
                 <p class="scan-fullscreen-celebration-desc">
                   Successfully indexed your media library with rich TMDb posters, synopses, cast information, and episode metadata.
                 </p>
-
                 <div class="scan-fullscreen-stats-grid celebration">
                   <div class="scan-fullscreen-stat-card">
                     <div class="scan-fullscreen-stat-icon"><i class="ph ph-film-strip"></i></div>
@@ -17747,7 +17738,6 @@ const ScanProgressWidget = {
                     </div>
                   </div>
                 </div>
-
                 <div class="scan-fullscreen-celebration-actions">
                   <button class="btn btn-primary btn-lg" @click="exploreLibrary" id="scan-fullscreen-explore-btn">
                     <i class="ph ph-play-circle" style="font-size:1.3rem;margin-right:8px"></i>
@@ -17760,64 +17750,47 @@ const ScanProgressWidget = {
         </div>
       </teleport>
 
-      <!-- 2. Bottom-Left Floating Widget (When NOT in Fullscreen) -->
+      <!-- 2. Floating Card (collapsed / expanded) -->
       <div
         class="scan-floating-widget"
-        :class="{ 'has-bottom-nav': hasBottomNav }"
+        :class="{ 'has-bottom-nav': hasBottomNav, 'is-expanded': isExpanded }"
         v-if="!isFullscreen && (store.scanRunning || showCompleted)"
+        ref="cardRef"
       >
-        <!-- Minimized Pill View -->
-        <div v-if="isMinimized" class="scan-widget-pill" @click="isMinimized = false" id="scan-widget-pill">
-          <div class="scan-widget-pill-text">
-            <i :class="phaseIcon" :style="{ animation: store.scanRunning ? 'spin 1s linear infinite' : 'none' }"></i>
-            <span v-if="store.scanRunning">{{ phaseLabel }} · {{ store.scanPercent }}% ({{ store.scanCount || 0 }}{{ store.scanTotal ? '/' + store.scanTotal : '' }})</span>
-            <span v-else style="color:var(--success)">Scan Complete!</span>
+        <!-- Header: always visible -->
+        <div class="scan-widget-header">
+          <div class="scan-widget-title-wrap">
+            <i class="ph ph-film-clapperboard scan-widget-logo-icon"></i>
+            <div class="scan-widget-title-text">
+              <span class="scan-widget-label" v-if="store.scanRunning">{{ phaseLabel }} library</span>
+              <span class="scan-widget-label scan-widget-done" v-else>Scan complete</span>
+              <span class="scan-widget-pct" v-if="store.scanRunning"> &middot; {{ store.scanPercent }}%</span>
+            </div>
           </div>
-          <div class="scan-widget-pill-actions">
-            <button class="scan-widget-btn" @click.stop="toggleFullscreen" title="Full Screen Mode" id="scan-widget-pill-fullscreen-btn">
+          <div class="scan-widget-btn-cluster">
+            <button class="scan-widget-btn" @click="toggleFullscreen" title="Full Screen" id="scan-widget-fullscreen-btn">
               <i class="ph ph-arrows-out"></i>
             </button>
-            <button class="scan-widget-btn" title="Expand Widget" id="scan-widget-expand-btn">
-              <i class="ph ph-caret-up"></i>
+            <button class="scan-widget-btn" @click="flipToggle" :title="isExpanded ? 'Collapse' : 'Expand'" id="scan-widget-expand-btn">
+              <i :class="isExpanded ? 'ph ph-caret-down' : 'ph ph-caret-up'"></i>
+            </button>
+            <button class="scan-widget-btn scan-widget-close-btn" @click="dismiss" title="Dismiss" id="scan-widget-close-btn">
+              <i class="ph ph-x"></i>
             </button>
           </div>
         </div>
 
-        <!-- Expanded Card View -->
-        <div v-else class="scan-widget-card" id="scan-widget-card">
-          <div class="scan-widget-header">
-            <div class="scan-widget-title">
-              <i class="ph ph-popcorn"></i>
-              <span>{{ store.scanRunning ? 'Library Scan' : 'Scan Complete!' }}</span>
-              <span v-if="store.scanRunning" class="scan-phase-badge" :class="store.scanPhase">
-                <i :class="phaseIcon"></i>{{ phaseLabel }}
-              </span>
-            </div>
-            <div class="scan-widget-actions">
-              <button class="scan-widget-btn" @click="toggleFullscreen" title="Full Screen Mode" id="scan-widget-fullscreen-btn">
-                <i class="ph ph-arrows-out"></i>
-              </button>
-              <button class="scan-widget-btn" @click="isMinimized = true" title="Minimize Widget" id="scan-widget-minimize-btn">
-                <i class="ph ph-minus"></i>
-              </button>
-              <button class="scan-widget-btn" @click="dismiss" title="Close" id="scan-widget-close-btn">
-                <i class="ph ph-x"></i>
-              </button>
-            </div>
-          </div>
+        <!-- Thin progress bar -->
+        <div class="scan-widget-progress-strip">
+          <div
+            class="scan-widget-progress-fill"
+            :class="{ indeterminate: store.scanRunning && !store.scanPercent }"
+            :style="{ width: store.scanRunning ? (store.scanPercent || 5) + '%' : '100%' }"
+          ></div>
+        </div>
 
-          <div class="scan-widget-progress-row">
-            <div class="scan-widget-progress-bg">
-              <div
-                class="scan-widget-progress-fill"
-                :class="{ indeterminate: store.scanRunning && !store.scanPercent }"
-                :style="{ width: store.scanRunning ? store.scanPercent + '%' : '100%' }"
-              ></div>
-            </div>
-            <span class="scan-widget-percent" v-if="store.scanRunning">{{ store.scanPercent }}%</span>
-          </div>
-
-          <!-- Running: current item details -->
+        <!-- Expanded body -->
+        <div class="scan-widget-body" v-show="isExpanded">
           <template v-if="store.scanRunning">
             <div class="scan-widget-item" v-if="store.scanItem && store.scanItem.file_name">
               <div class="scan-item-top">
@@ -17826,32 +17799,28 @@ const ScanProgressWidget = {
               </div>
               <div class="scan-item-title" :title="store.scanItem.title">{{ store.scanItem.title }}</div>
               <div class="scan-item-file" :title="store.scanItem.file_name">
-                {{ store.scanItem.file_name }}<span v-if="itemSize"> · {{ itemSize }}</span>
+                {{ store.scanItem.file_name }}<span v-if="itemSize"> &middot; {{ itemSize }}</span>
               </div>
               <div class="scan-item-match" v-if="store.scanItem.matched_title">
                 <i class="ph ph-check-circle"></i>
-                Matched: {{ store.scanItem.matched_title }}<template v-if="store.scanItem.year"> ({{ store.scanItem.year }})</template><template v-if="store.scanItem.rating"> · <i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ Number(store.scanItem.rating).toFixed(1) }}</template>
+                Matched: {{ store.scanItem.matched_title }}<template v-if="store.scanItem.year"> ({{ store.scanItem.year }})</template><template v-if="store.scanItem.rating"> &middot; <i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ Number(store.scanItem.rating).toFixed(1) }}</template>
               </div>
               <div class="scan-item-match pending" v-else>
                 <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite"></i> Searching TMDb...
               </div>
             </div>
-
             <div class="scan-widget-status" v-else style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
               {{ store.scanProgress || 'Preparing scan...' }}
             </div>
-
             <div class="scan-widget-footer">
               <span><i class="ph ph-files"></i> {{ store.scanCount || 0 }}/{{ store.scanTotal || '?' }} processed</span>
               <span v-if="store.scanMatched"><i class="ph ph-checks"></i> {{ store.scanMatched }} matched</span>
               <span v-if="store.scanElapsed"><i class="ph ph-timer"></i> {{ fmtElapsed(store.scanElapsed) }}</span>
             </div>
           </template>
-
-          <!-- Completed -->
           <template v-else>
             <div class="scan-widget-status" style="color:var(--text-muted)">
-              Processed {{ store.scanCount || 0 }} new media files<template v-if="store.scanMatched"> · {{ store.scanMatched }} matched to TMDb</template>.
+              Processed {{ store.scanCount || 0 }} new media files<template v-if="store.scanMatched"> &middot; {{ store.scanMatched }} matched to TMDb</template>.
             </div>
           </template>
         </div>
@@ -17859,7 +17828,8 @@ const ScanProgressWidget = {
     </div>
   `,
   setup(props) {
-    const isMinimized = ref(false);
+    const cardRef = ref(null);
+    const isExpanded = ref(false);
     const isFullscreen = ref(false);
     const showCompleted = ref(false);
     const countdown = ref(5);
@@ -17871,7 +17841,7 @@ const ScanProgressWidget = {
         const hasScannedBefore = localStorage.getItem("cs_has_scanned") === "true";
         if (isPendingOnboarding || !hasScannedBefore) {
           isFullscreen.value = true;
-          isMinimized.value = false;
+          isExpanded.value = false;
           if (store.onboardingWaiting) {
             store.onboardingWaiting = false;
           }
@@ -17885,7 +17855,7 @@ const ScanProgressWidget = {
         const hasScannedBefore = localStorage.getItem("cs_has_scanned") === "true";
         if (isPendingOnboarding || !hasScannedBefore) {
           isFullscreen.value = true;
-          isMinimized.value = false;
+          isExpanded.value = false;
           if (store.onboardingWaiting) {
             store.onboardingWaiting = false;
           }
@@ -17900,44 +17870,66 @@ const ScanProgressWidget = {
       }
     });
 
+    // FLIP-style expand/collapse animation.
+    // ponytail: uses getBoundingClientRect delta + CSS transition; ceiling is that scaleY
+    // distorts border-radius during animation — acceptable trade-off vs a height tween.
+    const prefersReducedMotion = typeof window !== "undefined"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false;
+
+    function flipToggle() {
+      const el = cardRef.value;
+      if (!el || prefersReducedMotion) {
+        isExpanded.value = !isExpanded.value;
+        return;
+      }
+      const before = el.getBoundingClientRect();
+      isExpanded.value = !isExpanded.value;
+      nextTick(() => {
+        const after = el.getBoundingClientRect();
+        const dy = before.top - after.top;
+        const sy = before.height / after.height;
+        el.style.transition = "none";
+        el.style.transform = `translateY(${dy}px) scaleY(${sy})`;
+        el.style.transformOrigin = "bottom center";
+        el.getBoundingClientRect(); // force reflow
+        el.style.transition = "";
+        el.style.transform = "";
+      });
+    }
+
     function toggleFullscreen() {
       isFullscreen.value = !isFullscreen.value;
-      if (isFullscreen.value) {
-        isMinimized.value = false;
-      }
+      if (isFullscreen.value) isExpanded.value = false;
     }
 
     function exitFullscreen() {
       isFullscreen.value = false;
     }
 
-    function minimizeToBackground() {
+    function collapseAndClose() {
       isFullscreen.value = false;
-      isMinimized.value = true;
+      isExpanded.value = false;
     }
 
+    // Backward-compat alias (called from App watch in some code paths)
+    function minimizeToBackground() { collapseAndClose(); }
+
     function exploreLibrary() {
-      if (countdownTimer) {
-        clearInterval(countdownTimer);
-        countdownTimer = null;
-      }
+      if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
       isFullscreen.value = false;
       showCompleted.value = false;
-      isMinimized.value = false;
-
+      isExpanded.value = false;
       if (sessionStorage.getItem("cs_pending_onboarding") === "true") {
         sessionStorage.removeItem("cs_pending_onboarding");
         setTimeout(() => {
-          if (typeof window.startOnboardingTour === "function") {
-            window.startOnboardingTour();
-          }
+          if (typeof window.startOnboardingTour === "function") window.startOnboardingTour();
         }, 350);
       }
     }
 
     const phaseLabel = computed(() => {
       if (store.scanPhase === "matching") return "Matching";
-      if (store.scanPhase === "scanning") return "Scanning";
       return "Scanning";
     });
 
@@ -17969,9 +17961,7 @@ const ScanProgressWidget = {
 
     const itemSize = computed(() => fmtFileSize(store.scanItem?.file_size));
 
-    function pad2(n) {
-      return String(n ?? 0).padStart(2, "0");
-    }
+    function pad2(n) { return String(n ?? 0).padStart(2, "0"); }
 
     function fmtElapsed(sec) {
       sec = Number(sec) || 0;
@@ -17992,14 +17982,10 @@ const ScanProgressWidget = {
             if (countdownTimer) clearInterval(countdownTimer);
             countdownTimer = setInterval(() => {
               countdown.value--;
-              if (countdown.value <= 0) {
-                exploreLibrary();
-              }
+              if (countdown.value <= 0) exploreLibrary();
             }, 1000);
           } else {
-            setTimeout(() => {
-              showCompleted.value = false;
-            }, 4000);
+            setTimeout(() => { showCompleted.value = false; }, 4000);
           }
         } else if (running && !prev) {
           checkAutoFullscreen(running, prev);
@@ -18009,7 +17995,7 @@ const ScanProgressWidget = {
 
     function dismiss() {
       showCompleted.value = false;
-      isMinimized.value = true;
+      isExpanded.value = false;
     }
 
     function fmtFileSize(bytes) {
@@ -18017,23 +18003,23 @@ const ScanProgressWidget = {
       if (!bytes || bytes <= 0) return null;
       const units = ["B", "KB", "MB", "GB", "TB"];
       let i = 0;
-      while (bytes >= 1024 && i < units.length - 1) {
-        bytes /= 1024;
-        i++;
-      }
+      while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
       return `${bytes.toFixed(i > 1 ? 1 : 0)} ${units[i]}`;
     }
 
     return {
       store,
+      cardRef,
       hasBottomNav: computed(() => props.hasBottomNav),
-      isMinimized,
+      isExpanded,
       isFullscreen,
       showCompleted,
       countdown,
       dismiss,
+      flipToggle,
       toggleFullscreen,
       exitFullscreen,
+      collapseAndClose,
       minimizeToBackground,
       exploreLibrary,
       phaseLabel,
