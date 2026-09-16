@@ -94,23 +94,42 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Check if Android TV app has changes
+        id: check_android
+        shell: bash
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          if [ -z "$PREV_TAG" ]; then
+            echo "build_apk=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$PREV_TAG..${GITHUB_REF_NAME}" -- clients/android-tv/ | grep -q .; then
+            echo "Android TV changes detected → build APK"
+            echo "build_apk=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No changes in clients/android-tv/ since $PREV_TAG → skipping APK build"
+            echo "build_apk=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up JDK 17 for Android TV APK
+        if: steps.check_android.outputs.build_apk == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
       - name: Setup Android SDK
+        if: steps.check_android.outputs.build_apk == 'true'
         uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools'
 
       - name: Setup Gradle
+        if: steps.check_android.outputs.build_apk == 'true'
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.4'
 
       - name: Build Android TV Companion APK
+        if: steps.check_android.outputs.build_apk == 'true'
         working-directory: clients/android-tv
         run: |
           TAG="${GITHUB_REF_NAME#v}"
@@ -122,6 +141,20 @@ jobs:
             sha256sum "CapsStream-AndroidTV-${TAG}.apk" >> sha256sums.txt
           else
             echo "::warning::Android TV APK not found at $APK_SRC"
+          fi
+
+      - name: Carry forward existing Android TV APK
+        if: steps.check_android.outputs.build_apk != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Android TV unchanged — downloading latest APK from previous release..."
+          gh release download --pattern "CapsStream-AndroidTV*.apk" || echo "No prior APK asset found"
+          if ls CapsStream-AndroidTV*.apk 1> /dev/null 2>&1; then
+            sha256sum CapsStream-AndroidTV*.apk >> sha256sums.txt
+            echo "Attached carried-forward APK to release assets:"
+            ls -lh CapsStream-AndroidTV*.apk
           fi
 
       - name: Create GitHub Release

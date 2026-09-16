@@ -21,6 +21,7 @@ jobs:
       bump_type: ${{ steps.bump.outputs.bump_type }}
       current_version: ${{ steps.bump.outputs.current_version }}
       changelog: ${{ steps.commits.outputs.list }}
+      build_apk: ${{ steps.bump.outputs.build_apk }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -110,6 +111,19 @@ jobs:
           NEW_VERSION="$MAJOR.$MINOR.$BUILD.$REVISION"
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "Bump → $BUMP_TYPE ($CURRENT → $NEW_VERSION)"
+
+          if [ -z "$RANGE" ]; then
+            echo "build_apk=true" >> "$GITHUB_OUTPUT"
+            echo "No previous tag → build APK enabled"
+          else
+            if git diff --name-only "$RANGE" -- clients/android-tv/ | grep -q .; then
+              echo "build_apk=true" >> "$GITHUB_OUTPUT"
+              echo "Android TV changes detected in $RANGE → build APK enabled"
+            else
+              echo "build_apk=false" >> "$GITHUB_OUTPUT"
+              echo "No changes in clients/android-tv/ in $RANGE → APK build skipped"
+            fi
+          fi
 
       - name: Collect commit list for the changelog
         id: commits
@@ -234,22 +248,26 @@ jobs:
           unzip -l "$ZIP"
 
       - name: Set up JDK 17 for Android TV APK
+        if: needs.semantic-bump.outputs.build_apk == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
       - name: Setup Android SDK
+        if: needs.semantic-bump.outputs.build_apk == 'true'
         uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools'
 
       - name: Setup Gradle
+        if: needs.semantic-bump.outputs.build_apk == 'true'
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.4'
 
       - name: Build Android TV Companion APK
+        if: needs.semantic-bump.outputs.build_apk == 'true'
         working-directory: clients/android-tv
         run: |
           NEW_VER="${{ needs.semantic-bump.outputs.new_version }}"
@@ -261,6 +279,20 @@ jobs:
             sha256sum "CapsStream-AndroidTV-${NEW_VER}.apk" >> sha256sums.txt
           else
             echo "::warning::Android TV APK not found at $APK_SRC"
+          fi
+
+      - name: Carry forward existing Android TV APK
+        if: needs.semantic-bump.outputs.build_apk != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Android TV unchanged — downloading latest APK from previous release..."
+          gh release download --pattern "CapsStream-AndroidTV*.apk" || echo "No prior APK asset found"
+          if ls CapsStream-AndroidTV*.apk 1> /dev/null 2>&1; then
+            sha256sum CapsStream-AndroidTV*.apk >> sha256sums.txt
+            echo "Attached carried-forward APK to release assets:"
+            ls -lh CapsStream-AndroidTV*.apk
           fi
 
       - name: Create GitHub Release

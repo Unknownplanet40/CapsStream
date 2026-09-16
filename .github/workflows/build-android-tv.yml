@@ -5,11 +5,13 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
+    paths:
+      - 'clients/android-tv/**'
   pull_request:
     branches:
       - main
+    paths:
+      - 'clients/android-tv/**'
 
 jobs:
   build-apk:
