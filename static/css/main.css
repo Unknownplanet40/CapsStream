@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    CapsStream — Cinematic Design System
    Dark Netflix-style UI with premium aesthetics
    ============================================================ */
@@ -8690,6 +8690,19 @@ input:checked + .toggle-slider:before {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.3;
+}
+
+.scan-widget-status-idle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.scan-widget-status-idle span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Current item card */

@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    CapsStream — Vue 3 SPA (No Build Step)
    All components defined inline using Vue.defineComponent
    ============================================================ */
@@ -17809,8 +17809,9 @@ const ScanProgressWidget = {
                 <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite"></i> Searching TMDb...
               </div>
             </div>
-            <div class="scan-widget-status" v-else style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-              {{ store.scanProgress || 'Preparing scan...' }}
+            <div class="scan-widget-status scan-widget-status-idle" v-else>
+              <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;flex-shrink:0"></i>
+              <span>{{ store.scanProgress || 'Preparing library...' }}</span>
             </div>
             <div class="scan-widget-footer">
               <span><i class="ph ph-files"></i> {{ store.scanCount || 0 }}/{{ store.scanTotal || '?' }} processed</span>
@@ -19530,7 +19531,7 @@ const App = {
     const isDetailRoute = computed(() => !route.path.startsWith("/title"));
 
     const isBottomNavVisible = computed(() => {
-      return showNav.value && !isPlayerRoute.value && !!store.profile && !isMobileNavHidden.value;
+      return showNav.value && !isPlayerRoute.value && !!store.profile && !isMobileNavHidden.value && !!store.isMobileScreen;
     });
 
     function isRoute(path) {
