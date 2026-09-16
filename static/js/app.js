@@ -7076,9 +7076,13 @@ const SettingsPage = {
                 Host and Port changes take effect after restarting CapsStream (close the server and run start.bat again).
               </div>
 
-              <div style="margin-top:4px">
+              <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
                 <button class="btn btn-secondary btn-sm" @click="$router.push('/logs')" title="View live server log">
                   <i class="ph ph-scroll" style="margin-right:4px"></i> View Live Logs
+                </button>
+                <button class="btn btn-primary btn-sm" @click="saveSettings" :disabled="saving" id="btn-save-server-config" title="Save host, port, and launch preferences">
+                  <i :class="saving ? 'ph ph-circle-notch' : 'ph ph-floppy-disk'" :style="saving ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                  {{ saving ? 'Saving...' : 'Save Configuration' }}
                 </button>
               </div>
             </div>
@@ -7420,7 +7424,7 @@ const SettingsPage = {
   </template>
 
       <!-- Shutdown Confirmation Modal -->
-      <div v-if="showShutdownModal" class="modal-backdrop" style="z-index:500;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showShutdownModal = false">
+      <div v-if="showShutdownModal" class="modal-backdrop" style="z-index:100050;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showShutdownModal = false">
         <div class="shortcuts-modal-card" style="max-width:480px" @click.stop>
           <div class="shortcuts-modal-inner" style="text-align:left">
             <div class="shortcuts-modal-header" style="margin-bottom:1rem;border-bottom-color:rgba(239,68,68,0.3)">
@@ -7478,10 +7482,11 @@ const SettingsPage = {
               <i class="ph ph-x-circle" style="margin-right:6px"></i> Close Window
             </button>
           </div>
+        </div>
       </div>
 
       <!-- Restart Confirmation Modal -->
-      <div v-if="showRestartModal" class="modal-backdrop" style="z-index:500;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showRestartModal = false">
+      <div v-if="showRestartModal" class="modal-backdrop" style="z-index:100050;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showRestartModal = false">
         <div class="shortcuts-modal-card" style="max-width:480px" @click.stop>
           <div class="shortcuts-modal-inner" style="text-align:left">
             <div class="shortcuts-modal-header" style="margin-bottom:1rem;border-bottom-color:rgba(251,191,36,0.3)">
@@ -7495,13 +7500,18 @@ const SettingsPage = {
             </div>
 
             <div style="font-size:0.9rem;color:var(--text-secondary);line-height:1.5;margin-bottom:1rem">
-              Are you sure you want to restart the CapsStream server? Active playback streams will briefly disconnect, and this page will automatically reload once the server comes back online.
+              <template v-if="isDirty">
+                You have unsaved configuration changes (including <strong>Host: {{ form.host }}</strong>). These changes will be automatically saved before the server restarts.
+              </template>
+              <template v-else>
+                Are you sure you want to restart the CapsStream server? Active playback streams will briefly disconnect, and this page will automatically reload once the server comes back online.
+              </template>
             </div>
 
             <div class="shortcuts-modal-footer" style="margin-top:1.5rem;display:flex;justify-content:flex-end;gap:10px">
               <button class="btn btn-secondary" @click="showRestartModal = false">Cancel</button>
               <button class="btn btn-primary" style="background:#f59e0b;border-color:#f59e0b;color:#000;font-weight:600" @click="executeRestartServer" id="btn-confirm-restart">
-                <i class="ph ph-arrow-clockwise" style="margin-right:6px"></i> Yes, Restart Server
+                <i class="ph ph-arrow-clockwise" style="margin-right:6px"></i> {{ isDirty ? 'Save & Restart Server' : 'Yes, Restart Server' }}
               </button>
             </div>
           </div>
@@ -7531,7 +7541,7 @@ const SettingsPage = {
       </div>
 
       <!-- Fresh Start Warning & Confirmation Modal -->
-      <div v-if="showResetModal" class="modal-backdrop" style="z-index:500;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showResetModal = false">
+      <div v-if="showResetModal" class="modal-backdrop" style="z-index:100050;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showResetModal = false">
         <div class="shortcuts-modal-card" style="max-width:520px" @click.stop>
           <div class="shortcuts-modal-inner" style="text-align:left">
             <div class="shortcuts-modal-header" style="margin-bottom:1rem;border-bottom-color:rgba(229,9,20,0.3)">
@@ -8799,6 +8809,16 @@ const SettingsPage = {
       _stopAllPolling();
       stopDiagPolling();
 
+      // Automatically save pending configuration changes if dirty
+      if (isDirty.value) {
+        const saved = await saveSettings();
+        if (!saved) {
+          isRestarting.value = false;
+          addToast("Failed to save configuration before restarting", "error");
+          return;
+        }
+      }
+
       try {
         await API.post("/api/system/restart");
       } catch (e) {
@@ -8806,14 +8826,17 @@ const SettingsPage = {
       }
 
       sessionStorage.setItem("cs_server_restarted", "1");
-      // Poll /api/system/info every 1.5s until the server is back up
+      const targetPort = form.value?.port || window.location.port;
+      const targetOrigin = window.location.protocol + "//" + window.location.hostname + (targetPort ? (":" + targetPort) : "");
+
+      // Poll targetOrigin + "/api/system/info" every 1.5s until the server is back up
       const check = setInterval(async () => {
         try {
-          const res = await fetch("/api/system/info", { cache: "no-store" });
+          const res = await fetch(targetOrigin + "/api/system/info", { cache: "no-store" });
           if (res.ok) {
             clearInterval(check);
             sessionStorage.setItem("cs_server_restarted", "1");
-            location.href = location.origin + location.pathname + "?v=" + Date.now();
+            location.href = targetOrigin + location.pathname + "?v=" + Date.now();
           }
         } catch (e) {}
       }, 1500);
@@ -19290,16 +19313,7 @@ const App = {
           <span class="connection-island-dot" :class="connectionIsland.status"></span>
           <i :class="connectionIsland.icon" class="connection-island-icon"></i>
           <span class="connection-island-text">{{ connectionIsland.text }}</span>
-          <button
-            v-if="connectionIsland.status === 'offline'"
-            class="connection-island-retry"
-            @click="retryConnectionNow"
-            :disabled="isRetryingConnection"
-            title="Retry connection"
-          >
-            <i class="ph-bold ph-arrows-clockwise" :class="{ 'spin-anim': isRetryingConnection }"></i>
-            <span>{{ isRetryingConnection ? 'Checking...' : 'Retry' }}</span>
-          </button>
+
         </div>
       </transition>
 
