@@ -735,26 +735,6 @@ def clear_cache():
     except Exception:
         pass
 
-    # Completely purge media records and related association rows from the database
-    try:
-        from backend.db import get_conn
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM media")
-        cur.execute("DELETE FROM watch_progress")
-        cur.execute("DELETE FROM collection_items")
-        cur.execute("DELETE FROM favorites")
-        cur.execute("DELETE FROM playlist_items")
-        try:
-            cur.execute("DELETE FROM sqlite_sequence WHERE name IN ('media', 'watch_progress', 'collection_items', 'favorites', 'playlist_items')")
-        except Exception:
-            pass
-        conn.commit()
-        conn.close()
-        print("[Settings] Cleared all media records and playback associations from database.")
-    except Exception as e:
-        print("[Settings] Failed to delete media records from DB:", e)
-
     return cleared_count
 
 
@@ -802,7 +782,7 @@ def reset_application(clear_media_files=False):
         conn = get_conn()
         conn.execute("PRAGMA foreign_keys = OFF")
         tables = [
-            "watch_progress", "collection_items", "collections", "favorites",
+            "watch_progress", "watch_history", "collection_items", "collections", "favorites",
             "achievements", "kids_overrides", "playlist_items", "playlists",
             "media", "profiles"
         ]

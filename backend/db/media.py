@@ -524,6 +524,119 @@ def delete_media_by_title_and_type(title, media_type):
     return n
 
 
+def clear_media_by_path(target_path):
+    """
+    Remove all media rows from the database whose file_path begins with target_path (or matches drive).
+    Also deletes associated watch_progress, favorites, collection_items, and playlist_items.
+    Returns the number of media rows removed.
+    """
+    if not target_path:
+        return 0
+    norm_target = os.path.normcase(os.path.normpath(target_path)).replace("\\", "/").rstrip("/")
+    if not norm_target:
+        return 0
+    prefix = norm_target + "/"
+    is_drive_letter = (len(norm_target) == 2 and norm_target[1] == ":")
+
+    conn = get_conn()
+    rows = conn.execute("SELECT id, file_path FROM media").fetchall()
+    to_delete = []
+    for r in rows:
+        raw_fp = r["file_path"] if r else ""
+        if not raw_fp:
+            continue
+        fp_norm = os.path.normcase(os.path.normpath(raw_fp)).replace("\\", "/").rstrip("/")
+        if is_drive_letter:
+            if fp_norm == norm_target or fp_norm.startswith(prefix):
+                to_delete.append(r["id"])
+        else:
+            if fp_norm == norm_target or fp_norm.startswith(prefix):
+                to_delete.append(r["id"])
+
+    if not to_delete:
+        conn.close()
+        return 0
+
+    cur = conn.cursor()
+    cur.executemany("DELETE FROM media WHERE id=?", [(i,) for i in to_delete])
+    cur.executemany("DELETE FROM watch_progress WHERE media_id=?", [(i,) for i in to_delete])
+    cur.executemany("DELETE FROM favorites WHERE media_id=?", [(i,) for i in to_delete])
+    cur.executemany("DELETE FROM collection_items WHERE media_id=?", [(i,) for i in to_delete])
+    cur.executemany("DELETE FROM playlist_items WHERE media_id=?", [(i,) for i in to_delete])
+    conn.commit()
+    conn.close()
+
+    try:
+        from backend.routes.media import bust_home_cache
+        bust_home_cache()
+    except Exception:
+        pass
+
+    return len(to_delete)
+
+
+def prune_unconfigured_drive_media():
+    """
+    Remove all media rows whose file_path does not belong to any configured media path in config.json.
+    Also deletes associated watch_progress, favorites, collection_items, and playlist_items.
+    Returns the count of pruned items.
+    """
+    try:
+        from backend.settings import load_config
+        cfg = load_config()
+    except Exception:
+        return 0
+
+    media_paths = cfg.get("media_paths", {})
+    all_configured_paths = []
+    for cat, paths in media_paths.items():
+        if isinstance(paths, list):
+            for p in paths:
+                if p:
+                    all_configured_paths.append(os.path.normcase(os.path.normpath(p)).replace("\\", "/").rstrip("/"))
+
+    if not all_configured_paths:
+        return 0
+
+    conn = get_conn()
+    rows = conn.execute("SELECT id, file_path FROM media").fetchall()
+    to_delete = []
+    for r in rows:
+        raw_fp = r["file_path"] if r else ""
+        if not raw_fp:
+            continue
+        fp_norm = os.path.normcase(os.path.normpath(raw_fp)).replace("\\", "/").rstrip("/")
+        matches = False
+        for cp in all_configured_paths:
+            if fp_norm == cp or fp_norm.startswith(cp + "/"):
+                matches = True
+                break
+        if not matches:
+            to_delete.append(r["id"])
+
+    if not to_delete:
+        conn.close()
+        return 0
+
+    cur = conn.cursor()
+    cur.executemany("DELETE FROM media WHERE id=?", [(i,) for i in to_delete])
+    cur.executemany("DELETE FROM watch_progress WHERE media_id=?", [(i,) for i in to_delete])
+    cur.executemany("DELETE FROM favorites WHERE media_id=?", [(i,) for i in to_delete])
+    cur.executemany("DELETE FROM collection_items WHERE media_id=?", [(i,) for i in to_delete])
+    cur.executemany("DELETE FROM playlist_items WHERE media_id=?", [(i,) for i in to_delete])
+    conn.commit()
+    conn.close()
+
+    try:
+        from backend.routes.media import bust_home_cache
+        bust_home_cache()
+    except Exception:
+        pass
+
+    return len(to_delete)
+
+
+
 def update_skip_timestamps(media_id, data):
     """
     Updates recap/intro/outro/preview skip markers for a media item.
@@ -1176,6 +1289,15 @@ def upsert_media(data):
             1 if data.get("tmdb_id") else 0
         ))
         row_id = cur.lastrowid
+
+    # Auto-restore active watch progress if this title exists in persistent watch_history
+    try:
+        from .playback import restore_progress_for_media
+        m_item = dict(data)
+        m_item["id"] = row_id
+        restore_progress_for_media(m_item, conn=conn)
+    except Exception:
+        pass
 
     conn.commit()
     conn.close()

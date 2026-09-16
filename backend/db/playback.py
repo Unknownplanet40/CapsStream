@@ -44,8 +44,109 @@ def save_progress(profile_id, media_id, position, duration=0, completed=False):
                 completed=excluded.completed,
                 updated_at=CURRENT_TIMESTAMP
         """, (profile_id, mid, position, duration, 1 if completed else 0))
+
+    # Also record to persistent watch_history table (immune to media/drive deletions)
+    if media:
+        try:
+            m_tmdb_id = media.get("tmdb_id")
+            m_title = media.get("title") or "Unknown Title"
+            m_type = media.get("type") or "movie"
+            m_season = media.get("season")
+            m_episode = media.get("episode")
+            m_ep_title = media.get("ep_title")
+            m_genres = media.get("genres") or ""
+            m_year = media.get("year")
+            m_poster = media.get("poster_path")
+
+            hist_row = None
+            if m_tmdb_id:
+                hist_row = conn.execute("""
+                    SELECT id FROM watch_history
+                    WHERE profile_id=? AND tmdb_id=? AND type=?
+                      AND COALESCE(season, -1) = COALESCE(?, -1)
+                      AND COALESCE(episode, -1) = COALESCE(?, -1)
+                """, (profile_id, m_tmdb_id, m_type, m_season, m_episode)).fetchone()
+            if not hist_row and m_title:
+                hist_row = conn.execute("""
+                    SELECT id FROM watch_history
+                    WHERE profile_id=? AND title=? AND type=?
+                      AND COALESCE(season, -1) = COALESCE(?, -1)
+                      AND COALESCE(episode, -1) = COALESCE(?, -1)
+                """, (profile_id, m_title, m_type, m_season, m_episode)).fetchone()
+
+            if hist_row:
+                conn.execute("""
+                    UPDATE watch_history SET
+                        position=?, duration=?, completed=?, updated_at=CURRENT_TIMESTAMP,
+                        poster_path=COALESCE(?, poster_path), genres=COALESCE(?, genres)
+                    WHERE id=?
+                """, (position, duration, 1 if completed else 0, m_poster, m_genres, hist_row["id"]))
+            else:
+                conn.execute("""
+                    INSERT INTO watch_history (profile_id, tmdb_id, title, type, season, episode, ep_title, genres, year, poster_path, position, duration, completed, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (profile_id, m_tmdb_id, m_title, m_type, m_season, m_episode, m_ep_title, m_genres, m_year, m_poster, position, duration, 1 if completed else 0))
+        except Exception as e:
+            print("[Playback] Error updating persistent watch_history:", e)
+
     conn.commit()
     conn.close()
+
+
+def restore_progress_for_media(media_item, conn=None):
+    """
+    Check watch_history for matching progress for a newly scanned/added media item.
+    If found, restore active watch_progress so Continue Watching and resume points return.
+    """
+    if not media_item or not media_item.get("id"):
+        return 0
+    close_conn = False
+    if conn is None:
+        conn = get_conn()
+        close_conn = True
+
+    m_id = media_item["id"]
+    m_tmdb_id = media_item.get("tmdb_id")
+    m_title = media_item.get("title") or ""
+    m_type = media_item.get("type") or "movie"
+    m_season = media_item.get("season")
+    m_episode = media_item.get("episode")
+
+    rows = []
+    if m_tmdb_id:
+        rows = conn.execute("""
+            SELECT profile_id, position, duration, completed, updated_at
+            FROM watch_history
+            WHERE tmdb_id=? AND type=?
+              AND COALESCE(season, -1) = COALESCE(?, -1)
+              AND COALESCE(episode, -1) = COALESCE(?, -1)
+        """, (m_tmdb_id, m_type, m_season, m_episode)).fetchall()
+    if not rows and m_title:
+        rows = conn.execute("""
+            SELECT profile_id, position, duration, completed, updated_at
+            FROM watch_history
+            WHERE title=? AND type=?
+              AND COALESCE(season, -1) = COALESCE(?, -1)
+              AND COALESCE(episode, -1) = COALESCE(?, -1)
+        """, (m_title, m_type, m_season, m_episode)).fetchall()
+
+    restored = 0
+    for r in rows:
+        conn.execute("""
+            INSERT INTO watch_progress (profile_id, media_id, position, duration, completed, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(profile_id, media_id) DO UPDATE SET
+                position=excluded.position,
+                duration=excluded.duration,
+                completed=excluded.completed,
+                updated_at=excluded.updated_at
+        """, (r["profile_id"], m_id, r["position"], r["duration"], r["completed"], r["updated_at"]))
+        restored += 1
+
+    if close_conn:
+        conn.commit()
+        conn.close()
+    return restored
 
 
 def delete_progress(profile_id, media_id):

@@ -63,8 +63,8 @@ class TestSettings(unittest.TestCase):
         # Should have inherited auto_play_next from DEFAULT_CONFIG
         self.assertTrue(cfg["playback"]["auto_play_next"])
 
-    def test_clear_cache_deletes_metadata_files_and_db_records(self):
-        """Verify clear_cache deletes cached files on disk and removes all media records from SQLite."""
+    def test_clear_cache_deletes_only_disk_files_preserves_db(self):
+        """Verify clear_cache deletes cached files on disk but preserves all media and watch records in SQLite."""
         fake_meta_dir = os.path.join(self.test_dir, "data", "metadata")
         os.makedirs(os.path.join(fake_meta_dir, "images"), exist_ok=True)
         dummy_file = os.path.join(fake_meta_dir, "movie_123.json")
@@ -110,17 +110,19 @@ class TestSettings(unittest.TestCase):
             with patch("backend.db.get_conn", side_effect=lambda: sqlite3.connect(test_db_path)):
                 cleared = settings.clear_cache()
 
+            # Disk cache files should be removed
             self.assertEqual(cleared, 2)
             self.assertFalse(os.path.exists(dummy_file))
             self.assertFalse(os.path.exists(dummy_img))
+            # The metadata directory structure should be recreated
             self.assertTrue(os.path.exists(os.path.join(fake_meta_dir, "images")))
 
-            # Verify database rows purged
+            # Verify database rows are PRESERVED (not deleted)
             verify_conn = sqlite3.connect(test_db_path)
             count = verify_conn.execute("SELECT COUNT(*) FROM media").fetchone()[0]
-            self.assertEqual(count, 0)
+            self.assertEqual(count, 1)  # media row must survive
             prog_count = verify_conn.execute("SELECT COUNT(*) FROM watch_progress").fetchone()[0]
-            self.assertEqual(prog_count, 0)
+            self.assertEqual(prog_count, 1)  # watch_progress must survive
             verify_conn.close()
         finally:
             settings.ROOT_DIR = orig_root

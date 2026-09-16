@@ -35,6 +35,8 @@ from .media import (
     delete_media_by_id,
     delete_media_by_tmdb,
     delete_media_by_title_and_type,
+    clear_media_by_path,
+    prune_unconfigured_drive_media,
     update_skip_timestamps,
     get_media_by_tmdb,
     search_media,

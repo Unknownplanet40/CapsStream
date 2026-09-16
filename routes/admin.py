@@ -42,25 +42,15 @@ def api_get_settings():
 
 @admin_bp.route("/api/settings", methods=["POST"])
 def api_post_settings():
-    from backend.settings import load_config, save_config
-    require_profile()
-    data = request.json or {}
-    if not is_admin():
-        cfg = load_config()
-        if "player" in data and isinstance(data["player"], dict):
-            cfg["player"] = data["player"]
-            ok, result = save_config(cfg)
-            if ok:
-                return jsonify({"ok": True, "config": result})
-            return jsonify({"error": result}), 500
-        return jsonify({"error": "Administrator privileges required to change system settings"}), 403
+    from backend.routes.admin import api_post_settings as _impl
+    return _impl()
 
-    ok, result = save_config(data)
-    if ok:
-        if "library" in data and "scan_interval_hours" in (data.get("library") or {}):
-            write_last_scheduled_scan(time.time())
-        return jsonify({"ok": True, "config": result})
-    return jsonify({"error": result}), 500
+
+@admin_bp.route("/api/settings/remove-path", methods=["POST"])
+def api_remove_media_path():
+    from backend.routes.admin import api_remove_media_path as _impl
+    return _impl()
+
 
 
 @admin_bp.route("/api/settings/test-api", methods=["POST"])

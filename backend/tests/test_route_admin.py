@@ -172,6 +172,38 @@ class TestRouteAdmin(unittest.TestCase):
         self.assertEqual(data.get("latest"), "2.99.0.0")
 
 
+    @patch("backend.routes.admin.require_admin")
+    @patch("backend.settings.load_config")
+    @patch("backend.settings.save_config")
+    @patch("backend.db.media.clear_media_by_path")
+    @patch("backend.db.media.prune_unconfigured_drive_media")
+    def test_api_remove_media_path(self, mock_prune, mock_clear, mock_save, mock_load, mock_admin):
+        """Verify POST /api/settings/remove-path removes path from config and clears media."""
+        mock_load.return_value = {
+            "media_paths": {"movies": ["D:\\Movies", "E:\\OldMovies"], "series": []},
+            "disabled_paths": {"movies": ["E:\\OldMovies"]}
+        }
+        mock_save.return_value = (True, {})
+        mock_clear.return_value = 15
+        mock_prune.return_value = 0
+
+        res = self.client.post("/api/settings/remove-path", json={
+            "path": "E:\\OldMovies",
+            "category": "movies",
+            "clear_drive": True,
+            "drive_letter": "E:"
+        })
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data.get("ok"))
+        self.assertEqual(data.get("path"), "E:\\OldMovies")
+        self.assertGreater(data.get("deleted_count"), 0)
+        mock_save.assert_called_once()
+        mock_clear.assert_any_call("E:\\OldMovies")
+        mock_clear.assert_any_call("E:")
+        mock_prune.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
 

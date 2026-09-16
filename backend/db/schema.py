@@ -68,6 +68,30 @@ def init_db():
             FOREIGN KEY(media_id) REFERENCES media(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS watch_history (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id    INTEGER NOT NULL,
+            tmdb_id       INTEGER,
+            title         TEXT NOT NULL,
+            type          TEXT NOT NULL CHECK(type IN ('movie','series','anime')),
+            season        INTEGER,
+            episode       INTEGER,
+            ep_title      TEXT,
+            genres        TEXT,
+            year          INTEGER,
+            poster_path   TEXT,
+            position      INTEGER NOT NULL DEFAULT 0,
+            duration      INTEGER DEFAULT 0,
+            completed     INTEGER DEFAULT 0,
+            updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_watch_history_lookup 
+            ON watch_history(profile_id, tmdb_id, type, season, episode);
+        CREATE INDEX IF NOT EXISTS idx_watch_history_title 
+            ON watch_history(profile_id, title, type);
+
         CREATE TABLE IF NOT EXISTS collections (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             profile_id  INTEGER NOT NULL,
@@ -247,6 +271,25 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_playlists_shared ON playlists(is_shared)")
     except Exception as e:
         print("[DB] Migration notice (playlists):", e)
+
+    # Migration guard for watch_history — seed from existing watch_progress + media
+    try:
+        conn.execute("""
+            INSERT INTO watch_history (profile_id, tmdb_id, title, type, season, episode, ep_title, genres, year, poster_path, position, duration, completed, updated_at)
+            SELECT wp.profile_id, m.tmdb_id, m.title, m.type, m.season, m.episode, m.ep_title, m.genres, m.year, m.poster_path, wp.position, wp.duration, wp.completed, wp.updated_at
+            FROM watch_progress wp
+            JOIN media m ON m.id = wp.media_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM watch_history wh
+                WHERE wh.profile_id = wp.profile_id
+                  AND wh.title = m.title
+                  AND wh.type = m.type
+                  AND COALESCE(wh.season, -1) = COALESCE(m.season, -1)
+                  AND COALESCE(wh.episode, -1) = COALESCE(m.episode, -1)
+            )
+        """)
+    except Exception as e:
+        print("[DB] Migration notice (watch_history):", e)
 
     conn.commit()
     conn.close()

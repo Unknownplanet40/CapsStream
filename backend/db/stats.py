@@ -14,10 +14,18 @@ def get_profile_watch_stats(profile_id):
     conn = get_conn()
     from datetime import datetime, timedelta
 
+    # Check if watch_history has records for this profile, else fallback to watch_progress
+    use_history = False
+    try:
+        use_history = bool(conn.execute("SELECT 1 FROM watch_history WHERE profile_id=? LIMIT 1", (profile_id,)).fetchone())
+    except Exception:
+        use_history = False
+    src_table = "watch_history" if use_history else "watch_progress"
+
     # 1. Total seconds watched & total items tracked
-    total_row = conn.execute("""
+    total_row = conn.execute(f"""
         SELECT SUM(position) as total_seconds, COUNT(*) as total_items, SUM(CASE WHEN completed=1 THEN 1 ELSE 0 END) as completed_items
-        FROM watch_progress
+        FROM {src_table}
         WHERE profile_id=?
     """, (profile_id,)).fetchone()
 
@@ -28,9 +36,9 @@ def get_profile_watch_stats(profile_id):
     avg_session_minutes = round((total_seconds / max(1, total_items)) / 60, 1)
 
     # 2. Peak Viewing Hour
-    peak_row = conn.execute("""
+    peak_row = conn.execute(f"""
         SELECT strftime('%H', updated_at) as hr, COUNT(*) as cnt
-        FROM watch_progress
+        FROM {src_table}
         WHERE profile_id=? AND updated_at IS NOT NULL
         GROUP BY hr ORDER BY cnt DESC LIMIT 1
     """, (profile_id,)).fetchone()
@@ -58,8 +66,8 @@ def get_profile_watch_stats(profile_id):
         day_str = dt_day.strftime("%Y-%m-%d")
         day_name = dt_day.strftime("%a")
         
-        row_day = conn.execute("""
-            SELECT SUM(position) as sec FROM watch_progress
+        row_day = conn.execute(f"""
+            SELECT SUM(position) as sec FROM {src_table}
             WHERE profile_id=? AND date(updated_at)=?
         """, (profile_id, day_str)).fetchone()
         sec = row_day["sec"] or 0
@@ -70,23 +78,38 @@ def get_profile_watch_stats(profile_id):
         })
 
     # 4. Type breakdown (movies vs series vs anime)
-    type_rows = conn.execute("""
-        SELECT m.type, COUNT(*) as cnt, SUM(wp.position) as seconds
-        FROM watch_progress wp
-        JOIN media m ON m.id = wp.media_id
-        WHERE wp.profile_id=?
-        GROUP BY m.type
-    """, (profile_id,)).fetchall()
+    if use_history:
+        type_rows = conn.execute("""
+            SELECT type as m_type, COUNT(*) as cnt, SUM(position) as seconds
+            FROM watch_history
+            WHERE profile_id=?
+            GROUP BY type
+        """, (profile_id,)).fetchall()
+        type_breakdown = {r["m_type"]: {"count": r["cnt"], "seconds": r["seconds"] or 0} for r in type_rows}
+    else:
+        type_rows = conn.execute("""
+            SELECT m.type, COUNT(*) as cnt, SUM(wp.position) as seconds
+            FROM watch_progress wp
+            JOIN media m ON m.id = wp.media_id
+            WHERE wp.profile_id=?
+            GROUP BY m.type
+        """, (profile_id,)).fetchall()
+        type_breakdown = {r["type"]: {"count": r["cnt"], "seconds": r["seconds"] or 0} for r in type_rows}
 
-    type_breakdown = {r["type"]: {"count": r["cnt"], "seconds": r["seconds"] or 0} for r in type_rows}
-
-    # 5. Genre breakdown (aggregate genres from media)
-    media_genres = conn.execute("""
-        SELECT m.genres, wp.position
-        FROM watch_progress wp
-        JOIN media m ON m.id = wp.media_id
-        WHERE wp.profile_id=? AND m.genres IS NOT NULL AND m.genres != ''
-    """, (profile_id,)).fetchall()
+    # 5. Genre breakdown (aggregate genres from media or persistent watch_history)
+    if use_history:
+        media_genres = conn.execute("""
+            SELECT genres, position
+            FROM watch_history
+            WHERE profile_id=? AND genres IS NOT NULL AND genres != ''
+        """, (profile_id,)).fetchall()
+    else:
+        media_genres = conn.execute("""
+            SELECT m.genres, wp.position
+            FROM watch_progress wp
+            JOIN media m ON m.id = wp.media_id
+            WHERE wp.profile_id=? AND m.genres IS NOT NULL AND m.genres != ''
+        """, (profile_id,)).fetchall()
 
     genre_counts = {}
     for r in media_genres:
@@ -134,13 +157,25 @@ def get_profile_watch_stats(profile_id):
         res_counts[k] = dynamic_counts[k]
 
     # 7. Recent history (Consolidated 10 distinct titles watched)
-    all_history = conn.execute("""
-        SELECT m.*, wp.position, wp.duration, wp.completed, wp.updated_at as last_watched
-        FROM watch_progress wp
-        JOIN media m ON m.id = wp.media_id
-        WHERE wp.profile_id=?
-        ORDER BY wp.updated_at DESC
-    """, (profile_id,)).fetchall()
+    if use_history:
+        all_history = conn.execute("""
+            SELECT wh.id, wh.title, wh.type, wh.season, wh.episode, wh.ep_title, wh.genres, wh.year,
+                   wh.poster_path, wh.position, wh.duration, wh.completed, wh.updated_at as last_watched, wh.tmdb_id,
+                   m.id as media_id, m.rating, m.vote_count, m.backdrop_path, m.file_path
+            FROM watch_history wh
+            LEFT JOIN media m ON (wh.tmdb_id IS NOT NULL AND m.tmdb_id = wh.tmdb_id AND m.type = wh.type)
+                              OR (wh.title = m.title AND m.type = wh.type)
+            WHERE wh.profile_id=?
+            ORDER BY wh.updated_at DESC
+        """, (profile_id,)).fetchall()
+    else:
+        all_history = conn.execute("""
+            SELECT m.*, wp.position, wp.duration, wp.completed, wp.updated_at as last_watched
+            FROM watch_progress wp
+            JOIN media m ON m.id = wp.media_id
+            WHERE wp.profile_id=?
+            ORDER BY wp.updated_at DESC
+        """, (profile_id,)).fetchall()
 
     grouped_history = []
     seen_groups = set()
@@ -208,10 +243,17 @@ def get_profile_wrapped_analytics(profile_id, period="year", year=None):
     conn = get_conn()
     now_dt = datetime.now()
 
+    use_history = False
+    try:
+        use_history = bool(conn.execute("SELECT 1 FROM watch_history WHERE profile_id=? LIMIT 1", (profile_id,)).fetchone())
+    except Exception:
+        use_history = False
+    src_table = "watch_history" if use_history else "watch_progress"
+
     # Available years list for UI selector
-    available_years_rows = conn.execute("""
+    available_years_rows = conn.execute(f"""
         SELECT DISTINCT strftime('%Y', updated_at) as yr
-        FROM watch_progress
+        FROM {src_table}
         WHERE profile_id=? AND updated_at IS NOT NULL
         ORDER BY yr DESC
     """, (profile_id,)).fetchall()
@@ -246,18 +288,36 @@ def get_profile_wrapped_analytics(profile_id, period="year", year=None):
         date_params = []
         label = "All Time"
 
+    col_prefix = "wh." if use_history else "wp."
+    date_filter_applied = date_filter.replace("wp.", col_prefix)
+
     # 1. Base query for all matching watch progress + media
-    base_query = f"""
-        SELECT wp.media_id, wp.position, wp.duration as wp_duration, wp.completed, wp.updated_at,
-               m.id as m_id, m.type as m_type, m.title, m.original_title, m.year as m_year,
-               m.season, m.episode, m.ep_title, m.duration as m_duration, m.genres,
-               m.rating, m.poster_path, m.backdrop_path, m.file_path, m.file_size,
-               m.cast_json, m.tmdb_id
-        FROM watch_progress wp
-        JOIN media m ON m.id = wp.media_id
-        WHERE wp.profile_id=? {date_filter}
-        ORDER BY wp.updated_at DESC
-    """
+    if use_history:
+        base_query = f"""
+            SELECT wh.id as media_id, wh.position, wh.duration as wp_duration, wh.completed, wh.updated_at,
+                   wh.id as m_id, wh.type as m_type, wh.title, wh.title as original_title, wh.year as m_year,
+                   wh.season, wh.episode, wh.ep_title, wh.duration as m_duration, wh.genres,
+                   COALESCE(m.rating, 0) as rating, wh.poster_path, COALESCE(m.backdrop_path, '') as backdrop_path,
+                   COALESCE(m.file_path, '') as file_path, COALESCE(m.file_size, 0) as file_size,
+                   COALESCE(m.cast_json, '[]') as cast_json, wh.tmdb_id
+            FROM watch_history wh
+            LEFT JOIN media m ON (wh.tmdb_id IS NOT NULL AND m.tmdb_id = wh.tmdb_id AND m.type = wh.type)
+                              OR (wh.title = m.title AND m.type = wh.type)
+            WHERE wh.profile_id=? {date_filter_applied}
+            ORDER BY wh.updated_at DESC
+        """
+    else:
+        base_query = f"""
+            SELECT wp.media_id, wp.position, wp.duration as wp_duration, wp.completed, wp.updated_at,
+                   m.id as m_id, m.type as m_type, m.title, m.original_title, m.year as m_year,
+                   m.season, m.episode, m.ep_title, m.duration as m_duration, m.genres,
+                   m.rating, m.poster_path, m.backdrop_path, m.file_path, m.file_size,
+                   m.cast_json, m.tmdb_id
+            FROM watch_progress wp
+            JOIN media m ON m.id = wp.media_id
+            WHERE wp.profile_id=? {date_filter}
+            ORDER BY wp.updated_at DESC
+        """
     rows = conn.execute(base_query, [profile_id] + date_params).fetchall()
 
     total_seconds = sum((r["position"] or 0) for r in rows)
@@ -269,11 +329,11 @@ def get_profile_wrapped_analytics(profile_id, period="year", year=None):
 
     # 2. Activity Heatmap & Streaks
     day_map_query = f"""
-        SELECT date(wp.updated_at) as day_str,
-               SUM(wp.position) as day_seconds,
+        SELECT date(updated_at) as day_str,
+               SUM(position) as day_seconds,
                COUNT(*) as day_items
-        FROM watch_progress wp
-        WHERE wp.profile_id=? {date_filter} AND wp.updated_at IS NOT NULL
+        FROM {src_table}
+        WHERE profile_id=? {date_filter.replace('wp.', '')} AND updated_at IS NOT NULL
         GROUP BY day_str
         ORDER BY day_str ASC
     """
@@ -367,9 +427,9 @@ def get_profile_wrapped_analytics(profile_id, period="year", year=None):
         prev_d = d
 
     # Also compute all-time active dates for all-time streak & total active days
-    all_active_days_rows = conn.execute("""
+    all_active_days_rows = conn.execute(f"""
         SELECT DISTINCT date(updated_at) as day_str
-        FROM watch_progress
+        FROM {src_table}
         WHERE profile_id=? AND position >= 60 AND updated_at IS NOT NULL
         ORDER BY day_str ASC
     """, (profile_id,)).fetchall()
@@ -422,14 +482,23 @@ def get_profile_wrapped_analytics(profile_id, period="year", year=None):
                 "items_count": d_info["count"]
             }
 
-    ep_day_rows = conn.execute(f"""
-        SELECT date(wp.updated_at) as day_str, COUNT(*) as ep_count
-        FROM watch_progress wp
-        JOIN media m ON m.id = wp.media_id
-        WHERE wp.profile_id=? AND m.type IN ('series', 'anime') {date_filter}
-        GROUP BY day_str
-        ORDER BY ep_count DESC LIMIT 1
-    """, [profile_id] + date_params).fetchone()
+    if use_history:
+        ep_day_rows = conn.execute(f"""
+            SELECT date(updated_at) as day_str, COUNT(*) as ep_count
+            FROM watch_history
+            WHERE profile_id=? AND type IN ('series', 'anime') {date_filter.replace('wp.', '')}
+            GROUP BY day_str
+            ORDER BY ep_count DESC LIMIT 1
+        """, [profile_id] + date_params).fetchone()
+    else:
+        ep_day_rows = conn.execute(f"""
+            SELECT date(wp.updated_at) as day_str, COUNT(*) as ep_count
+            FROM watch_progress wp
+            JOIN media m ON m.id = wp.media_id
+            WHERE wp.profile_id=? AND m.type IN ('series', 'anime') {date_filter}
+            GROUP BY day_str
+            ORDER BY ep_count DESC LIMIT 1
+        """, [profile_id] + date_params).fetchone()
     most_episodes_in_day = ep_day_rows["ep_count"] if ep_day_rows else 0
 
     # 4. Hourly Viewing Matrix & Day-of-Week

@@ -3043,9 +3043,10 @@ const ContentRow = {
       <div class="row-scroller-wrapper">
         <div class="top10-scroller" ref="scrollerRef" @scroll="onRowScroll">
           <div
-            v-for="item in visibleItems"
+            v-for="(item, i) in visibleItems"
             :key="getItemKey(item)"
             class="top10-card-wrapper"
+            :style="'--i:' + i"
             @click="$emit('card-click', item, row)"
           >
             <div class="top10-rank-number" :data-rank="item.rank">{{ item.rank }}</div>
@@ -6181,7 +6182,8 @@ const SettingsPage = {
             <span>Media Scanner Paths</span>
           </div>
           <div class="settings-group">
-            <div class="settings-desc" style="margin-bottom:0.75rem">Local directories scanned for video files, grouped by category. Order sets scan priority.</div>
+            <div class="settings-desc" style="margin-bottom:0.5rem">Local directories scanned for video files, grouped by category. Order sets scan priority.</div>
+            <div class="settings-warn" style="margin-bottom:0.85rem"><i class="ph ph-warning" style="margin-right:5px"></i><strong>Notice:</strong> Removing a folder path or drive will remove its indexed media from your library and permanently clear linked watch progress, play stats, and favorites.</div>
 
               <!-- Important Warning – Folder Selection & Accepted Naming Formats Banner -->
               <div class="folder-warning-banner">
@@ -6835,7 +6837,7 @@ const SettingsPage = {
               </button>
             </div>
 
-            <div v-else class="unmatched-container">
+            <div v-else class="unmatched-container recache-table-scrollable">
               <table class="unmatched-table">
                 <thead>
                   <tr>
@@ -7217,9 +7219,8 @@ const SettingsPage = {
             <!-- Cache row -->
             <div class="settings-row" id="settings-cache-row">
               <div class="settings-label-container">
-                <div class="settings-label">Cached Metadata, Images & Database Media</div>
-                <div class="settings-desc">Wipes all cached artwork files, JSON metadata, and removes all library media from the database so a fresh rescan repopulates from scratch.</div>
-                <div class="settings-warn"><i class="ph ph-warning" style="margin-right:5px"></i><strong>This also permanently deletes:</strong> watch history, play stats, favorites, and playlist items. These cannot be recovered.</div>
+                <div class="settings-label">Cached Metadata, Images & Artwork</div>
+                <div class="settings-desc">Wipes cached posters, backdrops, thumbnails, subtitles, and temporary files from disk to free up storage. Your media library, watch progress, and stats remain safe and preserved.</div>
                 <div style="font-size:0.85rem;color:var(--text-primary);font-weight:700;margin-top:4px">
                   Current Cache Usage: <span style="color:var(--accent)">{{ cacheInfo.size_formatted || '0 KB' }}</span> ({{ cacheInfo.file_count || 0 }} files)
                 </div>
@@ -8065,19 +8066,56 @@ const SettingsPage = {
 
     async function removePath(cat, idx) {
       const p = form.value.media_paths[cat][idx];
+      const driveMatch = (p.match(/^[a-zA-Z]:/) || [])[0];
+      const driveLetter = driveMatch ? driveMatch.toUpperCase() : "";
+
+      // Count remaining paths on the same drive across all categories
+      let totalPathsOnDrive = 0;
+      for (const c of Object.keys(form.value.media_paths || {})) {
+        for (const otherP of (form.value.media_paths[c] || [])) {
+          if (driveLetter && (otherP.match(/^[a-zA-Z]:/) || [])[0]?.toUpperCase() === driveLetter) {
+            totalPathsOnDrive++;
+          }
+        }
+      }
+      const isLastOnDrive = driveLetter && totalPathsOnDrive <= 1;
+
+      const messageText = isLastOnDrive
+        ? `Remove path "${p}" from ${cat} scanner list?\n\n⚠️ Warning: This is the last folder on drive ${driveLetter}. Removing it will delete all media files linked to drive ${driveLetter} from your library. Associated watch progress, play stats, favorites, and playlists will also be permanently cleared.`
+        : `Remove path "${p}" from ${cat} scanner list?\n\n⚠️ Warning: All media indexed from this folder will be removed from your library. Associated watch progress, play stats, favorites, and playlists will also be permanently cleared.`;
+
       const ok = await customConfirm({
         title: "Remove Media Path",
-        message: `Remove path "${p}" from ${cat} scanner list?`,
-        icon: "ph ph-folder-minus",
+        message: messageText,
+        icon: "ph ph-trash",
         danger: true,
-        okText: "Remove Path"
+        okText: "Remove & Clear Media",
+        cancelText: "Cancel"
       });
       if (!ok) return;
-      form.value.media_paths[cat].splice(idx, 1);
-      // Also remove from disabled_paths if present
-      const di = (form.value.disabled_paths[cat] || []).indexOf(p);
-      if (di !== -1) form.value.disabled_paths[cat].splice(di, 1);
+
+      try {
+        const res = await API.post("/api/settings/remove-path", {
+          path: p,
+          category: cat,
+          clear_drive: isLastOnDrive,
+          drive_letter: driveLetter
+        });
+        form.value.media_paths[cat].splice(idx, 1);
+        const di = (form.value.disabled_paths[cat] || []).indexOf(p);
+        if (di !== -1) form.value.disabled_paths[cat].splice(di, 1);
+        initialFormJson.value = JSON.stringify(form.value);
+        await validatePaths();
+        await checkDrivesHealth();
+        addToast(`Removed "${p}" and cleared ${res?.deleted_count || 0} media items & stats`, "success");
+      } catch (err) {
+        form.value.media_paths[cat].splice(idx, 1);
+        const di = (form.value.disabled_paths[cat] || []).indexOf(p);
+        if (di !== -1) form.value.disabled_paths[cat].splice(di, 1);
+        addToast("Removed path from list — click Save Settings to apply", "info");
+      }
     }
+
 
     function movePath(cat, idx, direction) {
       const target = idx + direction;
@@ -8208,7 +8246,7 @@ const SettingsPage = {
           _API_CACHE.clear();
         }
         const res = await API.del("/api/system/cache");
-        addToast(`Cache & media database cleared! (${res.cleared || 0} files removed) — starting fresh scan…`, "success");
+        addToast(`Artwork & metadata cache cleared (${res.cleared || 0} files removed). Media and watch stats remain safe.`, "success");
         await loadCacheInfo();
         if (typeof loadUnmatched === "function") {
           await loadUnmatched();
@@ -8216,9 +8254,6 @@ const SettingsPage = {
         if (typeof loadNeedsRecache === "function") {
           await loadNeedsRecache();
         }
-        // Signal HomePage to auto-start a scan when we arrive there
-        store.pendingScanAfterCacheCleared = true;
-        router.push("/");
       } catch (e) {
         addToast("Failed to clear cache", "error");
       } finally {
@@ -8346,7 +8381,7 @@ const SettingsPage = {
     const recachingAll = ref(false);
     const recacheProgress = ref({ current: 0, total: 0, currentTitle: "" });
     const recachingMap = ref({});
-    const hideOfflineRecache = ref(localStorage.getItem("capsstream_hide_offline_recache") === "true");
+    const hideOfflineRecache = ref(true);
 
     watch(hideOfflineRecache, (val) => {
       try {
@@ -18524,7 +18559,7 @@ const App = {
               </button>
             </div>
 
-            <div style="font-size:0.92rem;color:var(--text-secondary);line-height:1.5;margin-bottom:1.5rem">
+            <div style="font-size:0.92rem;color:var(--text-secondary);line-height:1.5;margin-bottom:1.5rem;white-space:pre-line">
               {{ confirmState.message }}
             </div>
 

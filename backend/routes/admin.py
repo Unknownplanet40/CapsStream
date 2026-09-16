@@ -61,8 +61,26 @@ def api_post_settings():
             return jsonify({"error": result}), 500
         return jsonify({"error": "Administrator privileges required to change system settings"}), 403
 
+    from backend.db.media import clear_media_by_path, prune_unconfigured_drive_media
+    old_cfg = load_config()
+    old_paths = set(
+        os.path.normcase(os.path.normpath(p)).replace("\\", "/").rstrip("/")
+        for plist in (old_cfg.get("media_paths") or {}).values()
+        if isinstance(plist, list) for p in plist if p
+    )
+
     ok, result = save_config(data)
     if ok:
+        new_paths = set(
+            os.path.normcase(os.path.normpath(p)).replace("\\", "/").rstrip("/")
+            for plist in (data.get("media_paths") or {}).values()
+            if isinstance(plist, list) for p in plist if p
+        )
+        removed_paths = old_paths - new_paths
+        for rp in removed_paths:
+            clear_media_by_path(rp)
+        prune_unconfigured_drive_media()
+
         try:
             from .media import bust_home_cache
             bust_home_cache()
@@ -72,6 +90,53 @@ def api_post_settings():
             write_last_scheduled_scan(time.time())
         return jsonify({"ok": True, "config": result})
     return jsonify({"error": result}), 500
+
+
+@admin_bp.route("/api/settings/remove-path", methods=["POST"])
+def api_remove_media_path():
+    require_admin()
+    from backend.settings import load_config, save_config
+    from backend.db.media import clear_media_by_path, prune_unconfigured_drive_media
+    data = request.json or {}
+    path = data.get("path", "").strip()
+    category = data.get("category", "").strip()
+    clear_drive = bool(data.get("clear_drive", False))
+    drive_letter = data.get("drive_letter", "").strip()
+
+    if not path or not category:
+        return jsonify({"error": "Path and category are required"}), 400
+
+    cfg = load_config()
+    media_paths = cfg.get("media_paths", {})
+    cat_paths = media_paths.get(category, [])
+    norm_target = os.path.normcase(os.path.normpath(path)).replace("\\", "/").rstrip("/")
+
+    # Remove matching path from category
+    new_cat_paths = [p for p in cat_paths if os.path.normcase(os.path.normpath(p)).replace("\\", "/").rstrip("/") != norm_target]
+    media_paths[category] = new_cat_paths
+    cfg["media_paths"] = media_paths
+
+    # Also remove from disabled_paths if present
+    disabled_paths = cfg.get("disabled_paths", {})
+    if category in disabled_paths:
+        disabled_paths[category] = [p for p in disabled_paths[category] if os.path.normcase(os.path.normpath(p)).replace("\\", "/").rstrip("/") != norm_target]
+        cfg["disabled_paths"] = disabled_paths
+
+    save_config(cfg)
+
+    # Clear media
+    deleted_count = clear_media_by_path(path)
+    if clear_drive and drive_letter:
+        deleted_count += clear_media_by_path(drive_letter)
+
+    deleted_count += prune_unconfigured_drive_media()
+
+    return jsonify({
+        "ok": True,
+        "path": path,
+        "category": category,
+        "deleted_count": deleted_count,
+    })
 
 
 @admin_bp.route("/api/settings/test-api", methods=["POST"])
@@ -807,18 +872,10 @@ def api_system_drives_status():
             if not is_p_disabled:
                 drives_by_letter[d_key]["all_disabled"] = False
 
-    # Also discover drives containing indexed media files that may not be in media_paths
+    # Only attribute indexed media categories to drives that are actively configured in media_paths
     for dl, cat in db_drives:
         d_key = dl.upper()
-        if d_key not in drives_by_letter:
-            drive_root = (dl + "\\") if (os.name == "nt" and len(dl) == 2 and dl[1] == ":") else dl
-            drives_by_letter[d_key] = {
-                "drive_letter": dl,
-                "paths": [drive_root],
-                "categories": {cat},
-                "all_disabled": False,
-            }
-        else:
+        if d_key in drives_by_letter:
             drives_by_letter[d_key]["categories"].add(cat)
 
     drives_list = []
