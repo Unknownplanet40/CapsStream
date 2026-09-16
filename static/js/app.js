@@ -5562,7 +5562,7 @@ const SettingsPage = {
         <main class="settings-content">
 
         <!-- ══════ Updates Card (Moved to Top) ══════ -->
-        <div class="settings-section" id="settings-updates-section" :class="{ 'update-section-disabled': sysInfo?.is_dev }">
+        <div class="settings-section" id="settings-updates-section" :class="{ 'update-section-disabled': sysInfo?.is_dev }" v-if="isAdmin">
           <div class="settings-section-title">
             <i class="ph ph-arrow-circle-up" :style="{ color: sysInfo?.is_dev ? '#fbbf24' : 'var(--accent)' }"></i>
             <span>Updates &amp; Version</span>
@@ -6204,7 +6204,7 @@ const SettingsPage = {
         </div>
 
         <!-- ══════ Media Scanner Paths (Full Width) ══════ -->
-        <div class="settings-section" id="settings-paths-section">
+        <div class="settings-section" id="settings-paths-section" v-if="isAdmin">
           <div class="settings-section-title">
             <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
             <span>Media Scanner Paths</span>
@@ -6494,7 +6494,7 @@ const SettingsPage = {
           </div>
 
           <!-- 2a. Connected Storage & Drive Health -->
-          <div class="settings-section" id="settings-storage-health-section">
+          <div class="settings-section" id="settings-storage-health-section" v-if="isAdmin">
             <div class="settings-section-title" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
               <div style="display:flex; align-items:center; gap:8px;">
                 <i class="ph ph-hard-drives" style="color:var(--accent)"></i>
@@ -6584,7 +6584,7 @@ const SettingsPage = {
         <!-- ══════ Side-by-Side: Library Scanning & Metadata Providers ══════ -->
         <div class="settings-grid-row">
           <!-- 2b. Library & Scanning -->
-          <div class="settings-section" id="settings-scanning-section">
+          <div class="settings-section" id="settings-scanning-section" v-if="isAdmin">
             <div class="settings-section-title">
               <i class="ph ph-file-video" style="color:var(--accent)"></i>
               <span>Library & Scanning</span>
@@ -6660,7 +6660,7 @@ const SettingsPage = {
           </div>
 
           <!-- ══════ Metadata Providers ══════ -->
-          <div class="settings-section" id="settings-metadata-section">
+          <div class="settings-section" id="settings-metadata-section" v-if="isAdmin">
             <div class="settings-section-title">
               <i class="ph ph-database" style="color:var(--accent)"></i>
               <span>Metadata Providers & API Keys</span>
@@ -6725,7 +6725,7 @@ const SettingsPage = {
         </div>
 
                 <!-- 2c. Unmatched Media & Fix Match Inspector -->
-        <div class="settings-section" id="settings-unmatched-section">
+        <div class="settings-section" id="settings-unmatched-section" v-if="isAdmin">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
               <i class="ph ph-warning-circle" style="color:var(--accent)"></i>
@@ -6799,7 +6799,7 @@ const SettingsPage = {
         </div>
 
         <!-- 2d. Missing Artwork & Re-cache Manager -->
-        <div class="settings-section" id="settings-recache-section">
+        <div class="settings-section" id="settings-recache-section" v-if="isAdmin">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
               <i class="ph ph-image-broken" style="color:var(--accent)"></i>
@@ -6928,7 +6928,7 @@ const SettingsPage = {
         <!-- ══════ Side-by-Side: Web Browser & System Config and Server Config ══════ -->
         <div class="settings-grid-row">
           <!-- Web Browser & System Config Card -->
-          <div class="settings-section" id="settings-browser-section">
+          <div class="settings-section" id="settings-browser-section" v-if="isAdmin">
             <div class="settings-section-title">
               <i class="ph ph-globe-hemisphere-west" style="color:var(--accent)"></i>
               <span>Web Browser & System Configuration</span>
@@ -6971,7 +6971,7 @@ const SettingsPage = {
           </div>
 
           <!-- Server Configuration Card -->
-          <div class="settings-section" id="settings-server-section">
+          <div class="settings-section" id="settings-server-section" v-if="isAdmin">
             <div class="settings-section-title">
               <i class="ph ph-hard-drives" style="color:var(--accent)"></i>
               <span>Server Configuration</span>
@@ -7090,7 +7090,7 @@ const SettingsPage = {
         </div>
 
                 <!-- ══════ Outgoing Network Activity ══════ -->
-        <div class="settings-section" id="settings-network-section">
+        <div class="settings-section" id="settings-network-section" v-if="isAdmin">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
               <i class="ph ph-broadcast" style="color:var(--accent)"></i>
@@ -7242,7 +7242,7 @@ const SettingsPage = {
           </div>
         </div>
                 <!-- ══════ Storage, Cache & System Backup (Full Width) ══════ -->
-        <div class="settings-section" id="settings-backup-section">
+        <div class="settings-section" id="settings-backup-section" v-if="isAdmin">
           <div class="settings-section-title">
             <i class="ph ph-archive-box" style="color:var(--accent)"></i>
             <span>Storage, Cache & System Backup</span>
@@ -7330,7 +7330,7 @@ const SettingsPage = {
           </div>
         </div>
                 <!-- ══════ System Maintenance & Server Control ══════ -->
-        <div class="settings-section" id="settings-danger-section">
+        <div class="settings-section" id="settings-danger-section" v-if="isAdmin">
           <div class="settings-section-title">
             <i class="ph ph-warning-octagon" style="color:#ef4444"></i>
             <span style="color:#ef4444">System Maintenance & Server Control</span>
@@ -7670,6 +7670,8 @@ const SettingsPage = {
       }
       return items;
     });
+
+    const isAdmin = computed(() => !!(store.profile?.is_admin || !store.profile));
 
     const loading = ref(true);
     const saving = ref(false);
@@ -8969,6 +8971,7 @@ const SettingsPage = {
     }
 
     return {
+      isAdmin,
       isRefreshingDrives,
       refreshDrivesHealth,
       activeTab,
