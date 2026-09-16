@@ -26,77 +26,82 @@ Point CapsStream to your media folders. It automatically matches your titles aga
 <p align="center">
   <img src="static/img/Previews/home-page-hero-backdrop.png" alt="Home Page Hero" width="100%">
 </p>
-<p align="center"><em>Home — Cinematic hero backdrop banner with instant playback & details</em></p>
+<p align="center"><em>Home — Cinematic hero backdrop banner with instant playback &amp; details</em></p>
 
-<p align="center">
-  <img src="static/img/Previews/home-page-top-10.png" alt="Home Top 10" width="100%">
-</p>
-<p align="center"><em>Top 10 — Ranked Top 10 carousel with prominent stylized typographic numbers</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/home-page-continue-watching.png" alt="Continue Watching" width="100%">
-</p>
-<p align="center"><em>Continue Watching — Dedicated resume shelf with exact visual progress tracking</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/movie-library.png" alt="Movie Library" width="100%">
-</p>
-<p align="center"><em>Movies — Full movie collection with interactive genre chips, ratings, and video quality badges</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/series-library.png" alt="Series Library" width="100%">
-</p>
-<p align="center"><em>Series & Anime — Organized TV library with season counts, episode badges, and missing episode tracking</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/details-view.png" alt="Details View" width="100%">
-</p>
-<p align="center"><em>Details — Full metadata view with backdrop artwork, synopsis, cast roster, and interactive season drawer</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/player-playback.png" alt="Video Player" width="100%">
-</p>
-<p align="center"><em>Player — Modern floating glassmorphic dock controller with audio/subtitle track pickers and speed controls</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/player-resume-playback.png" alt="Resume Playback" width="100%">
-</p>
-<p align="center"><em>Resume Playback — Non-intrusive resume card allowing seamless pickup right where you left off</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/next-episode-card.png" alt="Next Episode Overlay" width="100%">
-</p>
-<p align="center"><em>Next Episode Overlay — 1:1 Netflix-style bottom-right floating card with circular countdown SVG ring and replay action</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/keyboard-shortcuts.png" alt="Keyboard Shortcuts" width="100%">
-</p>
-<p align="center"><em>Shortcuts Cheatsheet — Real-time searchable keyboard shortcuts cheatsheet modal (Press '?' anytime)</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/missing-episodes.png" alt="Missing Episodes" width="100%">
-</p>
-<p align="center"><em>Missing Episodes — TMDb-matched gap detection highlighting missing episodes and seasons at a glance</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/profiles-screen.png" alt="Profiles" width="100%">
-</p>
-<p align="center"><em>Profiles — Multi-profile support with customizable avatars, PIN protection, and dedicated Kids mode</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/achievements-trophies.png" alt="Achievements & Trophies" width="100%">
-</p>
-<p align="center"><em>Achievements — Unlock streaming milestones, earn trophies, and level up your viewer profile</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/watch-stats.png" alt="Watch Stats" width="100%">
-</p>
-<p align="center"><em>Stats & Analytics — Track total hours watched, weekly viewing trends, and library breakdown</em></p>
-
-<p align="center">
-  <img src="static/img/Previews/settings-panel.png" alt="Settings" width="100%">
-</p>
-<p align="center"><em>Settings — Configure media library paths, TMDb API keys, hardware acceleration, and preferences</em></p>
+<table width="100%">
+  <tr>
+    <td width="50%" align="center">
+      <img src="static/img/Previews/home-page-top-10.png" alt="Home Top 10" width="100%"><br>
+      <em>Top 10 — Ranked Top 10 carousel with prominent stylized typographic numbers</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="static/img/Previews/home-page-continue-watching.png" alt="Continue Watching" width="100%"><br>
+      <em>Continue Watching — Dedicated resume shelf with exact visual progress tracking</em>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="static/img/Previews/movie-library.png" alt="Movie Library" width="100%"><br>
+      <em>Movies — Full movie collection with interactive genre chips, ratings, and video quality badges</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="static/img/Previews/series-library.png" alt="Series Library" width="100%"><br>
+      <em>Series &amp; Anime — Organized TV library with season counts, episode badges, and missing episode tracking</em>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="static/img/Previews/details-view.png" alt="Details View" width="100%"><br>
+      <em>Details — Full metadata view with backdrop artwork, synopsis, cast roster, and interactive season drawer</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="static/img/Previews/player-playback.png" alt="Video Player" width="100%"><br>
+      <em>Player — Modern floating glassmorphic dock controller with audio/subtitle track pickers and speed controls</em>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="static/img/Previews/player-resume-playback.png" alt="Resume Playback" width="100%"><br>
+      <em>Resume Playback — Non-intrusive resume card allowing seamless pickup right where you left off</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="static/img/Previews/next-episode-card.png" alt="Next Episode Overlay" width="100%"><br>
+      <em>Next Episode Overlay — Netflix-style bottom-right floating card with circular countdown SVG ring and replay action</em>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="static/img/Previews/keyboard-shortcuts.png" alt="Keyboard Shortcuts" width="100%"><br>
+      <em>Shortcuts Cheatsheet — Real-time searchable keyboard shortcuts cheatsheet modal (Press '?' anytime)</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="static/img/Previews/missing-episodes.png" alt="Missing Episodes" width="100%"><br>
+      <em>Missing Episodes — TMDb-matched gap detection highlighting missing episodes and seasons at a glance</em>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="static/img/Previews/profiles-screen.png" alt="Profiles" width="100%"><br>
+      <em>Profiles — Multi-profile support with customizable avatars, PIN protection, and dedicated Kids mode</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="static/img/Previews/achievements-trophies.png" alt="Achievements &amp; Trophies" width="100%"><br>
+      <em>Achievements — Unlock streaming milestones, earn trophies, and level up your viewer profile</em>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="static/img/Previews/watch-stats.png" alt="Watch Stats" width="60%"><br>
+      <em>Stats &amp; Analytics — Track total hours watched, weekly viewing trends, and library breakdown</em>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="static/img/Previews/settings-panel.png" alt="Settings" width="60%"><br>
+      <em>Settings — Configure media library paths, TMDb API keys, hardware acceleration, and preferences</em>
+    </td>
+  </tr>
+</table>
 
 ---
 
