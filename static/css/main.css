@@ -17130,6 +17130,120 @@ kbd.about-kbd {
   }
 }
 
+/* ─── Server Diagnostics & Maintenance Controls ────────────── */
+.diagnostics-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.diagnostics-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+  animation: diagPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes diagPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.diagnostics-pills-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.diag-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+
+.diag-stat-pill i {
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+.diag-key {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.diag-val {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.diag-stat-pill.diag-warn {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.1);
+}
+.diag-stat-pill.diag-warn i,
+.diag-stat-pill.diag-warn .diag-val {
+  color: #f59e0b;
+}
+
+.diag-stat-pill.diag-crit {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+}
+.diag-stat-pill.diag-crit i,
+.diag-stat-pill.diag-crit .diag-val {
+  color: #ef4444;
+}
+
+.server-restart-notice-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  animation: diagPulse 2s ease-in-out infinite;
+}
+
+.btn-restart-recommended {
+  background: #f59e0b !important;
+  color: #0f172a !important;
+  border-color: #f59e0b !important;
+  font-weight: 600 !important;
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.35);
+}
+.btn-restart-recommended:hover {
+  background: #d97706 !important;
+  border-color: #d97706 !important;
+  color: #fff !important;
+}
+
 /* ─── Playlists & Queue System ─────────────────────────────── */
 
 .player-queue-badge {

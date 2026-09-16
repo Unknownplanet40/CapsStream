@@ -203,8 +203,44 @@ class TestRouteAdmin(unittest.TestCase):
         mock_clear.assert_any_call("E:")
         mock_prune.assert_called_once()
 
+    @patch("backend.utils.diagnostics.get_system_diagnostics")
+    def test_api_system_diagnostics(self, mock_get_diag):
+        """Verify GET /api/system/diagnostics returns performance metrics."""
+        mock_get_diag.return_value = {
+            "ok": True,
+            "cpu_pct": 18.5,
+            "ram_used_gb": 4.2,
+            "ram_total_gb": 16.0,
+            "ram_pct": 26,
+            "active_streams": 2,
+            "db_size": "12.5 MB",
+            "db_size_bytes": 13107200,
+        }
+        res = self.client.get("/api/system/diagnostics")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data.get("ok"))
+        self.assertEqual(data.get("cpu_pct"), 18.5)
+        self.assertEqual(data.get("ram_pct"), 26)
+        self.assertEqual(data.get("active_streams"), 2)
+        self.assertEqual(data.get("db_size"), "12.5 MB")
+
+    @patch("backend.routes.admin.require_admin")
+    @patch("backend.routes.admin._graceful_shutdown")
+    @patch("backend.updater.spawn_restart_helper")
+    def test_api_system_restart(self, mock_helper, mock_shutdown, mock_admin):
+        """Verify POST /api/system/restart triggers restart helper and graceful shutdown."""
+        res = self.client.post("/api/system/restart")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data.get("ok"))
+        self.assertIn("restarting", data.get("message", "").lower())
+        mock_helper.assert_called_once()
+        mock_shutdown.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

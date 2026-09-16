@@ -7305,6 +7305,41 @@ const SettingsPage = {
             <span style="color:#ef4444">System Maintenance & Server Control</span>
           </div>
           <div class="settings-group">
+            <!-- Live Server Diagnostics -->
+            <div class="settings-row" id="settings-diagnostics-row" style="padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,0.06)">
+              <div class="settings-label-container">
+                <div class="settings-label" style="color:var(--text-primary);display:flex;align-items:center;gap:8px">
+                  <span>Live Diagnostics</span>
+                  <span class="diagnostics-live-pill">
+                    <span class="diagnostics-live-dot"></span> Live
+                  </span>
+                </div>
+                <div class="settings-desc">Real-time resource utilization, active playback streams, and database size.</div>
+              </div>
+              <div class="diagnostics-pills-row">
+                <div class="diag-stat-pill" :class="{ 'diag-warn': diagStats.cpu_pct > 70, 'diag-crit': diagStats.cpu_pct > 90 }" title="System CPU load">
+                  <i class="ph ph-cpu"></i>
+                  <span class="diag-key">CPU</span>
+                  <span class="diag-val">{{ diagStats.cpu_pct !== null ? diagStats.cpu_pct + '%' : '—' }}</span>
+                </div>
+                <div class="diag-stat-pill" :class="{ 'diag-warn': diagStats.ram_pct > 85 }" title="System RAM consumption">
+                  <i class="ph ph-memory"></i>
+                  <span class="diag-key">RAM</span>
+                  <span class="diag-val">{{ diagStats.ram_used_gb !== null ? diagStats.ram_used_gb + ' / ' + diagStats.ram_total_gb + ' GB' : '—' }}</span>
+                </div>
+                <div class="diag-stat-pill" title="Currently active streaming or transcoding playback sessions">
+                  <i class="ph ph-play-circle"></i>
+                  <span class="diag-key">Streams</span>
+                  <span class="diag-val">{{ diagStats.active_streams }} active</span>
+                </div>
+                <div class="diag-stat-pill" title="SQLite database file size">
+                  <i class="ph ph-database"></i>
+                  <span class="diag-key">Database</span>
+                  <span class="diag-val">{{ diagStats.db_size || '—' }}</span>
+                </div>
+              </div>
+            </div>
+
             <!-- Fresh Start & Reset -->
             <div class="settings-row" id="settings-reset-section">
               <div class="settings-label-container">
@@ -7317,21 +7352,39 @@ const SettingsPage = {
               </button>
             </div>
 
-            <!-- Server Control & Shutdown -->
+            <!-- Server Control & Shutdown / Restart -->
             <div class="settings-row" id="settings-shutdown-section" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:12px;padding-top:16px">
               <div class="settings-label-container">
                 <div class="settings-label" style="color:var(--text-primary);display:flex;align-items:center;gap:8px">
-                  <span>Server Control & Shutdown</span>
+                  <span>Server Control</span>
                   <span class="server-status-pill online" style="font-size:0.7rem;padding:2px 8px">
                     <span class="status-dot"></span> Active
                   </span>
+                  <span v-if="isRestartNeeded" class="server-restart-notice-pill">
+                    <i class="ph ph-arrow-counter-clockwise"></i> Restart Recommended
+                  </span>
                 </div>
-                <div class="settings-desc">Gracefully stops the backend server process, flushes SQLite databases, and closes the browser window cleanly.</div>
+                <div class="settings-desc">
+                  {{ isRestartNeeded ? 'Pending configuration changes (host/port or system settings) require a restart to take effect.' : 'Restart the backend process to reload services, or gracefully stop the server and close the application.' }}
+                </div>
               </div>
-              <button class="btn btn-primary danger" @click="showShutdownModal = true" id="btn-open-shutdown">
-                <i class="ph ph-power" style="margin-right:6px"></i>
-                Shutdown Server
-              </button>
+              <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <button
+                  class="btn"
+                  :class="isRestartNeeded ? 'btn-restart-recommended' : 'btn-secondary'"
+                  @click="showRestartModal = true"
+                  :disabled="isRestarting || restartPending"
+                  id="btn-open-restart"
+                  title="Restart the CapsStream backend server process"
+                >
+                  <i :class="(isRestarting || restartPending) ? 'ph ph-circle-notch' : 'ph ph-arrow-clockwise'" :style="(isRestarting || restartPending) ? 'animation:spin 1s linear infinite' : ''" style="margin-right:6px"></i>
+                  {{ (isRestarting || restartPending) ? 'Restarting...' : 'Restart Server' }}
+                </button>
+                <button class="btn btn-primary danger" @click="showShutdownModal = true" :disabled="isRestarting || restartPending" id="btn-open-shutdown">
+                  <i class="ph ph-power" style="margin-right:6px"></i>
+                  Shutdown Server
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -7397,6 +7450,55 @@ const SettingsPage = {
             <button class="btn btn-secondary btn-lg" @click="closeCurrentWindow">
               <i class="ph ph-x-circle" style="margin-right:6px"></i> Close Window
             </button>
+          </div>
+      </div>
+
+      <!-- Restart Confirmation Modal -->
+      <div v-if="showRestartModal" class="modal-backdrop" style="z-index:500;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showRestartModal = false">
+        <div class="shortcuts-modal-card" style="max-width:480px" @click.stop>
+          <div class="shortcuts-modal-inner" style="text-align:left">
+            <div class="shortcuts-modal-header" style="margin-bottom:1rem;border-bottom-color:rgba(251,191,36,0.3)">
+              <div class="shortcuts-header-title" style="color:#fbbf24">
+                <i class="ph ph-arrow-clockwise" style="font-size:1.6rem"></i>
+                <span>Restart Server?</span>
+              </div>
+              <button class="shortcuts-close-btn" @click="showRestartModal = false">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+
+            <div style="font-size:0.9rem;color:var(--text-secondary);line-height:1.5;margin-bottom:1rem">
+              Are you sure you want to restart the CapsStream server? Active playback streams will briefly disconnect, and this page will automatically reload once the server comes back online.
+            </div>
+
+            <div class="shortcuts-modal-footer" style="margin-top:1.5rem;display:flex;justify-content:flex-end;gap:10px">
+              <button class="btn btn-secondary" @click="showRestartModal = false">Cancel</button>
+              <button class="btn btn-primary" style="background:#f59e0b;border-color:#f59e0b;color:#000;font-weight:600" @click="executeRestartServer" id="btn-confirm-restart">
+                <i class="ph ph-arrow-clockwise" style="margin-right:6px"></i> Yes, Restart Server
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fullscreen Restart Overlay -->
+      <div v-if="isRestarting" class="shutdown-overlay">
+        <div class="shutdown-modal-box" style="border-color:rgba(245,158,11,0.4);box-shadow:0 24px 80px rgba(0,0,0,0.9), 0 0 40px rgba(245,158,11,0.2)">
+          <div class="shutdown-icon-wrap" style="color:#f59e0b;border-color:rgba(245,158,11,0.5);background:rgba(245,158,11,0.15);box-shadow:0 0 24px rgba(245,158,11,0.35)">
+            <i class="ph ph-arrow-clockwise" style="animation:spin 1.5s linear infinite"></i>
+          </div>
+
+          <h2 class="shutdown-title">
+            Restarting Server...
+          </h2>
+
+          <p class="shutdown-desc">
+            Restarting CapsStream backend process. The application will reconnect and reload automatically.
+          </p>
+
+          <div class="shutdown-countdown-pill" style="color:#f59e0b;background:rgba(245,158,11,0.15)">
+            <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite"></i>
+            <span>Waiting for server to come back online...</span>
           </div>
         </div>
       </div>
@@ -8005,6 +8107,7 @@ const SettingsPage = {
       loadNetworkRequests();
       loadAutoBackupStatus();
       if (!store.profile?.is_kids) loadKidsOverrides();
+      startDiagPolling();
       window.addEventListener("beforeunload", handleBeforeUnload);
       // Auto-run the update check when arriving from the update banner
       if (store.pendingUpdateCheck) {
@@ -8018,6 +8121,7 @@ const SettingsPage = {
     onUnmounted(() => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       if (animeDetectTimer) clearInterval(animeDetectTimer);
+      stopDiagPolling();
     });
 
     async function testApi(provider, key) {
@@ -8599,6 +8703,96 @@ const SettingsPage = {
     }
 
 
+    // ─── Live Server Diagnostics ─────────────────────────────────
+    const diagStats = ref({
+      cpu_pct: null,
+      ram_used_gb: null,
+      ram_total_gb: null,
+      ram_pct: 0,
+      active_streams: 0,
+      db_size: "",
+    });
+    let diagTimer = null;
+
+    async function fetchDiagnostics() {
+      try {
+        const data = await API.get("/api/system/diagnostics");
+        if (data && data.ok) {
+          diagStats.value = {
+            cpu_pct: data.cpu_pct,
+            ram_used_gb: data.ram_used_gb,
+            ram_total_gb: data.ram_total_gb,
+            ram_pct: data.ram_pct,
+            active_streams: data.active_streams,
+            db_size: data.db_size,
+          };
+        }
+      } catch (e) {}
+    }
+
+    function startDiagPolling() {
+      stopDiagPolling();
+      fetchDiagnostics();
+      diagTimer = setInterval(fetchDiagnostics, 3000);
+    }
+
+    function stopDiagPolling() {
+      if (diagTimer) {
+        clearInterval(diagTimer);
+        diagTimer = null;
+      }
+    }
+
+    // ─── Server Restart Management ──────────────────────────────
+    const showRestartModal = ref(false);
+    const isRestarting = ref(false);
+
+    const isRestartNeeded = computed(() => {
+      // 1. Host or port modified in settings form compared to active bind
+      if (sysInfo.value?.server_addr) {
+        const parts = sysInfo.value.server_addr.split(":");
+        const currentHost = parts[0];
+        const currentPort = parts[1];
+        const formHost = (form.value?.host || "").trim();
+        const formPort = String(form.value?.port || "");
+        if (formHost && currentHost && formHost !== currentHost) return true;
+        if (formPort && currentPort && formPort !== currentPort) return true;
+      }
+      // 2. Or update pending restart
+      if (updateState.value?.status === "up_to_date" && /restart CapsStream/i.test(updateState.value?.message || "")) {
+        return true;
+      }
+      return false;
+    });
+
+    async function executeRestartServer() {
+      if (isRestarting.value) return;
+      showRestartModal.value = false;
+      isRestarting.value = true;
+      _stopAllPolling();
+      stopDiagPolling();
+
+      try {
+        await API.post("/api/system/restart");
+      } catch (e) {
+        // Expected — server exits immediately after spawning restart helper
+      }
+
+      sessionStorage.setItem("cs_server_restarted", "1");
+      // Poll /api/system/info every 1.5s until the server is back up
+      const check = setInterval(async () => {
+        try {
+          const res = await fetch("/api/system/info", { cache: "no-store" });
+          if (res.ok) {
+            clearInterval(check);
+            sessionStorage.setItem("cs_server_restarted", "1");
+            location.href = location.origin + location.pathname + "?v=" + Date.now();
+          }
+        } catch (e) {}
+      }, 1500);
+    }
+
+
     // ─── Server Shutdown & Power Management ─────────────────────
     const showShutdownModal = ref(false);
     const isShuttingDown = ref(false);
@@ -8613,6 +8807,7 @@ const SettingsPage = {
         clearInterval(networkPollInterval);
         networkPollInterval = null;
       }
+      stopDiagPolling();
     }
 
     async function executeShutdown() {
@@ -8814,6 +9009,11 @@ const SettingsPage = {
       loadNetworkRequests,
       clearNetworkRequests,
       getServiceBadgeClass,
+      diagStats,
+      isRestartNeeded,
+      showRestartModal,
+      isRestarting,
+      executeRestartServer,
       showShutdownModal,
       isShuttingDown,
       shutdownCountdown,

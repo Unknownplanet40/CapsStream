@@ -223,6 +223,7 @@ def api_system_shutdown():
     return jsonify({"ok": True, "message": "Server shutting down cleanly"})
 
 
+@admin_bp.route("/api/system/restart", methods=["POST"])
 @admin_bp.route("/api/system/restart-after-update", methods=["POST"])
 def api_restart_after_update():
     require_admin()
@@ -232,7 +233,13 @@ def api_restart_after_update():
     except Exception as e:
         return jsonify({"ok": False, "error": f"Could not spawn restart helper: {e}"}), 500
     _graceful_shutdown()
-    return jsonify({"ok": True, "message": "Restarting to finish the update"})
+    return jsonify({"ok": True, "message": "Server restarting"})
+
+
+@admin_bp.route("/api/system/diagnostics", methods=["GET"])
+def api_system_diagnostics():
+    from backend.utils.diagnostics import get_system_diagnostics
+    return jsonify(get_system_diagnostics())
 
 
 # ─── Updates ──────────────────────────────────────────────────────────────────
