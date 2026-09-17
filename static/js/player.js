@@ -1510,7 +1510,7 @@ const PlayerPage = {
 
       <!-- Watch Together: Floating Reaction Picker Bar -->
       <transition name="fade">
-        <div v-if="wtRoom.code && !controlsHidden" class="wt-reaction-bar" @click.stop>
+        <div v-if="wtRoom.code && !controlsHidden" class="wt-reaction-bar" :class="{ 'chat-open': wtShowChat }" @click.stop>
           <button
             v-for="emoji in WT_REACTIONS"
             :key="emoji"
@@ -1795,6 +1795,11 @@ const PlayerPage = {
     const wtCopied = ref(false);
     let _wtSocket = null;
     let _wtDriftCheckInterval = null;
+    let _wtHeartbeatInterval = null;
+    let _applyingRemoteSync = false;
+    let _lastSyncPosition = 0;
+    let _lastSyncReceivedAt = 0;
+    let _pendingWtSync = null;
 
     const WT_REACTIONS = ["😂", "😱", "❤️", "🔥", "👏", "😭", "😲", "🤣"];
 
@@ -1807,13 +1812,40 @@ const PlayerPage = {
       document.head.appendChild(s);
     }
 
+    function _applySyncToVideo(targetPos, shouldPlay) {
+      const video = videoRef.value;
+      if (!video) {
+        _pendingWtSync = { targetPos, shouldPlay };
+        return;
+      }
+      _applyingRemoteSync = true;
+      if (typeof targetPos === "number" && targetPos >= 0) {
+        const drift = Math.abs(video.currentTime - targetPos);
+        // Snap immediately if paused, or if playing and drift exceeds 0.75s
+        if (!shouldPlay || drift > 0.75) {
+          try {
+            video.currentTime = targetPos;
+            currentTime.value = targetPos;
+            wtDrifted.value = false;
+          } catch (e) {}
+        }
+      }
+      if (shouldPlay && video.paused) {
+        video.play().catch(() => {});
+      } else if (!shouldPlay && !video.paused) {
+        video.pause();
+      }
+      setTimeout(() => {
+        _applyingRemoteSync = false;
+      }, 600);
+    }
+
     function _wtConnectSocket(onReady) {
       if (_wtSocket && _wtSocket.connected) {
         if (onReady) onReady(_wtSocket);
         return;
       }
       if (_wtSocket) {
-        // Socket instance exists, wait for connect event
         _wtSocket.once("connect", () => {
           if (onReady) onReady(_wtSocket);
         });
@@ -1839,13 +1871,21 @@ const PlayerPage = {
           wtRoom.isPlaying = data.is_playing || false;
           wtRoom.mediaId = data.media_id;
           wtRoom.mediaTitle = data.media_title;
-          wtRoom.isLeader = (data.leader_sid === _wtSocket.id);
+          wtRoom.mySid = data.your_sid || _wtSocket.id;
+          wtRoom.isLeader = (data.leader_sid === wtRoom.mySid) || (data.leader_sid === _wtSocket.id);
           wtRoom.following = !wtRoom.isLeader;
           wtRoom.chat = [];
           wtDrifted.value = false;
+          _lastSyncPosition = data.position || 0;
+          _lastSyncReceivedAt = Date.now();
           _startDriftCheck();
+          _startLeaderHeartbeat();
           if (typeof addToast === "function") {
             addToast(`Watch Together Room Active: ${data.code}`, "success");
+          }
+          // Follower: immediately align playback with the host
+          if (!wtRoom.isLeader) {
+            _applySyncToVideo(data.position, data.is_playing);
           }
         });
 
@@ -1854,32 +1894,36 @@ const PlayerPage = {
           if (data.member?.name && typeof addToast === "function") {
             addToast(`${data.member.name} joined Watch Together`, "info");
           }
+          // If we are the leader, broadcast fresh sync immediately so newcomer joins on exact frame
+          if (wtRoom.isLeader) {
+            wtEmitSync();
+          }
         });
 
         _wtSocket.on("member_left", (data) => {
           wtRoom.members = data.members || wtRoom.members;
-          // If we're now the leader (first member), update
-          if (data.leader_sid === _wtSocket.id) {
+          // If leadership transferred to us, take charge
+          const wasLeader = wtRoom.isLeader;
+          if (data.leader_sid && (data.leader_sid === wtRoom.mySid || data.leader_sid === _wtSocket.id)) {
             wtRoom.isLeader = true;
             wtRoom.following = false;
+            _startLeaderHeartbeat();
+            if (!wasLeader && typeof addToast === "function") {
+              addToast("You are now the Watch Together host", "info");
+            }
           }
         });
 
         _wtSocket.on("sync", (data) => {
-          if (!wtRoom.code || wtRoom.isLeader) return;
+          if (!wtRoom.code) return;
+          if (data.from_sid && data.from_sid === wtRoom.mySid) return;
+          if (wtRoom.isLeader) return; // Host controls playback
           wtRoom.position = data.position;
           wtRoom.isPlaying = data.is_playing;
+          _lastSyncPosition = data.position;
+          _lastSyncReceivedAt = Date.now();
           if (!wtRoom.following) return;
-          // Apply: seek if drift > 2s, otherwise let it slide
-          const video = videoRef.value;
-          if (!video) return;
-          const drift = Math.abs(video.currentTime - data.position);
-          if (drift > 2) {
-            video.currentTime = data.position;
-            wtDrifted.value = false;
-          }
-          if (data.is_playing && video.paused) video.play().catch(() => {});
-          if (!data.is_playing && !video.paused) video.pause();
+          _applySyncToVideo(data.position, data.is_playing);
         });
 
         _wtSocket.on("reaction", (data) => {
@@ -1940,6 +1984,7 @@ const PlayerPage = {
       if (_wtSocket && wtRoom.code) {
         _wtSocket.emit("leave_room");
       }
+      _stopLeaderHeartbeat();
       _stopDriftCheck();
       wtRoom.code = null;
       wtRoom.isLeader = false;
@@ -1959,14 +2004,33 @@ const PlayerPage = {
     }
 
     // Emit sync whenever leader plays/pauses/seeks
-    function wtEmitSync() {
-      if (!wtRoom.code || !wtRoom.isLeader || !_wtSocket) return;
+    function wtEmitSync(forcedPos, forcedPlay) {
+      if (!wtRoom.code || !wtRoom.isLeader || !_wtSocket || _applyingRemoteSync) return;
       const video = videoRef.value;
       if (!video) return;
+      const pos = typeof forcedPos === "number" ? forcedPos : video.currentTime;
+      const playing = typeof forcedPlay === "boolean" ? forcedPlay : !video.paused;
       _wtSocket.emit("sync", {
-        position: video.currentTime,
-        is_playing: !video.paused,
+        position: pos,
+        is_playing: playing,
       });
+    }
+
+    function _startLeaderHeartbeat() {
+      _stopLeaderHeartbeat();
+      if (!wtRoom.isLeader) return;
+      _wtHeartbeatInterval = setInterval(() => {
+        if (wtRoom.code && wtRoom.isLeader && videoRef.value && !videoRef.value.paused) {
+          wtEmitSync();
+        }
+      }, 5000);
+    }
+
+    function _stopLeaderHeartbeat() {
+      if (_wtHeartbeatInterval) {
+        clearInterval(_wtHeartbeatInterval);
+        _wtHeartbeatInterval = null;
+      }
     }
 
     function wtSendReaction(emoji) {
@@ -1984,8 +2048,11 @@ const PlayerPage = {
     function wtResync() {
       const video = videoRef.value;
       if (!video) return;
-      video.currentTime = wtRoom.position;
-      if (wtRoom.isPlaying && video.paused) video.play().catch(() => {});
+      let target = _lastSyncPosition;
+      if (wtRoom.isPlaying && _lastSyncReceivedAt) {
+        target += (Date.now() - _lastSyncReceivedAt) / 1000;
+      }
+      _applySyncToVideo(target, wtRoom.isPlaying);
       wtDrifted.value = false;
       wtRoom.following = true;
     }
@@ -1996,7 +2063,8 @@ const PlayerPage = {
       const el = document.createElement("span");
       el.className = "wt-reaction-float";
       el.textContent = emoji;
-      el.style.left = (Math.random() * 60 + 10) + "px";
+      const baseRight = wtShowChat.value ? 330 : 36;
+      el.style.right = (baseRight + Math.random() * 40 - 10) + "px";
       el.style.color = color || "#fff";
       wrapper.appendChild(el);
       setTimeout(() => el.remove(), 2600);
@@ -2010,8 +2078,12 @@ const PlayerPage = {
           return;
         }
         const video = videoRef.value;
-        if (!video || !wtRoom.position) return;
-        const drift = Math.abs(video.currentTime - wtRoom.position);
+        if (!video) return;
+        let expected = _lastSyncPosition;
+        if (wtRoom.isPlaying && _lastSyncReceivedAt) {
+          expected += (Date.now() - _lastSyncReceivedAt) / 1000;
+        }
+        const drift = Math.abs(video.currentTime - expected);
         wtDrifted.value = drift > 5;
       }, 2000);
     }
@@ -3026,6 +3098,7 @@ const PlayerPage = {
           currentTime.value = target;
         }
         saveProgressNow();
+        wtEmitSync(target, !videoRef.value?.paused);
       }, 120);
     }
 
@@ -3656,6 +3729,7 @@ const PlayerPage = {
     }
 
     function onVideoSeeked() {
+      wtEmitSync();
       // After a native video seek, decide how to realign the remote audio:
       //
       //  1. SLIDE — if the new position is still covered by the audio
@@ -4999,6 +5073,11 @@ const PlayerPage = {
       }
       bindPipListeners();
       syncTextTracks();
+      if (_pendingWtSync) {
+        const p = _pendingWtSync;
+        _pendingWtSync = null;
+        _applySyncToVideo(p.targetPos, p.shouldPlay);
+      }
       // ─── Web Audio API (Dialogue Boost & Night Mode) ─────────────
       if (audioEnhancerMode.value !== "off") {
         initWebAudio();
@@ -6619,6 +6698,7 @@ const PlayerPage = {
       if (sleepFadeInterval) clearInterval(sleepFadeInterval);
       if (sleepHUDTimer) clearTimeout(sleepHUDTimer);
       // Watch Together cleanup
+      _stopLeaderHeartbeat();
       _stopDriftCheck();
       if (_wtSocket && wtRoom.code) { _wtSocket.emit("leave_room"); }
       if (_wtSocket) { _wtSocket.disconnect(); _wtSocket = null; }

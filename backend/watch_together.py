@@ -56,12 +56,15 @@ def init_socketio(app):
         return {"sid": sid, "name": name, "color": color}
 
     def _room_public(room):
+        pos = room["position"]
+        if room.get("is_playing") and "last_sync_time" in room:
+            pos += max(0.0, time.time() - room["last_sync_time"])
         return {
             "code": room["code"],
             "media_id": room.get("media_id"),
             "media_type": room.get("media_type"),
             "media_title": room.get("media_title"),
-            "position": room["position"],
+            "position": round(pos, 2),
             "is_playing": room["is_playing"],
             "leader_sid": room.get("leader_sid"),
             "members": room["members"],
@@ -105,6 +108,7 @@ def init_socketio(app):
         except RuntimeError as exc:
             emit("error", {"message": str(exc)}, namespace="/wt")
             return
+        now = time.time()
         room = {
             "code": code,
             "media_id": data.get("media_id"),
@@ -112,14 +116,15 @@ def init_socketio(app):
             "media_title": data.get("media_title"),
             "position": float(data.get("position", 0)),
             "is_playing": bool(data.get("is_playing", False)),
+            "last_sync_time": now,
             "leader_sid": sid,
             "members": [_member_info(sid)],
             "chat": [],
         }
         _rooms[code] = room
         _sid_room[sid] = code
-        join_room(code)
-        emit("room_joined", _room_public(room), namespace="/wt")
+        join_room(code, namespace="/wt")
+        emit("room_joined", {**_room_public(room), "your_sid": sid}, namespace="/wt")
         log.info("[WatchTogether] Room %s created by %s", code, sid)
 
     @socketio.on("join_room", namespace="/wt")
@@ -134,8 +139,8 @@ def init_socketio(app):
         member = _member_info(sid)
         room["members"].append(member)
         _sid_room[sid] = code
-        join_room(code)
-        emit("room_joined", _room_public(room), namespace="/wt")
+        join_room(code, namespace="/wt")
+        emit("room_joined", {**_room_public(room), "your_sid": sid}, namespace="/wt")
         emit(
             "member_joined",
             {"member": member, "members": room["members"]},
@@ -152,11 +157,15 @@ def init_socketio(app):
         if not code or code not in _rooms:
             return
         room = _rooms[code]
-        room["position"] = float(data.get("position", room["position"]))
-        room["is_playing"] = bool(data.get("is_playing", room["is_playing"]))
+        pos = float(data.get("position", room["position"]))
+        playing = bool(data.get("is_playing", room["is_playing"]))
+        room["position"] = pos
+        room["is_playing"] = playing
+        room["last_sync_time"] = time.time()
+        log.debug("[WatchTogether] sync in %s from %s: pos=%.2f play=%s", code, sid, pos, playing)
         emit(
             "sync",
-            {"position": room["position"], "is_playing": room["is_playing"], "from_sid": sid},
+            {"position": pos, "is_playing": playing, "from_sid": sid},
             to=code,
             include_self=False,
             namespace="/wt",
@@ -203,7 +212,8 @@ def init_socketio(app):
     def on_leave_room():
         sid = request.sid
         code, room = _remove_member(sid)
-        leave_room(code)
+        if code:
+            leave_room(code, namespace="/wt")
         if code and room:
             emit(
                 "member_left",
