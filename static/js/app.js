@@ -4350,6 +4350,10 @@ const DetailPage = {
                 <div class="detail-action-icon"><i class="ph ph-wrench"></i></div>
                 <span class="detail-action-label">Match</span>
               </button>
+              <button class="detail-action-circle" @click="openWatchTogetherModal" id="detail-wt-btn" title="Watch Together">
+                <div class="detail-action-icon"><i class="ph-fill ph-users-three" style="color:#c4b5fd"></i></div>
+                <span class="detail-action-label" style="color:#c4b5fd">Watch Together</span>
+              </button>
               <button v-if="!store.profile?.is_kids" class="detail-action-circle" @click="recacheInfo" :disabled="recaching" id="detail-recache-btn" :title="recaching ? 'Re-caching...' : 'Re-cache'">
                 <div class="detail-action-icon"><i :class="recaching ? 'ph ph-circle-notch' : 'ph ph-database'" :style="{ animation: recaching ? 'spin 1s linear infinite' : 'none' }"></i></div>
                 <span class="detail-action-label">Re-cache</span>
@@ -4796,6 +4800,63 @@ const DetailPage = {
         @close="showFixMatchModal = false"
         @matched="handleFixMatchDone"
       />
+
+      <!-- Watch Together Modal (Detail Page) -->
+      <div v-if="showWtModal" class="wt-modal-backdrop" @click.self="showWtModal = false">
+        <div class="wt-modal" @click.stop>
+          <div class="wt-modal-header">
+            <div class="wt-modal-title">
+              <i class="ph-fill ph-users-three"></i>
+              <span>Watch Together</span>
+            </div>
+            <button class="wt-modal-close" @click="showWtModal = false">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:1.25rem">
+            <div class="wt-modal-tabs">
+              <button class="wt-tab-btn" :class="{ active: wtModalTab === 'start' }" @click="wtModalTab = 'start'">
+                Host Room
+              </button>
+              <button class="wt-tab-btn" :class="{ active: wtModalTab === 'join' }" @click="wtModalTab = 'join'">
+                Join with Code
+              </button>
+            </div>
+
+            <!-- Tab: Host Room -->
+            <div v-if="wtModalTab === 'start'" style="display:flex;flex-direction:column;gap:1rem;text-align:center">
+              <p style="font-size:0.88rem;color:var(--text-secondary);line-height:1.5">
+                Host a synchronized playback session for <strong>{{ media?.title }}</strong> across local network devices.
+              </p>
+              <button class="btn btn-primary btn-lg" style="background:#7c3aed;border:none;justify-content:center" @click="startWatchTogetherHost">
+                <i class="ph-fill ph-broadcast"></i>
+                <span>Launch & Host</span>
+              </button>
+            </div>
+
+            <!-- Tab: Join Room -->
+            <div v-else style="display:flex;flex-direction:column;gap:1rem">
+              <p style="font-size:0.88rem;color:var(--text-secondary);line-height:1.5">
+                Enter the 6-character room code from your host:
+              </p>
+              <div class="wt-join-input">
+                <input
+                  v-model="wtJoinCode"
+                  type="text"
+                  placeholder="CODE"
+                  maxlength="6"
+                  @keydown.enter.prevent="joinWatchTogetherRoom"
+                  autofocus
+                />
+                <button @click="joinWatchTogetherRoom">
+                  Join
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- Skip Timestamps Editor Modal (per-episode) -->
       <skip-timestamps-modal
@@ -5335,6 +5396,41 @@ const DetailPage = {
       }
     }
 
+    // ── Watch Together (Detail Page) ──
+    const showWtModal = ref(false);
+    const wtModalTab = ref("start");
+    const wtJoinCode = ref("");
+
+    function openWatchTogetherModal() {
+      wtModalTab.value = "start";
+      showWtModal.value = true;
+    }
+
+    function _getPlayableId() {
+      if (!media.value) return null;
+      if (media.value.type === "movie") return media.value.id;
+      const seasonEps = media.value.seasons?.[activeSeason.value] || [];
+      const ep = seasonEps.find(e => e.is_local !== false && e.is_mounted !== false) || seasonEps[0];
+      return ep?.id || media.value.id;
+    }
+
+    function startWatchTogetherHost() {
+      showWtModal.value = false;
+      const targetId = _getPlayableId();
+      if (!targetId) return;
+      router.push({ path: `/watch/${targetId}`, query: { wt_host: "true" } });
+    }
+
+    async function joinWatchTogetherRoom() {
+      const code = (wtJoinCode.value || "").trim().toUpperCase();
+      if (!code) return;
+      showWtModal.value = false;
+      wtJoinCode.value = "";
+      const targetId = _getPlayableId();
+      if (!targetId) return;
+      router.push({ path: `/watch/${targetId}`, query: { wt_join: code } });
+    }
+
     const castScrollerRef = ref(null);
     function scrollCast(offset) {
       if (castScrollerRef.value) {
@@ -5606,6 +5702,12 @@ const DetailPage = {
       requestMissingEpisode,
       openInDefaultPlayer,
       isDesktop: isDesktopClient(),
+      showWtModal,
+      wtModalTab,
+      wtJoinCode,
+      openWatchTogetherModal,
+      startWatchTogetherHost,
+      joinWatchTogetherRoom,
     };
   },
 };

@@ -130,6 +130,15 @@ except ImportError:
 
 register_blueprints(app, limiter)
 
+# ─── Watch Together (WebSocket) ────────────────────────────────────────────────
+
+try:
+    from backend.watch_together import init_socketio as _init_wt
+    _socketio = _init_wt(app)
+except Exception as _wt_err:
+    _socketio = None
+    print(f"  [!] Watch Together disabled: {_wt_err}")
+
 # ─── Per-request DB connection teardown ────────────────────────────────────────
 
 @app.teardown_appcontext
@@ -735,4 +744,7 @@ if __name__ == "__main__":
     print(f"   TO STOP THE SERVER: Press Ctrl+C in this window")
     print(f"  ==========================================================\n")
 
-    app.run(host=host, port=port, debug=False, threaded=True, ssl_context=ssl_context)
+    if _socketio is not None:
+        _socketio.run(app, host=host, port=port, debug=False, ssl_context=ssl_context, allow_unsafe_werkzeug=True)
+    else:
+        app.run(host=host, port=port, debug=False, threaded=True, ssl_context=ssl_context)

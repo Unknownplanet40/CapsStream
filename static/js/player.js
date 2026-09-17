@@ -209,6 +209,36 @@ const PlayerPage = {
               S{{ (media.season||'').toString().padStart(2,'0') }}E{{ (media.episode||'').toString().padStart(2,'0') }} — {{ media.ep_title }}
             </div>
           </div>
+          <!-- Watch Together HUD controls -->
+          <div v-if="wtRoom.code" style="display:flex;align-items:center;gap:6px;margin-right:6px">
+            <!-- Member avatars -->
+            <div class="wt-player-members">
+              <div
+                v-for="m in wtRoom.members.slice(0,5)"
+                :key="m.sid"
+                class="wt-player-avatar"
+                :style="{ background: m.color }"
+                :title="m.name"
+              >{{ (m.name || '?')[0].toUpperCase() }}</div>
+            </div>
+            <!-- Chat toggle -->
+            <div class="wt-hud-btn-wrap">
+              <div class="wt-hud-btn" :class="{ active: wtShowChat }" @click.stop="wtShowChat = !wtShowChat" title="Watch Together Chat">
+                <i class="ph ph-chat-circle"></i>
+              </div>
+            </div>
+            <!-- Leave button -->
+            <div class="wt-hud-btn" @click.stop="wtLeaveSession" title="Leave Watch Together" style="background:rgba(239,68,68,0.18);border-color:rgba(239,68,68,0.4);color:#fca5a5">
+              <i class="ph ph-sign-out"></i>
+            </div>
+          </div>
+          <div v-else style="margin-right:6px">
+            <div class="wt-hud-btn-wrap">
+              <div class="wt-hud-btn" @click.stop="wtOpenModal('start')" title="Watch Together">
+                <i class="ph ph-users-three"></i>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Dynamic Island Notification Capsule (Above Bottom Dock) -->
@@ -1457,6 +1487,165 @@ const PlayerPage = {
           </button>
         </div>
       </div>
+
+      <!-- Watch Together: Re-sync Button (Follower drift > 5s) -->
+      <transition name="fade">
+        <button
+          v-if="wtRoom.code && !wtRoom.isLeader && wtDrifted"
+          class="wt-resync-btn"
+          @click.stop="wtResync"
+          title="Re-sync with Host"
+        >
+          <i class="ph-bold ph-arrows-clockwise"></i>
+          <span>Re-sync with Host</span>
+        </button>
+      </transition>
+
+      <!-- Watch Together: Floating Reaction Picker Bar -->
+      <transition name="fade">
+        <div v-if="wtRoom.code && !controlsHidden" class="wt-reaction-bar" @click.stop>
+          <button
+            v-for="emoji in WT_REACTIONS"
+            :key="emoji"
+            class="wt-reaction-pick"
+            @click.stop="wtSendReaction(emoji)"
+            :title="'React ' + emoji"
+          >
+            {{ emoji }}
+          </button>
+        </div>
+      </transition>
+
+      <!-- Watch Together: Chat Sidebar -->
+      <div
+        v-if="wtRoom.code"
+        class="wt-chat-panel"
+        :class="{ hidden: !wtShowChat }"
+        @click.stop
+      >
+        <div style="padding:12px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.08)">
+          <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:0.92rem;color:#ede9fe">
+            <i class="ph-fill ph-chat-circle" style="color:#a78bfa"></i>
+            <span>Session Chat</span>
+          </div>
+          <button class="wt-modal-close" style="width:26px;height:26px;font-size:0.8rem" @click="wtShowChat = false">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+        <div class="wt-chat-messages">
+          <div v-if="!wtRoom.chat || wtRoom.chat.length === 0" style="color:var(--text-muted);font-size:0.8rem;text-align:center;margin-top:2rem">
+            No messages yet. Say hi to the group!
+          </div>
+          <div
+            v-for="(msg, mIdx) in wtRoom.chat"
+            :key="mIdx"
+            class="wt-chat-msg"
+          >
+            <span class="wt-chat-sender" :style="{ color: msg.color || '#a78bfa' }">{{ msg.sender }}</span>
+            <span class="wt-chat-text">{{ msg.text }}</span>
+          </div>
+        </div>
+        <div class="wt-chat-input-row">
+          <input
+            v-model="wtChatInput"
+            type="text"
+            placeholder="Send a message..."
+            maxlength="500"
+            @keydown.enter.prevent="wtSendChat"
+          />
+          <button class="wt-chat-send-btn" @click="wtSendChat" title="Send">
+            <i class="ph-bold ph-paper-plane-right"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Watch Together: Modal (Start or Join Session) -->
+      <div v-if="wtShowModal" class="wt-modal-backdrop" @click.self="wtCloseModal">
+        <div class="wt-modal" @click.stop>
+          <div class="wt-modal-header">
+            <div class="wt-modal-title">
+              <i class="ph-fill ph-users-three"></i>
+              <span>Watch Together</span>
+            </div>
+            <button class="wt-modal-close" @click="wtCloseModal">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+
+          <!-- Active Room View -->
+          <div v-if="wtRoom.code" style="display:flex;flex-direction:column;gap:1.25rem">
+            <div class="wt-room-code-display">
+              <span class="wt-code-hint">Share this room code with anyone on your LAN:</span>
+              <span class="wt-room-code">{{ wtRoom.code }}</span>
+              <button class="wt-copy-btn" @click="wtCopyCode">
+                <i :class="wtCopied ? 'ph-bold ph-check' : 'ph ph-copy'"></i>
+                <span>{{ wtCopied ? 'Copied!' : 'Copy Code' }}</span>
+              </button>
+            </div>
+            <div>
+              <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:8px;font-weight:600">Connected Viewers ({{ wtRoom.members.length }}):</div>
+              <div class="wt-members-list">
+                <div v-for="m in wtRoom.members" :key="m.sid" class="wt-member-pill">
+                  <span class="wt-member-dot" :style="{ background: m.color }"></span>
+                  <span>{{ m.name }}</span>
+                  <span v-if="m.sid === wtRoom.leader_sid" class="wt-leader-crown" title="Host">👑</span>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:0.5rem">
+              <button class="btn btn-primary" style="flex:1;background:#7c3aed;border:none" @click="wtShowChat = true; wtCloseModal()">
+                <i class="ph ph-chat-circle"></i> Open Chat
+              </button>
+              <button class="btn btn-secondary" style="border-color:rgba(239,68,68,0.4);color:#fca5a5" @click="wtLeaveSession; wtCloseModal()">
+                Leave Room
+              </button>
+            </div>
+          </div>
+
+          <!-- Start / Join Tabs -->
+          <div v-else style="display:flex;flex-direction:column;gap:1.25rem">
+            <div class="wt-modal-tabs">
+              <button class="wt-tab-btn" :class="{ active: wtModalTab === 'start' }" @click="wtModalTab = 'start'">
+                Start a Session
+              </button>
+              <button class="wt-tab-btn" :class="{ active: wtModalTab === 'join' }" @click="wtModalTab = 'join'">
+                Join with Code
+              </button>
+            </div>
+
+            <!-- Tab: Start Session -->
+            <div v-if="wtModalTab === 'start'" style="display:flex;flex-direction:column;gap:1rem;text-align:center">
+              <p style="font-size:0.88rem;color:var(--text-secondary);line-height:1.5">
+                Host a Watch Together room for <strong>{{ media?.title }}</strong>. Playback will sync across devices on your local network.
+              </p>
+              <button class="btn btn-primary btn-lg" style="background:#7c3aed;border:none;justify-content:center" @click="wtStartSession">
+                <i class="ph-fill ph-broadcast"></i>
+                <span>Start Room</span>
+              </button>
+            </div>
+
+            <!-- Tab: Join Session -->
+            <div v-else style="display:flex;flex-direction:column;gap:1rem">
+              <p style="font-size:0.88rem;color:var(--text-secondary);line-height:1.5">
+                Enter the 6-character room code shared by your host:
+              </p>
+              <div class="wt-join-input">
+                <input
+                  v-model="wtJoinCode"
+                  type="text"
+                  placeholder="CODE"
+                  maxlength="6"
+                  @keydown.enter.prevent="wtJoinSession"
+                  autofocus
+                />
+                <button @click="wtJoinSession">
+                  Join
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   `,
   setup() {
@@ -1578,7 +1767,229 @@ const PlayerPage = {
       router.push("/");
     }
 
+    // ── Watch Together ──────────────────────────────────────────
+    const wtRoom = reactive({
+      code: null,
+      isLeader: false,
+      following: true,
+      position: 0,
+      isPlaying: false,
+      members: [],
+      chat: [],
+      mediaId: null,
+      mediaTitle: null,
+    });
+    const wtShowModal = ref(false);
+    const wtModalTab = ref("start"); // "start" | "join"
+    const wtJoinCode = ref("");
+    const wtShowChat = ref(false);
+    const wtChatInput = ref("");
+    const wtDrifted = ref(false); // follower drifted >5s from leader
+    const wtCopied = ref(false);
+    let _wtSocket = null;
+    let _wtDriftCheckInterval = null;
+
+    const WT_REACTIONS = ["😂", "😱", "❤️", "🔥", "👏", "😭", "😲", "🤣"];
+
+    function _loadSocketIo(cb) {
+      if (window.io) { cb(); return; }
+      const s = document.createElement("script");
+      s.src = "https://cdn.socket.io/4.7.5/socket.io.min.js";
+      s.onload = cb;
+      s.onerror = () => console.warn("[WatchTogether] Could not load socket.io CDN");
+      document.head.appendChild(s);
+    }
+
+    function _wtConnectSocket() {
+      if (_wtSocket) return;
+      _loadSocketIo(() => {
+        const origin = window.location.origin;
+        _wtSocket = window.io(origin + "/wt", { transports: ["websocket", "polling"] });
+
+        _wtSocket.on("room_joined", (data) => {
+          wtRoom.code = data.code;
+          wtRoom.members = data.members || [];
+          wtRoom.position = data.position || 0;
+          wtRoom.isPlaying = data.is_playing || false;
+          wtRoom.mediaId = data.media_id;
+          wtRoom.mediaTitle = data.media_title;
+          wtRoom.isLeader = (data.leader_sid === _wtSocket.id);
+          wtRoom.following = !wtRoom.isLeader;
+          wtRoom.chat = [];
+          wtDrifted.value = false;
+          _startDriftCheck();
+        });
+
+        _wtSocket.on("member_joined", (data) => {
+          wtRoom.members = data.members || wtRoom.members;
+        });
+
+        _wtSocket.on("member_left", (data) => {
+          wtRoom.members = data.members || wtRoom.members;
+          // If we're now the leader (first member), update
+          if (data.leader_sid === _wtSocket.id) {
+            wtRoom.isLeader = true;
+            wtRoom.following = false;
+          }
+        });
+
+        _wtSocket.on("sync", (data) => {
+          if (!wtRoom.code || wtRoom.isLeader) return;
+          wtRoom.position = data.position;
+          wtRoom.isPlaying = data.is_playing;
+          if (!wtRoom.following) return;
+          // Apply: seek if drift > 2s, otherwise let it slide
+          const video = videoRef.value;
+          if (!video) return;
+          const drift = Math.abs(video.currentTime - data.position);
+          if (drift > 2) {
+            video.currentTime = data.position;
+            wtDrifted.value = false;
+          }
+          if (data.is_playing && video.paused) video.play().catch(() => {});
+          if (!data.is_playing && !video.paused) video.pause();
+        });
+
+        _wtSocket.on("reaction", (data) => {
+          _spawnFloatingReaction(data.emoji, data.color);
+        });
+
+        _wtSocket.on("chat_msg", (data) => {
+          wtRoom.chat.push(data);
+          if (wtRoom.chat.length > 200) wtRoom.chat.shift();
+          // auto-scroll chat
+          nextTick(() => {
+            const el = document.querySelector(".wt-chat-messages");
+            if (el) el.scrollTop = el.scrollHeight;
+          });
+        });
+
+        _wtSocket.on("error", (data) => {
+          console.warn("[WatchTogether] Server error:", data.message);
+        });
+      });
+    }
+
+    function wtOpenModal(tab = "start") {
+      wtModalTab.value = tab;
+      wtShowModal.value = true;
+    }
+
+    function wtCloseModal() {
+      wtShowModal.value = false;
+    }
+
+    function wtStartSession() {
+      _wtConnectSocket();
+      const video = videoRef.value;
+      _wtSocket.emit("create_room", {
+        media_id: media.value?.id,
+        media_type: media.value?.type,
+        media_title: media.value?.title,
+        position: video ? video.currentTime : 0,
+        is_playing: video ? !video.paused : false,
+      });
+      wtCloseModal();
+    }
+
+    function wtJoinSession() {
+      const code = (wtJoinCode.value || "").trim().toUpperCase();
+      if (!code) return;
+      _wtConnectSocket();
+      _wtSocket.emit("join_room", { code });
+      wtJoinCode.value = "";
+      wtCloseModal();
+    }
+
+    function wtLeaveSession() {
+      if (_wtSocket && wtRoom.code) {
+        _wtSocket.emit("leave_room");
+      }
+      _stopDriftCheck();
+      wtRoom.code = null;
+      wtRoom.isLeader = false;
+      wtRoom.following = true;
+      wtRoom.members = [];
+      wtRoom.chat = [];
+      wtDrifted.value = false;
+      wtShowChat.value = false;
+    }
+
+    function wtCopyCode() {
+      if (!wtRoom.code) return;
+      navigator.clipboard.writeText(wtRoom.code).then(() => {
+        wtCopied.value = true;
+        setTimeout(() => { wtCopied.value = false; }, 2000);
+      }).catch(() => {});
+    }
+
+    // Emit sync whenever leader plays/pauses/seeks
+    function wtEmitSync() {
+      if (!wtRoom.code || !wtRoom.isLeader || !_wtSocket) return;
+      const video = videoRef.value;
+      if (!video) return;
+      _wtSocket.emit("sync", {
+        position: video.currentTime,
+        is_playing: !video.paused,
+      });
+    }
+
+    function wtSendReaction(emoji) {
+      if (!wtRoom.code || !_wtSocket) return;
+      _wtSocket.emit("reaction", { emoji });
+    }
+
+    function wtSendChat() {
+      const text = (wtChatInput.value || "").trim();
+      if (!text || !_wtSocket || !wtRoom.code) return;
+      _wtSocket.emit("chat_msg", { text });
+      wtChatInput.value = "";
+    }
+
+    function wtResync() {
+      const video = videoRef.value;
+      if (!video) return;
+      video.currentTime = wtRoom.position;
+      if (wtRoom.isPlaying && video.paused) video.play().catch(() => {});
+      wtDrifted.value = false;
+      wtRoom.following = true;
+    }
+
+    function _spawnFloatingReaction(emoji, color) {
+      const wrapper = document.querySelector(".custom-player-wrapper");
+      if (!wrapper) return;
+      const el = document.createElement("span");
+      el.className = "wt-reaction-float";
+      el.textContent = emoji;
+      el.style.left = (Math.random() * 60 + 10) + "px";
+      el.style.color = color || "#fff";
+      wrapper.appendChild(el);
+      setTimeout(() => el.remove(), 2600);
+    }
+
+    function _startDriftCheck() {
+      _stopDriftCheck();
+      _wtDriftCheckInterval = setInterval(() => {
+        if (!wtRoom.code || wtRoom.isLeader || !wtRoom.following) {
+          wtDrifted.value = false;
+          return;
+        }
+        const video = videoRef.value;
+        if (!video || !wtRoom.position) return;
+        const drift = Math.abs(video.currentTime - wtRoom.position);
+        wtDrifted.value = drift > 5;
+      }, 2000);
+    }
+
+    function _stopDriftCheck() {
+      if (_wtDriftCheckInterval) {
+        clearInterval(_wtDriftCheckInterval);
+        _wtDriftCheckInterval = null;
+      }
+    }
+
     // ── Sleep Timer & Deep Standby ──
+
     const showSleepMenu = ref(false);
     const isSleepStandby = ref(false);
     const sleepExpiringWarning = ref(false);
@@ -3445,6 +3856,7 @@ const PlayerPage = {
       const targetTime = calculateSeekbarTimeFromClientX(e.clientX);
       seekTo(targetTime);
       unlockAchievementSilently("seeker");
+      wtEmitSync(); // Watch Together: broadcast seek to room
     }
 
     function hoverSeekbar(e) {
@@ -3750,6 +4162,7 @@ const PlayerPage = {
       if (isRemoteAudioActive() && remoteAudioEl) {
         remoteAudioEl.play().catch(() => {});
       }
+      wtEmitSync(); // Watch Together: broadcast play to room
       if (isDesktopDevice() && (controlsHidden.value || Date.now() < suppressControlsUntil)) {
         return;
       }
@@ -3762,6 +4175,7 @@ const PlayerPage = {
       clearTimeout(hideTimer);
       // Instantly pause the remote audio track with the video
       if (isRemoteAudioActive() && remoteAudioEl) remoteAudioEl.pause();
+      wtEmitSync(); // Watch Together: broadcast pause to room
     }
 
     watch(
@@ -6144,6 +6558,13 @@ const PlayerPage = {
           unlockOrientation();
         });
       }
+      // Watch Together auto-start or auto-join via route query
+      if (route.query.wt_host === "true") {
+        setTimeout(() => { wtStartSession(); }, 600);
+      } else if (route.query.wt_join) {
+        wtJoinCode.value = route.query.wt_join;
+        setTimeout(() => { wtJoinSession(); }, 600);
+      }
     });
 
     onUnmounted(() => {
@@ -6162,6 +6583,10 @@ const PlayerPage = {
       if (sleepTickInterval) clearInterval(sleepTickInterval);
       if (sleepFadeInterval) clearInterval(sleepFadeInterval);
       if (sleepHUDTimer) clearTimeout(sleepHUDTimer);
+      // Watch Together cleanup
+      _stopDriftCheck();
+      if (_wtSocket && wtRoom.code) { _wtSocket.emit("leave_room"); }
+      if (_wtSocket) { _wtSocket.disconnect(); _wtSocket = null; }
       if (rvfcHandle && videoRef.value && "cancelVideoFrameCallback" in videoRef.value) {
         try { videoRef.value.cancelVideoFrameCallback(rvfcHandle); } catch (e) {}
       }
@@ -6496,6 +6921,26 @@ const PlayerPage = {
       showDriveOfflineScreen,
       launchDefaultPlayer,
       isDesktopDevice,
+      // Watch Together
+      wtRoom,
+      wtShowModal,
+      wtModalTab,
+      wtJoinCode,
+      wtShowChat,
+      wtChatInput,
+      wtDrifted,
+      wtCopied,
+      WT_REACTIONS,
+      wtOpenModal,
+      wtCloseModal,
+      wtStartSession,
+      wtJoinSession,
+      wtLeaveSession,
+      wtCopyCode,
+      wtEmitSync,
+      wtSendReaction,
+      wtSendChat,
+      wtResync,
     };
   },
 };
