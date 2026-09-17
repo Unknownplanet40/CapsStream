@@ -13300,7 +13300,10 @@ const ProfilesPage = {
         clientSessionId = "sess_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
       }
       try { sessionStorage.setItem("cs_session_id", clientSessionId); } catch (e) {}
+      try { sessionStorage.setItem("cs_active_profile_id", String(profile.id)); } catch (e) {}
       try { localStorage.removeItem("cs_session_id"); } catch (e) {}
+      try { localStorage.removeItem("capsstream_profile_id"); } catch (e) {}
+      try { localStorage.removeItem("cs_active_profile_id"); } catch (e) {}
       const deviceName = (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ? "iPhone / iPad" : /android/.test(navigator.userAgent.toLowerCase()) ? "Android Device" : /macintosh|mac os x/.test(navigator.userAgent.toLowerCase()) ? "Mac" : "Windows PC");
 
       try {
@@ -13312,6 +13315,7 @@ const ProfilesPage = {
           device_name: deviceName,
         });
         if (res.ok) {
+          try { sessionStorage.setItem("cs_active_profile_id", String(profile.id)); } catch (e) {}
           store.profile = res.profile;
           pinTarget.value = null;
           takeoverTarget.value = null;
@@ -13690,6 +13694,9 @@ const SetupPage = {
         });
 
         store.profile = authRes.profile || created;
+        try { sessionStorage.setItem("cs_active_profile_id", String(created.id)); } catch (e) {}
+        try { localStorage.removeItem("capsstream_profile_id"); } catch (e) {}
+        try { localStorage.removeItem("cs_session_id"); } catch (e) {}
         sessionStorage.setItem("cs_pending_onboarding", "true");
         addToast(`Welcome, ${created.name}!`, "success");
 
@@ -21441,8 +21448,11 @@ const App = {
     }
 
     function _clearSessionId() {
+      try { sessionStorage.removeItem("cs_active_profile_id"); } catch (e) {}
       try { sessionStorage.removeItem("cs_session_id"); } catch (e) {}
       try { localStorage.removeItem("cs_session_id"); } catch (e) {}
+      try { localStorage.removeItem("capsstream_profile_id"); } catch (e) {}
+      try { localStorage.removeItem("cs_active_profile_id"); } catch (e) {}
     }
 
     function switchProfile() {
@@ -21675,60 +21685,39 @@ const App = {
       } catch (e) {}
 
       try {
-        // Restore a persisted session (survives page refresh) before anything else
-        const me = await API.get("/api/profiles/me").catch(() => null);
         const profiles = await API.get("/api/profiles");
         if (!profiles || profiles.length === 0) {
           store.profile = null;
           router.push("/setup");
-        } else if (me && me.id) {
-          // Session still valid — keep the user logged in on their current page
-          store.profile = me;
-          const path = router.currentRoute.value.path;
-          if (path === "/profiles") {
-            router.push("/");
-          }
-        } else if (profiles && profiles.length === 1 && !profiles[0].has_pin) {
-          // Exactly one profile and it has no PIN — automatically use it and redirect to homepage
-          const singleProfile = profiles[0];
-          let clientSessionId = sessionStorage.getItem("cs_session_id");
-          if (!clientSessionId) {
-            clientSessionId = "sess_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-          }
-          try { sessionStorage.setItem("cs_session_id", clientSessionId); } catch (e) {}
-          try { localStorage.removeItem("cs_session_id"); } catch (e) {}
-          const deviceName = (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ? "iPhone / iPad" : /android/.test(navigator.userAgent.toLowerCase()) ? "Android Device" : /macintosh|mac os x/.test(navigator.userAgent.toLowerCase()) ? "Mac" : "Windows PC");
-
-          try {
-            const res = await API.post("/api/profiles/auth", {
-              profile_id: singleProfile.id,
-              pin: "",
-              force_takeover: true,
-              session_id: clientSessionId,
-              device_name: deviceName,
-            });
-            if (res && res.ok && res.profile) {
-              store.profile = res.profile;
-              router.push("/").then(() => {
-                startLibraryScan();
-                if (typeof window.checkPostUpdateWhatsNew === "function") {
-                  window.checkPostUpdateWhatsNew();
-                }
-              });
+        } else {
+          // Check if this browser tab/session has an authenticated profile in sessionStorage
+          const activeSessionProfileId = sessionStorage.getItem("cs_active_profile_id");
+          if (activeSessionProfileId) {
+            const me = await API.get("/api/profiles/me").catch(() => null);
+            if (me && me.id && String(me.id) === String(activeSessionProfileId)) {
+              // Active ongoing session in this tab/window — keep logged in
+              store.profile = me;
+              const path = router.currentRoute.value.path;
+              if (path === "/profiles") {
+                router.push("/");
+              }
             } else {
+              // Invalid/stale session or server restarted — clear and require selecting profile
+              _clearSessionId();
+              await API.post("/api/profiles/logout", {}).catch(() => {});
               store.profile = null;
               router.push("/profiles");
             }
-          } catch (authErr) {
+          } else {
+            // New browser session, server start, or user logged out — always prompt to select a profile
+            _clearSessionId();
+            await API.post("/api/profiles/logout", {}).catch(() => {});
             store.profile = null;
             router.push("/profiles");
           }
-        } else {
-          // Multiple profiles, or single profile has a PIN — start with profile selection screen
-          store.profile = null;
-          router.push("/profiles");
         }
       } catch (e) {
+        store.profile = null;
         router.push("/profiles");
       } finally {
         appLoading.value = false;

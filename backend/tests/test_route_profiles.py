@@ -165,6 +165,45 @@ class TestRouteProfiles(unittest.TestCase):
         self.assertTrue(hb_dev1.get("evicted"))
         self.assertEqual(hb_dev1.get("status"), "evicted")
 
+    def test_server_boot_invalidation_and_session_lifecycle(self):
+        """Verify session is invalid after simulated server restart and cleanly wiped on logout."""
+        from backend.routes.profiles import SERVER_BOOT_ID
+        pid = create_profile(name="BootUser", pin_hash=None, is_admin=False)
+
+        # Authenticate
+        resp = self.client.post("/api/profiles/auth", json={
+            "profile_id": pid,
+            "session_id": "client_boot_sess",
+            "device_name": "PC",
+        })
+        self.assertEqual(resp.status_code, 200)
+
+        # In current session, /api/profiles/me returns profile
+        resp_me = self.client.get("/api/profiles/me")
+        self.assertEqual(resp_me.status_code, 200)
+        self.assertIsNotNone(resp_me.get_json())
+        self.assertEqual(resp_me.get_json().get("id"), pid)
+
+        # Simulate server restart by changing stored server_boot_id in session
+        with self.client.session_transaction() as sess:
+            sess["server_boot_id"] = "stale_old_boot_id"
+
+        # /api/profiles/me should now invalidate session and return None
+        resp_me_stale = self.client.get("/api/profiles/me")
+        self.assertEqual(resp_me_stale.status_code, 200)
+        self.assertIsNone(resp_me_stale.get_json())
+
+        # Re-auth and verify explicit logout clears all keys
+        self.client.post("/api/profiles/auth", json={
+            "profile_id": pid,
+            "session_id": "client_boot_sess_2",
+            "device_name": "PC",
+        })
+        resp_logout = self.client.post("/api/profiles/logout")
+        self.assertEqual(resp_logout.status_code, 200)
+        resp_me_after = self.client.get("/api/profiles/me")
+        self.assertIsNone(resp_me_after.get_json())
+
 
 if __name__ == "__main__":
     unittest.main()

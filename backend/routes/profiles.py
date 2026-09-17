@@ -5,8 +5,11 @@ routes/profiles.py — Profile management, auth, session, and PIN endpoints.
 import os
 import time
 import threading
+import uuid
 
 from flask import Blueprint, jsonify, request, session
+
+SERVER_BOOT_ID = str(uuid.uuid4())
 
 from .middleware import (
     current_profile, require_profile, require_admin, is_admin,
@@ -348,7 +351,8 @@ def api_auth_profile():
     session["session_id"] = client_session_id
     session["is_kids"] = bool(profile.get("is_kids", 0))
     session["is_admin"] = bool(profile.get("is_admin", 0))
-    session.permanent = True
+    session["server_boot_id"] = SERVER_BOOT_ID
+    session.permanent = False
     return jsonify({"ok": True, "profile": sanitize_profile(profile)})
 
 
@@ -402,12 +406,21 @@ def api_me():
     pid = current_profile()
     if not pid:
         return jsonify(None)
+    stored_boot = session.get("server_boot_id")
+    if stored_boot and stored_boot != SERVER_BOOT_ID:
+        session.pop("profile_id", None)
+        session.pop("session_id", None)
+        session.pop("is_kids", None)
+        session.pop("is_admin", None)
+        session.pop("server_boot_id", None)
+        return jsonify(None)
     profile = get_profile(pid)
     if not profile:
         session.pop("profile_id", None)
         session.pop("session_id", None)
         session.pop("is_kids", None)
         session.pop("is_admin", None)
+        session.pop("server_boot_id", None)
         return jsonify(None)
     session["is_kids"] = bool(profile.get("is_kids", 0))
     session["is_admin"] = bool(profile.get("is_admin", 0))
@@ -435,6 +448,8 @@ def api_logout():
     session.pop("session_id", None)
     session.pop("is_kids", None)
     session.pop("is_admin", None)
+    session.pop("server_boot_id", None)
+    session.clear()
     if pid:
         with ACTIVE_PROFILE_LOCK:
             ACTIVE_PROFILE_SESSIONS.pop(pid, None)
