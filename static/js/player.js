@@ -230,7 +230,7 @@ const PlayerPage = {
             </div>
             <!-- Chat toggle -->
             <div class="wt-hud-btn-wrap">
-              <div class="wt-hud-btn" :class="{ active: wtShowChat }" @click.stop="wtShowChat = !wtShowChat" title="Watch Together Chat">
+              <div class="wt-hud-btn" :class="{ active: wtShowChat }" @click.stop="toggleWtChat" title="Watch Together Chat">
                 <i class="ph ph-chat-circle"></i>
               </div>
             </div>
@@ -1523,48 +1523,83 @@ const PlayerPage = {
         </div>
       </transition>
 
-      <!-- Watch Together: Chat Sidebar -->
-      <div
-        v-if="wtRoom.code"
-        class="wt-chat-panel"
-        :class="{ hidden: !wtShowChat }"
-        @click.stop
-      >
-        <div style="padding:12px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.08)">
-          <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:0.92rem;color:#ede9fe">
-            <i class="ph-fill ph-chat-circle" style="color:#a78bfa"></i>
-            <span>Session Chat</span>
+      <!-- Watch Together: Chat Drawer (Styled like player-queue-drawer) -->
+      <transition name="slide-left">
+        <div
+          v-if="wtRoom.code && wtShowChat"
+          class="wt-chat-panel player-queue-drawer"
+          @click.stop
+        >
+          <div class="queue-drawer-header">
+            <div class="queue-drawer-title">
+              <i class="ph-fill ph-chat-circle-dots" style="color:#a78bfa;font-size:1.3rem"></i>
+              <span>Session Chat</span>
+              <span v-if="wtRoom.chat && wtRoom.chat.length" class="queue-count-pill" style="background:rgba(139,92,246,0.22);color:#c4b5fd;border:1px solid rgba(167,139,250,0.3)">
+                {{ wtRoom.chat.length }}
+              </span>
+            </div>
+            <button class="queue-close-btn" @click="wtShowChat = false" title="Close Chat (Esc)">
+              <i class="ph ph-x"></i>
+            </button>
           </div>
-          <button class="wt-modal-close" style="width:26px;height:26px;font-size:0.8rem" @click="wtShowChat = false">
-            <i class="ph ph-x"></i>
-          </button>
-        </div>
-        <div class="wt-chat-messages">
-          <div v-if="!wtRoom.chat || wtRoom.chat.length === 0" style="color:var(--text-muted);font-size:0.8rem;text-align:center;margin-top:2rem">
-            No messages yet. Say hi to the group!
+
+          <!-- Session Info Sub-Bar -->
+          <div class="wt-chat-session-bar">
+            <div class="wt-chat-room-badge" @click="wtCopyCode" :title="wtCopied ? 'Copied!' : 'Click to copy room code'">
+              <i class="ph-bold" :class="wtCopied ? 'ph-check' : 'ph-key'"></i>
+              <span class="wt-chat-room-code">{{ wtRoom.code }}</span>
+              <span class="wt-chat-copy-hint">{{ wtCopied ? 'COPIED' : 'COPY' }}</span>
+            </div>
+            <div class="wt-chat-members-summary" :title="wtRoom.members ? wtRoom.members.map(m => m.name).join(', ') : ''">
+              <i class="ph-fill ph-users-three" style="color:#a78bfa"></i>
+              <span>{{ (wtRoom.members && wtRoom.members.length) || 1 }} active</span>
+            </div>
           </div>
-          <div
-            v-for="(msg, mIdx) in wtRoom.chat"
-            :key="mIdx"
-            class="wt-chat-msg"
-          >
-            <span class="wt-chat-sender" :style="{ color: msg.color || '#a78bfa' }">{{ msg.sender }}</span>
-            <span class="wt-chat-text">{{ msg.text }}</span>
+
+          <!-- Messages Container -->
+          <div class="wt-chat-messages">
+            <div v-if="!wtRoom.chat || wtRoom.chat.length === 0" class="queue-empty-state" style="padding:2.5rem 1.5rem">
+              <i class="ph-fill ph-chat-circle-dots" style="color:#8b5cf6;opacity:0.6;font-size:2.6rem;margin-bottom:12px"></i>
+              <div style="font-weight:700;font-size:1rem;margin-bottom:6px;color:#f3f4f6">No messages yet</div>
+              <p style="font-size:0.82rem;color:var(--text-muted);max-width:260px;line-height:1.45">
+                Send a message or react to what's happening on screen with your watch party!
+              </p>
+            </div>
+
+            <div
+              v-for="(msg, mIdx) in wtRoom.chat"
+              :key="mIdx"
+              class="wt-chat-item"
+            >
+              <div class="wt-chat-item-avatar" :style="{ background: msg.color || '#8b5cf6' }">
+                <img v-if="msg.avatar && (msg.avatar.startsWith('http') || msg.avatar.startsWith('/') || msg.avatar.startsWith('data:'))" :src="msg.avatar" :alt="msg.sender" />
+                <span v-else>{{ msg.avatar || (msg.sender || '?').charAt(0).toUpperCase() }}</span>
+              </div>
+              <div class="wt-chat-item-body">
+                <div class="wt-chat-item-meta">
+                  <span class="wt-chat-sender" :style="{ color: msg.color || '#a78bfa' }">{{ msg.sender }}</span>
+                  <span v-if="msg.ts" class="wt-chat-time">{{ wtFormatTime(msg.ts) }}</span>
+                </div>
+                <div class="wt-chat-text">{{ msg.text }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Input Bar -->
+          <div class="wt-chat-input-bar">
+            <input
+              v-model="wtChatInput"
+              type="text"
+              placeholder="Send message to room..."
+              maxlength="500"
+              @keydown.enter.prevent="wtSendChat"
+            />
+            <button class="wt-chat-send-btn" @click="wtSendChat" :disabled="!wtChatInput.trim()" title="Send">
+              <i class="ph-bold ph-paper-plane-right"></i>
+            </button>
           </div>
         </div>
-        <div class="wt-chat-input-row">
-          <input
-            v-model="wtChatInput"
-            type="text"
-            placeholder="Send a message..."
-            maxlength="500"
-            @keydown.enter.prevent="wtSendChat"
-          />
-          <button class="wt-chat-send-btn" @click="wtSendChat" title="Send">
-            <i class="ph-bold ph-paper-plane-right"></i>
-          </button>
-        </div>
-      </div>
+      </transition>
 
       <!-- Watch Together: Modal (Start or Join Session) -->
       <div v-if="wtShowModal" class="wt-modal-backdrop" @click.self="wtCloseModal">
@@ -1600,10 +1635,10 @@ const PlayerPage = {
               </div>
             </div>
             <div style="display:flex;gap:10px;margin-top:0.5rem">
-              <button class="btn btn-primary" style="flex:1;background:#7c3aed;border:none" @click="wtShowChat = true; wtCloseModal()">
+              <button class="btn btn-primary" style="flex:1;background:#7c3aed;border:none" @click="toggleWtChat(true); wtCloseModal()">
                 <i class="ph ph-chat-circle"></i> Open Chat
               </button>
-              <button class="btn btn-secondary" style="border-color:rgba(239,68,68,0.4);color:#fca5a5" @click="wtLeaveSession; wtCloseModal()">
+              <button class="btn btn-secondary" style="border-color:rgba(239,68,68,0.4);color:#fca5a5" @click="wtLeaveSession(); wtCloseModal()">
                 Leave Room
               </button>
             </div>
@@ -1916,7 +1951,7 @@ const PlayerPage = {
           wtRoom.mySid = data.your_sid || _wtSocket.id;
           wtRoom.isLeader = (data.leader_sid === wtRoom.mySid) || (data.leader_sid === _wtSocket.id);
           wtRoom.following = !wtRoom.isLeader;
-          wtRoom.chat = [];
+          wtRoom.chat = data.chat || [];
           wtDrifted.value = false;
           _lastSyncPosition = data.position || 0;
           _lastSyncReceivedAt = Date.now();
@@ -2098,6 +2133,37 @@ const PlayerPage = {
       wtChatInput.value = "";
     }
 
+    function toggleWtChat(force) {
+      if (typeof force === "boolean") {
+        wtShowChat.value = force;
+      } else {
+        wtShowChat.value = !wtShowChat.value;
+      }
+      if (wtShowChat.value) {
+        showQueueDrawer.value = false;
+        showEpisodesDrawer.value = false;
+        showSpeedMenu.value = false;
+        showSubMenu.value = false;
+        showAudioMenu.value = false;
+        showQualityMenu.value = false;
+        showControls();
+        nextTick(() => {
+          const el = document.querySelector(".wt-chat-messages");
+          if (el) el.scrollTop = el.scrollHeight;
+        });
+      }
+    }
+
+    function wtFormatTime(ts) {
+      if (!ts) return "";
+      try {
+        const d = new Date(ts * 1000);
+        return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      } catch (_) {
+        return "";
+      }
+    }
+
     function wtResync() {
       const video = videoRef.value;
       if (!video) return;
@@ -2116,7 +2182,7 @@ const PlayerPage = {
       const el = document.createElement("span");
       el.className = "wt-reaction-float";
       el.textContent = emoji;
-      const baseRight = wtShowChat.value ? 330 : 36;
+      const baseRight = wtShowChat.value ? 404 : 36;
       el.style.right = (baseRight + Math.random() * 40 - 10) + "px";
       el.style.color = color || "#fff";
       wrapper.appendChild(el);
@@ -2137,7 +2203,7 @@ const PlayerPage = {
       text.textContent = msg.text || "";
       el.appendChild(sender);
       el.appendChild(text);
-      const baseRight = wtShowChat.value ? 330 : 28;
+      const baseRight = wtShowChat.value ? 400 : 28;
       el.style.right = baseRight + "px";
       wrapper.appendChild(el);
       setTimeout(() => {
@@ -5421,6 +5487,7 @@ const PlayerPage = {
       showEpisodesDrawer.value = !showEpisodesDrawer.value;
       if (showEpisodesDrawer.value) {
         showQueueDrawer.value = false;
+        wtShowChat.value = false;
         showSpeedMenu.value = false;
         showSubMenu.value = false;
         showAudioMenu.value = false;
@@ -5464,6 +5531,7 @@ const PlayerPage = {
       showQueueDrawer.value = !showQueueDrawer.value;
       if (showQueueDrawer.value) {
         showEpisodesDrawer.value = false;
+        wtShowChat.value = false;
         showControls();
       }
     }
@@ -6248,6 +6316,12 @@ const PlayerPage = {
           } else if (showQueueDrawer.value) {
             e.preventDefault();
             showQueueDrawer.value = false;
+          } else if (wtShowChat.value) {
+            e.preventDefault();
+            wtShowChat.value = false;
+          } else if (wtShowModal.value) {
+            e.preventDefault();
+            wtShowModal.value = false;
           } else if (activeSettingsSubmenu.value) {
             e.preventDefault();
             activeSettingsSubmenu.value = null;
@@ -7132,6 +7206,8 @@ const PlayerPage = {
       wtSendReaction,
       wtSendChat,
       wtResync,
+      toggleWtChat,
+      wtFormatTime,
     };
   },
 };

@@ -70,6 +70,7 @@ def init_socketio(app):
             "is_playing": room["is_playing"],
             "leader_sid": room.get("leader_sid"),
             "members": room["members"],
+            "chat": room.get("chat", [])[-50:],
         }
 
     def _remove_member(sid):
@@ -203,6 +204,7 @@ def init_socketio(app):
         msg = {
             "sender": member.get("name", "?"),
             "color": member.get("color", "#8b5cf6"),
+            "avatar": member.get("avatar"),
             "text": text,
             "ts": time.time(),
         }
