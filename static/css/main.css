@@ -767,8 +767,81 @@ ol {
 }
 
 .update-banner.warning-banner {
-  background: linear-gradient(90deg, #7a1f1f, #a12b2b);
-  border-color: rgba(239, 68, 68, 0.6);
+  background: rgba(22, 19, 14, 0.92);
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6), 0 0 18px rgba(245, 158, 11, 0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  gap: 10px;
+}
+
+.update-banner.warning-banner .warning-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.update-banner.warning-banner .warning-tag i {
+  color: #fbbf24;
+  font-size: 0.85rem;
+}
+
+.update-banner.warning-banner .warning-message-text {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.82rem;
+}
+
+.update-banner.warning-banner .banner-action-link {
+  color: #fbbf24;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  margin-left: 5px;
+  white-space: nowrap;
+}
+
+.update-banner.warning-banner .banner-action-link:hover {
+  color: #fef08a;
+}
+
+.update-banner.warning-banner .banner-text-btn {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+  font-size: 0.73rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 99px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  margin-left: 2px;
+}
+
+.update-banner.warning-banner .banner-text-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+@media (max-width: 640px) {
+  .update-banner.warning-banner {
+    border-radius: 14px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 6px;
+    font-size: 0.78rem;
+  }
 }
 
 .update-banner.offline-banner {

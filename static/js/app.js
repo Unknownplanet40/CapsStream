@@ -19796,14 +19796,20 @@ const App = {
             class="update-banner warning-banner"
             v-if="store.sysInfo?.remote_exposed && !remoteBannerDismissed && (store.profile?.is_admin || !store.profile)"
           >
-            <i class="ph ph-warning"></i>
-            <span>
-              The server is reachable from your network without authentication —
-              set host to 127.0.0.1 in config.json if this is unintentional.
+            <span class="warning-tag">
+              <i class="ph-bold ph-wifi-high"></i> LAN Access
             </span>
-            <button class="update-banner-dismiss" @click="remoteBannerDismissed = true" title="Dismiss">
+            <span class="warning-message-text">
+              Server is accessible on your local network without authentication.
+              <a href="#" class="banner-action-link" @click.prevent="showRemoteInfoModal = true">Learn more</a>
+            </span>
+            <button class="banner-text-btn" @click="dismissRemoteBanner(true)" title="Dismiss and don't show again">
+              Don't show again
+            </button>
+            <button class="update-banner-dismiss" @click="dismissRemoteBanner(true)" title="Dismiss">
               <i class="ph ph-x"></i>
             </button>
+          </div>
         </transition>
       </div>
 
@@ -19933,6 +19939,58 @@ const App = {
           </div>
         </div>
       </div>
+
+      <!-- LAN Access Notice Modal -->
+      <transition name="fade">
+        <div v-if="showRemoteInfoModal" class="modal-backdrop" style="z-index:9999995;background:rgba(0,0,0,0.85);backdrop-filter:blur(20px);" @click.self="showRemoteInfoModal = false">
+          <div class="shortcuts-modal-card" style="max-width:500px;border-radius:var(--radius-outer);border:1px solid rgba(245,158,11,0.3);box-shadow:0 24px 70px rgba(0,0,0,0.95)" @click.stop>
+            <div class="shortcuts-modal-inner" style="text-align:left">
+              <div class="shortcuts-modal-header" style="margin-bottom:1.1rem;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:0.75rem">
+                <div class="shortcuts-header-title" style="color:var(--text-primary);display:flex;align-items:center;gap:10px;font-size:1.15rem;font-weight:800">
+                  <div style="width:34px;height:34px;border-radius:10px;background:rgba(245,158,11,0.18);display:flex;align-items:center;justify-content:center;border:1px solid rgba(245,158,11,0.35)">
+                    <i class="ph-fill ph-wifi-high" style="color:#f59e0b;font-size:1.25rem"></i>
+                  </div>
+                  <span>Local Network Access</span>
+                </div>
+                <button class="shortcuts-close-btn" @click="showRemoteInfoModal = false">
+                  <i class="ph ph-x"></i>
+                </button>
+              </div>
+
+              <div style="margin-bottom:1rem">
+                <div style="font-size:0.92rem;color:var(--text-primary);line-height:1.55;margin-bottom:0.8rem">
+                  CapsStream is currently bound to all network interfaces (<code>0.0.0.0</code>). This allows other devices on your home Wi-Fi (such as phones, tablets, or smart TVs) to stream media directly.
+                </div>
+                <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.22);border-radius:12px;padding:12px 14px;margin-bottom:0.9rem">
+                  <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:0.86rem;color:#fbbf24;margin-bottom:4px">
+                    <i class="ph-bold ph-shield-check"></i> Is this safe?
+                  </div>
+                  <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.5">
+                    Yes! For personal media servers on private, password-protected home networks, this is standard so clients can stream without a reverse proxy.
+                  </div>
+                </div>
+                <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 14px">
+                  <div style="font-weight:700;font-size:0.84rem;color:var(--text-primary);margin-bottom:4px">
+                    Want to restrict access to this PC only?
+                  </div>
+                  <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.5;margin-bottom:6px">
+                    Set <code>"host": "127.0.0.1"</code> in your <code>config.json</code> and restart CapsStream.
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex;gap:10px;justify-content:flex-end">
+                <button class="btn btn-secondary" style="border-radius:10px" @click="showRemoteInfoModal = false">
+                  Close
+                </button>
+                <button class="btn btn-primary" style="background:#fbbf24;color:#000;font-weight:700;border:none;border-radius:10px" @click="dismissRemoteBanner(true); showRemoteInfoModal = false">
+                  Got it, don't show again
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
 
       <!-- Bottom-Left Floating Scan Progress Widget -->
       <scan-progress-widget :has-bottom-nav="isBottomNavVisible" />
@@ -20932,7 +20990,17 @@ const App = {
 
     // ─── Update banner state ─────────────────────────────────────
     const updateBannerDismissed = ref(false);
-    const remoteBannerDismissed = ref(false);
+    const remoteBannerDismissed = ref(localStorage.getItem("cs_remote_banner_dismissed") === "true");
+    const showRemoteInfoModal = ref(false);
+
+    function dismissRemoteBanner(persist = true) {
+      remoteBannerDismissed.value = true;
+      if (persist) {
+        try {
+          localStorage.setItem("cs_remote_banner_dismissed", "true");
+        } catch (_) {}
+      }
+    }
 
     const whatsNewSections = computed(() => {
       const body = store.whatsNewData?.body || "";
@@ -22089,6 +22157,8 @@ const App = {
       isBottomNavVisible,
       updateBannerDismissed,
       remoteBannerDismissed,
+      showRemoteInfoModal,
+      dismissRemoteBanner,
       isPlayerRoute,
       isDetailRoute,
       isRoute,
