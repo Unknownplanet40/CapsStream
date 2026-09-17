@@ -753,6 +753,16 @@ const THEME_PRESETS = [
     border: "rgba(76, 194, 255, 0.28)",
     icon: "ph-squares-four",
   },
+  {
+    id: "solar",
+    name: "Solar Light",
+    desc: "Clean, high-contrast daytime aesthetic with crisp slate cards, warm charcoal typography, and crimson accents.",
+    accent: "#e50914",
+    secondary: "#f59e0b",
+    bg: "#f8fafc",
+    border: "rgba(0, 0, 0, 0.12)",
+    icon: "ph-sun",
+  },
 ];
 
 function applyTheme(themeKey, persist = false) {
@@ -4264,10 +4274,10 @@ const DetailPage = {
           </div>
 
           <!-- Quality & Drive Badges -->
-          <div v-if="media.quality_options && media.quality_options.length > 0" class="detail-quality-row">
+          <div v-if="media.quality_options && media.quality_options.filter(o => !o.is_transcode).length > 0" class="detail-quality-row">
             <span
-              v-for="opt in media.quality_options"
-              :key="opt.media_id"
+              v-for="opt in media.quality_options.filter(o => !o.is_transcode)"
+              :key="opt.quality_id || opt.media_id"
               class="quality-source-badge"
               :class="{ 'quality-source-current': opt.is_current, 'quality-source-unmounted': !opt.is_mounted }"
               :title="opt.file_path"
@@ -4527,6 +4537,10 @@ const DetailPage = {
                     <i class="ph ph-arrow-square-out"></i>
                     <span>IMDb: {{ media.imdb_id }}</span>
                   </a>
+                  <div class="file-pill" v-if="media.certification" title="Content rating / certification">
+                    <i class="ph ph-seal-check"></i>
+                    <span>{{ media.certification }}</span>
+                  </div>
                   <div class="file-pill" v-if="media.file_size">
                     <i class="ph ph-hard-drive"></i>
                     <span>{{ formatFileSize(media.file_size) }}</span>
@@ -4638,6 +4652,7 @@ const DetailPage = {
                 v-for="ep in media.seasons[activeSeason]"
                 :key="ep.id || ('missing-' + ep.season + '-' + ep.episode)"
                 class="episode-card"
+                :data-ep-num="ep.episode"
                 :class="{
                   'missing-episode': ep.is_local === false || ep.is_mounted === false,
                   'unaired-episode': ep.is_local === false && ep.is_unaired
@@ -5459,6 +5474,62 @@ const DetailPage = {
       if (s.includes("pilot")) return "Pilot: Shows that have only produced a pilot episode so far.";
       return `Series Status: ${status}`;
     }
+
+    // ── Jump-to-episode: G+N shortcut ──────────────────────────
+    // Usage: press G, then type episode number, then Enter (or wait 1.5s)
+    let _epJumpBuffer = "";
+    let _epJumpTimer = null;
+    let _epJumpActive = false;
+    function _flushEpJump() {
+      const num = parseInt(_epJumpBuffer, 10);
+      _epJumpBuffer = "";
+      _epJumpActive = false;
+      if (!num) return;
+      const eps = media.value?.seasons?.[activeSeason.value] || [];
+      const target = eps.find((ep) => ep.episode === num);
+      if (!target) { addToast(`Episode ${num} not found in Season ${activeSeason.value}`, "info"); return; }
+      const el = document.querySelector(`[data-ep-num="${num}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("ep-jump-highlight");
+        setTimeout(() => el.classList.remove("ep-jump-highlight"), 1800);
+      } else {
+        addToast(`Jumped to Episode ${num}`, "info");
+      }
+    }
+    function _handleEpJumpKey(e) {
+      if (!route.path.startsWith("/title/")) return;
+      if (["INPUT","TEXTAREA","SELECT"].includes(e.target?.tagName || "")) return;
+      if (e.key === "g" || e.key === "G") {
+        _epJumpActive = true;
+        _epJumpBuffer = "";
+        clearTimeout(_epJumpTimer);
+        addToast("Episode jump: type number + Enter", "info");
+        e.preventDefault();
+        return;
+      }
+      if (_epJumpActive && /^[0-9]$/.test(e.key)) {
+        _epJumpBuffer += e.key;
+        clearTimeout(_epJumpTimer);
+        _epJumpTimer = setTimeout(_flushEpJump, 1500);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "Enter" && _epJumpActive && _epJumpBuffer) {
+        clearTimeout(_epJumpTimer);
+        _flushEpJump();
+        e.preventDefault();
+      } else if (e.key === "Escape" && _epJumpActive) {
+        _epJumpActive = false;
+        _epJumpBuffer = "";
+        clearTimeout(_epJumpTimer);
+      }
+    }
+    onMounted(() => window.addEventListener("keydown", _handleEpJumpKey));
+    onUnmounted(() => {
+      window.removeEventListener("keydown", _handleEpJumpKey);
+      clearTimeout(_epJumpTimer);
+    });
 
     return {
       store,
@@ -7257,10 +7328,16 @@ const SettingsPage = {
                   Current Cache Usage: <span style="color:var(--accent)">{{ cacheInfo.size_formatted || '0 KB' }}</span> ({{ cacheInfo.file_count || 0 }} files)
                 </div>
               </div>
-              <button class="btn btn-secondary" @click="handleClearCache" :disabled="clearingCache" id="btn-clear-cache">
-                <i class="ph ph-trash-simple" style="margin-right:6px"></i>
-                {{ clearingCache ? 'Clearing...' : 'Clear Cache' }}
-              </button>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-secondary" @click="handleClearCache" :disabled="clearingCache" id="btn-clear-cache">
+                  <i class="ph ph-trash-simple" style="margin-right:6px"></i>
+                  {{ clearingCache ? 'Clearing...' : 'Clear Cache' }}
+                </button>
+                <button class="btn btn-secondary" @click="handleClearProbeCache" :disabled="clearingProbeCache" id="btn-clear-probe-cache" title="Flush in-memory ffprobe result cache (forces fresh probe on next file access)">
+                  <i class="ph ph-cpu" style="margin-right:6px"></i>
+                  {{ clearingProbeCache ? 'Clearing...' : 'Clear Probe Cache' }}
+                </button>
+              </div>
             </div>
 
             <!-- Download Backup -->
@@ -7819,6 +7896,14 @@ const SettingsPage = {
 
     async function saveSettings() {
       saving.value = true;
+      let prevHost = null;
+      try {
+        prevHost = JSON.parse(initialFormJson.value || "{}").host;
+      } catch (e) {}
+      const currentHost = (form.value?.host || "").trim();
+      const activeHost = sysInfo.value?.server_addr ? sysInfo.value.server_addr.split(":")[0].trim() : null;
+      const hostChanged = (prevHost !== null && prevHost !== undefined && prevHost.trim() !== currentHost) || (activeHost && activeHost !== currentHost);
+
       try {
         await API.post("/api/settings", form.value);
         initialFormJson.value = JSON.stringify(form.value);
@@ -7832,6 +7917,21 @@ const SettingsPage = {
           } catch (err) {}
         }
         addToast("Settings saved successfully", "success");
+
+        if (hostChanged) {
+          nextTick(() => {
+            const targetEl = document.getElementById("settings-shutdown-section") || document.getElementById("btn-open-restart");
+            if (targetEl) {
+              targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+              targetEl.classList.add("server-control-highlight");
+              setTimeout(() => {
+                targetEl.classList.remove("server-control-highlight");
+              }, 4500);
+            }
+          });
+          addToast("Host updated. Restart the server in Server Control below to apply changes.", "warning", 8000);
+        }
+
         return true;
       } catch (e) {
         addToast("Failed to save settings", "error");
@@ -8400,6 +8500,19 @@ const SettingsPage = {
         addToast("Failed to clear cache", "error");
       } finally {
         clearingCache.value = false;
+      }
+    }
+
+    const clearingProbeCache = ref(false);
+    async function handleClearProbeCache() {
+      clearingProbeCache.value = true;
+      try {
+        await API.del("/api/system/probe-cache");
+        addToast("Probe cache cleared. Fresh ffprobe results will be fetched on next access.", "success");
+      } catch (e) {
+        addToast("Failed to clear probe cache", "error");
+      } finally {
+        clearingProbeCache.value = false;
       }
     }
 
@@ -9032,6 +9145,8 @@ const SettingsPage = {
       clearingCache,
       resetting,
       handleClearCache,
+      clearingProbeCache,
+      handleClearProbeCache,
       showResetModal,
       clearMediaFiles,
       resetConfirmText,
@@ -9139,6 +9254,7 @@ const ShortcutsModal = {
           { desc: "Next / Previous Chapter", keys: ["PgUp", "PgDn"] },
           { desc: "Queue & Playlist Drawer", keys: ["Q"] },
           { desc: "Sleep Timer (Cycle Presets)", keys: ["Z"] },
+          { desc: "Jump to Episode (on Series Page)", keys: ["G", "1-9"] },
         ]
       },
       {
@@ -9753,8 +9869,26 @@ const CollectionsPage = {
           @click="router.push('/collection/' + col.id)"
           :id="'collection-' + col.id"
         >
-          <div class="collection-cover" :class="'cover-count-' + Math.min(col.items ? col.items.length : 0, 4)">
-            <template v-if="col.items && col.items.length">
+          <div class="collection-cover" :class="'cover-count-' + (col.cover_id && getCollectionCover(col) ? 1 : Math.min(col.items ? col.items.length : 0, 4))">
+            <button
+              v-if="!col.smart && !col.is_country_hub && !col.is_franchise && !col.universe && !store.profile?.is_kids"
+              class="collection-card-cover-btn"
+              @click.stop="openCoverPicker(col)"
+              title="Set Cover Image"
+            >
+              <i class="ph ph-image"></i>
+              <span>Set Cover</span>
+            </button>
+            <template v-if="col.cover_id && getCollectionCover(col)">
+              <img
+                :src="imgUrl(getCollectionCover(col).backdrop_path || getCollectionCover(col).poster_path)"
+                class="collection-cover-img"
+                style="grid-column: 1 / -1; grid-row: 1 / -1; width: 100%; height: 100%; object-fit: cover;"
+                :alt="col.name"
+                loading="lazy"
+              >
+            </template>
+            <template v-else-if="col.items && col.items.length">
               <img
                 v-for="item in col.items.slice(0, 4)"
                 :key="item.id"
@@ -9812,6 +9946,62 @@ const CollectionsPage = {
           </div>
         </div>
       </div>
+
+      <!-- Cover Picker Modal for Collection Card -->
+      <div class="modal-backdrop" v-if="showCoverPickerModal && selectedColForCover" @click.self="showCoverPickerModal = false">
+        <div class="modal-card" style="max-width:640px;width:90%;max-height:85vh;display:flex;flex-direction:column">
+          <div class="modal-header">
+            <div style="font-weight:700;font-size:1.1rem;display:flex;align-items:center;gap:8px">
+              <i class="ph ph-image" style="color:var(--accent)"></i> Select Cover for "{{ selectedColForCover.name }}"
+            </div>
+            <button class="modal-close" @click="showCoverPickerModal = false"><i class="ph ph-x"></i></button>
+          </div>
+          <div class="modal-body" style="overflow-y:auto;padding:16px">
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">
+              Choose a title from this collection to use as its cover:
+            </p>
+            <div v-if="!selectedColForCover.items || selectedColForCover.items.length === 0" style="text-align:center;padding:24px;color:var(--text-muted)">
+              <i class="ph ph-film-strip" style="font-size:2rem;margin-bottom:8px;display:block"></i>
+              No titles in this collection yet. Add titles to this collection first from any movie or series page.
+            </div>
+            <div v-else style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px">
+              <div
+                v-for="it in selectedColForCover.items"
+                :key="it.id"
+                @click="saveCollectionCover(it.id)"
+                :style="{
+                  cursor: 'pointer',
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                  position: 'relative',
+                  border: selectedColForCover && String(selectedColForCover.cover_id) === String(it.id) ? '2px solid var(--accent)' : '2px solid transparent',
+                  background: 'rgba(255,255,255,0.05)'
+                }"
+              >
+                <img
+                  :src="imgUrl(it.poster_path || it.backdrop_path)"
+                  style="width:100%;aspect-ratio:2/3;object-fit:cover;display:block"
+                  :alt="it.title"
+                  loading="lazy"
+                />
+                <div v-if="selectedColForCover && String(selectedColForCover.cover_id) === String(it.id)" style="position:absolute;top:4px;right:4px;background:var(--accent);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:0.75rem">
+                  <i class="ph-bold ph-check"></i>
+                </div>
+                <div style="font-size:0.75rem;padding:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center">
+                  {{ it.title }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer" style="display:flex;justify-content:space-between;padding:12px 16px">
+            <button v-if="selectedColForCover.cover_id" class="btn btn-ghost" @click="saveCollectionCover(null)" style="color:var(--text-muted)">
+              Reset to Auto-Collage
+            </button>
+            <span v-else></span>
+            <button class="btn btn-secondary" @click="showCoverPickerModal = false">Close</button>
+          </div>
+        </div>
+      </div>
     </div>
   `,
   setup() {
@@ -9859,6 +10049,35 @@ const CollectionsPage = {
       }
     }
 
+    function getCollectionCover(col) {
+      if (!col?.cover_id || !col?.items) return null;
+      return col.items.find(i => String(i.id) === String(col.cover_id)) || null;
+    }
+
+    const selectedColForCover = ref(null);
+    const showCoverPickerModal = ref(false);
+
+    function openCoverPicker(col) {
+      selectedColForCover.value = col;
+      showCoverPickerModal.value = true;
+    }
+
+    async function saveCollectionCover(mediaId) {
+      if (!selectedColForCover.value) return;
+      const colId = selectedColForCover.value.id;
+      try {
+        await API.patch(`/api/collections/${colId}`, { cover_id: mediaId });
+        selectedColForCover.value.cover_id = mediaId;
+        const found = collections.value.find(c => c.id === colId);
+        if (found) found.cover_id = mediaId;
+        API.clearCache("/api/collections");
+        showCoverPickerModal.value = false;
+        addToast(mediaId ? "Collection cover updated!" : "Collection cover reset to auto", "success");
+      } catch (e) {
+        addToast("Failed to update cover", "error");
+      }
+    }
+
     onMounted(load);
     watch(() => store.profile, load);
 
@@ -9876,6 +10095,11 @@ const CollectionsPage = {
       newDesc,
       router,
       imgUrl,
+      getCollectionCover,
+      selectedColForCover,
+      showCoverPickerModal,
+      openCoverPicker,
+      saveCollectionCover,
       createCollection
     };
   },
@@ -10002,6 +10226,15 @@ const CollectionDetailPage = {
             </button>
             <button
               v-if="!collection.smart && !store.profile?.is_kids"
+              class="btn btn-secondary"
+              @click="showCoverModal = true"
+              id="collection-set-cover-btn"
+              title="Choose cover image for this collection"
+            >
+              <i class="ph ph-image"></i> Set Cover
+            </button>
+            <button
+              v-if="!collection.smart && !store.profile?.is_kids"
               class="btn btn-ghost"
               @click="deleteCollection"
               style="color:var(--accent)"
@@ -10030,8 +10263,8 @@ const CollectionDetailPage = {
 
       <!-- Convert to Playlist Modal -->
       <div class="modal-backdrop" v-if="showConvertModal" @click.self="showConvertModal = false">
-        <div class="modal convert-playlist-modal">
-          <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <div class="modal">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
             <h3 style="margin:0;display:flex;align-items:center;gap:8px">
               <i class="ph ph-queue" style="color:var(--accent)"></i> Convert to Playlist
             </h3>
@@ -10071,6 +10304,62 @@ const CollectionDetailPage = {
               <i class="ph ph-check"></i> {{ isConverting ? 'Creating...' : 'Create Playlist' }}
             </button>
             <button class="btn btn-ghost btn-full" @click="showConvertModal = false" :disabled="isConverting">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cover Picker Modal -->
+      <div class="modal-backdrop" v-if="showCoverModal" @click.self="showCoverModal = false">
+        <div class="modal-card" style="max-width:640px;width:90%;max-height:85vh;display:flex;flex-direction:column">
+          <div class="modal-header">
+            <div style="font-weight:700;font-size:1.1rem;display:flex;align-items:center;gap:8px">
+              <i class="ph ph-image" style="color:var(--accent)"></i> Select Collection Cover
+            </div>
+            <button class="modal-close" @click="showCoverModal = false"><i class="ph ph-x"></i></button>
+          </div>
+          <div class="modal-body" style="overflow-y:auto;padding:16px">
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">
+              Choose a title to use as the hero backdrop and poster for this collection:
+            </p>
+            <div v-if="!displayItems || displayItems.length === 0" style="text-align:center;padding:24px;color:var(--text-muted)">
+              <i class="ph ph-film-strip" style="font-size:2rem;margin-bottom:8px;display:block"></i>
+              No titles in this collection yet. Add titles to this collection first from any movie or series page.
+            </div>
+            <div v-else style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px">
+              <div
+                v-for="it in displayItems"
+                :key="it.id"
+                @click="setCover(it.id)"
+                :style="{
+                  cursor: 'pointer',
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                  position: 'relative',
+                  border: collection && String(collection.cover_id) === String(it.id) ? '2px solid var(--accent)' : '2px solid transparent',
+                  background: 'rgba(255,255,255,0.05)'
+                }"
+              >
+                <img
+                  :src="imgUrl(it.poster_path || it.backdrop_path)"
+                  style="width:100%;aspect-ratio:2/3;object-fit:cover;display:block"
+                  :alt="it.title"
+                  loading="lazy"
+                />
+                <div v-if="collection && String(collection.cover_id) === String(it.id)" style="position:absolute;top:4px;right:4px;background:var(--accent);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:0.75rem">
+                  <i class="ph-bold ph-check"></i>
+                </div>
+                <div style="font-size:0.75rem;padding:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center">
+                  {{ it.title }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer" style="display:flex;justify-content:space-between;padding:12px 16px">
+            <button v-if="collection && collection.cover_id" class="btn btn-ghost" @click="setCover(null)" style="color:var(--text-muted)">
+              Reset to Auto
+            </button>
+            <span v-else></span>
+            <button class="btn btn-secondary" @click="showCoverModal = false">Close</button>
           </div>
         </div>
       </div>
@@ -10154,9 +10443,27 @@ const CollectionDetailPage = {
 
     const heroBackdrop = computed(() => {
       if (!displayItems.value?.length) return null;
+      if (collection.value?.cover_id) {
+        const coverItem = displayItems.value.find((i) => String(i.id) === String(collection.value.cover_id));
+        if (coverItem) return coverItem.backdrop_path || coverItem.poster_path;
+      }
       const firstWithBackdrop = displayItems.value.find((i) => i.backdrop_path);
       return firstWithBackdrop ? firstWithBackdrop.backdrop_path : (displayItems.value[0]?.poster_path || null);
     });
+
+    const showCoverModal = ref(false);
+    async function setCover(mediaId) {
+      if (!collection.value) return;
+      try {
+        await API.patch(`/api/collections/${collection.value.id}`, { cover_id: mediaId });
+        collection.value.cover_id = mediaId;
+        API.clearCache("/api/collections");
+        showCoverModal.value = false;
+        addToast(mediaId ? "Collection cover updated" : "Collection cover reset to auto", "success");
+      } catch (err) {
+        addToast("Failed to update cover", "error");
+      }
+    }
 
     async function load() {
       try {
@@ -10225,9 +10532,596 @@ const CollectionDetailPage = {
       isConverting,
       hasSeriesInCollection,
       openConvertModal,
-      submitConvertToPlaylist
+      submitConvertToPlaylist,
+      showCoverModal,
+      setCover
     };
   },
+};
+
+// ─── Cinematic Universes & Franchises Explorer ──────────────────
+
+const UniversesPage = {
+  template: `
+    <div class="collections-page universes-page">
+      <div class="collections-header-bar">
+        <div>
+          <h1 class="page-title">Cinematic Universes</h1>
+          <p style="color:var(--text-secondary);font-size:0.9rem;margin-top:4px">
+            Explore interconnected sagas, multiverse timelines, and film franchises with canonical viewing orders.
+          </p>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.75rem">
+          <button class="btn btn-secondary" @click="router.push('/collections')" title="View All Collections">
+            <i class="ph ph-squares-four"></i> All Collections
+          </button>
+        </div>
+      </div>
+
+      <div v-if="loading" style="display:flex;justify-content:center;padding:4rem">
+        <div class="loading-spinner"></div>
+      </div>
+
+      <div v-else-if="universes.length === 0" class="empty-state">
+        <div class="empty-icon"><i class="ph-bold ph-sparkle"></i></div>
+        <div class="empty-title">No Cinematic Universes Found</div>
+        <div class="empty-subtitle">Add titles from franchises like Marvel, Star Wars, Harry Potter, or Lord of the Rings to unlock universe timelines.</div>
+      </div>
+
+      <div v-else class="universes-grid">
+        <div
+          v-for="u in universes"
+          :key="u.id"
+          class="universe-card"
+          @click="router.push('/universe/' + u.id)"
+        >
+          <div class="universe-card-backdrop-wrap">
+            <img
+              v-if="u.backdrop_path"
+              :src="imgUrl(u.backdrop_path)"
+              class="universe-card-backdrop"
+              :alt="u.name"
+            />
+            <div class="universe-card-backdrop-gradient"></div>
+            <div class="universe-card-badge-row">
+              <span class="universe-badge-chip">
+                <i :class="u.icon || 'ph ph-sparkle'"></i>
+                {{ u.item_count }} Title{{ u.item_count === 1 ? '' : 's' }}
+              </span>
+              <span v-if="u.has_timeline" class="universe-badge-chip timeline-chip">
+                <i class="ph-bold ph-hourglass-high"></i> Canonical Timeline
+              </span>
+            </div>
+          </div>
+          <div class="universe-card-info">
+            <h3 class="universe-card-title">{{ u.name }}</h3>
+            <p class="universe-card-desc">{{ u.description }}</p>
+            <div class="universe-preview-posters" v-if="u.preview_items && u.preview_items.length">
+              <img
+                v-for="p in u.preview_items"
+                :key="p.id"
+                :src="imgUrl(p.poster_path)"
+                class="universe-mini-poster"
+                :alt="p.title"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `,
+  setup() {
+    const router = VueRouter.useRouter();
+    const universes = ref([]);
+    const loading = ref(true);
+
+    async function loadUniverses() {
+      loading.value = true;
+      try {
+        universes.value = (await API.get("/api/universes")) || [];
+      } catch (e) {
+        universes.value = [];
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    onMounted(loadUniverses);
+
+    return {
+      universes,
+      loading,
+      router,
+      imgUrl,
+    };
+  }
+};
+
+const UniverseDetailPage = {
+  components: { MediaCard },
+  template: `
+    <div class="browse-page universe-detail-page">
+      <div v-if="loading" style="display:flex;justify-content:center;padding:5rem">
+        <div class="loading-spinner"></div>
+      </div>
+
+      <template v-else-if="universe">
+        <div class="collection-hero universe-hero">
+          <img
+            v-if="universe.backdrop_path"
+            :src="imgUrl(universe.backdrop_path)"
+            class="collection-hero-backdrop"
+            :alt="universe.name"
+          />
+          <div class="collection-hero-overlay"></div>
+          <div class="collection-hero-content">
+            <div class="collection-hero-main">
+              <div class="collection-hero-badges">
+                <button class="btn btn-sm btn-ghost" @click="router.push('/universes')" style="padding:4px 8px;font-size:0.75rem;margin-right:6px">
+                  <i class="ph-bold ph-arrow-left"></i> Universes
+                </button>
+                <span class="collection-hero-badge badge-universe">
+                  <i :class="universe.icon || 'ph ph-sparkle'"></i> Cinematic Universe
+                </span>
+                <span class="collection-hero-badge">
+                  {{ universe.item_count }} title{{ universe.item_count === 1 ? '' : 's' }} in library
+                </span>
+              </div>
+              <h1 class="collection-hero-title">{{ universe.name }}</h1>
+              <p v-if="universe.description" class="collection-hero-desc">{{ universe.description }}</p>
+            </div>
+            <div class="collection-hero-actions">
+              <div v-if="universe.has_timeline" class="timeline-toggle-group">
+                <button
+                  class="timeline-toggle-btn"
+                  :class="{ active: viewMode === 'timeline' }"
+                  @click="viewMode = 'timeline'"
+                  title="Sort by In-Universe Chronological Timeline"
+                >
+                  <i class="ph-bold ph-hourglass-high"></i> Timeline Order
+                </button>
+                <button
+                  class="timeline-toggle-btn"
+                  :class="{ active: viewMode === 'release' }"
+                  @click="viewMode = 'release'"
+                  title="Sort by Theatrical Release Date"
+                >
+                  <i class="ph ph-calendar"></i> Release Order
+                </button>
+              </div>
+
+              <button v-if="activeItems.length > 0" class="btn btn-primary" @click="playFirst" id="universe-play-first-btn">
+                <i class="ph ph-play-fill"></i> Play First
+              </button>
+              <button v-if="activeItems.length > 1" class="btn btn-secondary" @click="playRandom" id="universe-shuffle-btn" title="Shuffle Play">
+                <i class="ph ph-shuffle"></i> Shuffle
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Timeline Chronological View -->
+        <div v-if="viewMode === 'timeline' && universe.timeline_items && universe.timeline_items.length" class="universe-timeline-wrap">
+          <div class="timeline-header-hint">
+            <i class="ph-bold ph-info"></i>
+            <span>Canonical narrative timeline: chronological viewing sequence through this universe.</span>
+          </div>
+          <div class="universe-timeline-track">
+            <div
+              v-for="it in universe.timeline_items"
+              :key="it.id"
+              class="timeline-node-card"
+              @click="openDetail(it)"
+            >
+              <div class="timeline-marker">
+                <span class="timeline-step-badge">#{{ it.sequence_number }}</span>
+                <div class="timeline-line"></div>
+              </div>
+              <div class="timeline-card-body">
+                <img
+                  v-if="it.poster_path"
+                  :src="imgUrl(it.poster_path)"
+                  class="timeline-card-poster"
+                  :alt="it.title"
+                />
+                <div class="timeline-card-content">
+                  <div class="timeline-card-meta">
+                    <span v-if="it.year" class="timeline-year">{{ it.year }}</span>
+                    <span class="timeline-type-pill">{{ it.type === 'movie' ? 'Movie' : 'Series' }}</span>
+                    <span v-if="it.rating" class="timeline-rating"><i class="ph-fill ph-star" style="color:var(--gold)"></i> {{ Number(it.rating).toFixed(1) }}</span>
+                  </div>
+                  <h4 class="timeline-card-title">{{ it.title }}</h4>
+                  <p v-if="it.overview" class="timeline-card-overview">{{ it.overview }}</p>
+                  <div class="timeline-card-actions">
+                    <button class="btn btn-sm btn-primary" @click.stop="playItem(it)">
+                      <i class="ph ph-play-fill"></i> Play
+                    </button>
+                    <button class="btn btn-sm btn-secondary" @click.stop="openDetail(it)">
+                      <i class="ph ph-info"></i> Details
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Release Order Grid View -->
+        <div v-else class="collections-detail-content">
+          <div class="media-grid">
+            <media-card
+              v-for="item in activeItems"
+              :key="item.id"
+              :item="item"
+              :show-favorite="true"
+              @click="handleClick(item)"
+            />
+          </div>
+        </div>
+      </template>
+    </div>
+  `,
+  setup() {
+    const route = VueRouter.useRoute();
+    const router = VueRouter.useRouter();
+    const universe = ref(null);
+    const loading = ref(true);
+    const viewMode = ref("timeline");
+
+    async function loadUniverse() {
+      loading.value = true;
+      const id = route.params.id;
+      try {
+        universe.value = await API.get(`/api/universes/${id}`);
+        if (!universe.value?.has_timeline) {
+          viewMode.value = "release";
+        }
+      } catch (e) {
+        universe.value = null;
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    const activeItems = computed(() => {
+      if (!universe.value) return [];
+      if (viewMode.value === "timeline" && universe.value.timeline_items?.length) {
+        return universe.value.timeline_items;
+      }
+      return universe.value.items || [];
+    });
+
+    function playFirst() {
+      if (activeItems.value.length > 0) {
+        playItem(activeItems.value[0]);
+      }
+    }
+
+    function playRandom() {
+      const items = activeItems.value;
+      if (items.length > 0) {
+        const rand = items[Math.floor(Math.random() * items.length)];
+        playItem(rand);
+      }
+    }
+
+    function playItem(item) {
+      if (item && item.id) {
+        router.push(`/watch/${item.id}`);
+      }
+    }
+
+    function openDetail(item) {
+      if (item && item.id) {
+        router.push(`/title/${item.type || 'movie'}/${item.id}`);
+      }
+    }
+
+    function handleClick(item) {
+      openDetail(item);
+    }
+
+    onMounted(loadUniverse);
+
+    return {
+      universe,
+      loading,
+      viewMode,
+      activeItems,
+      router,
+      imgUrl,
+      playFirst,
+      playRandom,
+      playItem,
+      openDetail,
+      handleClick,
+    };
+  }
+};
+
+// ─── Regional & Country Hubs ────────────────────────────────────
+
+const RegionalHubsPage = {
+  template: `
+    <div class="collections-page regional-page">
+      <div class="collections-header-bar">
+        <div>
+          <h1 class="page-title">Regional Cinema & Country Hubs</h1>
+          <p style="color:var(--text-secondary);font-size:0.9rem;margin-top:4px">
+            Explore films, television, and local cinema grouped by country of origin.
+          </p>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.75rem">
+          <button class="btn btn-secondary" @click="router.push('/collections')" title="View All Collections">
+            <i class="ph ph-squares-four"></i> All Collections
+          </button>
+        </div>
+      </div>
+
+      <div v-if="loading" style="display:flex;justify-content:center;padding:4rem">
+        <div class="loading-spinner"></div>
+      </div>
+
+      <div v-else-if="countries.length === 0" class="empty-state">
+        <div class="empty-icon"><i class="ph-bold ph-globe"></i></div>
+        <div class="empty-title">No Regional Hubs Detected</div>
+        <div class="empty-subtitle">Media files with country tags or languages will appear here automatically.</div>
+      </div>
+
+      <div v-else class="regional-grid">
+        <div
+          v-for="c in countries"
+          :key="c.id"
+          class="country-hub-card"
+          @click="router.push('/regional/' + (c.country_code || 'ph').toLowerCase())"
+        >
+          <div class="country-hub-flag-header">
+            <span class="country-hub-flag">{{ c.flag || '🌍' }}</span>
+            <div class="country-hub-title-box">
+              <h3 class="country-hub-name">{{ c.country_name }}</h3>
+              <span class="country-hub-badge">{{ c.item_count }} Title{{ c.item_count === 1 ? '' : 's' }}</span>
+            </div>
+          </div>
+          <p class="country-hub-desc">{{ c.description }}</p>
+          <div class="country-hub-stats">
+            <span v-if="c.movie_count" class="country-stat-pill"><i class="ph ph-film-strip"></i> {{ c.movie_count }} Movies</span>
+            <span v-if="c.series_count" class="country-stat-pill"><i class="ph ph-television"></i> {{ c.series_count }} Series</span>
+          </div>
+          <div class="country-preview-row" v-if="c.preview_items && c.preview_items.length">
+            <img
+              v-for="p in getUniquePreviews(c.preview_items)"
+              :key="p.id"
+              :src="imgUrl(p.poster_path)"
+              class="country-mini-poster"
+              :alt="p.title"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  `,
+  setup() {
+    const router = VueRouter.useRouter();
+    const countries = ref([]);
+    const loading = ref(true);
+
+    async function loadCountries() {
+      loading.value = true;
+      try {
+        countries.value = (await API.get("/api/regional/countries")) || [];
+      } catch (e) {
+        countries.value = [];
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    function getUniquePreviews(items) {
+      if (!items || !items.length) return [];
+      const seen = new Set();
+      const res = [];
+      for (const p of items) {
+        const key = `${p.type || 'movie'}_${p.tmdb_id || (p.title || '').trim().toLowerCase()}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          res.push(p);
+        }
+      }
+      return res.slice(0, 4);
+    }
+
+    onMounted(loadCountries);
+
+    return {
+      countries,
+      loading,
+      router,
+      imgUrl,
+      getUniquePreviews,
+    };
+  }
+};
+
+const CountryDetailPage = {
+  components: { MediaCard },
+  template: `
+    <div class="browse-page country-detail-page">
+      <div v-if="loading" style="display:flex;justify-content:center;padding:5rem">
+        <div class="loading-spinner"></div>
+      </div>
+
+      <template v-else-if="country">
+        <div class="collection-hero country-hero">
+          <img
+            v-if="country.backdrop_path"
+            :src="imgUrl(country.backdrop_path)"
+            class="collection-hero-backdrop"
+            :alt="country.country_name"
+          />
+          <div class="collection-hero-overlay"></div>
+          <div class="collection-hero-content">
+            <div class="collection-hero-main">
+              <div class="collection-hero-badges">
+                <button class="btn btn-sm btn-ghost" @click="router.push('/regional')" style="padding:4px 8px;font-size:0.75rem;margin-right:6px">
+                  <i class="ph-bold ph-arrow-left"></i> Country Hubs
+                </button>
+                <span class="collection-hero-badge badge-country">
+                  <span>{{ country.flag || '🌍' }}</span> Regional Cinema Hub
+                </span>
+                <span class="collection-hero-badge">
+                  {{ filteredItems.length }} title{{ filteredItems.length === 1 ? '' : 's' }}
+                </span>
+              </div>
+              <h1 class="collection-hero-title">
+                <span style="margin-right:12px">{{ country.flag }}</span>{{ country.country_name }}
+              </h1>
+              <p v-if="country.description" class="collection-hero-desc">{{ country.description }}</p>
+            </div>
+            <div class="collection-hero-actions">
+              <div class="timeline-toggle-group">
+                <button
+                  class="timeline-toggle-btn"
+                  :class="{ active: filterType === 'all' }"
+                  @click="filterType = 'all'"
+                >
+                  <i class="ph ph-squares-four"></i> All ({{ uniqueAllCount }})
+                </button>
+                <button
+                  v-if="uniqueMovieCount > 0"
+                  class="timeline-toggle-btn"
+                  :class="{ active: filterType === 'movie' }"
+                  @click="filterType = 'movie'"
+                >
+                  <i class="ph ph-film-strip"></i> Movies ({{ uniqueMovieCount }})
+                </button>
+                <button
+                  v-if="uniqueSeriesCount > 0"
+                  class="timeline-toggle-btn"
+                  :class="{ active: filterType === 'series' }"
+                  @click="filterType = 'series'"
+                >
+                  <i class="ph ph-television"></i> Series ({{ uniqueSeriesCount }})
+                </button>
+              </div>
+
+              <button v-if="filteredItems.length > 0" class="btn btn-primary" @click="playFirst">
+                <i class="ph ph-play-fill"></i> Play First
+              </button>
+              <button v-if="filteredItems.length > 1" class="btn btn-secondary" @click="playRandom" title="Shuffle Play">
+                <i class="ph ph-shuffle"></i> Shuffle
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="collections-detail-content">
+          <div class="media-grid">
+            <media-card
+              v-for="item in filteredItems"
+              :key="item.id || item.tmdb_id"
+              :item="item"
+              :show-favorite="true"
+              @click="handleClick(item)"
+            />
+          </div>
+        </div>
+      </template>
+    </div>
+  `,
+  setup() {
+    const route = VueRouter.useRoute();
+    const router = VueRouter.useRouter();
+    const country = ref(null);
+    const loading = ref(true);
+    const filterType = ref("all");
+
+    async function loadCountry() {
+      loading.value = true;
+      const code = route.params.code;
+      try {
+        country.value = await API.get(`/api/regional/countries/${code}`);
+      } catch (e) {
+        country.value = null;
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    const uniqueAllItems = computed(() => {
+      if (!country.value || !country.value.items) return [];
+      const seen = new Set();
+      const unique = [];
+      for (const it of country.value.items) {
+        const key = `${it.type || 'movie'}_${it.tmdb_id || (it.title || '').trim().toLowerCase()}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push(it);
+        }
+      }
+      return unique;
+    });
+
+    const uniqueAllCount = computed(() => uniqueAllItems.value.length);
+    const uniqueMovieCount = computed(() => uniqueAllItems.value.filter(i => (i.type || 'movie') === 'movie').length);
+    const uniqueSeriesCount = computed(() => uniqueAllItems.value.filter(i => (i.type || '') === 'series' || (i.type || '') === 'anime').length);
+
+    const filteredItems = computed(() => {
+      const all = uniqueAllItems.value;
+      if (filterType.value === "movie") return all.filter(i => (i.type || "movie") === "movie");
+      if (filterType.value === "series") return all.filter(i => (i.type || "") === "series" || (i.type || "") === "anime");
+      return all;
+    });
+
+    function playFirst() {
+      if (filteredItems.value.length > 0) {
+        const first = filteredItems.value[0];
+        if (first.type === "movie" && first.id) {
+          router.push(`/watch/${first.id}`);
+        } else {
+          router.push(`/title/${first.type || 'series'}/${first.tmdb_id || first.id}`);
+        }
+      }
+    }
+
+    function playRandom() {
+      const items = filteredItems.value;
+      if (items.length > 0) {
+        const rand = items[Math.floor(Math.random() * items.length)];
+        if (rand.type === "movie" && rand.id) {
+          router.push(`/watch/${rand.id}`);
+        } else {
+          router.push(`/title/${rand.type || 'series'}/${rand.tmdb_id || rand.id}`);
+        }
+      }
+    }
+
+    function handleClick(item) {
+      if (item) {
+        if (item.type === "movie" && item.id) {
+          router.push(`/title/movie/${item.id}`);
+        } else {
+          router.push(`/title/${item.type || 'series'}/${item.tmdb_id || item.id}`);
+        }
+      }
+    }
+
+    onMounted(loadCountry);
+
+    return {
+      country,
+      loading,
+      filterType,
+      filteredItems,
+      uniqueAllCount,
+      uniqueMovieCount,
+      uniqueSeriesCount,
+      router,
+      imgUrl,
+      playFirst,
+      playRandom,
+      handleClick,
+    };
+  }
 };
 
 // ─── Playlists Page ───────────────────────────────────────────
@@ -11103,10 +11997,10 @@ const ProfilesPage = {
 
             <!-- Kids Screen Time Controls -->
             <template v-if="editProfile.is_kids">
-              <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Daily Watch Limit</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Automatically lock Kids Mode after watching this amount today.</div>
-                <select v-model.number="editProfile.daily_limit_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+              <div style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">Daily Watch Limit</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">Automatically lock Kids Mode after watching this amount today.</div>
+                <select v-model.number="editProfile.daily_limit_minutes" class="form-input" style="max-width:240px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-strong);padding:8px;border-radius:8px">
                   <option :value="0">No Limit (Unlimited)</option>
                   <option :value="30">30 Minutes / day</option>
                   <option :value="45">45 Minutes / day</option>
@@ -11117,10 +12011,10 @@ const ProfilesPage = {
                 </select>
               </div>
 
-              <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Bedtime Curfew</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Locks Kids Mode at this time in the evening.</div>
-                <select v-model="editProfile.bedtime_curfew" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+              <div style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">Bedtime Curfew</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">Locks Kids Mode at this time in the evening.</div>
+                <select v-model="editProfile.bedtime_curfew" class="form-input" style="max-width:240px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-strong);padding:8px;border-radius:8px">
                   <option value="">Off (No Bedtime Curfew)</option>
                   <option value="19:00">7:00 PM</option>
                   <option value="19:30">7:30 PM</option>
@@ -11136,9 +12030,9 @@ const ProfilesPage = {
             <!-- Adult & Teen Settings -->
             <template v-else>
               <!-- Maturity Level Selector (Admin Only) -->
-              <div v-if="isAdminUnlocked" style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Maturity Rating Filter</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Select the highest rating category permitted for this profile.</div>
+              <div v-if="isAdminUnlocked" style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">Maturity Rating Filter</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">Select the highest rating category permitted for this profile.</div>
                 <div class="maturity-pill-selector">
                   <div
                     class="maturity-pill"
@@ -11160,9 +12054,9 @@ const ProfilesPage = {
               </div>
 
               <!-- Blocked Genres Exclusions (Admin Only) -->
-              <div v-if="isAdminUnlocked" style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Excluded Genres</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Click to block specific genres from appearing in this profile's library.</div>
+              <div v-if="isAdminUnlocked" style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">Excluded Genres</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">Click to block specific genres from appearing in this profile's library.</div>
                 <div class="genre-chip-selector">
                   <div
                     v-for="g in availableGenres"
@@ -11178,13 +12072,13 @@ const ProfilesPage = {
               </div>
 
               <!-- Language & Playback Defaults -->
-              <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Playback Language Defaults</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:10px">Automatically select preferred audio and subtitle tracks on playback.</div>
+              <div style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">Playback Language Defaults</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:10px">Automatically select preferred audio and subtitle tracks on playback.</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                   <div>
-                    <label style="font-size:0.75rem;color:#808080;font-weight:600;display:block;margin-bottom:4px">PREFERRED AUDIO</label>
-                    <select v-model="editProfile.default_audio_lang" class="form-input" style="width:100%;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                    <label style="font-size:0.75rem;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">PREFERRED AUDIO</label>
+                    <select v-model="editProfile.default_audio_lang" class="form-input" style="width:100%;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-strong);padding:8px;border-radius:8px">
                       <option value="">Auto (Default Track)</option>
                       <option value="en">English (en)</option>
                       <option value="ja">Japanese (ja)</option>
@@ -11196,8 +12090,8 @@ const ProfilesPage = {
                     </select>
                   </div>
                   <div>
-                    <label style="font-size:0.75rem;color:#808080;font-weight:600;display:block;margin-bottom:4px">PREFERRED SUBTITLES</label>
-                    <select v-model="editProfile.default_sub_lang" class="form-input" style="width:100%;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                    <label style="font-size:0.75rem;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">PREFERRED SUBTITLES</label>
+                    <select v-model="editProfile.default_sub_lang" class="form-input" style="width:100%;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-strong);padding:8px;border-radius:8px">
                       <option value="">Auto / System Default</option>
                       <option value="off">Off (Subtitles Disabled)</option>
                       <option value="en">English (en)</option>
@@ -11209,13 +12103,24 @@ const ProfilesPage = {
                     </select>
                   </div>
                 </div>
+                <div style="margin-top:12px">
+                  <label style="font-size:0.75rem;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">DEFAULT PLAYBACK SPEED</label>
+                  <select v-model.number="editProfile.default_speed" class="form-input" style="max-width:240px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-strong);padding:8px;border-radius:8px">
+                    <option :value="0.75">0.75x</option>
+                    <option :value="1.0">1.0x (Normal)</option>
+                    <option :value="1.25">1.25x</option>
+                    <option :value="1.5">1.5x</option>
+                    <option :value="1.75">1.75x</option>
+                    <option :value="2.0">2.0x</option>
+                  </select>
+                </div>
               </div>
 
               <!-- Inactivity Auto-Lock -->
-              <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">⏳ Inactivity Auto-Lock</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Return to Profile Switcher when idle.</div>
-                <select v-model.number="editProfile.auto_lock_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+              <div style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">⏳ Inactivity Auto-Lock</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">Return to Profile Switcher when idle.</div>
+                <select v-model.number="editProfile.auto_lock_minutes" class="form-input" style="max-width:240px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-strong);padding:8px;border-radius:8px">
                   <option :value="0">Never (Stay Logged In)</option>
                   <option :value="15">15 Minutes</option>
                   <option :value="30">30 Minutes</option>
@@ -11225,7 +12130,7 @@ const ProfilesPage = {
               </div>
 
               <!-- Admin Privileges Toggle (if Admin Unlocked) -->
-              <div v-if="isAdminUnlocked" style="border-top:1px solid #282828;padding-top:18px">
+              <div v-if="isAdminUnlocked" style="border-top:1px solid var(--border);padding-top:18px">
                 <label class="netflix-checkbox-label">
                   <input type="checkbox" v-model="editProfile.is_admin">
                   <div>
@@ -11363,10 +12268,10 @@ const ProfilesPage = {
 
             <!-- Kids Controls -->
             <template v-if="newProfile.is_kids">
-              <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Daily Watch Limit</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Automatically lock Kids Mode after watching this amount today.</div>
-                <select v-model.number="newProfile.daily_limit_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+              <div style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">Daily Watch Limit</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">Automatically lock Kids Mode after watching this amount today.</div>
+                <select v-model.number="newProfile.daily_limit_minutes" class="form-input" style="max-width:240px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-strong);padding:8px;border-radius:8px">
                   <option :value="0">No Limit (Unlimited)</option>
                   <option :value="30">30 Minutes / day</option>
                   <option :value="45">45 Minutes / day</option>
@@ -11377,10 +12282,10 @@ const ProfilesPage = {
                 </select>
               </div>
 
-              <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Bedtime Curfew</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Locks Kids Mode at this time in the evening.</div>
-                <select v-model="newProfile.bedtime_curfew" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+              <div style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">Bedtime Curfew</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">Locks Kids Mode at this time in the evening.</div>
+                <select v-model="newProfile.bedtime_curfew" class="form-input" style="max-width:240px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-strong);padding:8px;border-radius:8px">
                   <option value="">Off (No Bedtime Curfew)</option>
                   <option value="19:00">7:00 PM</option>
                   <option value="19:30">7:30 PM</option>
@@ -11396,9 +12301,9 @@ const ProfilesPage = {
             <!-- Adult / Teen New Settings -->
             <template v-else>
               <!-- Maturity Level Selector -->
-              <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Maturity Rating Filter</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Select the highest rating category permitted for this profile.</div>
+              <div style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">Maturity Rating Filter</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">Select the highest rating category permitted for this profile.</div>
                 <div class="maturity-pill-selector">
                   <div
                     class="maturity-pill"
@@ -11420,9 +12325,9 @@ const ProfilesPage = {
               </div>
 
               <!-- Blocked Genres Exclusions -->
-              <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Excluded Genres</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Click to block specific genres from appearing in this profile's library.</div>
+              <div style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">Excluded Genres</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">Click to block specific genres from appearing in this profile's library.</div>
                 <div class="genre-chip-selector">
                   <div
                     v-for="g in availableGenres"
@@ -11438,13 +12343,13 @@ const ProfilesPage = {
               </div>
 
               <!-- Language & Playback Defaults -->
-              <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">Playback Language Defaults</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:10px">Automatically select preferred audio and subtitle tracks on playback.</div>
+              <div style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">Playback Language Defaults</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:10px">Automatically select preferred audio and subtitle tracks on playback.</div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                   <div>
-                    <label style="font-size:0.75rem;color:#808080;font-weight:600;display:block;margin-bottom:4px">PREFERRED AUDIO</label>
-                    <select v-model="newProfile.default_audio_lang" class="form-input" style="width:100%;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                    <label style="font-size:0.75rem;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">PREFERRED AUDIO</label>
+                    <select v-model="newProfile.default_audio_lang" class="form-input" style="width:100%;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-strong);padding:8px;border-radius:8px">
                       <option value="">Auto (Default Track)</option>
                       <option value="en">English (en)</option>
                       <option value="ja">Japanese (ja)</option>
@@ -11456,8 +12361,8 @@ const ProfilesPage = {
                     </select>
                   </div>
                   <div>
-                    <label style="font-size:0.75rem;color:#808080;font-weight:600;display:block;margin-bottom:4px">PREFERRED SUBTITLES</label>
-                    <select v-model="newProfile.default_sub_lang" class="form-input" style="width:100%;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+                    <label style="font-size:0.75rem;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">PREFERRED SUBTITLES</label>
+                    <select v-model="newProfile.default_sub_lang" class="form-input" style="width:100%;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-strong);padding:8px;border-radius:8px">
                       <option value="">Auto / System Default</option>
                       <option value="off">Off (Subtitles Disabled)</option>
                       <option value="en">English (en)</option>
@@ -11469,13 +12374,24 @@ const ProfilesPage = {
                     </select>
                   </div>
                 </div>
+                <div style="margin-top:12px">
+                  <label style="font-size:0.75rem;color:var(--text-secondary);font-weight:600;display:block;margin-bottom:4px">DEFAULT PLAYBACK SPEED</label>
+                  <select v-model.number="newProfile.default_speed" class="form-input" style="max-width:240px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-strong);padding:8px;border-radius:8px">
+                    <option :value="0.75">0.75x</option>
+                    <option :value="1.0">1.0x (Normal)</option>
+                    <option :value="1.25">1.25x</option>
+                    <option :value="1.5">1.5x</option>
+                    <option :value="1.75">1.75x</option>
+                    <option :value="2.0">2.0x</option>
+                  </select>
+                </div>
               </div>
 
               <!-- Inactivity Auto-Lock -->
-              <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">⏳ Inactivity Auto-Lock</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Return to Profile Switcher when idle.</div>
-                <select v-model.number="newProfile.auto_lock_minutes" class="form-input" style="max-width:240px;background:#1a1a1a;color:#fff;border:1px solid #333;padding:8px;border-radius:8px">
+              <div style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">⏳ Inactivity Auto-Lock</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">Return to Profile Switcher when idle.</div>
+                <select v-model.number="newProfile.auto_lock_minutes" class="form-input" style="max-width:240px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-strong);padding:8px;border-radius:8px">
                   <option :value="0">Never (Stay Logged In)</option>
                   <option :value="15">15 Minutes</option>
                   <option :value="30">30 Minutes</option>
@@ -11485,7 +12401,7 @@ const ProfilesPage = {
               </div>
 
               <!-- Admin Privileges Toggle -->
-              <div v-if="store.profile?.is_admin" style="border-top:1px solid #282828;padding-top:18px">
+              <div v-if="store.profile?.is_admin" style="border-top:1px solid var(--border);padding-top:18px">
                 <label class="netflix-checkbox-label">
                   <input type="checkbox" v-model="newProfile.is_admin">
                   <div>
@@ -11496,9 +12412,9 @@ const ProfilesPage = {
               </div>
 
               <!-- PIN Protection -->
-              <div style="border-top:1px solid #282828;padding-top:18px">
-                <div style="font-size:0.95rem;color:#ffffff;font-weight:600;margin-bottom:4px">PIN Protection (Optional)</div>
-                <div style="font-size:0.85rem;color:#808080;margin-bottom:8px">Leave empty for instant access without a PIN.</div>
+              <div style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">PIN Protection (Optional)</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">Leave empty for instant access without a PIN.</div>
                 <input
                   id="new-profile-pin"
                   class="netflix-input"
@@ -11842,6 +12758,7 @@ const ProfilesPage = {
       default_audio_lang: "",
       default_sub_lang: "",
       auto_lock_minutes: 0,
+      default_speed: 1.0,
       pin: "",
       update_pin: false,
       daily_limit_minutes: 0,
@@ -11865,6 +12782,7 @@ const ProfilesPage = {
       default_audio_lang: "",
       default_sub_lang: "",
       auto_lock_minutes: 0,
+      default_speed: 1.0,
       daily_limit_minutes: 0,
       bedtime_curfew: "",
     });
@@ -12087,6 +13005,7 @@ const ProfilesPage = {
       editProfile.default_audio_lang = profile.default_audio_lang || "";
       editProfile.default_sub_lang = profile.default_sub_lang || "";
       editProfile.auto_lock_minutes = profile.auto_lock_minutes || 0;
+      editProfile.default_speed = Number(profile.default_speed) || 1.0;
       editProfile.has_existing_pin = !!profile.has_pin;
       editProfile.update_pin = !!profile.has_pin;
       editProfile.pin = "";
@@ -12111,6 +13030,7 @@ const ProfilesPage = {
         newProfile.default_audio_lang = "";
         newProfile.default_sub_lang = "";
         newProfile.auto_lock_minutes = 0;
+        newProfile.default_speed = 1.0;
         newProfile.daily_limit_minutes = 0;
         newProfile.bedtime_curfew = "";
         viewMode.value = "create";
@@ -12164,6 +13084,7 @@ const ProfilesPage = {
           default_audio_lang: editProfile.default_audio_lang,
           default_sub_lang: editProfile.default_sub_lang,
           auto_lock_minutes: editProfile.auto_lock_minutes,
+          default_speed: Number(editProfile.default_speed) || 1.0,
           pin: pinToSend,
           update_pin: updatePinFlag,
           daily_limit_minutes: editProfile.daily_limit_minutes,
@@ -12272,12 +13193,12 @@ const ProfilesPage = {
     }
 
     async function authProfile(profile, enteredPin, forceTakeover = false) {
-      let clientSessionId = localStorage.getItem("cs_session_id") || sessionStorage.getItem("cs_session_id");
+      let clientSessionId = sessionStorage.getItem("cs_session_id");
       if (!clientSessionId) {
         clientSessionId = "sess_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
       }
-      try { localStorage.setItem("cs_session_id", clientSessionId); } catch (e) {}
       try { sessionStorage.setItem("cs_session_id", clientSessionId); } catch (e) {}
+      try { localStorage.removeItem("cs_session_id"); } catch (e) {}
       const deviceName = (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ? "iPhone / iPad" : /android/.test(navigator.userAgent.toLowerCase()) ? "Android Device" : /macintosh|mac os x/.test(navigator.userAgent.toLowerCase()) ? "Mac" : "Windows PC");
 
       try {
@@ -12357,6 +13278,7 @@ const ProfilesPage = {
           default_audio_lang: newProfile.default_audio_lang,
           default_sub_lang: newProfile.default_sub_lang,
           auto_lock_minutes: newProfile.auto_lock_minutes,
+          default_speed: Number(newProfile.default_speed) || 1.0,
           daily_limit_minutes: newProfile.daily_limit_minutes,
           bedtime_curfew: newProfile.bedtime_curfew,
           admin_pin: currentAdminPin.value,
@@ -12710,13 +13632,41 @@ const SearchPage = {
                 class="search-text-input"
                 @input="onQueryInput"
                 @keyup.enter="performSearch"
+                @focus="showHistory = true"
+                @blur="setTimeout(() => showHistory = false, 150)"
                 id="search-input"
                 autofocus
               />
+              <button
+                type="button"
+                class="search-mic-btn"
+                :class="{ listening: isListening }"
+                @click="triggerVoiceSearch"
+                :title="isListening ? 'Listening...' : 'Voice Search (Android TV & Mic)'"
+                id="search-mic-btn"
+              >
+                <i :class="isListening ? 'ph-fill ph-microphone search-mic-pulsing' : 'ph ph-microphone'"></i>
+              </button>
               <button v-if="query" class="search-clear-btn" @click="clearSearch" title="Clear search">
                 <i class="ph ph-x"></i>
               </button>
             </div>
+          </div>
+          <!-- Recent Searches -->
+          <div v-if="showHistory && !query && recentSearches.length" class="search-history-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;justify-content:center">
+            <span style="font-size:0.72rem;color:var(--text-muted);align-self:center;font-weight:600;letter-spacing:0.04em">RECENT:</span>
+            <button
+              v-for="term in recentSearches" :key="term"
+              class="suggestion-tag"
+              style="font-size:0.78rem;display:inline-flex;align-items:center;gap:4px"
+              @mousedown.prevent="quickSearch(term)"
+            >
+              <i class="ph ph-clock-counter-clockwise" style="font-size:0.75rem"></i>
+              {{ term }}
+            </button>
+            <button @mousedown.prevent="clearHistory" style="font-size:0.72rem;color:var(--text-muted);background:none;border:none;cursor:pointer;padding:2px 6px;opacity:0.7" title="Clear recent searches">
+              <i class="ph ph-x"></i> Clear
+            </button>
           </div>
         </div>
       </div>
@@ -12883,6 +13833,27 @@ const SearchPage = {
 
     let debounceTimer = null;
 
+    // ── Search history (localStorage, per profile) ──
+    const HISTORY_KEY = () => `capsstream_search_history_${store.profile?.id || 'guest'}`;
+    const MAX_HISTORY = 8;
+    const recentSearches = ref([]);
+    const showHistory = ref(false);
+
+    function _loadHistory() {
+      try { recentSearches.value = JSON.parse(localStorage.getItem(HISTORY_KEY()) || '[]'); } catch { recentSearches.value = []; }
+    }
+    function saveToHistory(term) {
+      if (!term || term.trim().length < 2) return;
+      const list = recentSearches.value.filter(t => t !== term.trim());
+      list.unshift(term.trim());
+      recentSearches.value = list.slice(0, MAX_HISTORY);
+      try { localStorage.setItem(HISTORY_KEY(), JSON.stringify(recentSearches.value)); } catch {}
+    }
+    function clearHistory() {
+      recentSearches.value = [];
+      try { localStorage.removeItem(HISTORY_KEY()); } catch {}
+    }
+
     const typeOptions = [
       { label: 'All', value: 'all', icon: 'ph ph-squares-four' },
       { label: 'Movies', value: 'movie', icon: 'ph ph-film-strip' },
@@ -12894,7 +13865,10 @@ const SearchPage = {
       loading.value = true;
       searched.value = true;
       currentPage.value = 1;
-      if (query.value && query.value.trim()) unlockAchievement("search_master");
+      if (query.value && query.value.trim()) {
+        unlockAchievement("search_master");
+        saveToHistory(query.value.trim());
+      }
       try {
         const res = await API.get(`/api/search?q=${encodeURIComponent(query.value)}&type=${selectedType.value}&genre=${selectedGenre.value}&sort=${selectedSort.value}`);
         results.value = kidsFilter(res || []);
@@ -12971,8 +13945,71 @@ const SearchPage = {
       }
     }
 
+    const isListening = ref(false);
+
+    function triggerVoiceSearch() {
+      // 1. Android TV WebView native bridge (MainActivity.kt)
+      if (window.CapsStreamNative && typeof window.CapsStreamNative.startVoiceSearch === 'function') {
+        isListening.value = true;
+        try {
+          window.CapsStreamNative.startVoiceSearch();
+        } catch (e) {
+          console.warn("Native voice search error:", e);
+          isListening.value = false;
+        }
+        return;
+      }
+
+      // 2. Web Speech API (Chrome, Edge, Safari, Android WebView)
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRec) {
+        try {
+          const recognition = new SpeechRec();
+          recognition.lang = 'en-US';
+          recognition.interimResults = false;
+          recognition.maxAlternatives = 1;
+
+          recognition.onstart = () => {
+            isListening.value = true;
+          };
+          recognition.onresult = (event) => {
+            isListening.value = false;
+            const transcript = event.results?.[0]?.[0]?.transcript;
+            if (transcript && transcript.trim()) {
+              query.value = transcript.trim();
+              performSearch();
+            }
+          };
+          recognition.onerror = (err) => {
+            isListening.value = false;
+            if (err.error !== 'no-speech') {
+              addToast("Voice search error: " + (err.error || "mic unavailable"), "error");
+            }
+          };
+          recognition.onend = () => {
+            isListening.value = false;
+          };
+          recognition.start();
+        } catch (err) {
+          isListening.value = false;
+          addToast("Voice recognition failed to start. Check mic permissions.", "info");
+        }
+        return;
+      }
+
+      addToast("Voice search is not supported on this browser or client.", "info");
+    }
+
     onMounted(() => {
       window.addEventListener('keydown', handleGlobalHotkeys);
+      _loadHistory();
+      window.__searchPageVoiceHandler = (recognizedText) => {
+        isListening.value = false;
+        if (recognizedText && recognizedText.trim()) {
+          query.value = recognizedText.trim();
+          performSearch();
+        }
+      };
       if (route.query.q) {
         query.value = route.query.q;
       }
@@ -13004,6 +14041,9 @@ const SearchPage = {
     onUnmounted(() => {
       window.removeEventListener('keydown', handleGlobalHotkeys);
       clearTimeout(debounceTimer);
+      if (window.__searchPageVoiceHandler) {
+        window.__searchPageVoiceHandler = null;
+      }
     });
 
     function handleClick(item) {
@@ -13022,7 +14062,9 @@ const SearchPage = {
     return {
       store, searchInputRef, query, selectedType, selectedGenre, selectedSort,
       results, filteredResults, paginatedResults, currentPage, pageSize, totalPages, visiblePageNumbers, setPage, loading, searched, genresList, typeOptions,
-      performSearch, onQueryInput, clearSearch, selectType, quickSearch, handleClick
+      performSearch, onQueryInput, clearSearch, selectType, quickSearch, handleClick,
+      recentSearches, showHistory, clearHistory,
+      isListening, triggerVoiceSearch
     };
   }
 };
@@ -14502,15 +15544,15 @@ const StatsPage = {
           <i class="ph-fill ph-sparkle"></i> Launch {{ wrappedData.label }} Wrapped
         </button>
 
-        <!-- Admin Preview Button (Outside December) -->
+        <!-- Preview Button (Outside December, any non-kids profile) -->
         <button
-          v-else-if="wrappedData && !store.profile?.is_kids && store.profile?.is_admin"
+          v-else-if="wrappedData && !store.profile?.is_kids"
           class="wrapped-launch-btn admin-preview"
           @click="launchStory"
           id="btn-launch-wrapped-header-admin"
-          title="Admin Mode: Preview Wrapped story before December"
+          title="Preview your Wrapped story"
         >
-          <i class="ph-bold ph-shield-check"></i> Preview {{ wrappedData.label }} Wrapped
+          <i class="ph-fill ph-sparkle"></i> Preview {{ wrappedData.label }} Wrapped
         </button>
       </div>
 
@@ -17840,6 +18882,10 @@ const router = createRouter({
     { path: "/playlists/:id", component: PlaylistDetailPage },
     { path: "/collections", component: CollectionsPage },
     { path: "/collection/:id", component: CollectionDetailPage },
+    { path: "/universes", component: UniversesPage },
+    { path: "/universes/:id", alias: "/universe/:id", component: UniverseDetailPage },
+    { path: "/regional", component: RegionalHubsPage },
+    { path: "/regional/:code", component: CountryDetailPage },
     { path: "/favorites", component: FavoritesPage },
     { path: "/requests", component: RequestsPage },
     { path: "/stats", component: StatsPage },
@@ -18339,44 +19385,80 @@ const App = {
 
             <!-- Profile Dropdown -->
             <div class="profile-dropdown tv-dropdown" v-if="showProfileMenu" :style="tvDropdownStyle" ref="tvDropdownRef" @click.stop>
-              <div v-if="store?.profile" class="profile-dropdown-item" style="font-weight:700;color:var(--text-primary);cursor:default" @click.stop>
-                <img v-if="store.profile?.custom_avatar_url" :src="imgUrl(store.profile.custom_avatar_url)" class="dropdown-profile-avatar-img" />
-                <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar" style="font-size:1.15rem"></i>
-                <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
-                <span style="margin-left:6px;font-weight:700">{{ store.profile?.name }}</span>
+              <!-- Profile Header Card -->
+              <div v-if="store?.profile" class="profile-dropdown-header">
+                <div class="profile-dropdown-user">
+                  <div class="profile-dropdown-avatar-wrap" :style="{ borderColor: store.profile?.color || 'var(--accent)' }">
+                    <img v-if="store.profile?.custom_avatar_url" :src="imgUrl(store.profile.custom_avatar_url)" class="dropdown-profile-avatar-img" />
+                    <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar"></i>
+                    <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
+                  </div>
+                  <div class="profile-dropdown-user-meta">
+                    <span class="profile-dropdown-name">{{ store.profile?.name }}</span>
+                    <div class="profile-dropdown-badges">
+                      <span v-if="store.profile?.is_admin" class="admin-profile-badge">Admin</span>
+                      <span v-else-if="store.profile?.is_kids" class="kids-profile-badge">Kids</span>
+                      <span v-else-if="store.profile?.maturity_rating === 'Teens'" class="teen-profile-badge">Teens</span>
+                      <span v-else class="profile-role-pill">Profile</span>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="!store.profile?.is_kids" class="profile-dropdown-quick-actions">
+                  <button class="profile-quick-btn" @click.stop="switchProfile" id="tv-dd-switch" title="Switch Profile" tabindex="0">
+                    <i class="ph-bold ph-arrows-left-right"></i>
+                  </button>
+                </div>
               </div>
-              <div class="profile-dropdown-divider" v-if="store?.profile"></div>
-              <div class="profile-dropdown-item" @click.stop="goFavorites" id="tv-dd-watchlist">
-                <i class="ph-bold ph-bookmark-simple" style="font-size:1.1rem;color:var(--accent)"></i>
-                <span>Watchlist</span>
+
+              <!-- Media Library Section (2-Column Grid) -->
+              <div class="profile-dropdown-section">
+                <div class="profile-dropdown-section-title">Library</div>
+                <div class="profile-dropdown-grid">
+                  <div class="profile-dropdown-tile" @click.stop="goFavorites" id="tv-dd-watchlist" tabindex="0" title="Watchlist">
+                    <i class="ph-bold ph-bookmark-simple" style="color:var(--accent)"></i>
+                    <span>Watchlist</span>
+                  </div>
+                  <div class="profile-dropdown-tile" @click.stop="goPlaylists" id="tv-dd-playlists" tabindex="0" title="Playlists">
+                    <i class="ph-bold ph-queue" style="color:#38bdf8"></i>
+                    <span>Playlists</span>
+                  </div>
+                  <div class="profile-dropdown-tile" @click.stop="goCollections" id="tv-dd-collections" tabindex="0" title="Collections">
+                    <i class="ph-bold ph-squares-four" style="color:#a78bfa"></i>
+                    <span>Collections</span>
+                  </div>
+                  <div class="profile-dropdown-tile" @click.stop="goUniverses" id="tv-dd-universes" tabindex="0" title="Universes & Timelines">
+                    <i class="ph-bold ph-planet" style="color:#c084fc"></i>
+                    <span>Universes</span>
+                  </div>
+                  <div class="profile-dropdown-tile" @click.stop="goRegional" id="tv-dd-regional" tabindex="0" title="Country Hubs">
+                    <i class="ph-bold ph-globe-hemisphere-west" style="color:#34d399"></i>
+                    <span>Country Hubs</span>
+                  </div>
+                  <div class="profile-dropdown-tile" @click.stop="goStats" id="tv-dd-stats" tabindex="0" title="Analytics & Wrapped">
+                    <i class="ph-bold ph-chart-polar" style="color:#f59e0b"></i>
+                    <span>Analytics</span>
+                  </div>
+                </div>
               </div>
-              <div class="profile-dropdown-item" @click.stop="goPlaylists" id="tv-dd-playlists">
-                <i class="ph-bold ph-queue" style="font-size:1.1rem;color:#38bdf8"></i>
-                <span>Playlists</span>
+
+              <!-- System & Tools Section -->
+              <div class="profile-dropdown-section">
+                <div class="profile-dropdown-section-title">System & Tools</div>
+                <div class="profile-dropdown-list">
+                  <div class="profile-dropdown-item" @click.stop="openShortcuts" id="tv-dd-shortcuts" tabindex="0">
+                    <i class="ph-bold ph-keyboard" style="color:#38bdf8"></i>
+                    <span>Keyboard Shortcuts</span>
+                  </div>
+                  <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="tv-dd-settings" tabindex="0">
+                    <i class="ph-bold ph-gear-six" style="color:#94a3b8"></i>
+                    <span>Settings</span>
+                  </div>
+                </div>
               </div>
-              <div class="profile-dropdown-item" @click.stop="goCollections" id="tv-dd-collections">
-                <i class="ph-bold ph-squares-four" style="font-size:1.1rem;color:#a78bfa"></i>
-                <span>Collections</span>
-              </div>
-              <div class="profile-dropdown-item" @click.stop="goStats" id="tv-dd-stats">
-                <i class="ph-bold ph-chart-polar" style="font-size:1.1rem;color:#f59e0b"></i>
-                <span>Analytics & Wrapped</span>
-              </div>
-              <div class="profile-dropdown-item" @click.stop="openShortcuts" id="tv-dd-shortcuts">
-                <i class="ph-bold ph-keyboard" style="font-size:1.1rem;color:#38bdf8"></i>
-                <span>Keyboard Shortcuts</span>
-              </div>
-              <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="tv-dd-settings">
-                <i class="ph-bold ph-gear-six" style="font-size:1.1rem;color:#94a3b8"></i>
-                <span>Settings</span>
-              </div>
-              <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="switchProfile" id="tv-dd-switch">
-                <i class="ph-bold ph-arrows-left-right" style="font-size:1.1rem;color:#f472b6"></i>
-                <span>Switch Profile</span>
-              </div>
+
               <div class="profile-dropdown-divider"></div>
-              <div class="profile-dropdown-item danger" @click.stop="logout" v-if="store.profile" id="tv-dd-logout">
-                <i class="ph-bold ph-sign-out" style="font-size:1.1rem"></i>
+              <div class="profile-dropdown-item danger" @click.stop="logout" v-if="store.profile" id="tv-dd-logout" tabindex="0">
+                <i class="ph-bold ph-sign-out"></i>
                 <span>Sign Out</span>
               </div>
             </div>
@@ -18468,59 +19550,92 @@ const App = {
               <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar"></i>
               <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
               <div class="profile-dropdown" v-if="showProfileMenu" @click.stop>
-                <div v-if="store?.profile" class="profile-dropdown-item" style="font-weight:600;color:var(--text-primary);cursor:default" @click.stop>
-                  <img v-if="store.profile?.custom_avatar_url" :src="imgUrl(store.profile.custom_avatar_url)" class="dropdown-profile-avatar-img" />
-                  <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar" style="font-size:1.15rem"></i>
-                  <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
-                  <span style="margin-left:6px;font-weight:700">{{ store.profile?.name }}</span>
-                  <span v-if="store.profile?.is_admin" class="admin-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">Admin</span>
-                  <span v-else-if="store.profile?.is_kids" class="kids-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">Kids</span>
-                  <span v-else-if="store.profile?.maturity_rating === 'Teens'" class="teen-profile-badge" style="font-size:0.65rem;padding:2px 6px;margin-left:6px">Teens</span>
+                <!-- Profile Header Card -->
+                <div v-if="store?.profile" class="profile-dropdown-header">
+                  <div class="profile-dropdown-user">
+                    <div class="profile-dropdown-avatar-wrap" :style="{ borderColor: store.profile?.color || 'var(--accent)' }">
+                      <img v-if="store.profile?.custom_avatar_url" :src="imgUrl(store.profile.custom_avatar_url)" class="dropdown-profile-avatar-img" />
+                      <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar"></i>
+                      <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
+                    </div>
+                    <div class="profile-dropdown-user-meta">
+                      <span class="profile-dropdown-name">{{ store.profile?.name }}</span>
+                      <div class="profile-dropdown-badges">
+                        <span v-if="store.profile?.is_admin" class="admin-profile-badge">Admin</span>
+                        <span v-else-if="store.profile?.is_kids" class="kids-profile-badge">Kids</span>
+                        <span v-else-if="store.profile?.maturity_rating === 'Teens'" class="teen-profile-badge">Teens</span>
+                        <span v-else class="profile-role-pill">Profile</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="!store.profile?.is_kids" class="profile-dropdown-quick-actions">
+                    <button class="profile-quick-btn" @click.stop="editCurrentProfile" id="dd-edit-profile" title="Edit Profile" aria-label="Edit Profile">
+                      <i class="ph-bold ph-pencil-simple"></i>
+                    </button>
+                    <button class="profile-quick-btn" @click.stop="switchProfile" id="dd-switch" title="Switch Profile" aria-label="Switch Profile">
+                      <i class="ph-bold ph-arrows-left-right"></i>
+                    </button>
+                  </div>
                 </div>
-                <div class="profile-dropdown-divider" v-if="store?.profile"></div>
-                <div class="profile-dropdown-item" @click.stop="goFavorites" id="dd-watchlist">
-                  <i class="ph-bold ph-bookmark-simple" style="font-size:1.1rem;color:var(--accent)"></i>
-                  <span>Watchlist</span>
+
+                <!-- Media Library Section (2-Column Grid) -->
+                <div class="profile-dropdown-section">
+                  <div class="profile-dropdown-section-title">Library</div>
+                  <div class="profile-dropdown-grid">
+                    <div class="profile-dropdown-tile" @click.stop="goFavorites" id="dd-watchlist" title="Watchlist">
+                      <i class="ph-bold ph-bookmark-simple" style="color:var(--accent)"></i>
+                      <span>Watchlist</span>
+                    </div>
+                    <div class="profile-dropdown-tile" @click.stop="goPlaylists" id="dd-playlists" title="Playlists">
+                      <i class="ph-bold ph-queue" style="color:#38bdf8"></i>
+                      <span>Playlists</span>
+                    </div>
+                    <div class="profile-dropdown-tile" @click.stop="goCollections" id="dd-collections" title="Collections">
+                      <i class="ph-bold ph-squares-four" style="color:#a78bfa"></i>
+                      <span>Collections</span>
+                    </div>
+                    <div class="profile-dropdown-tile" @click.stop="goUniverses" id="dd-universes" title="Universes & Timelines">
+                      <i class="ph-bold ph-planet" style="color:#c084fc"></i>
+                      <span>Universes</span>
+                    </div>
+                    <div class="profile-dropdown-tile" @click.stop="goRegional" id="dd-regional" title="Country Hubs">
+                      <i class="ph-bold ph-globe-hemisphere-west" style="color:#34d399"></i>
+                      <span>Country Hubs</span>
+                    </div>
+                    <div class="profile-dropdown-tile" @click.stop="goStats" id="dd-stats" title="Analytics & Wrapped">
+                      <i class="ph-bold ph-chart-polar" style="color:#f59e0b"></i>
+                      <span>Analytics</span>
+                    </div>
+                  </div>
                 </div>
-                <div class="profile-dropdown-item" @click.stop="goPlaylists" id="dd-playlists">
-                  <i class="ph-bold ph-queue" style="font-size:1.1rem;color:#38bdf8"></i>
-                  <span>Playlists</span>
+
+                <!-- System & Tools Section -->
+                <div class="profile-dropdown-section">
+                  <div class="profile-dropdown-section-title">System & Tools</div>
+                  <div class="profile-dropdown-list">
+                    <div v-if="store.features?.requests && !store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goRequests" id="dd-requests">
+                      <i class="ph-bold ph-paper-plane-tilt" style="color:#38bdf8"></i>
+                      <span>Request Media</span>
+                    </div>
+                    <div class="profile-dropdown-item" @click.stop="openShortcuts" id="dd-shortcuts">
+                      <i class="ph-bold ph-keyboard" style="color:#38bdf8"></i>
+                      <span>Keyboard Shortcuts</span>
+                      <span class="profile-dropdown-kbd">?</span>
+                    </div>
+                    <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="dd-settings">
+                      <i class="ph-bold ph-gear-six" style="color:#94a3b8"></i>
+                      <span>Settings</span>
+                    </div>
+                    <div class="profile-dropdown-item" @click.stop="goAbout" id="dd-about">
+                      <i class="ph-bold ph-info" style="color:#60a5fa"></i>
+                      <span>About CapsStream</span>
+                    </div>
+                  </div>
                 </div>
-                <div class="profile-dropdown-item" @click.stop="goCollections" id="dd-collections">
-                  <i class="ph-bold ph-squares-four" style="font-size:1.1rem;color:#a78bfa"></i>
-                  <span>Collections</span>
-                </div>
-                <div v-if="store.features?.requests && !store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goRequests" id="dd-requests">
-                  <i class="ph-bold ph-paper-plane-tilt" style="font-size:1.1rem;color:#38bdf8"></i>
-                  <span>Request Media</span>
-                </div>
-                <div class="profile-dropdown-item" @click.stop="goStats" id="dd-stats">
-                  <i class="ph-bold ph-chart-polar" style="font-size:1.1rem;color:#f59e0b"></i>
-                  <span>Analytics & Wrapped</span>
-                </div>
-                <div class="profile-dropdown-item" @click.stop="openShortcuts" id="dd-shortcuts">
-                  <i class="ph-bold ph-keyboard" style="font-size:1.1rem;color:#38bdf8"></i>
-                  <span>Keyboard Shortcuts</span>
-                </div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goSettings" id="dd-settings">
-                  <i class="ph-bold ph-gear-six" style="font-size:1.1rem;color:#94a3b8"></i>
-                  <span>Settings</span>
-                </div>
-                <div class="profile-dropdown-item" @click.stop="goAbout" id="dd-about">
-                  <i class="ph-bold ph-info" style="font-size:1.1rem;color:#38bdf8"></i>
-                  <span>About CapsStream</span>
-                </div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="editCurrentProfile" id="dd-edit-profile">
-                  <i class="ph-bold ph-pencil-simple" style="font-size:1.1rem;color:#4ade80"></i>
-                  <span>Edit Profile</span>
-                </div>
-                <div v-if="!store.profile?.is_kids" class="profile-dropdown-item" @click.stop="switchProfile" id="dd-switch">
-                  <i class="ph-bold ph-arrows-left-right" style="font-size:1.1rem;color:#f472b6"></i>
-                  <span>Switch Profile</span>
-                </div>
+
                 <div class="profile-dropdown-divider"></div>
                 <div class="profile-dropdown-item danger" @click.stop="logout" v-if="store.profile" id="dd-logout">
-                  <i class="ph-bold ph-sign-out" style="font-size:1.1rem"></i>
+                  <i class="ph-bold ph-sign-out"></i>
                   <span>Sign Out</span>
                 </div>
               </div>
@@ -19515,7 +20630,7 @@ const App = {
 
     async function sendProfileHeartbeat() {
       if (!store.profile || !store.profile.id) return;
-      const sessionId = localStorage.getItem("cs_session_id") || sessionStorage.getItem("cs_session_id") || "";
+      const sessionId = sessionStorage.getItem("cs_session_id") || "";
       const deviceName = (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ? "iPhone / iPad" : /android/.test(navigator.userAgent.toLowerCase()) ? "Android Device" : /macintosh|mac os x/.test(navigator.userAgent.toLowerCase()) ? "Mac" : "Windows PC");
       try {
         const res = await API.post("/api/profiles/heartbeat", {
@@ -19540,6 +20655,8 @@ const App = {
 
     function handleEvictedReturn() {
       showSessionEvictedModal.value = false;
+      try { sessionStorage.removeItem("cs_session_id"); } catch (e) {}
+      try { localStorage.removeItem("cs_session_id"); } catch (e) {}
       store.profile = null;
       router.push("/profiles");
     }
@@ -20001,6 +21118,16 @@ const App = {
       router.push("/collections");
     }
 
+    function goUniverses() {
+      showProfileMenu.value = false;
+      router.push("/universes");
+    }
+
+    function goRegional() {
+      showProfileMenu.value = false;
+      router.push("/regional");
+    }
+
     function goRequests() {
       showProfileMenu.value = false;
       if (!store.features?.requests) {
@@ -20077,11 +21204,17 @@ const App = {
       }
     }
 
+    function _clearSessionId() {
+      try { sessionStorage.removeItem("cs_session_id"); } catch (e) {}
+      try { localStorage.removeItem("cs_session_id"); } catch (e) {}
+    }
+
     function switchProfile() {
       store.whatsNewModalOpen = false;
       showProfileMenu.value = false;
       clearInterval(scanPollTimer);
       store.scanRunning = false;
+      _clearSessionId();
       if (store.profile?.is_kids) {
         generateAppMathProblem(() => {
           store.profile = null;
@@ -20100,6 +21233,7 @@ const App = {
       showProfileMenu.value = false;
       clearInterval(scanPollTimer);
       store.scanRunning = false;
+      _clearSessionId();
       if (store.profile?.is_kids) {
         generateAppMathProblem(() => {
           store.profile = null;
@@ -20117,6 +21251,7 @@ const App = {
       store.whatsNewModalOpen = false;
       store.bedtimeActive = false;
       store.profile = null;
+      _clearSessionId();
       router.push("/profiles");
       API.post("/api/profiles/logout", {}).catch(() => {});
     }
@@ -20320,12 +21455,12 @@ const App = {
         } else if (profiles && profiles.length === 1 && !profiles[0].has_pin) {
           // Exactly one profile and it has no PIN — automatically use it and redirect to homepage
           const singleProfile = profiles[0];
-          let clientSessionId = localStorage.getItem("cs_session_id") || sessionStorage.getItem("cs_session_id");
+          let clientSessionId = sessionStorage.getItem("cs_session_id");
           if (!clientSessionId) {
             clientSessionId = "sess_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
           }
-          try { localStorage.setItem("cs_session_id", clientSessionId); } catch (e) {}
           try { sessionStorage.setItem("cs_session_id", clientSessionId); } catch (e) {}
+          try { localStorage.removeItem("cs_session_id"); } catch (e) {}
           const deviceName = (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ? "iPhone / iPad" : /android/.test(navigator.userAgent.toLowerCase()) ? "Android Device" : /macintosh|mac os x/.test(navigator.userAgent.toLowerCase()) ? "Mac" : "Windows PC");
 
           try {
@@ -20403,6 +21538,16 @@ const App = {
           window.location.reload();
         });
       });
+
+      // Android TV Native Voice Search Listener
+      window.onNativeVoiceSearchQuery = (recognizedText) => {
+        if (!recognizedText || !recognizedText.trim()) return;
+        if (typeof window.__searchPageVoiceHandler === 'function') {
+          window.__searchPageVoiceHandler(recognizedText.trim());
+        } else {
+          router.push(`/search?q=${encodeURIComponent(recognizedText.trim())}`);
+        }
+      };
 
       startScreenTimeWatchdog();
 
@@ -20750,6 +21895,8 @@ const App = {
       toggleProfileMenu,
       goFavorites,
       goCollections,
+      goUniverses,
+      goRegional,
       goRequests,
       goStats,
       openShortcuts,

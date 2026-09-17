@@ -173,6 +173,15 @@ def api_clear_cache():
     return jsonify({"ok": True, "cleared": cleared})
 
 
+@admin_bp.route("/api/system/probe-cache", methods=["DELETE"])
+def api_clear_probe_cache():
+    """Flush the in-memory ffprobe result cache."""
+    require_admin()
+    from backend.utils import probe_cache
+    probe_cache.clear()
+    return jsonify({"ok": True, "message": "Probe cache cleared"})
+
+
 @admin_bp.route("/api/system/reset", methods=["POST"])
 def api_system_reset():
     require_admin()

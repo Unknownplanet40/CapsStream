@@ -252,6 +252,9 @@ def init_db():
         if "has_completed_tour" not in pcols:
             conn.execute("ALTER TABLE profiles ADD COLUMN has_completed_tour INTEGER DEFAULT 0")
             print("[DB] Migrated: added has_completed_tour column to profiles")
+        if "default_speed" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN default_speed REAL DEFAULT 1.0")
+            print("[DB] Migrated: added default_speed column to profiles")
 
         # Guarantee at least one admin profile exists if profiles exist
         conn.execute("""
@@ -271,6 +274,15 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_playlists_shared ON playlists(is_shared)")
     except Exception as e:
         print("[DB] Migration notice (playlists):", e)
+
+    # Migration guard for collections table — cover_id
+    try:
+        col_cols = [r["name"] for r in conn.execute("PRAGMA table_info(collections)").fetchall()]
+        if "cover_id" not in col_cols:
+            conn.execute("ALTER TABLE collections ADD COLUMN cover_id INTEGER")
+            print("[DB] Migrated: added cover_id column to collections")
+    except Exception as e:
+        print("[DB] Migration notice (collections):", e)
 
     # Migration guard for watch_history — seed from existing watch_progress + media
     try:

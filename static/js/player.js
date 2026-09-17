@@ -1491,7 +1491,7 @@ const PlayerPage = {
     const isLightMode = ref(false);
     const recoveringMemory = ref(false);
 
-    const playbackRate = ref(1);
+    const playbackRate = ref(Number(store.profile?.default_speed) || 1);
     const selectedSub = ref(-1);
     const showSpeedMenu = ref(false);
     const showSubMenu = ref(false);
@@ -5825,12 +5825,11 @@ const PlayerPage = {
           if (remoteAudioEl) remoteAudioEl.muted = true;
         }
 
-        if (pb.default_speed !== undefined) {
-          const rate = Number(pb.default_speed) || 1;
-          playbackRate.value = rate;
-          if (videoRef.value) videoRef.value.playbackRate = rate;
-          if (isRemoteAudioActive() && remoteAudioEl) remoteAudioEl.playbackRate = rate;
-        }
+        const profSpeed = Number(store.profile?.default_speed);
+        const rate = (profSpeed && profSpeed > 0) ? profSpeed : (Number(pb.default_speed) || 1);
+        playbackRate.value = rate;
+        if (videoRef.value) videoRef.value.playbackRate = rate;
+        if (isRemoteAudioActive() && remoteAudioEl) remoteAudioEl.playbackRate = rate;
       }
 
       try {

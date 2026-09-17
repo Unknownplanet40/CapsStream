@@ -337,26 +337,36 @@ def get_media_quality_options(media_id):
             max_w = w
         res_label = probe_res.get("label") or "Standard Quality"
         base_label = probe_res.get("base_label") or "Standard"
-        probed.append((s, res_label, base_label, drive, h, w))
+        codec = probe_res.get("codec") or ""
+        probed.append({
+            "source": s,
+            "res_label": res_label,
+            "base_label": base_label,
+            "drive": drive,
+            "height": h,
+            "width": w,
+            "codec": codec,
+        })
 
     options = []
-    for idx, (s, res_label, base_label, drive, h, w) in enumerate(probed):
+    for p in probed:
+        s = p["source"]
         size_str = format_file_size_bytes(s.get("file_size"))
-        display_label = res_label
+        display_label = p["res_label"]
         if size_str:
             display_label += f" ({size_str})"
-        if drive:
-            display_label += f" — {drive}"
+        if p["drive"]:
+            display_label += f" — {p['drive']}"
 
         options.append({
             "media_id": s["id"],
             "quality_id": f"{s['id']}_direct",
             "type": "direct",
-            "target_height": h,
+            "target_height": p["height"],
             "file_path": s.get("file_path", ""),
-            "drive": drive,
-            "resolution": res_label,
-            "base_label": base_label,
+            "drive": p["drive"],
+            "resolution": p["res_label"],
+            "base_label": p["base_label"],
             "display_label": display_label,
             "size_str": size_str,
             "file_size": s.get("file_size") or 0,
@@ -368,38 +378,57 @@ def get_media_quality_options(media_id):
     # Detect if source includes 4K / UHD or high-resolution content
     is_4k_source = any(
         (
-            h >= 2160 or w >= 3840 or
-            "4k" in base.lower() or "2160" in res.lower() or "uhd" in res.lower() or
-            "4k" in str(s.get("resolution") or "").lower() or "2160" in str(s.get("resolution") or "").lower() or "uhd" in str(s.get("resolution") or "").lower() or
-            "4k" in str(s.get("file_path") or "").lower() or "2160p" in str(s.get("file_path") or "").lower() or "uhd" in str(s.get("file_path") or "").lower()
+            p["height"] >= 2160 or p["width"] >= 3840 or
+            "4k" in p["base_label"].lower() or "2160" in p["res_label"].lower() or "uhd" in p["res_label"].lower() or
+            "4k" in str(p["source"].get("resolution") or "").lower() or "2160" in str(p["source"].get("resolution") or "").lower() or "uhd" in str(p["source"].get("resolution") or "").lower() or
+            "4k" in str(p["source"].get("file_path") or "").lower() or "2160p" in str(p["source"].get("file_path") or "").lower() or "uhd" in str(p["source"].get("file_path") or "").lower()
         )
-        for (s, res, base, _, h, w) in probed
+        for p in probed
     )
 
-    # Offer on-the-fly conversion streams when source is 4K/UHD, 1080p, etc.
+    # Detect if source is encoded in x265 / HEVC
+    is_x265_source = any(
+        (
+            (p["codec"] or "").lower() in ("x265", "hevc", "h265") or
+            "x265" in p["res_label"].lower() or "hevc" in p["res_label"].lower() or "h265" in p["res_label"].lower() or "h.265" in p["res_label"].lower() or
+            "x265" in str(p["source"].get("resolution") or "").lower() or "hevc" in str(p["source"].get("resolution") or "").lower() or
+            "x265" in os.path.basename(str(p["source"].get("file_path") or "")).lower() or
+            "hevc" in os.path.basename(str(p["source"].get("file_path") or "")).lower() or
+            "h265" in os.path.basename(str(p["source"].get("file_path") or "")).lower() or
+            "h.265" in os.path.basename(str(p["source"].get("file_path") or "")).lower()
+        )
+        for p in probed
+    )
+
+    # Offer on-the-fly conversion streams ONLY when source is 4K/UHD or x265/HEVC
     target_presets = []
-    if is_4k_source or max_h >= 2000 or max_w >= 3500:
-        target_presets = [
-            (1080, "1080p", "Convert to 1080p (Full HD)"),
-            (720, "720p", "Convert to 720p (HD)"),
-            (480, "480p", "Convert to 480p (SD)"),
-        ]
-    elif max_h >= 1080 or max_w >= 1900:
-        target_presets = [
-            (720, "720p", "Convert to 720p (HD)"),
-            (480, "480p", "Convert to 480p (SD)"),
-        ]
-    elif max_h >= 720 or max_w >= 1200:
-        target_presets = [
-            (480, "480p", "Convert to 480p (SD)"),
-        ]
+    if is_4k_source or is_x265_source:
+        if is_4k_source or max_h >= 2000 or max_w >= 3500:
+            target_presets = [
+                (1080, "1080p", "Convert to 1080p (Full HD)"),
+                (720, "720p", "Convert to 720p (HD)"),
+                (480, "480p", "Convert to 480p (SD)"),
+            ]
+        elif max_h >= 1080 or max_w >= 1900:
+            target_presets = [
+                (720, "720p", "Convert to 720p (HD)"),
+                (480, "480p", "Convert to 480p (SD)"),
+            ]
+        elif max_h >= 720 or max_w >= 1200:
+            target_presets = [
+                (480, "480p", "Convert to 480p (SD)"),
+            ]
+        else:
+            target_presets = [
+                (480, "480p", "Convert to 480p (SD)"),
+            ]
 
     # Only add conversion presets where a physical copy of roughly that resolution does not already exist
-    primary_source = probed[0][0] if probed else media
+    primary_source = probed[0]["source"] if probed else media
     for t_h, base_lbl, disp_lbl in target_presets:
         already_has_physical = any(
-            abs(h - t_h) <= 120 or base_lbl.lower() in b_lbl.lower()
-            for (_, _, b_lbl, _, h, _) in probed if h > 0
+            abs(p["height"] - t_h) <= 120 or base_lbl.lower() in p["base_label"].lower()
+            for p in probed if p["height"] > 0
         )
         if not already_has_physical:
             options.append({

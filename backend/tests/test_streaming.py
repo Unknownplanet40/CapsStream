@@ -390,6 +390,62 @@ class TestStreamingRouteIntegration(unittest.TestCase):
         self.assertEqual(opt_1080["display_label"], "Convert to 1080p (Full HD)")
         self.assertTrue(opt_1080["is_transcode"])
 
+    @patch("backend.db.media.get_all_sources_for_media")
+    @patch("backend.db.media.get_media_by_id")
+    @patch("backend.video_probe.probe_video_resolution")
+    def test_get_media_quality_options_no_transcode_for_standard_1080p_x264(self, mock_probe, mock_get_media, mock_get_sources):
+        """Verify get_media_quality_options does NOT generate converted presets (e.g. 480p) for standard 1080p x264."""
+        from backend.db.media import get_media_quality_options
+        mock_media = {
+            "id": 101,
+            "file_path": "C:\\Media\\Movies\\Movie.2020.1080p.BluRay.x264.mp4",
+            "file_size": 2500000000,
+            "is_mounted": True,
+        }
+        mock_get_media.return_value = mock_media
+        mock_get_sources.return_value = [mock_media]
+        mock_probe.return_value = {
+            "height": 1080,
+            "width": 1920,
+            "codec": "x264",
+            "label": "1080p HD • x264",
+            "base_label": "1080p HD",
+        }
+
+        opts = get_media_quality_options(101)
+        # Only direct stream option should exist
+        self.assertEqual(len(opts), 1)
+        self.assertFalse(opts[0].get("is_transcode"))
+        self.assertEqual(opts[0]["quality_id"], "101_direct")
+
+    @patch("backend.db.media.get_all_sources_for_media")
+    @patch("backend.db.media.get_media_by_id")
+    @patch("backend.video_probe.probe_video_resolution")
+    def test_get_media_quality_options_generates_transcode_presets_for_x265_1080p(self, mock_probe, mock_get_media, mock_get_sources):
+        """Verify get_media_quality_options generates conversion options for x265/HEVC content."""
+        from backend.db.media import get_media_quality_options
+        mock_media = {
+            "id": 102,
+            "file_path": "C:\\Media\\Movies\\Movie.2020.1080p.x265.mkv",
+            "file_size": 1500000000,
+            "is_mounted": True,
+        }
+        mock_get_media.return_value = mock_media
+        mock_get_sources.return_value = [mock_media]
+        mock_probe.return_value = {
+            "height": 1080,
+            "width": 1920,
+            "codec": "x265",
+            "label": "1080p HD • x265",
+            "base_label": "1080p HD",
+        }
+
+        opts = get_media_quality_options(102)
+        transcode_opts = [o for o in opts if o.get("is_transcode")]
+        self.assertTrue(len(transcode_opts) >= 1)
+        target_heights = [o["target_height"] for o in transcode_opts]
+        self.assertIn(480, target_heights)
+
 
 if __name__ == "__main__":
     unittest.main()

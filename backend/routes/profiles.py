@@ -97,6 +97,7 @@ def api_create_profile():
     is_kids = bool(data.get("is_kids", False))
     daily_limit_minutes = int(data.get("daily_limit_minutes", 0) or 0)
     bedtime_curfew = str(data.get("bedtime_curfew", "") or "").strip()
+    default_speed = float(data.get("default_speed", 1.0) or 1.0)
     pin_hash = hash_pin(pin) if pin else None
     pid = create_profile(
         name, pin_hash, avatar, color, is_kids=is_kids,
@@ -105,7 +106,7 @@ def api_create_profile():
         maturity_rating=maturity_rating, blocked_genres=blocked_genres,
         default_audio_lang=default_audio_lang, default_sub_lang=default_sub_lang,
         position=len(all_prof), auto_lock_minutes=auto_lock_minutes,
-        has_completed_tour=has_completed_tour_flag
+        has_completed_tour=has_completed_tour_flag, default_speed=default_speed
     )
     if is_kids:
         active_pid = current_profile()
@@ -121,7 +122,8 @@ def api_create_profile():
         "maturity_rating": maturity_rating, "blocked_genres": blocked_genres,
         "default_audio_lang": default_audio_lang, "default_sub_lang": default_sub_lang,
         "daily_limit_minutes": daily_limit_minutes, "bedtime_curfew": bedtime_curfew,
-        "auto_lock_minutes": auto_lock_minutes, "has_completed_tour": has_completed_tour_flag
+        "auto_lock_minutes": auto_lock_minutes, "has_completed_tour": has_completed_tour_flag,
+        "default_speed": default_speed
     }), 201
 
 
@@ -147,6 +149,7 @@ def api_update_profile(profile_id):
     default_sub_lang = str(data.get("default_sub_lang", "") or "").strip()
     auto_lock_minutes = int(data.get("auto_lock_minutes", 0) or 0)
     has_completed_tour = data.get("has_completed_tour")
+    default_speed = float(data["default_speed"]) if "default_speed" in data and data["default_speed"] is not None else None
     update_pin = bool(data.get("update_pin", False))
 
     if not is_admin():
@@ -180,7 +183,7 @@ def api_update_profile(profile_id):
         custom_avatar_url=custom_avatar_url, maturity_rating=maturity_rating,
         blocked_genres=blocked_genres, default_audio_lang=default_audio_lang,
         default_sub_lang=default_sub_lang, auto_lock_minutes=auto_lock_minutes,
-        has_completed_tour=has_completed_tour
+        has_completed_tour=has_completed_tour, default_speed=default_speed
     )
 
     if update_pin:

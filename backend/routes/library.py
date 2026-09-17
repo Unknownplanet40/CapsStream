@@ -12,7 +12,7 @@ from backend.db import (
     get_media_by_id, get_media_by_tmdb, get_unique_shows, get_recently_added, get_top_rated,
     get_progress, save_progress, delete_progress, get_continue_watching,
     get_favorites, toggle_favorite, is_favorite,
-    get_collections, create_collection, delete_collection,
+    get_collections, create_collection, update_collection, delete_collection,
     add_to_collection, remove_from_collection,
     get_playlists, get_playlist, create_playlist, update_playlist,
     delete_playlist, add_to_playlist, remove_from_playlist, reorder_playlist,
@@ -226,6 +226,19 @@ def api_delete_collection(collection_id):
     return jsonify({"ok": True})
 
 
+@library_bp.route("/api/collections/<int:collection_id>", methods=["PUT", "PATCH"])
+def api_update_collection(collection_id):
+    pid = require_profile()
+    data = request.json or {}
+    name = data.get("name")
+    desc = data.get("description")
+    kwargs = {}
+    if "cover_id" in data:
+        kwargs["cover_id"] = data["cover_id"]
+    update_collection(collection_id, pid, name=name, description=desc, **kwargs)
+    return jsonify({"ok": True, "cover_id": data.get("cover_id")})
+
+
 @library_bp.route("/api/collections/<int:collection_id>/items", methods=["POST"])
 def api_add_to_collection(collection_id):
     pid = require_profile()
@@ -395,3 +408,124 @@ def api_reorder_playlist(playlist_id):
     if not ok:
         return jsonify({"error": "Permission denied"}), 403
     return jsonify({"ok": True})
+
+
+# ─── Cinematic Universes & Franchises ─────────────────────────────────────────
+
+@library_bp.route("/api/universes", methods=["GET"])
+def api_get_universes():
+    from backend.db import get_all_media
+    all_media = get_all_media()
+    if active_is_kids():
+        all_media = filter_for_profile(all_media)
+
+    universes = get_universe_collections(all_media, min_count=1)
+    results = []
+    for u in universes:
+        items = u.get("items") or []
+        results.append({
+            "id": u["id"],
+            "name": u["name"],
+            "description": u.get("description", ""),
+            "icon": u.get("icon", "ph ph-sparkle"),
+            "poster_path": u.get("poster_path") or (items[0].get("poster_path") if items else None),
+            "backdrop_path": u.get("backdrop_path") or (items[0].get("backdrop_path") if items else None),
+            "has_timeline": bool(u.get("has_timeline")),
+            "item_count": len(items),
+            "preview_items": items[:4],
+        })
+    return jsonify(results)
+
+
+@library_bp.route("/api/universes/<universe_id>", methods=["GET"])
+def api_get_universe(universe_id):
+    from backend.db import get_all_media
+    all_media = get_all_media()
+    if active_is_kids():
+        all_media = filter_for_profile(all_media)
+
+    universes = get_universe_collections(all_media, min_count=1)
+    target = next((u for u in universes if u["id"] == universe_id), None)
+    if not target:
+        return jsonify({"error": "Universe not found"}), 404
+
+    items = target.get("items") or []
+    for idx, it in enumerate(items, 1):
+        it["sequence_number"] = idx
+
+    timeline_items = target.get("timeline_items") or []
+    for idx, it in enumerate(timeline_items, 1):
+        it["sequence_number"] = idx
+
+    return jsonify({
+        "id": target["id"],
+        "name": target["name"],
+        "description": target.get("description", ""),
+        "icon": target.get("icon", "ph ph-sparkle"),
+        "poster_path": target.get("poster_path") or (items[0].get("poster_path") if items else None),
+        "backdrop_path": target.get("backdrop_path") or (items[0].get("backdrop_path") if items else None),
+        "has_timeline": bool(target.get("has_timeline")),
+        "item_count": len(items),
+        "items": items,
+        "timeline_items": timeline_items,
+    })
+
+
+# ─── Regional / Country Hubs ──────────────────────────────────────────────────
+
+@library_bp.route("/api/regional/countries", methods=["GET"])
+def api_get_regional_countries():
+    from backend.db import get_all_media
+    all_media = get_all_media()
+    if active_is_kids():
+        all_media = filter_for_profile(all_media)
+
+    country_collections = get_country_collections(all_media, min_count=1)
+    results = []
+    for c in country_collections:
+        items = c.get("items") or []
+        results.append({
+            "id": c["id"],
+            "country_code": c.get("country_code"),
+            "country_name": c.get("country_name") or c.get("name"),
+            "flag": c.get("flag"),
+            "flag_svg": c.get("flag_svg"),
+            "description": c.get("description", ""),
+            "item_count": len(items),
+            "movie_count": c.get("movie_count", sum(1 for i in items if (i.get("type") or "movie") == "movie")),
+            "series_count": c.get("series_count", sum(1 for i in items if (i.get("type") or "") in ("series", "anime"))),
+            "poster_path": items[0].get("poster_path") if items else None,
+            "backdrop_path": items[0].get("backdrop_path") if items else None,
+            "preview_items": items[:4],
+        })
+    return jsonify(results)
+
+
+@library_bp.route("/api/regional/countries/<country_code>", methods=["GET"])
+def api_get_regional_country(country_code):
+    from backend.db import get_all_media
+    all_media = get_all_media()
+    if active_is_kids():
+        all_media = filter_for_profile(all_media)
+
+    code_upper = country_code.upper().strip()
+    country_collections = get_country_collections(all_media, min_count=1)
+    target = next((c for c in country_collections if (c.get("country_code") or "").upper() == code_upper or c.get("id") == f"country-{code_upper.lower()}"), None)
+    if not target:
+        return jsonify({"error": "Country hub not found"}), 404
+
+    items = target.get("items") or []
+    return jsonify({
+        "id": target["id"],
+        "country_code": target.get("country_code", code_upper),
+        "country_name": target.get("country_name") or target.get("name"),
+        "flag": target.get("flag"),
+        "flag_svg": target.get("flag_svg"),
+        "description": target.get("description", ""),
+        "item_count": len(items),
+        "movie_count": target.get("movie_count", sum(1 for i in items if (i.get("type") or "movie") == "movie")),
+        "series_count": target.get("series_count", sum(1 for i in items if (i.get("type") or "") in ("series", "anime"))),
+        "poster_path": items[0].get("poster_path") if items else None,
+        "backdrop_path": items[0].get("backdrop_path") if items else None,
+        "items": items,
+    })

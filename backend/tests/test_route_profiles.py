@@ -78,24 +78,28 @@ class TestRouteProfiles(unittest.TestCase):
     @patch("backend.routes.profiles.is_admin")
     @patch("backend.routes.profiles.current_profile")
     def test_api_update_profile_tour_completion(self, mock_curr, mock_admin):
-        """Verify PUT /api/profiles/<id> persists has_completed_tour flag."""
+        """Verify PUT /api/profiles/<id> persists has_completed_tour flag and default_speed."""
         mock_admin.return_value = True
         mock_curr.return_value = 1
 
-        pid = create_profile(name="Admin", pin_hash=None, is_admin=True, has_completed_tour=0)
+        pid = create_profile(name="Admin", pin_hash=None, is_admin=True, has_completed_tour=0, default_speed=1.0)
         prof_before = get_profile(pid)
         self.assertEqual(prof_before.get("has_completed_tour"), 0)
+        self.assertEqual(prof_before.get("default_speed"), 1.0)
 
         resp = self.client.put(f"/api/profiles/{pid}", json={
             "name": "Admin",
             "has_completed_tour": 1,
+            "default_speed": 1.25,
         })
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
         self.assertTrue(data.get("has_completed_tour"))
+        self.assertEqual(data.get("default_speed"), 1.25)
 
         prof_after = get_profile(pid)
         self.assertEqual(prof_after.get("has_completed_tour"), 1)
+        self.assertEqual(prof_after.get("default_speed"), 1.25)
 
     def test_heartbeat_does_not_falsely_evict_after_api_me(self):
         """Verify that heartbeat does not evict after /api/profiles/me initializes presence."""

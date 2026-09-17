@@ -333,16 +333,34 @@ def get_country_collections(all_media: List[Dict[str, Any]], min_count: int = 2)
 
     collections = []
     for code, items in country_groups.items():
-        if len(items) < min_count:
-            continue
-
         meta = country_meta[code]
         c_name = meta["name"]
         flag = meta["flag"]
 
+        # Deduplicate items by (type, tmdb_id or title) so each show/movie appears exactly once
+        unique_map: Dict[Any, Dict[str, Any]] = {}
+        for item in items:
+            m_type = item.get("type") or "movie"
+            tmdb_id = item.get("tmdb_id")
+            title_norm = (item.get("title") or "").strip().lower()
+            key = (m_type, tmdb_id) if tmdb_id else (m_type, title_norm)
+
+            if key not in unique_map:
+                unique_map[key] = dict(item)
+            else:
+                existing = unique_map[key]
+                if not existing.get("poster_path") and item.get("poster_path"):
+                    unique_map[key] = dict(item)
+                elif (existing.get("season") or 999) > (item.get("season") or 999):
+                    unique_map[key] = dict(item)
+
+        unique_items = list(unique_map.values())
+        if len(unique_items) < min_count:
+            continue
+
         # Sort items: latest release year first, then title
         sorted_items = sorted(
-            items,
+            unique_items,
             key=lambda x: (-(int(x.get("year") or 0)), (x.get("title") or "").lower())
         )
 

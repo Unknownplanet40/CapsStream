@@ -1,8 +1,10 @@
 package com.capsstream.tv
 
 import android.annotation.SuppressLint
-import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.view.KeyEvent
 import android.view.View
 import android.webkit.*
@@ -11,6 +13,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -27,6 +30,32 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnRetry: Button
 
     private var serverUrl: String? = null
+
+    private val voiceSearchLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spokenText.isNullOrBlank()) {
+                val escaped = spokenText.replace("\\", "\\\\").replace("'", "\\'")
+                webView.post {
+                    webView.evaluateJavascript("if (window.onNativeVoiceSearchQuery) { window.onNativeVoiceSearchQuery('$escaped'); }", null)
+                }
+            }
+        }
+    }
+
+    fun launchVoiceSearch() {
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Search movies, series, anime...")
+            }
+            voiceSearchLauncher.launch(intent)
+        } catch (e: Exception) {
+            // Speech recognition unavailable
+        }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,6 +98,20 @@ class MainActivity : AppCompatActivity() {
 
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+
+        webView.addJavascriptInterface(object {
+            @JavascriptInterface
+            fun isVoiceAvailable(): Boolean {
+                return SpeechRecognizer.isRecognitionAvailable(this@MainActivity)
+            }
+
+            @JavascriptInterface
+            fun startVoiceSearch() {
+                runOnUiThread {
+                    launchVoiceSearch()
+                }
+            }
+        }, "CapsStreamNative")
 
         webView.webChromeClient = object : WebChromeClient() {}
         webView.webViewClient = object : WebViewClient() {
@@ -189,6 +232,11 @@ class MainActivity : AppCompatActivity() {
                     // Dispatch space bar key event to trigger video play/pause
                     webView.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_SPACE))
                     webView.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_SPACE))
+                    return true
+                }
+                KeyEvent.KEYCODE_SEARCH,
+                KeyEvent.KEYCODE_VOICE_ASSIST -> {
+                    launchVoiceSearch()
                     return true
                 }
             }

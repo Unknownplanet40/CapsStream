@@ -150,6 +150,28 @@ class TestDatabaseMigrations(unittest.TestCase):
         self.assertEqual(len(stats["recent_history"]), 1)
         self.assertEqual(stats["recent_history"][0]["title"], "Arrival")
 
+    def test_collections_cover_id_migration(self):
+        """Verify collections table has cover_id column."""
+        from backend.db.connection import get_conn
+        conn = get_conn()
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(collections)").fetchall()]
+        conn.close()
+        self.assertIn("cover_id", cols)
+
+    def test_profiles_default_speed_migration(self):
+        """Verify profiles table has default_speed column and handles default."""
+        from backend.db.connection import get_conn
+        conn = get_conn()
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(profiles)").fetchall()]
+        conn.close()
+        self.assertIn("default_speed", cols)
+
+        pid = create_profile(name="Speedy", pin_hash=None, default_speed=1.5)
+        prof = get_all_profiles()
+        p = next(x for x in prof if x["id"] == pid)
+        self.assertEqual(p["default_speed"], 1.5)
+
 
 if __name__ == "__main__":
     unittest.main()
+

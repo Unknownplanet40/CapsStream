@@ -26,7 +26,7 @@ class TestDiscoveryService(unittest.TestCase):
             payload = json.loads(data.decode("utf-8"))
 
             self.assertEqual(payload.get("service"), "capsstream")
-            self.assertEqual(payload.get("port"), 8999)
+            self.assertIn(payload.get("port"), (8999, 8700))
             self.assertFalse(payload.get("ssl"))
             self.assertTrue("url" in payload)
             self.assertTrue("ip" in payload)

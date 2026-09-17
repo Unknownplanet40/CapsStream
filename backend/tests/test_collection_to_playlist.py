@@ -101,3 +101,28 @@ class TestCollectionToPlaylist(unittest.TestCase):
         # Missing items
         res = self.client.post("/api/collections/convert-to-playlist", json={"name": "Empty"})
         self.assertEqual(res.status_code, 400)
+
+    def test_update_and_reset_collection_cover(self):
+        from backend.db.collections import create_collection, get_collections
+        cid = create_collection(1, "My Phase 1", "Marvel Phase 1")
+
+        with self.client.session_transaction() as sess:
+            sess["profile_id"] = 1
+
+        # 1. Update cover to media 10
+        res = self.client.patch(f"/api/collections/{cid}", json={"cover_id": 10})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()["cover_id"], 10)
+
+        cols = get_collections(1)
+        found = next(c for c in cols if c["id"] == cid)
+        self.assertEqual(found["cover_id"], 10)
+
+        # 2. Reset cover back to None (auto)
+        res = self.client.patch(f"/api/collections/{cid}", json={"cover_id": None})
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNone(res.get_json()["cover_id"])
+
+        cols = get_collections(1)
+        found = next(c for c in cols if c["id"] == cid)
+        self.assertIsNone(found["cover_id"])

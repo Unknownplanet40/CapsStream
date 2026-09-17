@@ -238,6 +238,19 @@ class TestRouteAdmin(unittest.TestCase):
         mock_helper.assert_called_once()
         mock_shutdown.assert_called_once()
 
+    @patch("backend.routes.admin.require_admin")
+    def test_api_clear_probe_cache(self, mock_admin):
+        """Verify DELETE /api/system/probe-cache flushes in-memory probe cache."""
+        from backend.utils import probe_cache
+        probe_cache.put(("dummy_path", 123, 456), {"width": 1920})
+        self.assertIsNotNone(probe_cache.get(("dummy_path", 123, 456)))
+
+        res = self.client.delete("/api/system/probe-cache")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data.get("ok"))
+        self.assertIsNone(probe_cache.get(("dummy_path", 123, 456)))
+
 
 if __name__ == "__main__":
     unittest.main()

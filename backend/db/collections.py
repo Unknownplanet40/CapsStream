@@ -96,6 +96,29 @@ def delete_collection(collection_id, profile_id):
     conn.close()
 
 
+_UNSET = object()
+
+
+def update_collection(collection_id, profile_id, name=None, description=None, cover_id=_UNSET):
+    conn = get_conn()
+    fields = []
+    params = []
+    if name is not None:
+        fields.append("name=?")
+        params.append(name)
+    if description is not None:
+        fields.append("description=?")
+        params.append(description)
+    if cover_id is not _UNSET:
+        fields.append("cover_id=?")
+        params.append(cover_id)
+    if fields:
+        params.extend([collection_id, profile_id])
+        conn.execute(f"UPDATE collections SET {', '.join(fields)} WHERE id=? AND profile_id=?", params)
+        conn.commit()
+    conn.close()
+
+
 def add_to_collection(collection_id, media_id):
     conn = get_conn()
     max_order = conn.execute(
