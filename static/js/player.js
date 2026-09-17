@@ -211,8 +211,15 @@ const PlayerPage = {
           </div>
           <!-- Watch Together HUD controls -->
           <div v-if="wtRoom.code" style="display:flex;align-items:center;gap:6px;margin-right:6px">
+            <!-- Room Code Pill (Click to copy / open info) -->
+            <div class="wt-room-code-pill" @click.stop="wtCopyCode" :title="'Room Code: ' + wtRoom.code + ' (Click to copy)'">
+              <i :class="wtCopied ? 'ph-bold ph-check' : 'ph ph-copy'" :style="{ color: wtCopied ? '#34d399' : '#c4b5fd' }"></i>
+              <span class="wt-room-code-pill-label">Room</span>
+              <span class="wt-room-code-pill-val">{{ wtCopied ? 'COPIED!' : wtRoom.code }}</span>
+            </div>
+
             <!-- Member avatars -->
-            <div class="wt-player-members">
+            <div class="wt-player-members" @click.stop="wtOpenModal('start')" style="cursor:pointer" title="View participants">
               <div
                 v-for="m in wtRoom.members.slice(0,5)"
                 :key="m.sid"
@@ -1800,11 +1807,30 @@ const PlayerPage = {
       document.head.appendChild(s);
     }
 
-    function _wtConnectSocket() {
-      if (_wtSocket) return;
+    function _wtConnectSocket(onReady) {
+      if (_wtSocket && _wtSocket.connected) {
+        if (onReady) onReady(_wtSocket);
+        return;
+      }
+      if (_wtSocket) {
+        // Socket instance exists, wait for connect event
+        _wtSocket.once("connect", () => {
+          if (onReady) onReady(_wtSocket);
+        });
+        return;
+      }
       _loadSocketIo(() => {
+        if (!window.io) {
+          if (typeof addToast === "function") addToast("Watch Together: socket library unavailable", "error");
+          return;
+        }
         const origin = window.location.origin;
         _wtSocket = window.io(origin + "/wt", { transports: ["websocket", "polling"] });
+
+        _wtSocket.on("connect", () => {
+          log.debug?.("[WatchTogether] Connected to /wt namespace");
+          if (onReady) onReady(_wtSocket);
+        });
 
         _wtSocket.on("room_joined", (data) => {
           wtRoom.code = data.code;
@@ -1818,10 +1844,16 @@ const PlayerPage = {
           wtRoom.chat = [];
           wtDrifted.value = false;
           _startDriftCheck();
+          if (typeof addToast === "function") {
+            addToast(`Watch Together Room Active: ${data.code}`, "success");
+          }
         });
 
         _wtSocket.on("member_joined", (data) => {
           wtRoom.members = data.members || wtRoom.members;
+          if (data.member?.name && typeof addToast === "function") {
+            addToast(`${data.member.name} joined Watch Together`, "info");
+          }
         });
 
         _wtSocket.on("member_left", (data) => {
@@ -1866,6 +1898,7 @@ const PlayerPage = {
 
         _wtSocket.on("error", (data) => {
           console.warn("[WatchTogether] Server error:", data.message);
+          if (typeof addToast === "function") addToast(data.message || "Watch Together error", "error");
         });
       });
     }
@@ -1880,14 +1913,15 @@ const PlayerPage = {
     }
 
     function wtStartSession() {
-      _wtConnectSocket();
-      const video = videoRef.value;
-      _wtSocket.emit("create_room", {
-        media_id: media.value?.id,
-        media_type: media.value?.type,
-        media_title: media.value?.title,
-        position: video ? video.currentTime : 0,
-        is_playing: video ? !video.paused : false,
+      _wtConnectSocket((sock) => {
+        const video = videoRef.value;
+        sock.emit("create_room", {
+          media_id: media.value?.id,
+          media_type: media.value?.type,
+          media_title: media.value?.title,
+          position: video ? video.currentTime : 0,
+          is_playing: video ? !video.paused : false,
+        });
       });
       wtCloseModal();
     }
@@ -1895,8 +1929,9 @@ const PlayerPage = {
     function wtJoinSession() {
       const code = (wtJoinCode.value || "").trim().toUpperCase();
       if (!code) return;
-      _wtConnectSocket();
-      _wtSocket.emit("join_room", { code });
+      _wtConnectSocket((sock) => {
+        sock.emit("join_room", { code });
+      });
       wtJoinCode.value = "";
       wtCloseModal();
     }

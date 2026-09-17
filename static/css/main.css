@@ -7327,6 +7327,41 @@ main::-webkit-scrollbar {
   opacity: 0.7;
 }
 
+/* Player top-bar room code pill */
+.wt-room-code-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-pill, 999px);
+  background: rgba(124, 58, 237, 0.22);
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  color: #ede9fe;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  user-select: none;
+}
+.wt-room-code-pill:hover {
+  background: rgba(124, 58, 237, 0.38);
+  border-color: rgba(196, 181, 253, 0.7);
+  transform: translateY(-1px);
+}
+.wt-room-code-pill-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #c4b5fd;
+  font-weight: 800;
+}
+.wt-room-code-pill-val {
+  letter-spacing: 0.12em;
+  font-family: monospace;
+  color: #fff;
+}
+
 /* Player HUD Watch Together button */
 .wt-hud-btn {
   width: 36px;
@@ -7471,14 +7506,15 @@ main::-webkit-scrollbar {
 }
 .wt-chat-send-btn:hover { background: #6d28d9; transform: scale(1.08); }
 
-/* Reaction bar at bottom of player */
+/* Reaction bar elevated safely above player bottom controls dock */
 .wt-reaction-bar {
   position: absolute;
-  bottom: 80px;
-  left: 16px;
+  bottom: 130px;
+  left: 24px;
   display: flex;
   gap: 8px;
   z-index: 650;
+  pointer-events: auto;
 }
 .wt-reaction-pick {
   width: 38px;
@@ -7504,19 +7540,19 @@ main::-webkit-scrollbar {
   font-size: 1.6rem;
   z-index: 700;
   animation: wtReactionFloat 2.5s ease-out forwards;
-  bottom: 80px;
+  bottom: 140px;
   left: 30px;
 }
 @keyframes wtReactionFloat {
   0%   { opacity: 1; transform: translateY(0) scale(1); }
-  20%  { opacity: 1; transform: translateY(-20px) scale(1.15); }
-  100% { opacity: 0; transform: translateY(-120px) scale(0.8); }
+  20%  { opacity: 1; transform: translateY(-30px) scale(1.15); }
+  100% { opacity: 0; transform: translateY(-160px) scale(0.8); }
 }
 
-/* Re-sync pill */
+/* Re-sync pill positioned comfortably above controls */
 .wt-resync-btn {
   position: absolute;
-  bottom: 90px;
+  bottom: 130px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 660;
