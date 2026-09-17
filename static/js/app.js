@@ -19909,19 +19909,16 @@ const App = {
             <p style="font-size:0.88rem;color:var(--text-secondary);line-height:1.5">
               Enter the 6-character room code shared by your host to join the synchronized watch session:
             </p>
-            <div class="wt-join-input-group">
+            <div class="wt-join-input">
               <input
                 v-model="globalWtJoinCode"
                 type="text"
                 placeholder="e.g. AB12CD"
                 maxlength="8"
-                class="wt-join-input"
                 @keydown.enter.prevent="submitGlobalJoinParty"
                 autofocus
               />
               <button
-                class="btn btn-primary"
-                style="padding:10px 24px;border-radius:12px;font-weight:700"
                 @click="submitGlobalJoinParty"
                 :disabled="!globalWtJoinCode.trim() || globalWtJoining"
               >

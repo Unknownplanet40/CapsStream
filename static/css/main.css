@@ -7267,37 +7267,63 @@ main::-webkit-scrollbar {
 .wt-copy-btn:hover { background: rgba(139, 92, 246, 0.3); }
 
 /* Join input */
-.wt-join-input {
+.wt-join-input,
+.wt-join-input-group {
   display: flex;
+  align-items: center;
   gap: 8px;
+  width: 100%;
 }
-.wt-join-input input {
+.wt-join-input input,
+.wt-join-input-group input,
+input.wt-join-input {
   flex: 1;
   padding: 10px 14px;
   border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.15);
-  background: rgba(255,255,255,0.06);
-  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary, #fff);
   font-size: 1rem;
   font-weight: 700;
   letter-spacing: 0.15em;
   text-transform: uppercase;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
 }
-.wt-join-input input:focus { border-color: rgba(139, 92, 246, 0.6); }
-.wt-join-input button {
-  padding: 10px 18px;
+.wt-join-input input:focus,
+.wt-join-input-group input:focus,
+input.wt-join-input:focus {
+  border-color: rgba(139, 92, 246, 0.8);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.25);
+  background: rgba(255, 255, 255, 0.1);
+}
+.wt-join-input button,
+.wt-join-input-group button {
+  padding: 10px 20px;
   border-radius: 10px;
   border: none;
   background: #7c3aed;
   color: #fff;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.2s, transform 0.18s;
+  transition: background 0.2s, transform 0.18s, opacity 0.2s;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
-.wt-join-input button:hover { background: #6d28d9; transform: translateY(-1px); }
+.wt-join-input button:hover:not(:disabled),
+.wt-join-input-group button:hover:not(:disabled) {
+  background: #6d28d9;
+  transform: translateY(-1px);
+}
+.wt-join-input button:disabled,
+.wt-join-input-group button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 /* Member list in modal */
 .wt-members-list {

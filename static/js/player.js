@@ -1902,7 +1902,7 @@ const PlayerPage = {
         _wtSocket = window.io(origin + "/wt", { transports: ["websocket", "polling"] });
 
         _wtSocket.on("connect", () => {
-          log.debug?.("[WatchTogether] Connected to /wt namespace");
+          console.debug("[WatchTogether] Connected to /wt namespace");
           if (onReady) onReady(_wtSocket);
         });
 
