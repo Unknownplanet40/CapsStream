@@ -49,11 +49,13 @@ def init_socketio(app):
         engineio_logger=False,
     )
 
-    def _member_info(sid):
+    def _member_info(sid, data=None):
+        data = data or {}
         profile = session.get("profile", {}) or {}
-        name = profile.get("name") or profile.get("username") or "Guest"
-        color = profile.get("color") or "#8b5cf6"
-        return {"sid": sid, "name": name, "color": color}
+        name = data.get("user_name") or profile.get("name") or profile.get("username") or "Guest"
+        color = data.get("user_color") or profile.get("color") or profile.get("theme") or "#8b5cf6"
+        avatar = data.get("user_avatar") or profile.get("avatar") or profile.get("custom_avatar_url") or "👤"
+        return {"sid": sid, "name": name, "color": color, "avatar": avatar}
 
     def _room_public(room):
         pos = room["position"]
@@ -118,7 +120,7 @@ def init_socketio(app):
             "is_playing": bool(data.get("is_playing", False)),
             "last_sync_time": now,
             "leader_sid": sid,
-            "members": [_member_info(sid)],
+            "members": [_member_info(sid, data)],
             "chat": [],
         }
         _rooms[code] = room
@@ -136,7 +138,7 @@ def init_socketio(app):
             return
         _remove_member(sid)
         room = _rooms[code]
-        member = _member_info(sid)
+        member = _member_info(sid, data)
         room["members"].append(member)
         _sid_room[sid] = code
         join_room(code, namespace="/wt")
@@ -162,10 +164,11 @@ def init_socketio(app):
         room["position"] = pos
         room["is_playing"] = playing
         room["last_sync_time"] = time.time()
+        sent_at = data.get("sent_at")
         log.debug("[WatchTogether] sync in %s from %s: pos=%.2f play=%s", code, sid, pos, playing)
         emit(
             "sync",
-            {"position": pos, "is_playing": playing, "from_sid": sid},
+            {"position": pos, "is_playing": playing, "from_sid": sid, "sent_at": sent_at},
             to=code,
             include_self=False,
             namespace="/wt",
@@ -226,5 +229,22 @@ def init_socketio(app):
     def wt_rooms():
         from flask import jsonify
         return jsonify({"rooms": len(_rooms), "codes": list(_rooms.keys())})
+
+    @app.route("/api/watch-together/room/<code>", methods=["GET"])
+    def wt_room_details(code):
+        from flask import jsonify
+        c = (code or "").strip().upper()
+        room = _rooms.get(c)
+        if not room:
+            return jsonify({"error": "Room not found"}), 404
+        return jsonify({
+            "code": room["code"],
+            "media_id": room.get("media_id"),
+            "media_type": room.get("media_type"),
+            "media_title": room.get("media_title"),
+            "position": room["position"],
+            "is_playing": room["is_playing"],
+            "member_count": len(room.get("members", [])),
+        })
 
     return socketio

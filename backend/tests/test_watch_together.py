@@ -50,6 +50,24 @@ class TestWatchTogether(unittest.TestCase):
         self.assertEqual(_sid_room.get("sid-1"), code)
         self.assertEqual(_rooms[code]["position"], 42.0)
 
+    def test_room_profile_metadata(self):
+        """Test storing member profile information (name, avatar, theme)."""
+        code = _gen_code()
+        _rooms[code] = {
+            "code": code,
+            "media_id": 999,
+            "members": [
+                {"sid": "sid-alice", "name": "Alice", "color": "#10b981", "avatar": "👩"}
+            ],
+            "leader_sid": "sid-alice",
+            "position": 10.5,
+            "is_playing": True,
+        }
+        member = _rooms[code]["members"][0]
+        self.assertEqual(member["name"], "Alice")
+        self.assertEqual(member["color"], "#10b981")
+        self.assertEqual(member["avatar"], "👩")
+
 
 if __name__ == "__main__":
     unittest.main()

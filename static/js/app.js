@@ -19543,6 +19543,17 @@ const App = {
                 </div>
               </div>
 
+              <!-- Watch Together Section -->
+              <div class="profile-dropdown-section">
+                <div class="profile-dropdown-section-title">Watch Together</div>
+                <div class="profile-dropdown-list">
+                  <div class="profile-dropdown-item" @click.stop="openGlobalWatchTogetherModal" id="tv-dd-join-wt" tabindex="0">
+                    <i class="ph-bold ph-users-three" style="color:#a78bfa"></i>
+                    <span>Join Watch Party</span>
+                  </div>
+                </div>
+              </div>
+
               <!-- System & Tools Section -->
               <div class="profile-dropdown-section">
                 <div class="profile-dropdown-section-title">System & Tools</div>
@@ -19711,6 +19722,20 @@ const App = {
                   </div>
                 </div>
 
+                <!-- Watch Together Section -->
+                <div class="profile-dropdown-section">
+                  <div class="profile-dropdown-section-title">Watch Together</div>
+                  <div class="profile-dropdown-list">
+                    <div class="profile-dropdown-item" @click.stop="openGlobalWatchTogetherModal" id="dd-join-wt">
+                      <i class="ph-bold ph-users-three" style="color:#a78bfa"></i>
+                      <div style="display:flex;flex-direction:column;gap:1px">
+                        <span style="font-weight:600">Join Watch Party</span>
+                        <span style="font-size:0.72rem;color:var(--text-muted)">Enter room code to sync playback</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- System & Tools Section -->
                 <div class="profile-dropdown-section">
                   <div class="profile-dropdown-section-title">System & Tools</div>
@@ -19867,6 +19892,50 @@ const App = {
 
       <!-- Shortcuts Modal -->
       <shortcuts-modal v-if="showShortcuts" @close="showShortcuts = false" />
+
+      <!-- Global Join Watch Party Modal -->
+      <div v-if="showGlobalWtModal" class="wt-modal-backdrop" @click.self="showGlobalWtModal = false" style="z-index:999999">
+        <div class="wt-modal" @click.stop>
+          <div class="wt-modal-header">
+            <div class="wt-modal-title">
+              <i class="ph-fill ph-users-three" style="color:#a78bfa"></i>
+              <span>Join Watch Party</span>
+            </div>
+            <button class="wt-modal-close" @click="showGlobalWtModal = false">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:1.25rem">
+            <p style="font-size:0.88rem;color:var(--text-secondary);line-height:1.5">
+              Enter the 6-character room code shared by your host to join the synchronized watch session:
+            </p>
+            <div class="wt-join-input-group">
+              <input
+                v-model="globalWtJoinCode"
+                type="text"
+                placeholder="e.g. AB12CD"
+                maxlength="8"
+                class="wt-join-input"
+                @keydown.enter.prevent="submitGlobalJoinParty"
+                autofocus
+              />
+              <button
+                class="btn btn-primary"
+                style="padding:10px 24px;border-radius:12px;font-weight:700"
+                @click="submitGlobalJoinParty"
+                :disabled="!globalWtJoinCode.trim() || globalWtJoining"
+              >
+                <i v-if="globalWtJoining" class="ph ph-spinner ph-spin"></i>
+                <span v-else>Join Party</span>
+              </button>
+            </div>
+            <div v-if="globalWtError" style="color:#ef4444;font-size:0.84rem;font-weight:600;display:flex;align-items:center;gap:6px">
+              <i class="ph-bold ph-warning-circle"></i>
+              <span>{{ globalWtError }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- Bottom-Left Floating Scan Progress Widget -->
       <scan-progress-widget :has-bottom-nav="isBottomNavVisible" />
@@ -21736,6 +21805,39 @@ const App = {
       showShortcuts.value = true;
     }
 
+    const showGlobalWtModal = ref(false);
+    const globalWtJoinCode = ref("");
+    const globalWtJoining = ref(false);
+    const globalWtError = ref("");
+
+    function openGlobalWatchTogetherModal() {
+      showProfileMenu.value = false;
+      globalWtJoinCode.value = "";
+      globalWtError.value = "";
+      showGlobalWtModal.value = true;
+    }
+
+    async function submitGlobalJoinParty() {
+      const code = (globalWtJoinCode.value || "").trim().toUpperCase();
+      if (!code) return;
+      globalWtJoining.value = true;
+      globalWtError.value = "";
+      try {
+        const res = await API.get(`/api/watch-together/room/${encodeURIComponent(code)}`);
+        if (!res || !res.media_id) {
+          globalWtError.value = "Room not found or session has ended.";
+          globalWtJoining.value = false;
+          return;
+        }
+        showGlobalWtModal.value = false;
+        globalWtJoining.value = false;
+        router.push({ path: `/watch/${res.media_id}`, query: { wt_join: code } });
+      } catch (err) {
+        globalWtError.value = err?.response?.data?.error || err?.message || "Room not found. Check the code and try again.";
+        globalWtJoining.value = false;
+      }
+    }
+
     function dismissToast(id) {
       store.toasts = store.toasts.filter((t) => t.id !== id);
     }
@@ -22002,6 +22104,12 @@ const App = {
       goRequests,
       goStats,
       openShortcuts,
+      showGlobalWtModal,
+      globalWtJoinCode,
+      globalWtJoining,
+      globalWtError,
+      openGlobalWatchTogetherModal,
+      submitGlobalJoinParty,
       goSettings,
       goAbout,
       editCurrentProfile,

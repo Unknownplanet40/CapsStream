@@ -1797,6 +1797,7 @@ const PlayerPage = {
     let _wtDriftCheckInterval = null;
     let _wtHeartbeatInterval = null;
     let _applyingRemoteSync = false;
+    let _tempoRestoreTimer = null;
     let _lastSyncPosition = 0;
     let _lastSyncReceivedAt = 0;
     let _pendingWtSync = null;
@@ -1812,32 +1813,73 @@ const PlayerPage = {
       document.head.appendChild(s);
     }
 
-    function _applySyncToVideo(targetPos, shouldPlay) {
+    function _applySyncToVideo(targetPos, shouldPlay, sentAt) {
       const video = videoRef.value;
       if (!video) {
-        _pendingWtSync = { targetPos, shouldPlay };
+        _pendingWtSync = { targetPos, shouldPlay, sentAt };
         return;
       }
+
+      // Compensate network transit latency if timestamp provided
+      if (typeof sentAt === "number" && sentAt > 0 && shouldPlay) {
+        const transitSec = (Date.now() - sentAt) / 1000;
+        if (transitSec > 0 && transitSec < 3.0) {
+          targetPos += transitSec;
+        }
+      }
+
       _applyingRemoteSync = true;
-      if (typeof targetPos === "number" && targetPos >= 0) {
-        const drift = Math.abs(video.currentTime - targetPos);
-        // Snap immediately if paused, or if playing and drift exceeds 0.75s
-        if (!shouldPlay || drift > 0.75) {
+      const currentPos = video.currentTime;
+      const drift = targetPos - currentPos;
+      const absDrift = Math.abs(drift);
+
+      // If host is paused, or follower is paused: snap immediately to exact frame
+      if (!shouldPlay || video.paused) {
+        if (absDrift > 0.15) {
           try {
             video.currentTime = targetPos;
             currentTime.value = targetPos;
-            wtDrifted.value = false;
           } catch (e) {}
         }
+        if (video.paused && shouldPlay) {
+          video.play().catch(() => {});
+        } else if (!video.paused && !shouldPlay) {
+          video.pause();
+        }
+        wtDrifted.value = false;
+        if (video) video.playbackRate = playbackRate.value || 1.0;
+      } else {
+        // Both playing: Hybrid Smart Sync
+        if (absDrift > 0.35) {
+          // Noticeable drift: snap directly to match host position
+          try {
+            video.currentTime = targetPos;
+            currentTime.value = targetPos;
+          } catch (e) {}
+          video.playbackRate = playbackRate.value || 1.0;
+          wtDrifted.value = false;
+        } else if (absDrift > 0.08) {
+          // Minor drift (80ms - 350ms): micro-rate tempo nudge to converge without audio cuts
+          const baseRate = playbackRate.value || 1.0;
+          if (drift > 0) {
+            video.playbackRate = baseRate * 1.03; // follower behind, gently speed up
+          } else {
+            video.playbackRate = baseRate * 0.97; // follower ahead, gently ease off
+          }
+          clearTimeout(_tempoRestoreTimer);
+          _tempoRestoreTimer = setTimeout(() => {
+            if (videoRef.value) videoRef.value.playbackRate = playbackRate.value || 1.0;
+          }, 2200);
+        } else {
+          // In tight sync (<80ms)
+          video.playbackRate = playbackRate.value || 1.0;
+          wtDrifted.value = false;
+        }
       }
-      if (shouldPlay && video.paused) {
-        video.play().catch(() => {});
-      } else if (!shouldPlay && !video.paused) {
-        video.pause();
-      }
+
       setTimeout(() => {
         _applyingRemoteSync = false;
-      }, 600);
+      }, 500);
     }
 
     function _wtConnectSocket(onReady) {
@@ -1885,7 +1927,7 @@ const PlayerPage = {
           }
           // Follower: immediately align playback with the host
           if (!wtRoom.isLeader) {
-            _applySyncToVideo(data.position, data.is_playing);
+            _applySyncToVideo(data.position, data.is_playing, null);
           }
         });
 
@@ -1923,7 +1965,7 @@ const PlayerPage = {
           _lastSyncPosition = data.position;
           _lastSyncReceivedAt = Date.now();
           if (!wtRoom.following) return;
-          _applySyncToVideo(data.position, data.is_playing);
+          _applySyncToVideo(data.position, data.is_playing, data.sent_at);
         });
 
         _wtSocket.on("reaction", (data) => {
@@ -1933,7 +1975,7 @@ const PlayerPage = {
         _wtSocket.on("chat_msg", (data) => {
           wtRoom.chat.push(data);
           if (wtRoom.chat.length > 200) wtRoom.chat.shift();
-          // auto-scroll chat
+          _spawnFloatingChat(data);
           nextTick(() => {
             const el = document.querySelector(".wt-chat-messages");
             if (el) el.scrollTop = el.scrollHeight;
@@ -1959,12 +2001,16 @@ const PlayerPage = {
     function wtStartSession() {
       _wtConnectSocket((sock) => {
         const video = videoRef.value;
+        const prof = store.profile || {};
         sock.emit("create_room", {
           media_id: media.value?.id,
           media_type: media.value?.type,
           media_title: media.value?.title,
           position: video ? video.currentTime : 0,
           is_playing: video ? !video.paused : false,
+          user_name: prof.name || prof.username || "Host",
+          user_color: prof.theme || "#8b5cf6",
+          user_avatar: prof.custom_avatar_url || prof.avatar || "👑",
         });
       });
       wtCloseModal();
@@ -1974,7 +2020,13 @@ const PlayerPage = {
       const code = (wtJoinCode.value || "").trim().toUpperCase();
       if (!code) return;
       _wtConnectSocket((sock) => {
-        sock.emit("join_room", { code });
+        const prof = store.profile || {};
+        sock.emit("join_room", {
+          code,
+          user_name: prof.name || prof.username || "Guest",
+          user_color: prof.theme || "#38bdf8",
+          user_avatar: prof.custom_avatar_url || prof.avatar || "👤",
+        });
       });
       wtJoinCode.value = "";
       wtCloseModal();
@@ -2013,6 +2065,7 @@ const PlayerPage = {
       _wtSocket.emit("sync", {
         position: pos,
         is_playing: playing,
+        sent_at: Date.now(),
       });
     }
 
@@ -2052,7 +2105,7 @@ const PlayerPage = {
       if (wtRoom.isPlaying && _lastSyncReceivedAt) {
         target += (Date.now() - _lastSyncReceivedAt) / 1000;
       }
-      _applySyncToVideo(target, wtRoom.isPlaying);
+      _applySyncToVideo(target, wtRoom.isPlaying, null);
       wtDrifted.value = false;
       wtRoom.following = true;
     }
@@ -2068,6 +2121,29 @@ const PlayerPage = {
       el.style.color = color || "#fff";
       wrapper.appendChild(el);
       setTimeout(() => el.remove(), 2600);
+    }
+
+    function _spawnFloatingChat(msg) {
+      const wrapper = document.querySelector(".custom-player-wrapper");
+      if (!wrapper) return;
+      const el = document.createElement("div");
+      el.className = "wt-chat-bubble-float";
+      const sender = document.createElement("span");
+      sender.className = "wt-chat-bubble-sender";
+      sender.style.color = msg.color || "#c4b5fd";
+      sender.textContent = msg.sender || "Peer";
+      const text = document.createElement("span");
+      text.className = "wt-chat-bubble-text";
+      text.textContent = msg.text || "";
+      el.appendChild(sender);
+      el.appendChild(text);
+      const baseRight = wtShowChat.value ? 330 : 28;
+      el.style.right = baseRight + "px";
+      wrapper.appendChild(el);
+      setTimeout(() => {
+        el.classList.add("fade-out");
+        setTimeout(() => el.remove(), 600);
+      }, 3800);
     }
 
     function _startDriftCheck() {
@@ -5076,7 +5152,7 @@ const PlayerPage = {
       if (_pendingWtSync) {
         const p = _pendingWtSync;
         _pendingWtSync = null;
-        _applySyncToVideo(p.targetPos, p.shouldPlay);
+        _applySyncToVideo(p.targetPos, p.shouldPlay, p.sentAt);
       }
       // ─── Web Audio API (Dialogue Boost & Night Mode) ─────────────
       if (audioEnhancerMode.value !== "off") {
