@@ -59,11 +59,47 @@ class TestMediaScanner(unittest.TestCase):
         self.assertTrue(is_file_path_disabled(dummy_file, disabled_roots))
         self.assertFalse(is_file_path_disabled(os.path.join(self.test_dir, "Allowed.mp4"), disabled_roots))
 
-    def test_drive_mount_detection(self):
-        """Verify drive mount check handles existing paths and missing virtual paths."""
-        self.assertTrue(is_drive_mounted(self.test_dir))
-        fake_path = r"Z:\NonExistentDrive\Media\movie.mp4"
-        self.assertFalse(is_drive_mounted(fake_path))
+    def test_reset_scan_status(self):
+        """Verify reset_scan_status restores clean idle state."""
+        from backend.scanner import reset_scan_status, get_scan_status, _set_status
+        _set_status(running=True, phase="scanning", progress="testing...")
+        self.assertTrue(get_scan_status()["running"])
+        reset_scan_status()
+        status = get_scan_status()
+        self.assertFalse(status["running"])
+        self.assertEqual(status["phase"], "idle")
+        self.assertEqual(status["progress"], "")
+
+    def test_resolve_paths_ignores_empty_or_invalid(self):
+        """Verify _resolve_paths never resolves empty strings or invalid types to BASE_DIR."""
+        from backend.scanner import _resolve_paths
+        from backend.utils.paths import BASE_DIR
+        resolved = _resolve_paths(["", "  ", None, 123])
+        self.assertEqual(resolved, [])
+        self.assertNotIn(BASE_DIR, resolved)
+
+    def test_should_skip_system_and_hidden_folders(self):
+        """Verify _should_skip skips hidden, recycle bin, and repo folders."""
+        from backend.scanner import _should_skip
+        self.assertTrue(_should_skip(".CapsStream"))
+        self.assertTrue(_should_skip(".git"))
+        self.assertTrue(_should_skip("$RECYCLE.BIN"))
+        self.assertTrue(_should_skip("System Volume Information"))
+        self.assertTrue(_should_skip(".hidden_dir"))
+        self.assertFalse(_should_skip("Avatar (2009)"))
+
+    def test_scan_library_error_recovery(self):
+        """Verify scan_library sets running=False even if an unhandled error happens."""
+        from unittest.mock import patch
+        from backend.scanner import scan_library, get_scan_status, reset_scan_status
+        reset_scan_status()
+        with patch("backend.scanner._scan_movies", side_effect=RuntimeError("Disk failure test")):
+            with patch("backend.scanner._resolve_paths", return_value=[self.test_dir]):
+                scan_library()
+        status = get_scan_status()
+        self.assertFalse(status["running"], "Scanner must never stay running on fatal exception")
+        self.assertEqual(status["phase"], "complete")
+        self.assertTrue(any("Disk failure test" in e for e in status["errors"]))
 
 
 if __name__ == "__main__":

@@ -745,6 +745,12 @@ def clear_cache():
 
 def reset_application(clear_media_files=False):
     """Perform a fresh start reset: unlinks external paths, clears media path config, clears metadata cache, resets database, and optionally clears leftover files in the local 'media' folder."""
+    try:
+        from backend.scanner import reset_scan_status
+        reset_scan_status()
+    except Exception:
+        pass
+
     clear_cache()
 
     # Reset config media_paths to empty (users provide their own sources)

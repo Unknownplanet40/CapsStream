@@ -583,7 +583,7 @@ async function checkDrivesHealth() {
               if (typeof triggerScan === "function") {
                 triggerScan();
               } else {
-                API.post("/api/scan").then(() => addToast("Library scan started", "success")).catch(() => {});
+                startLibraryScan(true);
               }
             }
           });
@@ -4149,8 +4149,7 @@ const HomePage = {
         return;
       }
       try {
-        await API.post("/api/scan", {});
-        store.scanRunning = true;
+        await startLibraryScan(true);
       } catch (e) {
         addToast("Failed to start scan", "error");
       }
@@ -22023,7 +22022,7 @@ const App = {
         const res = await API.post("/api/scan", {});
         store.scanRunning = true;
         if (res && res.already_running) addToast("Scan already in progress", "info");
-        else pollScanStatus();
+        pollScanStatus();
       } catch (e) {
         addToast("Failed to start scan", "error");
       }

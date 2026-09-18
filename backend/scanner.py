@@ -66,6 +66,26 @@ def get_scan_status():
     return dict(_scan_status)
 
 
+def reset_scan_status():
+    """Forcibly reset scanner memory state to idle."""
+    global _scan_status, _scan_started_at
+    _scan_started_at = 0.0
+    _scan_status = {
+        "running": False,
+        "phase": "idle",
+        "progress": "",
+        "current_item": None,
+        "count": 0,
+        "total": 0,
+        "percent": 0,
+        "scan_done": 0,
+        "scan_total": 0,
+        "matched": 0,
+        "elapsed": 0,
+        "errors": [],
+    }
+
+
 def _load_config():
     cfg_path = os.path.join(BASE_DIR, "config.json")
     with open(cfg_path, encoding="utf-8") as f:
@@ -74,8 +94,13 @@ def _load_config():
 
 def _resolve_paths(path_list):
     """Resolve relative paths relative to BASE_DIR; keep absolute paths as-is."""
+    if not path_list or not isinstance(path_list, (list, tuple, set)):
+        return []
     resolved = []
     for p in path_list:
+        if not p or not isinstance(p, str) or not p.strip():
+            continue
+        p = p.strip()
         if os.path.isabs(p):
             resolved.append(p)
         else:
@@ -103,11 +128,21 @@ def _load_skip_patterns(cfg=None):
     return _SKIP_PATTERNS
 
 
+SYSTEM_SKIP_NAMES = {
+    "$recycle.bin", "system volume information", ".capsstream",
+    ".git", "node_modules", "winpython", "__pycache__", ".donotopen"
+}
+
+
 def _should_skip(name):
-    """True if a file/folder name contains any user-configured skip pattern."""
+    """True if a file/folder name contains any user-configured skip pattern or is a system/hidden directory."""
+    if not name:
+        return True
+    low = name.lower().strip()
+    if low.startswith(".") or low.startswith("$") or low in SYSTEM_SKIP_NAMES:
+        return True
     if not _SKIP_PATTERNS:
         return False
-    low = name.lower()
     return any(p in low for p in _SKIP_PATTERNS)
 
 
@@ -195,6 +230,20 @@ def _list_entries(base):
         return []
 
 
+def _safe_is_dir(entry):
+    try:
+        return entry.is_dir()
+    except OSError:
+        return False
+
+
+def _safe_is_file(entry):
+    try:
+        return entry.is_file()
+    except OSError:
+        return False
+
+
 def _scan_movies(path_list, existing_paths, on_progress=None):
     """Scan movie folders and return list of media dicts."""
     results = []
@@ -214,9 +263,9 @@ def _scan_movies(path_list, existing_paths, on_progress=None):
             on_progress(done - 1, total, entry.name)
         if _should_skip(entry.name):
             continue
-        if not entry.is_dir():
+        if not _safe_is_dir(entry):
             # Also handle flat file directly in movies folder
-            if entry.is_file() and _is_video(entry.name):
+            if _safe_is_file(entry) and _is_video(entry.name):
                 if entry.path not in existing_paths:
                     results.append({
                         "file_path":   entry.path,
@@ -226,17 +275,20 @@ def _scan_movies(path_list, existing_paths, on_progress=None):
             continue
         folder_name = entry.name
         # Find video files inside this folder (recursive)
-        for root, dirs, files in os.walk(entry.path):
-            dirs[:] = [d for d in sorted(dirs) if not _should_skip(d)]
-            for fname in sorted(files):
-                if _is_video(fname) and not _should_skip(fname):
-                    fpath = os.path.join(root, fname)
-                    if fpath not in existing_paths:
-                        results.append({
-                            "file_path":   fpath,
-                            "folder_name": folder_name,
-                            "type":        "movie",
-                        })
+        try:
+            for root, dirs, files in os.walk(entry.path, onerror=lambda _: None):
+                dirs[:] = [d for d in sorted(dirs) if not _should_skip(d)]
+                for fname in sorted(files):
+                    if _is_video(fname) and not _should_skip(fname):
+                        fpath = os.path.join(root, fname)
+                        if fpath not in existing_paths:
+                            results.append({
+                                "file_path":   fpath,
+                                "folder_name": folder_name,
+                                "type":        "movie",
+                            })
+        except OSError:
+            pass
     if on_progress and total:
         on_progress(total, total, "")
     return results
@@ -260,8 +312,8 @@ def _scan_shows(path_list, existing_paths, media_type, on_progress=None):
             on_progress(done - 1, total, show_entry.name)
         if _should_skip(show_entry.name):
             continue
-        if not show_entry.is_dir():
-            if show_entry.is_file() and _is_video(show_entry.name):
+        if not _safe_is_dir(show_entry):
+            if _safe_is_file(show_entry) and _is_video(show_entry.name):
                 fpath = show_entry.path
                 if fpath not in existing_paths:
                     season, episode = _parse_episode(show_entry.name)
@@ -275,28 +327,31 @@ def _scan_shows(path_list, existing_paths, media_type, on_progress=None):
             continue
         show_name = show_entry.name
         # Walk inside show folder looking for video files
-        for root, dirs, files in os.walk(show_entry.path):
-            dirs[:] = [d for d in sorted(dirs) if not _should_skip(d)]
-            rel = os.path.relpath(root, show_entry.path)
-            season_from_dir = _parse_season_dir(rel)
+        try:
+            for root, dirs, files in os.walk(show_entry.path, onerror=lambda _: None):
+                dirs[:] = [d for d in sorted(dirs) if not _should_skip(d)]
+                rel = os.path.relpath(root, show_entry.path)
+                season_from_dir = _parse_season_dir(rel)
 
-            video_files = [f for f in sorted(files) if _is_video(f) and not _should_skip(f)]
-            for idx, fname in enumerate(video_files):
-                fpath = os.path.join(root, fname)
-                if fpath in existing_paths:
-                    continue
-                season, episode = _parse_episode(fname)
-                if season is None or not re.search(r'[Ss]\d{1,2}', fname):
-                    season = season_from_dir if season_from_dir is not None else (season or 1)
-                if episode is None:
-                    episode = idx + 1
-                results.append({
-                    "file_path":   fpath,
-                    "folder_name": show_name,
-                    "season":      season or 1,
-                    "episode":     episode,
-                    "type":        media_type,
-                })
+                video_files = [f for f in sorted(files) if _is_video(f) and not _should_skip(f)]
+                for idx, fname in enumerate(video_files):
+                    fpath = os.path.join(root, fname)
+                    if fpath in existing_paths:
+                        continue
+                    season, episode = _parse_episode(fname)
+                    if season is None or not re.search(r'[Ss]\d{1,2}', fname):
+                        season = season_from_dir if season_from_dir is not None else (season or 1)
+                    if episode is None:
+                        episode = idx + 1
+                    results.append({
+                        "file_path":   fpath,
+                        "folder_name": show_name,
+                        "season":      season or 1,
+                        "episode":     episode,
+                        "type":        media_type,
+                    })
+        except OSError:
+            pass
     if on_progress and total:
         on_progress(total, total, "")
     return results
@@ -340,71 +395,76 @@ def scan_library(callback=None):
             progress=f"Scanning folders: {done}/{total}" + (f" — {label}" if label else ""),
         )
 
-    log("Preparing library...")
-    _fix_existing_seasons()
-
-    cfg = _load_config()
-    media_paths = cfg.get("media_paths", {})
-    _load_skip_patterns(cfg)
-
-    movies_paths = _resolve_paths(media_paths.get("movies", []))
-    series_paths = _resolve_paths(media_paths.get("series", []))
-    anime_paths  = _resolve_paths(media_paths.get("anime",  []))
-
-    # Filter out user-disabled directories
-    disabled = cfg.get("disabled_paths", {})
-    def _filter_disabled(paths, category):
-        off = set(disabled.get(category, []))
-        if not off:
-            return paths
-        kept = [p for p in paths if not any(
-            os.path.normpath(p) == os.path.normpath(d if os.path.isabs(d) else os.path.join(BASE_DIR, d))
-            for d in off
-        )]
-        skipped = len(paths) - len(kept)
-        if skipped:
-            log(f"Skipping {skipped} disabled path(s) in '{category}'")
-        return kept
-
-    movies_paths = _filter_disabled(movies_paths, "movies")
-    series_paths = _filter_disabled(series_paths, "series")
-    anime_paths  = _filter_disabled(anime_paths,  "anime")
-
-    def _has_valid_image(m):
-        p = m.get("poster_path")
-        if not p:
-            return False
-        abs_p = os.path.join(BASE_DIR, "data", "metadata", p)
-        return os.path.isfile(abs_p)
-
-    # Only skip files that have already been matched to TMDb AND have valid images on disk
-    existing = {
-        m["file_path"] for m in get_all_media()
-        if m.get("tmdb_matched") == 1 and _has_valid_image(m)
-    }
-
-    all_new = []
-
-    log("Scanning movie folders...")
-    all_new += _scan_movies(movies_paths, existing, on_progress=scan_progress)
-
-    log("Scanning series folders...")
-    all_new += _scan_shows(series_paths, existing, "series", on_progress=scan_progress)
-
-    log("Scanning anime folders...")
-    all_new += _scan_shows(anime_paths, existing, "anime", on_progress=scan_progress)
-
-    # ─── Matching phase ───
-    _set_status(phase="matching", total=len(all_new), count=0)
-    log(f"Found {len(all_new)} new files. Matching to TMDb...")
-
-    # TMDb cache per show and season to avoid redundant API calls
-    show_meta_cache = {}
-    season_meta_cache = {}
     count = 0
     matched_count = 0
 
     try:
+        log("Preparing library...")
+        _fix_existing_seasons()
+
+        cfg = _load_config()
+        media_paths = cfg.get("media_paths", {}) or {}
+        _load_skip_patterns(cfg)
+
+        movies_paths = _resolve_paths(media_paths.get("movies", []))
+        series_paths = _resolve_paths(media_paths.get("series", []))
+        anime_paths  = _resolve_paths(media_paths.get("anime",  []))
+
+        # Filter out user-disabled directories
+        disabled = cfg.get("disabled_paths", {}) or {}
+        def _filter_disabled(paths, category):
+            off = set(disabled.get(category, []) or [])
+            if not off:
+                return paths
+            kept = [p for p in paths if not any(
+                os.path.normpath(p) == os.path.normpath(d if os.path.isabs(d) else os.path.join(BASE_DIR, d))
+                for d in off
+            )]
+            skipped = len(paths) - len(kept)
+            if skipped:
+                log(f"Skipping {skipped} disabled path(s) in '{category}'")
+            return kept
+
+        movies_paths = _filter_disabled(movies_paths, "movies")
+        series_paths = _filter_disabled(series_paths, "series")
+        anime_paths  = _filter_disabled(anime_paths,  "anime")
+
+        def _has_valid_image(m):
+            p = m.get("poster_path")
+            if not p or not isinstance(p, str):
+                return False
+            clean_p = p.strip().lstrip("/\\")
+            abs_p = os.path.join(BASE_DIR, "data", "metadata", clean_p)
+            try:
+                return os.path.isfile(abs_p)
+            except OSError:
+                return False
+
+        # Only skip files that have already been matched to TMDb AND have valid images on disk
+        existing = {
+            m["file_path"] for m in get_all_media()
+            if m.get("tmdb_matched") == 1 and _has_valid_image(m)
+        }
+
+        all_new = []
+
+        log("Scanning movie folders...")
+        all_new += _scan_movies(movies_paths, existing, on_progress=scan_progress)
+
+        log("Scanning series folders...")
+        all_new += _scan_shows(series_paths, existing, "series", on_progress=scan_progress)
+
+        log("Scanning anime folders...")
+        all_new += _scan_shows(anime_paths, existing, "anime", on_progress=scan_progress)
+
+        # ─── Matching phase ───
+        _set_status(phase="matching", total=len(all_new), count=0)
+        log(f"Found {len(all_new)} new files. Matching to TMDb...")
+
+        # TMDb cache per show and season to avoid redundant API calls
+        show_meta_cache = {}
+        season_meta_cache = {}
+
         for idx, item in enumerate(all_new):
             fpath     = item["file_path"]
             fname     = item["folder_name"]
@@ -510,6 +570,10 @@ def scan_library(callback=None):
                 if len(_scan_status["errors"]) > 50:
                     _scan_status["errors"] = _scan_status["errors"][-50:]
                 print(f"[Scanner] ERROR: {err}")
+    except Exception as e:
+        fatal_err = f"Fatal scanner error: {e}"
+        _scan_status["errors"].append(fatal_err)
+        print(f"[Scanner] FATAL: {fatal_err}")
     finally:
         _set_status(
             running=False,

@@ -189,6 +189,11 @@ def api_system_reset():
     clear_media = data.get("clear_media_files", False)
     from backend.settings import reset_application
     reset_application(clear_media_files=clear_media)
+    try:
+        from backend.scanner import reset_scan_status
+        reset_scan_status()
+    except Exception:
+        pass
     session.clear()
     try:
         from backend.routes.profiles import ACTIVE_PROFILE_SESSIONS, ACTIVE_PROFILE_LOCK
