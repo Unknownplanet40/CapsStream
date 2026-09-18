@@ -31846,3 +31846,45 @@ body:has(.navbar-tv) .hero-backdrop-container::before,
   }
 }
 
+/* ─── Low-Spec Hardware Performance (Lite UI) Mode ────────────── */
+body.perf-lite-mode *,
+body.perf-lite-mode *::before,
+body.perf-lite-mode *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body.perf-lite-mode {
+  --bg-glass: rgba(14, 16, 25, 0.98);
+  --bg-frosted: #0d0f17;
+  --bg-modal: #0d0f18;
+  --bg-card: #12141f;
+  --bg-panel: #0d0f17;
+}
+
+body.perf-lite-mode .modal-card,
+body.perf-lite-mode .custom-player-controls,
+body.perf-lite-mode .keyboard-shortcuts-card,
+body.perf-lite-mode .player-queue-drawer,
+body.perf-lite-mode .player-wt-drawer,
+body.perf-lite-mode .settings-card,
+body.perf-lite-mode .detail-modal-card,
+body.perf-lite-mode .quick-search-modal,
+body.perf-lite-mode .update-banner,
+body.perf-lite-mode .nav-bar,
+body.perf-lite-mode .nav-header,
+body.perf-lite-mode .profile-switcher-dropdown,
+body.perf-lite-mode .settings-floating-bar,
+body.perf-lite-mode .player-skip-btn,
+body.perf-lite-mode .player-dynamic-island,
+body.perf-lite-mode .connection-island {
+  background-color: #0c0e16 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85) !important;
+}
+
+body.perf-lite-mode .media-card:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.8) !important;
+}
+
+

@@ -608,6 +608,55 @@ def api_download_auto_backup():
     return send_file(target, as_attachment=True, download_name=safe_name, mimetype="application/zip")
 
 
+# ─── Host PC Documents User Data Synchronization ──────────────────────────────
+
+@admin_bp.route("/api/system/host-sync/status", methods=["GET"])
+def api_host_sync_status():
+    from backend.host_sync import get_host_sync_status
+    tag = request.args.get("tag")
+    return jsonify(get_host_sync_status(custom_tag=tag))
+
+
+@admin_bp.route("/api/system/host-sync/export", methods=["POST"])
+def api_host_sync_export():
+    require_admin()
+    from backend.host_sync import export_user_data_to_host
+    force = False
+    custom_tag = None
+    if request.is_json and isinstance(request.json, dict):
+        force = bool(request.json.get("force_dev", False))
+        custom_tag = request.json.get("drive_tag")
+    res = export_user_data_to_host(force_dev=force, custom_tag=custom_tag)
+    status_code = 200 if res.get("ok") else (403 if res.get("is_dev") else 500)
+    return jsonify(res), status_code
+
+
+@admin_bp.route("/api/system/host-sync/import", methods=["POST"])
+def api_host_sync_import():
+    require_admin()
+    from backend.host_sync import import_user_data_from_host
+    force = False
+    custom_tag = None
+    if request.is_json and isinstance(request.json, dict):
+        force = bool(request.json.get("force_dev", False))
+        custom_tag = request.json.get("drive_tag")
+    res = import_user_data_from_host(force_dev=force, custom_tag=custom_tag)
+    status_code = 200 if res.get("ok") else (403 if res.get("is_dev") else 500)
+    return jsonify(res), status_code
+
+
+@admin_bp.route("/api/system/host-sync/open-folder", methods=["POST"])
+def api_host_sync_open_folder():
+    require_admin()
+    from backend.host_sync import open_host_sync_folder
+    custom_tag = None
+    if request.is_json and isinstance(request.json, dict):
+        custom_tag = request.json.get("drive_tag")
+    res = open_host_sync_folder(custom_tag=custom_tag)
+    status_code = 200 if res.get("ok") else 500
+    return jsonify(res), status_code
+
+
 # ─── System Info ──────────────────────────────────────────────────────────────
 
 @admin_bp.route("/api/system/info", methods=["GET"])

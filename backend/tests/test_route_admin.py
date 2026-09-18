@@ -128,6 +128,15 @@ class TestRouteAdmin(unittest.TestCase):
         self.assertIn("count", data)
         self.assertIn("backups", data)
 
+    def test_host_sync_endpoints(self):
+        """Verify host-sync status and export routes respond appropriately."""
+        res = self.client.get("/api/system/host-sync/status")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn("has_host_data", data)
+        self.assertIn("sync_dir", data)
+        self.assertIn("is_dev", data)
+
     @patch("backend.utils.network.get_device_ip", return_value="192.168.1.55")
     @patch("backend.utils.network.get_all_device_ips", return_value=["192.168.1.55"])
     def test_system_info_device_ip(self, mock_all_ips, mock_ip):

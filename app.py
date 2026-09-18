@@ -701,6 +701,23 @@ if __name__ == "__main__":
     _prune_old_logs()
     threading.Thread(target=_db_maintenance_daemon, daemon=True, name="db-maintenance").start()
 
+    # Host PC Documents Auto-Sync (Production only: auto-merges on boot, auto-exports on exit)
+    if not is_dev_mode():
+        try:
+            from backend.host_sync import is_host_sync_allowed, import_user_data_from_host, export_user_data_to_host
+            if is_host_sync_allowed():
+                import atexit
+                atexit.register(export_user_data_to_host)
+
+                def _startup_host_sync():
+                    time.sleep(1.5)
+                    res = import_user_data_from_host()
+                    if res.get("ok") and (res.get("restored_profiles") or res.get("relinked_progress")):
+                        print(f"  [HostSync] Restored user watch data from Documents: {res.get('restored_profiles', 0)} profiles, {res.get('relinked_progress', 0)} resume points.")
+                threading.Thread(target=_startup_host_sync, daemon=True, name="host-sync-startup").start()
+        except Exception as _hs_err:
+            print(f"  [!] HostSync startup notice: {_hs_err}")
+
     apply_system_file_hiding()
     try:
         with open(os.path.join(BASE_DIR, "data", "server.pid"), "w", encoding="utf-8") as f:

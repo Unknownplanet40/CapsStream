@@ -1719,7 +1719,7 @@ const PlayerPage = {
     const autoSwitched4K = ref(null);  // { label, original4kOption }
     const stutter4KBanner = ref(false);
     const lowMemoryBanner = ref(null);
-    const isLightMode = ref(false);
+    const isLightMode = ref(!!(window.store?.perfLiteMode || (typeof localStorage !== "undefined" && localStorage.getItem("cs_perf_mode") === "true")));
     const recoveringMemory = ref(false);
 
     const playbackRate = ref(Number(store.profile?.default_speed) || 1);
@@ -2740,6 +2740,16 @@ const PlayerPage = {
       return `/api/stream/${id}?audio_only=1&audio_track=${trackIndex}&at=${Math.max(0, atTime).toFixed(2)}`;
     }
 
+    function handleRemoteAudioError() {
+      if (isRemoteAudioActive() && remoteAudioEl) {
+        setTimeout(() => {
+          if (isRemoteAudioActive() && streamState.audioTrack !== null) {
+            attachRemoteAudio(streamState.audioTrack);
+          }
+        }, 300);
+      }
+    }
+
     function attachRemoteAudio(trackIndex) {
       const v = videoRef.value;
       if (!v || trackIndex === null || trackIndex === undefined) return;
@@ -2750,12 +2760,7 @@ const PlayerPage = {
       if (!remoteAudioEl) {
         remoteAudioEl = new Audio();
         remoteAudioEl.preload = "auto";
-        // If the element hits a fatal decode/network error, rebuild once.
-        remoteAudioEl.addEventListener("error", () => {
-          if (isRemoteAudioActive() && remoteAudioEl === this) {
-            setTimeout(() => attachRemoteAudio(streamState.audioTrack), 300);
-          }
-        });
+        remoteAudioEl.addEventListener("error", handleRemoteAudioError);
       }
       remoteAudioEl.volume = Math.min(1, Math.max(0, volume.value));
       remoteAudioEl.muted = false;
@@ -2795,10 +2800,12 @@ const PlayerPage = {
       remoteAudioBase = 0;
       if (remoteAudioEl) {
         try {
+          remoteAudioEl.removeEventListener("error", handleRemoteAudioError);
           remoteAudioEl.pause();
           remoteAudioEl.removeAttribute("src");
           remoteAudioEl.load();
         } catch (e) {}
+        remoteAudioEl = null;
       }
       const v = videoRef.value;
       if (v) {
@@ -4756,19 +4763,26 @@ const PlayerPage = {
       }
     }
 
+    function handleEnterPip() {
+      isPipActive.value = true;
+      syncTextTracks();
+      addToast("Entered Picture-in-Picture", "info");
+      unlockAchievementSilently("pip_master");
+    }
+
+    function handleLeavePip() {
+      isPipActive.value = false;
+      syncTextTracks();
+      addToast("Exited Picture-in-Picture", "info");
+    }
+
     function bindPipListeners() {
-      if (!videoRef.value) return;
-      videoRef.value.addEventListener("enterpictureinpicture", () => {
-        isPipActive.value = true;
-        syncTextTracks();
-        addToast("Entered Picture-in-Picture", "info");
-        unlockAchievementSilently("pip_master");
-      });
-      videoRef.value.addEventListener("leavepictureinpicture", () => {
-        isPipActive.value = false;
-        syncTextTracks();
-        addToast("Exited Picture-in-Picture", "info");
-      });
+      const v = videoRef.value;
+      if (!v) return;
+      v.removeEventListener("enterpictureinpicture", handleEnterPip);
+      v.removeEventListener("leavepictureinpicture", handleLeavePip);
+      v.addEventListener("enterpictureinpicture", handleEnterPip);
+      v.addEventListener("leavepictureinpicture", handleLeavePip);
     }
 
     const showResumeModal = ref(false);
@@ -6744,6 +6758,21 @@ const PlayerPage = {
         } catch (e) {}
       }
 
+      // Proactively release heavy thumbnail sprite sheet and retry timers
+      thumbSheet.value = null;
+      if (thumbRetryTimer) {
+        clearTimeout(thumbRetryTimer);
+        thumbRetryTimer = null;
+      }
+
+      // Revoke and clear any custom uploaded subtitle blob URLs
+      if (Array.isArray(customBlobUrls) && customBlobUrls.length > 0) {
+        for (const u of customBlobUrls) {
+          try { URL.revokeObjectURL(u); } catch (e) {}
+        }
+        customBlobUrls.length = 0;
+      }
+
       stopActiveConversion(prevMediaId);
 
       streamState.transcode = false;
@@ -6808,19 +6837,24 @@ const PlayerPage = {
       }
     }
 
+    function handleWebkitBeginFullscreen() {
+      isFullscreen.value = true;
+    }
+    function handleWebkitEndFullscreen() {
+      isFullscreen.value = false;
+      unlockOrientation();
+    }
+
     onMounted(() => {
       initPlayer();
       window.addEventListener("beforeunload", cleanupPlayback);
       document.addEventListener("fullscreenchange", handleFullscreenChange);
       document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
       if (videoRef.value) {
-        videoRef.value.addEventListener("webkitbeginfullscreen", () => {
-          isFullscreen.value = true;
-        });
-        videoRef.value.addEventListener("webkitendfullscreen", () => {
-          isFullscreen.value = false;
-          unlockOrientation();
-        });
+        videoRef.value.removeEventListener("webkitbeginfullscreen", handleWebkitBeginFullscreen);
+        videoRef.value.removeEventListener("webkitendfullscreen", handleWebkitEndFullscreen);
+        videoRef.value.addEventListener("webkitbeginfullscreen", handleWebkitBeginFullscreen);
+        videoRef.value.addEventListener("webkitendfullscreen", handleWebkitEndFullscreen);
       }
       // Watch Together auto-start or auto-join via route query
       if (route.query.wt_host === "true") {
@@ -6850,8 +6884,24 @@ const PlayerPage = {
       // Watch Together cleanup
       _stopLeaderHeartbeat();
       _stopDriftCheck();
-      if (_wtSocket && wtRoom.code) { _wtSocket.emit("leave_room"); }
-      if (_wtSocket) { _wtSocket.disconnect(); _wtSocket = null; }
+      if (_wtSocket) {
+        if (wtRoom.code) {
+          try { _wtSocket.emit("leave_room"); } catch (e) {}
+        }
+        try {
+          if (typeof _wtSocket.removeAllListeners === "function") {
+            _wtSocket.removeAllListeners();
+          }
+        } catch (e) {}
+        try { _wtSocket.disconnect(); } catch (e) {}
+        _wtSocket = null;
+      }
+      if (videoRef.value) {
+        videoRef.value.removeEventListener("webkitbeginfullscreen", handleWebkitBeginFullscreen);
+        videoRef.value.removeEventListener("webkitendfullscreen", handleWebkitEndFullscreen);
+        videoRef.value.removeEventListener("enterpictureinpicture", handleEnterPip);
+        videoRef.value.removeEventListener("leavepictureinpicture", handleLeavePip);
+      }
       if (rvfcHandle && videoRef.value && "cancelVideoFrameCallback" in videoRef.value) {
         try { videoRef.value.cancelVideoFrameCallback(rvfcHandle); } catch (e) {}
       }

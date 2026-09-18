@@ -240,7 +240,7 @@ _HW_CANDIDATES = [
     ("h264_qsv",   ["-preset", "veryfast", "-global_quality", "23"], True),
     ("h264_nvenc", ["-preset", "p4", "-rc", "vbr", "-cq", "24", "-b:v", "0"], True),
     ("h264_mf",    [], True),
-    ("libx264",    ["-preset", "veryfast", "-crf", "23"], False),
+    ("libx264",    ["-preset", "ultrafast", "-crf", "23"], False),
 ]
 
 
@@ -355,9 +355,14 @@ def _build_convert_cmd(file_path, audio_track_index, effective_start, max_height
         vf_filters.append(f"format={pix_fmt}")
         cmd.extend(["-vf", ",".join(vf_filters)])
 
-        extra = next((o for n, o, _ in _HW_CANDIDATES if n == encoder_name), ["-preset", "veryfast", "-crf", "23"])
+        extra = next((o for n, o, _ in _HW_CANDIDATES if n == encoder_name), ["-preset", "ultrafast", "-crf", "23"])
         cmd.extend(["-c:v", encoder_name, *extra])
         cmd.extend(["-pix_fmt", pix_fmt])
+        if encoder_name == "libx264":
+            cpu_cores = os.cpu_count() or 2
+            # Clamp threads so at least 1 core remains unthrottled for OS and browser playback clock
+            transcode_threads = max(1, min(2, cpu_cores - 1)) if cpu_cores <= 4 else min(4, cpu_cores - 1)
+            cmd.extend(["-threads", str(transcode_threads)])
 
     if has_audio:
         # High-compatibility stereo AAC audio stream with precise timestamp resampling

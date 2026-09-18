@@ -727,3 +727,28 @@ def api_system_validate_paths():
 def api_system_drives_status():
     from backend.routes.admin import api_system_drives_status as _impl
     return _impl()
+
+
+@admin_bp.route("/api/system/host-sync/status", methods=["GET"])
+def api_host_sync_status():
+    from backend.routes.admin import api_host_sync_status as _impl
+    return _impl()
+
+
+@admin_bp.route("/api/system/host-sync/export", methods=["POST"])
+def api_host_sync_export():
+    from backend.routes.admin import api_host_sync_export as _impl
+    return _impl()
+
+
+@admin_bp.route("/api/system/host-sync/import", methods=["POST"])
+def api_host_sync_import():
+    from backend.routes.admin import api_host_sync_import as _impl
+    return _impl()
+
+
+@admin_bp.route("/api/system/host-sync/open-folder", methods=["POST"])
+def api_host_sync_open_folder():
+    from backend.routes.admin import api_host_sync_open_folder as _impl
+    return _impl()
+

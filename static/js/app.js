@@ -170,6 +170,26 @@ const store = reactive({
   whatsNewLoading: false,   // Loading state for changelog fetch
   updateState: { status: "idle", current: "", latest: "", changelog: "", last_checked: "", message: "" }, // persisted across nav
   layoutMode: localStorage.getItem("capsstream_layout_mode") || "standard",
+  perfLiteMode: (() => {
+    const saved = typeof localStorage !== "undefined" ? localStorage.getItem("cs_perf_mode") : null;
+    if (saved !== null) return saved === "true";
+    // 4GB RAM and Dual-Core (Intel Celeron) is the official baseline for Standard Mode.
+    // Auto-enable Lite Mode only if strictly below this baseline (< 4GB RAM or < 2 cores).
+    if (typeof navigator !== "undefined") {
+      const mem = navigator.deviceMemory;
+      const cores = navigator.hardwareConcurrency;
+      if ((mem && mem < 4) || (cores && cores < 2)) return true;
+    }
+    return false;
+  })(),
+  isLowSpecDetected: (() => {
+    if (typeof navigator !== "undefined") {
+      const mem = navigator.deviceMemory;
+      const cores = navigator.hardwareConcurrency;
+      return !!((mem && mem < 4) || (cores && cores < 2));
+    }
+    return false;
+  })(),
   isMobileScreen: typeof window !== "undefined" ? window.innerWidth < 768 : false,
   tvFocus: { rowIndex: 0, cardIndex: 0 },
   playback: {
@@ -197,6 +217,9 @@ if (typeof window !== "undefined") {
   });
   if (store.layoutMode === "tv" && !store.isMobileScreen) {
     document.body.classList.add("layout-tv-mode");
+  }
+  if (store.perfLiteMode) {
+    document.body.classList.add("perf-lite-mode");
   }
 }
 
@@ -6087,6 +6110,87 @@ const SettingsPage = {
                 </div>
               </div>
             </div>
+
+            <!-- Performance Mode (Lite UI) Row -->
+            <div class="settings-divider" style="margin: 24px 0 16px; border-top: 1px solid rgba(255,255,255,0.08)"></div>
+
+            <div class="settings-row" style="align-items: center; padding: 14px 18px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-inner, 10px); gap: 20px;">
+              <div class="settings-label-container" style="flex: 1; min-width: 0;">
+                <div class="settings-label" style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.95rem;">
+                  <i class="ph-fill ph-lightning" style="color: #f59e0b; font-size: 1.15rem;"></i>
+                  <span>Performance Mode (Lite UI)</span>
+                  <span v-if="isLowSpecAutoDetected" class="about-dev-badge" style="font-size: 0.68rem; padding: 2px 8px; border-radius: 6px; background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); font-weight: 700;">AUTO-DETECTED</span>
+                </div>
+                <div class="settings-desc" style="margin-top: 4px; color: var(--text-muted); font-size: 0.82rem; line-height: 1.4;">
+                  Disables GPU backdrop blurs and complex translucent frosted-glass composition for resource-constrained systems (Intel Celeron, &le; 4GB RAM, or integrated graphics).
+                </div>
+              </div>
+              <label class="toggle-switch" style="flex-shrink: 0;">
+                <input type="checkbox" :checked="perfLiteMode" @change="setPerfLiteMode($event.target.checked)" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <!-- Current Device Hardware Specifications Card -->
+            <div class="client-specs-card" style="margin-top: 14px; padding: 16px 18px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-inner, 10px);">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 700; color: var(--text-secondary, #a1a1aa); text-transform: uppercase; letter-spacing: 0.5px;">
+                  <i class="ph-bold ph-cpu" style="color: var(--accent); font-size: 1rem;"></i>
+                  <span>Current Device Specifications</span>
+                </div>
+                <span class="device-spec-tier-badge" :style="{
+                  background: clientDeviceSpecs.isOptimal ? 'rgba(56, 189, 248, 0.15)' : (clientDeviceSpecs.meetsStandard ? 'rgba(34, 197, 94, 0.15)' : 'rgba(245, 158, 11, 0.15)'),
+                  color: clientDeviceSpecs.isOptimal ? '#38bdf8' : (clientDeviceSpecs.meetsStandard ? '#4ade80' : '#fbbf24'),
+                  border: '1px solid ' + (clientDeviceSpecs.isOptimal ? 'rgba(56, 189, 248, 0.3)' : (clientDeviceSpecs.meetsStandard ? 'rgba(34, 197, 94, 0.3)' : 'rgba(245, 158, 11, 0.3)'))
+                }" style="font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px;">
+                  <i :class="clientDeviceSpecs.meetsStandard ? 'ph-bold ph-check-circle' : 'ph-bold ph-warning-circle'"></i>
+                  <span>{{ clientDeviceSpecs.tierBadge }}</span>
+                </span>
+              </div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
+                {{ clientDeviceSpecs.tierNote }}
+              </div>
+              <div class="client-specs-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px;">
+                <div class="client-spec-pill" style="display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px;" :title="clientDeviceSpecs.cores">
+                  <i class="ph ph-cpu" style="color: #60a5fa; font-size: 1.1rem; flex-shrink: 0;"></i>
+                  <div style="min-width: 0;">
+                    <div style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Processor</div>
+                    <div style="font-size: 0.82rem; font-weight: 600; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ clientDeviceSpecs.cores }}</div>
+                  </div>
+                </div>
+                <div class="client-spec-pill" style="display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px;" :title="clientDeviceSpecs.ram">
+                  <i class="ph ph-memory" style="color: #34d399; font-size: 1.1rem; flex-shrink: 0;"></i>
+                  <div style="min-width: 0;">
+                    <div style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Memory (RAM)</div>
+                    <div style="font-size: 0.82rem; font-weight: 600; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ clientDeviceSpecs.ram }}</div>
+                  </div>
+                </div>
+                <div class="client-spec-pill" style="display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px;" :title="clientDeviceSpecs.gpu">
+                  <i class="ph ph-graphics-card" style="color: #f472b6; font-size: 1.1rem; flex-shrink: 0;"></i>
+                  <div style="min-width: 0;">
+                    <div style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Graphics (GPU)</div>
+                    <div style="font-size: 0.82rem; font-weight: 600; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ clientDeviceSpecs.gpu }}</div>
+                  </div>
+                </div>
+                <div class="client-spec-pill" style="display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px;" :title="clientDeviceSpecs.os">
+                  <i class="ph ph-windows-logo" style="color: #38bdf8; font-size: 1.1rem; flex-shrink: 0;"></i>
+                  <div style="min-width: 0;">
+                    <div style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Platform / OS</div>
+                    <div style="font-size: 0.82rem; font-weight: 600; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ clientDeviceSpecs.os }}</div>
+                  </div>
+                </div>
+                <div class="client-spec-pill" style="display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px;" :title="clientDeviceSpecs.display">
+                  <i class="ph ph-monitor" style="color: #fbbf24; font-size: 1.1rem; flex-shrink: 0;"></i>
+                  <div style="min-width: 0; flex: 1;">
+                    <div style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Display & Scaling</div>
+                    <div style="font-size: 0.82rem; font-weight: 600; color: #ffffff; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                      <span>{{ clientDeviceSpecs.displayRes }}</span>
+                      <span v-if="clientDeviceSpecs.displayScale" style="font-size: 0.68rem; padding: 1px 6px; background: rgba(251, 191, 36, 0.15); color: #fbbf24; border-radius: 4px; font-weight: 600;">{{ clientDeviceSpecs.displayScale }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -7506,6 +7610,98 @@ const SettingsPage = {
                 </a>
               </div>
             </div>
+
+            <!-- ══════ Host PC Documents User Data Sync ══════ -->
+            <div class="settings-row" style="border-top:1px solid rgba(255,255,255,0.08);margin-top:8px;padding-top:14px;display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;flex-wrap:wrap;gap:10px">
+                <div class="settings-label-container" style="max-width:640px">
+                  <div class="settings-label" style="display:flex;align-items:center;gap:8px">
+                    <i class="ph-bold ph-laptop" style="color:#38bdf8"></i>
+                    <span>Host PC Documents User Data Sync</span>
+                    <span v-if="sysInfo?.is_dev" class="about-dev-badge" style="font-size:0.7rem;padding:2px 8px;border-radius:6px;background:rgba(56,189,248,0.15);color:#38bdf8;border:1px solid rgba(56,189,248,0.3);font-weight:700">DEV TESTING (Dev_Test Folder)</span>
+                    <span v-else-if="hostSyncStatus?.has_host_data" class="server-status-pill online" style="font-size:0.7rem;padding:2px 8px">
+                      <span class="status-dot"></span> Synced with Host PC
+                    </span>
+                    <span v-else class="server-status-pill" style="font-size:0.7rem;padding:2px 8px;background:rgba(255,255,255,0.08);color:var(--text-muted)">
+                      Ready to Sync
+                    </span>
+                  </div>
+                  <div class="settings-desc">
+                    Automatically backs up your profiles, watch history, progress, playlists, and achievements to your PC's <code>Documents/CapsStream/</code> folder. When swapping to a newly updated USB drive, your personal data seamlessly restores without overwriting new movies.
+                  </div>
+                  <div v-if="sysInfo?.is_dev" style="margin-top:6px;font-size:0.76rem;color:#38bdf8;background:rgba(56,189,248,0.08);padding:6px 10px;border-radius:6px;border:1px solid rgba(56,189,248,0.2)">
+                    <i class="ph-bold ph-flask" style="margin-right:4px"></i>
+                    <strong>Safe Dev Isolation:</strong> Actions target <code>Documents/CapsStream/Dev_Test/</code> so you can test syncing right now without touching your production server (D:\) or external drives (T:\). Automatic background sync on boot/exit remains disabled while in dev mode.
+                  </div>
+                  <div v-else-if="hostSyncStatus?.last_sync_formatted" style="font-size:0.78rem;color:var(--text-muted);margin-top:6px">
+                    Last Synced: <strong style="color:var(--text-primary)">{{ hostSyncStatus.last_sync_formatted }}</strong> ({{ hostSyncStatus.profile_count }} profiles, {{ hostSyncStatus.history_count }} watch records)
+                  </div>
+                </div>
+
+                <!-- Auto-Sync Toggle -->
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span style="font-size:0.8rem;color:var(--text-muted)">Auto-Sync:</span>
+                  <label class="toggle-switch" :style="sysInfo?.is_dev ? 'cursor:not-allowed;' : ''">
+                    <input type="checkbox" v-model="form.host_sync.enabled" :disabled="sysInfo?.is_dev" />
+                    <span class="toggle-slider" :style="sysInfo?.is_dev ? 'opacity:0.5;cursor:not-allowed;' : ''"></span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Drive Tag and Target Path Configuration Row -->
+              <div style="display:flex;flex-direction:column;gap:6px;background:rgba(0,0,0,0.2);padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);margin-top:4px">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+                  <div>
+                    <div style="font-size:0.82rem;font-weight:600;color:var(--text-primary)">Drive / Library Sync Tag</div>
+                    <div style="font-size:0.72rem;color:var(--text-muted)">Custom tag or drive partition label. Replacement drives configured with the same tag will share the same host PC sync folder.</div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <input
+                      type="text"
+                      v-model="form.host_sync.drive_tag"
+                      class="form-input"
+                      style="width:160px;font-size:0.8rem;padding:4px 8px;height:32px"
+                      placeholder="e.g. Province_Drive"
+                      :disabled="sysInfo?.is_dev"
+                    />
+                  </div>
+                </div>
+                <div style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span>Target Folder:</span>
+                  <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;color:var(--accent);font-size:0.75rem;word-break:break-all">{{ hostSyncStatus?.sync_dir || 'Loading...' }}</code>
+                  <span v-if="hostSyncStatus?.drive_tag" style="font-size:0.7rem;color:#38bdf8">({{ hostSyncStatus.drive_tag }})</span>
+                </div>
+              </div>
+
+              <!-- Action buttons -->
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
+                <button
+                  class="btn btn-secondary btn-sm"
+                  @click="handleHostSyncExport"
+                  :disabled="hostSyncing"
+                  title="Export profiles and watch data to Documents"
+                >
+                  <i :class="hostSyncing ? 'ph-bold ph-spinner ph-spin' : 'ph ph-export'" style="margin-right:6px"></i>
+                  {{ hostSyncing ? 'Exporting...' : 'Sync to PC Now' }}
+                </button>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  @click="handleHostSyncImport"
+                  :disabled="hostRestoring || !hostSyncStatus?.has_host_data"
+                  title="Merge watch data from Documents folder into this drive"
+                >
+                  <i :class="hostRestoring ? 'ph-bold ph-spinner ph-spin' : 'ph ph-arrow-counter-clockwise'" style="margin-right:6px"></i>
+                  {{ hostRestoring ? 'Restoring...' : 'Restore from PC Now' }}
+                </button>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  @click="handleHostSyncOpenFolder"
+                  title="Open the Documents/CapsStream folder in Windows Explorer"
+                >
+                  <i class="ph ph-folder-open" style="margin-right:6px"></i> Open Documents Folder
+                </button>
+              </div>
+            </div>
           </div>
         </div>
                 <!-- ══════ System Maintenance & Server Control ══════ -->
@@ -7768,6 +7964,66 @@ const SettingsPage = {
         </div>
       </div>
 
+      <!-- Host PC User Data Restore Confirmation Modal -->
+      <div v-if="showHostRestoreModal" class="modal-backdrop" style="z-index:100050;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showHostRestoreModal = false">
+        <div class="shortcuts-modal-card" style="max-width:540px;border:1px solid rgba(56,189,248,0.3);box-shadow:0 24px 64px rgba(0,0,0,0.6);" @click.stop>
+          <div class="shortcuts-modal-inner" style="text-align:left">
+            <div class="shortcuts-modal-header" style="margin-bottom:1rem;border-bottom-color:rgba(56,189,248,0.25)">
+              <div class="shortcuts-header-title" style="color:#38bdf8;display:flex;align-items:center;gap:10px">
+                <i class="ph-bold ph-arrow-counter-clockwise" style="font-size:1.6rem"></i>
+                <span>Restore User Data from Host PC</span>
+              </div>
+              <button class="shortcuts-close-btn" @click="showHostRestoreModal = false" :disabled="hostRestoring">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+
+            <div style="font-size:0.9rem;color:var(--text-secondary);line-height:1.5;margin-bottom:1rem">
+              Merge personal watch history, profiles, playlists, and achievements from your host PC's Documents folder into this CapsStream library.
+            </div>
+
+            <div class="settings-group" style="background:rgba(0,0,0,0.3);padding:1rem;border-radius:8px;border:1px solid rgba(255,255,255,0.06);margin-bottom:1.25rem;display:flex;flex-direction:column;gap:10px">
+              <div style="font-size:0.85rem;color:var(--text-primary);font-weight:700;display:flex;align-items:center;gap:6px">
+                <i class="ph-bold ph-folder" style="color:#38bdf8"></i>
+                <span>Source Backup Location:</span>
+              </div>
+              <code style="background:rgba(255,255,255,0.06);padding:6px 10px;border-radius:6px;color:var(--accent);font-size:0.78rem;word-break:break-all">
+                {{ hostSyncStatus?.sync_dir || 'Documents/CapsStream' }}
+              </code>
+
+              <div v-if="hostSyncStatus?.last_sync_formatted" style="font-size:0.8rem;color:var(--text-muted);display:flex;gap:16px;flex-wrap:wrap;padding-top:4px">
+                <span><strong style="color:var(--text-primary)">Profiles:</strong> {{ hostSyncStatus.profile_count }}</span>
+                <span><strong style="color:var(--text-primary)">Watch Records:</strong> {{ hostSyncStatus.history_count }}</span>
+                <span><strong style="color:var(--text-primary)">Last Synced:</strong> {{ hostSyncStatus.last_sync_formatted }}</span>
+              </div>
+
+              <div style="margin-top:6px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.08)">
+                <div style="font-size:0.82rem;color:#10b981;display:flex;align-items:flex-start;gap:8px">
+                  <i class="ph-bold ph-check-circle" style="font-size:1.15rem;flex-shrink:0;margin-top:1px"></i>
+                  <span><strong>Safe Merge:</strong> All newly indexed movies and series on this drive will be preserved. Personal watch progress for matching titles will be automatically re-linked.</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:0.75rem;justify-content:flex-end;align-items:center">
+              <button class="btn btn-ghost" @click="showHostRestoreModal = false" :disabled="hostRestoring">
+                Cancel
+              </button>
+              <button
+                class="btn btn-primary"
+                @click="executeHostSyncImport"
+                :disabled="hostRestoring"
+                id="btn-confirm-host-restore"
+                style="background:linear-gradient(135deg, #0284c7, #0369a1);border-color:#38bdf8"
+              >
+                <i :class="hostRestoring ? 'ph-bold ph-spinner ph-spin' : 'ph-bold ph-arrow-counter-clockwise'" style="margin-right:6px"></i>
+                {{ hostRestoring ? 'Restoring Data...' : 'Confirm & Restore Now' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Floating Bottom-Right Save Action Bar (only when changes are pending) -->
       <transition name="fade">
         <div class="settings-floating-bar" id="settings-floating-bar" v-if="isDirty || saving">
@@ -7903,6 +8159,10 @@ const SettingsPage = {
         start_muted: false,
         enable_trailers: true,
       },
+      host_sync: {
+        enabled: false,
+        drive_tag: "",
+      },
     });
 
     // Built-in default media folders were removed — all paths are user-provided.
@@ -7979,6 +8239,7 @@ const SettingsPage = {
               appearance: { ...form.value.subtitles.appearance, ...(data.subtitles?.appearance || {}) },
             },
             playback: { ...form.value.playback, ...(data.playback || {}) },
+            host_sync: { ...form.value.host_sync, ...(data.host_sync || {}) },
           };
           if (data.hide_unmounted_items !== undefined) {
             store.hideOfflineMedia = !!data.hide_unmounted_items;
@@ -8347,6 +8608,7 @@ const SettingsPage = {
       loadNeedsRecache();
       loadNetworkRequests();
       loadAutoBackupStatus();
+      loadHostSyncStatus();
       if (!store.profile?.is_kids) loadKidsOverrides();
       startDiagPolling();
       window.addEventListener("beforeunload", handleBeforeUnload);
@@ -8615,6 +8877,84 @@ const SettingsPage = {
         addToast("Failed to clear probe cache", "error");
       } finally {
         clearingProbeCache.value = false;
+      }
+    }
+
+    const hostSyncStatus = ref(null);
+    const hostSyncing = ref(false);
+    const hostRestoring = ref(false);
+    const showHostRestoreModal = ref(false);
+
+    async function loadHostSyncStatus() {
+      try {
+        const tag = form.value?.host_sync?.drive_tag ? `?tag=${encodeURIComponent(form.value.host_sync.drive_tag)}` : "";
+        const res = await API.get(`/api/system/host-sync/status${tag}`);
+        if (res) hostSyncStatus.value = res;
+      } catch (e) {}
+    }
+
+    async function handleHostSyncExport() {
+      if (hostSyncing.value) return;
+      hostSyncing.value = true;
+      try {
+        const payload = {
+          force_dev: true,
+          drive_tag: form.value?.host_sync?.drive_tag || undefined
+        };
+        const res = await API.post("/api/system/host-sync/export", payload);
+        if (res.ok) {
+          addToast(res.message || "User data backed up to Documents!", "success");
+          await loadHostSyncStatus();
+        } else {
+          addToast(res.error || "Export failed", "error");
+        }
+      } catch (e) {
+        addToast(e.message || "Failed to export user data", "error");
+      } finally {
+        hostSyncing.value = false;
+      }
+    }
+
+    function handleHostSyncImport() {
+      if (hostRestoring.value) return;
+      showHostRestoreModal.value = true;
+    }
+
+    async function executeHostSyncImport() {
+      if (hostRestoring.value) return;
+      hostRestoring.value = true;
+      try {
+        const payload = {
+          force_dev: true,
+          drive_tag: form.value?.host_sync?.drive_tag || undefined
+        };
+        const res = await API.post("/api/system/host-sync/import", payload);
+        if (res.ok) {
+          addToast(res.message || "User data successfully merged!", "success");
+          await loadHostSyncStatus();
+          if (typeof loadAllProfiles === "function") await loadAllProfiles();
+          showHostRestoreModal.value = false;
+        } else {
+          addToast(res.error || "Restore failed", "error");
+        }
+      } catch (e) {
+        addToast(e.message || "Failed to restore user data", "error");
+      } finally {
+        hostRestoring.value = false;
+      }
+    }
+
+    async function handleHostSyncOpenFolder() {
+      try {
+        const payload = {
+          drive_tag: form.value?.host_sync?.drive_tag || undefined
+        };
+        const res = await API.post("/api/system/host-sync/open-folder", payload);
+        if (!res.ok) {
+          addToast(res.error || "Could not open folder", "error");
+        }
+      } catch (e) {
+        addToast("Failed to open Documents folder", "error");
       }
     }
 
@@ -8943,6 +9283,87 @@ const SettingsPage = {
       }
     }
 
+    const perfLiteMode = computed(() => store.perfLiteMode);
+    const isLowSpecAutoDetected = computed(() => store.isLowSpecDetected);
+
+    function setPerfLiteMode(active) {
+      store.perfLiteMode = !!active;
+      localStorage.setItem("cs_perf_mode", store.perfLiteMode ? "true" : "false");
+      if (typeof document !== "undefined" && document.body) {
+        if (store.perfLiteMode) {
+          document.body.classList.add("perf-lite-mode");
+          addToast("Performance Mode (Lite UI) enabled — GPU blurs disabled.", "info");
+        } else {
+          document.body.classList.remove("perf-lite-mode");
+          addToast("Performance Mode disabled — standard visual effects restored.", "info");
+        }
+      }
+    }
+
+    function detectClientSpecs() {
+      const cores = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 4;
+      const mem = (typeof navigator !== "undefined" && navigator.deviceMemory) || 4;
+
+      // 4GB RAM & Dual-Core (Intel Celeron) is the official baseline minimum for Standard Mode
+      const meetsStandard = (mem >= 4) && (cores >= 2);
+      const isOptimal = (mem >= 8) && (cores >= 6);
+      const isBelowMinimum = !meetsStandard;
+
+      const specs = {
+        cores: `${cores} Logical Cores`,
+        ram: mem >= 8 ? "≥ 8 GB RAM" : `${mem} GB RAM`,
+        gpu: "Integrated Graphics",
+        displayRes: (typeof window !== "undefined" && window.screen) ? `${window.screen.width} × ${window.screen.height}` : "1920 × 1080",
+        displayScale: (typeof window !== "undefined" && window.devicePixelRatio) ? `${Math.round(window.devicePixelRatio * 100)}%` : "100%",
+        display: (typeof window !== "undefined" && window.screen) ? `${window.screen.width} × ${window.screen.height} (${Math.round((window.devicePixelRatio || 1) * 100)}% scaling)` : "1920 × 1080",
+        os: "Windows",
+        meetsStandard: meetsStandard,
+        isOptimal: isOptimal,
+        isBelowMinimum: isBelowMinimum,
+        tierBadge: isOptimal
+          ? "Optimal Performance Tier"
+          : meetsStandard
+            ? "Meets Minimum Requirements (Standard Baseline: 4GB RAM / Dual-Core)"
+            : "Below Minimum Requirements (Lite Mode Recommended)",
+        tierNote: isOptimal
+          ? "Your device exceeds the recommended requirements for all interface animations and high-bitrate streaming."
+          : meetsStandard
+            ? "Your device meets the official baseline requirements for CapsStream Standard Mode (Intel Celeron / 4GB RAM baseline)."
+            : "Detected system resources are below 4GB RAM or 2 cores. Performance Mode (Lite UI) is recommended to prevent memory paging.",
+      };
+
+      if (typeof navigator !== "undefined") {
+        const ua = navigator.userAgent || "";
+        if (/Windows NT 10.0/i.test(ua)) specs.os = "Windows 10 / 11";
+        else if (/Windows NT 6.3/i.test(ua)) specs.os = "Windows 8.1";
+        else if (/Windows NT 6.1/i.test(ua)) specs.os = "Windows 7";
+        else if (/Mac OS X/i.test(ua)) specs.os = "macOS";
+        else if (/Android/i.test(ua)) specs.os = "Android";
+        else if (/Linux/i.test(ua)) specs.os = "Linux";
+        else if (/iPhone|iPad|iPod/i.test(ua)) specs.os = "iOS";
+      }
+
+      try {
+        if (typeof document !== "undefined") {
+          const canvas = document.createElement("canvas");
+          const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+          if (gl) {
+            const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+            if (debugInfo) {
+              let renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || "";
+              renderer = renderer.replace(/^ANGLE\s*\(([^,]+),\s*/i, "").replace(/\s*Direct3D.*$/i, "").replace(/\s*vs_\d+.*$/i, "").trim();
+              if (renderer.endsWith(")")) renderer = renderer.slice(0, -1).trim();
+              if (renderer) specs.gpu = renderer;
+            }
+          }
+        }
+      } catch (e) {}
+
+      return specs;
+    }
+
+    const clientDeviceSpecs = ref(detectClientSpecs());
+
     function replayTour() {
       router.push("/");
       setTimeout(() => {
@@ -9197,6 +9618,10 @@ const SettingsPage = {
       selectTheme,
       isMobileScreen,
       setLayoutMode,
+      perfLiteMode,
+      isLowSpecAutoDetected,
+      setPerfLiteMode,
+      clientDeviceSpecs,
       replayTour,
       openShortcutsGuide,
       kidsProfiles,
@@ -9245,6 +9670,14 @@ const SettingsPage = {
       loadAutoBackupStatus,
       cacheInfo,
       clearingCache,
+      hostSyncStatus,
+      hostSyncing,
+      hostRestoring,
+      showHostRestoreModal,
+      handleHostSyncExport,
+      handleHostSyncImport,
+      executeHostSyncImport,
+      handleHostSyncOpenFolder,
       resetting,
       handleClearCache,
       clearingProbeCache,
