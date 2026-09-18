@@ -31,7 +31,12 @@ class TestRouteRequests(unittest.TestCase):
         self.config_patcher = patch("backend.settings.load_config", return_value={"features": {"requests": True}})
         self.config_patcher.start()
 
+        # Isolate route unit tests from external Supabase network calls
+        self.supabase_patcher = patch("backend.routes.requests.is_supabase_configured", return_value=False)
+        self.supabase_patcher.start()
+
     def tearDown(self):
+        self.supabase_patcher.stop()
         self.file_patcher.stop()
         self.config_patcher.stop()
         self.temp_dir.cleanup()
@@ -282,6 +287,29 @@ class TestRouteRequests(unittest.TestCase):
         self.assertTrue(data["ok"])
         self.assertTrue(data["inventory"]["in_library"])
         self.assertEqual(data["inventory"]["seasons"]["1"], 9)
+
+    @patch("backend.routes.requests.ensure_request_artwork")
+    def test_get_request_artwork_placeholder(self, mock_ensure):
+        """GET /api/requests/artwork/<id>/poster returns fallback SVG if no image."""
+        payload = {"title": "Test Artwork Movie", "type": "Movie"}
+        res = self.client.post("/api/requests", json=payload)
+        req_id = res.get_json()["request"]["id"]
+        art_res = self.client.get(f"/api/requests/artwork/{req_id}/poster")
+        self.assertEqual(art_res.status_code, 200)
+        self.assertIn("image/svg+xml", art_res.content_type)
+
+    @patch("backend.matcher._tmdb_get", return_value={"poster_path": "/test.jpg", "backdrop_path": "/bg.jpg", "overview": "TMDb overview"})
+    @patch("backend.matcher._download_image", return_value="images/test.jpg")
+    def test_refresh_request_artwork(self, mock_dl, mock_tmdb):
+        """POST /api/requests/<id>/refresh-artwork repairs missing artwork from TMDb."""
+        payload = {"title": "Test Refresh", "type": "Movie", "tmdb_id": 99999}
+        res = self.client.post("/api/requests", json=payload)
+        req_id = res.get_json()["request"]["id"]
+        ref_res = self.client.post(f"/api/requests/{req_id}/refresh-artwork")
+        self.assertEqual(ref_res.status_code, 200)
+        updated = ref_res.get_json()["request"]
+        self.assertIn("test.jpg", updated["poster_path"])
+        self.assertIn("bg.jpg", updated["backdrop_path"])
 
 
 if __name__ == "__main__":

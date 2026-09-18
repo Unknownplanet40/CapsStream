@@ -73,8 +73,8 @@ DEFAULT_CONFIG = {
     "supabase_url": "",
     "supabase_anon_key": "",
     "features": {
-        "requests": True,
-        "online_requests": True
+        "requests": False,
+        "online_requests": False
     },
     "host_sync": {
         "enabled": False,

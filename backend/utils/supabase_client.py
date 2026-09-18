@@ -29,6 +29,10 @@ def get_supabase_config() -> Tuple[str, str]:
         except Exception:
             pass
 
+    if url:
+        import re
+        url = re.sub(r'^(?:https?:)+(?:\/\/)?', 'https://' if url.startswith('https') else 'http://', url)
+
     return url.rstrip("/"), key
 
 
@@ -125,14 +129,47 @@ def fetch_online_requests(client_id: Optional[str] = None) -> List[Dict[str, Any
     return []
 
 
+SUPABASE_COLUMNS = {
+    "id",
+    "client_id",
+    "title",
+    "type",
+    "year",
+    "season",
+    "episode",
+    "notes",
+    "tmdb_id",
+    "poster_path",
+    "backdrop_path",
+    "overview",
+    "vote_average",
+    "has_digital_release",
+    "digital_release_date",
+    "digital_status_label",
+    "status",
+    "admin_note",
+    "requested_by",
+    "profile_avatar",
+    "custom_avatar_url",
+    "profile_color",
+    "detected_media_id",
+    "detected_media_type",
+    "detected_tmdb_id",
+    "completed_at",
+    "created_at",
+    "updated_at",
+}
+
+
 def upsert_online_request(req_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Insert or update a media request in Supabase."""
     url, key = get_supabase_config()
     if not url or not key:
         return None
 
+    payload = {k: v for k, v in req_data.items() if k in SUPABASE_COLUMNS}
     endpoint = f"{url}/rest/v1/media_requests"
-    status, res = _make_request("POST", endpoint, key=key, data=req_data, prefer="resolution=merge-duplicates,return=representation")
+    status, res = _make_request("POST", endpoint, key=key, data=payload, prefer="resolution=merge-duplicates,return=representation")
 
     if status in (200, 201):
         if isinstance(res, list) and res:
@@ -151,11 +188,12 @@ def update_online_request(req_id: str, patch_data: Dict[str, Any], client_id: Op
     if not url or not key:
         return None
 
+    payload = {k: v for k, v in patch_data.items() if k in SUPABASE_COLUMNS}
     endpoint = f"{url}/rest/v1/media_requests?id=eq.{req_id}"
     if client_id:
         endpoint += f"&client_id=eq.{client_id}"
 
-    status, res = _make_request("PATCH", endpoint, key=key, data=patch_data, prefer="return=representation")
+    status, res = _make_request("PATCH", endpoint, key=key, data=payload, prefer="return=representation")
 
     if status in (200, 204):
         if isinstance(res, list) and res:

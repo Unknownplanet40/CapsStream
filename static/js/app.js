@@ -191,6 +191,7 @@ const store = reactive({
     return false;
   })(),
   isMobileScreen: typeof window !== "undefined" ? window.innerWidth < 768 : false,
+  isOnline: typeof navigator !== "undefined" ? navigator.onLine !== false : true,
   tvFocus: { rowIndex: 0, cardIndex: 0 },
   playback: {
     enable_trailers: true,
@@ -207,6 +208,12 @@ const store = reactive({
 window.store = store;
 
 if (typeof window !== "undefined") {
+  window.addEventListener("online", () => {
+    store.isOnline = true;
+  });
+  window.addEventListener("offline", () => {
+    store.isOnline = false;
+  });
   window.addEventListener("resize", () => {
     store.isMobileScreen = window.innerWidth < 768;
     if (store.layoutMode === "tv" && !store.isMobileScreen) {
@@ -929,7 +936,16 @@ function openGlobalCollectionPicker(item) {
   }).catch(() => {});
 }
 
-// ─── Global Trailer Modal System ──────────────────────────────
+// ─── Global Trailer Modal System & Connectivity ────────────────
+function isInternetAvailable() {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return false;
+  }
+  if (window.store && window.store.isOnline === false) {
+    return false;
+  }
+  return true;
+}
 
 const globalTrailerState = reactive({
   show: false,
@@ -939,6 +955,10 @@ const globalTrailerState = reactive({
 
 async function openGlobalTrailer(item) {
   if (!item) return;
+  if (!isInternetAvailable()) {
+    addToast("No internet connection. Trailers cannot be played offline.", "info");
+    return;
+  }
   if (store.playback?.enable_trailers === false) {
     addToast("Trailers are disabled in Settings", "info");
     return;
@@ -947,6 +967,7 @@ async function openGlobalTrailer(item) {
   if (!mediaId) return;
   try {
     const res = await API.get(`/api/media/${mediaId}/trailer`);
+    if (!isInternetAvailable()) return;
     if (res && res.embed_url) {
       unlockAchievement("trailer_buff");
       globalTrailerState.url = res.embed_url;
@@ -956,7 +977,11 @@ async function openGlobalTrailer(item) {
       addToast("No trailer found for this title", "info");
     }
   } catch (e) {
-    addToast("No trailer available for this title", "info");
+    if (!isInternetAvailable()) {
+      addToast("No internet connection. Trailers cannot be played offline.", "info");
+    } else {
+      addToast("No trailer available for this title", "info");
+    }
   }
 }
 
@@ -2034,11 +2059,11 @@ const MediaCard = {
             const item = cardItem.value;
             const id = item.id || item.tmdb_id;
 
-            // Attempt TMDB trailer first
-            if (id) {
+            // Attempt TMDB trailer only if internet is available
+            if (id && isInternetAvailable()) {
               try {
                 const res = await API.get(`/api/media/${id}/trailer`);
-                if (!isPopoutActive.value) return;
+                if (!isPopoutActive.value || !isInternetAvailable()) return;
                 if (res && res.embed_url) {
                   let url = res.embed_url;
                   const sep = url.includes("?") ? "&" : "?";
@@ -2048,7 +2073,7 @@ const MediaCard = {
               } catch (e) {}
             }
 
-            // Fallback to local video stream if available
+            // Fallback to local video stream if available (works offline)
             if (item.id && item.type === "movie" && isPopoutActive.value) {
               previewVideoUrl.value = `/api/stream/${item.id}?start=90&transcode=1`;
             }
@@ -2791,6 +2816,10 @@ const TvContentRow = {
     }
 
     function quickTrailer(item) {
+      if (!isInternetAvailable()) {
+        addToast("No internet connection. Trailers cannot be played offline.", "info");
+        return;
+      }
       emit("card-click", item, props.row);
     }
 
@@ -2879,9 +2908,11 @@ const TvContentRow = {
         if (!isFocusedRow.value && !isRowHovered.value) return;
 
         const id = item.id || item.tmdb_id;
-        if (id) {
+        // Attempt online trailer only if internet is available
+        if (id && isInternetAvailable()) {
           try {
             const res = await API.get(`/api/media/${id}/trailer`);
+            if (!isInternetAvailable() || activeItem.value !== item) return;
             if (res && (res.key || res.embed_url) && activeItem.value === item) {
               const key = res.key;
               const embedBase = key ? `https://www.youtube.com/embed/${key}` : (res.embed_url ? res.embed_url.split("?")[0] : null);
@@ -3642,7 +3673,8 @@ const HeroBanner = {
       try {
         const id = item.id || item.tmdb_id;
         let trailerData = null;
-        if (id) {
+        // Attempt online trailer only if internet is available
+        if (id && isInternetAvailable()) {
           try {
             trailerData = await API.get(`/api/media/${id}/trailer`);
           } catch (_) {}
@@ -3651,7 +3683,7 @@ const HeroBanner = {
         // Discard if a newer load has been scheduled (slide changed, resetPreview called, etc.)
         if (myToken !== previewLoadToken) return;
 
-        if (trailerData && (trailerData.embed_url || trailerData.key)) {
+        if (trailerData && (trailerData.embed_url || trailerData.key) && isInternetAvailable()) {
           let key = trailerData.key;
           if (!key && trailerData.embed_url) {
             const m = trailerData.embed_url.match(/embed\/([^?&]+)/);
@@ -4160,6 +4192,10 @@ const HomePage = {
 
     async function handleTrailer(item) {
       if (!item) return;
+      if (!isInternetAvailable()) {
+        addToast("No internet connection. Trailers cannot be played offline.", "info");
+        return;
+      }
       if (store.profile?.is_kids) {
         addToast("Trailers are disabled in Kids Mode", "info");
         return;
@@ -4167,6 +4203,7 @@ const HomePage = {
       try {
         const id = item.id || item.tmdb_id;
         const res = await API.get(`/api/media/${id}/trailer`);
+        if (!isInternetAvailable()) return;
         if (res && res.embed_url) {
           unlockAchievement("trailer_buff");
           trailerModalUrl.value = res.embed_url;
@@ -4175,7 +4212,11 @@ const HomePage = {
           addToast("No trailer found for this title", "info");
         }
       } catch (e) {
-        addToast("No trailer available for this title", "info");
+        if (!isInternetAvailable()) {
+          addToast("No internet connection. Trailers cannot be played offline.", "info");
+        } else {
+          addToast("No trailer available for this title", "info");
+        }
       }
     }
 
@@ -5398,6 +5439,10 @@ const DetailPage = {
 
     async function watchTrailer() {
       if (!media.value) return;
+      if (!isInternetAvailable()) {
+        addToast("No internet connection. Trailers cannot be played offline.", "info");
+        return;
+      }
       if (store.playback?.enable_trailers === false) {
         addToast("Trailers are disabled in Settings", "info");
         return;
@@ -5406,6 +5451,7 @@ const DetailPage = {
       if (!mediaId) return;
       try {
         const res = await API.get(`/api/media/${mediaId}/trailer`);
+        if (!isInternetAvailable()) return;
         if (res && res.embed_url) {
           unlockAchievement("trailer_buff");
           trailerModalUrl.value = res.embed_url;
@@ -5414,7 +5460,11 @@ const DetailPage = {
           addToast("No trailer found for this title", "info");
         }
       } catch (e) {
-        addToast("No trailer available for this title", "info");
+        if (!isInternetAvailable()) {
+          addToast("No internet connection. Trailers cannot be played offline.", "info");
+        } else {
+          addToast("No trailer available for this title", "info");
+        }
       }
     }
 
@@ -6974,16 +7024,43 @@ const SettingsPage = {
                 </div>
               </div>
 
+              <!-- ══════ Media Requests Feature ══════ -->
+              <div class="settings-divider" style="margin: 16px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label" style="display:flex;align-items:center;gap:8px">
+                    <i class="ph-bold ph-paper-plane-tilt" style="color:#38bdf8"></i>
+                    <span>Enable Media Requests</span>
+                  </div>
+                  <div class="settings-desc">Allow users to submit requests for missing movies, TV shows, and anime. Requests are saved to data/requests.json and tracked in the Request Media dashboard.</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="form.features.requests" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
               <!-- ══════ Supabase Cloud Relay for Online Requests ══════ -->
-              <template v-if="store.features?.requests">
+              <template v-if="form.features?.requests">
                 <div class="settings-divider" style="margin: 16px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
-                <div class="settings-row" style="flex-direction:column;align-items:flex-start">
+                <div class="settings-row">
                   <div class="settings-label-container">
                     <div class="settings-label" style="display:flex;align-items:center;gap:8px">
                       <i class="ph-bold ph-cloud" style="color:#38bdf8"></i>
-                      <span>Supabase Cloud Relay (Online Media Requests)</span>
+                      <span>Online Request Sync (Supabase Cloud Relay)</span>
                     </div>
-                    <div class="settings-desc">Allows Desktop 2 (outside your home network) to submit requests to Desktop 1 over the internet via Supabase REST API without port forwarding or VPNs.</div>
+                    <div class="settings-desc">Sync requests across client instances over the internet via Supabase REST API without opening ports or VPNs.</div>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" v-model="form.features.online_requests" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+
+                <div v-if="form.features?.online_requests" class="settings-row" style="flex-direction:column;align-items:flex-start">
+                  <div class="settings-label-container">
+                    <div class="settings-label">Supabase Credentials</div>
+                    <div class="settings-desc">Enter your Supabase project URL and anon public API key.</div>
                   </div>
                   <div style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:10px">
                     <input type="text" v-model="form.supabase_url" class="form-input" placeholder="Supabase Project URL (https://xyz.supabase.co)..." style="width:100%" />
@@ -8162,6 +8239,10 @@ const SettingsPage = {
         enabled: false,
         drive_tag: "",
       },
+      features: {
+        requests: true,
+        online_requests: true,
+      },
     });
 
     // Built-in default media folders were removed — all paths are user-provided.
@@ -8223,6 +8304,7 @@ const SettingsPage = {
           form.value = {
             ...form.value,
             ...data,
+            features: { ...form.value.features, ...(data.features || {}) },
             metadata_sources: { ...form.value.metadata_sources, ...(data.metadata_sources || {}) },
             media_paths: { ...form.value.media_paths, ...(data.media_paths || {}) },
             disabled_paths: {
@@ -8271,6 +8353,9 @@ const SettingsPage = {
         initialFormJson.value = JSON.stringify(form.value);
         if (form.value.playback) {
           store.playback = { ...store.playback, ...form.value.playback };
+        }
+        if (form.value.features) {
+          store.features = { ...store.features, ...form.value.features };
         }
         if (form.value.hide_unmounted_items !== undefined) {
           store.hideOfflineMedia = !!form.value.hide_unmounted_items;
@@ -17985,12 +18070,16 @@ const RequestsPage = {
           <div class="requests-header-left">
             <div class="requests-badge-title">
               <i class="ph-fill ph-paper-plane-tilt"></i>
-              <span>OFFLINE DRIVE MEDIA REQUESTS</span>
+              <span>ONLINE</span>
             </div>
             <h1 class="requests-main-title">Request a Movie or Show</h1>
             <p class="requests-subtitle">
-              Search any title via TMDb or submit a custom request. Items are saved directly to this drive for review and loading.
+              Submit your movie, series, or anime requests online anytime from any device.
             </p>
+            <div class="requests-delivery-notice requests-drive-notice">
+              <i class="ph-bold ph-hard-drive"></i>
+              <span><strong>Online Request:</strong> All submitted requests are synced online and will be prepared and loaded onto your hard drive on the next drive update for offline playback.</span>
+            </div>
           </div>
 
           <div class="requests-header-badges">
@@ -18369,7 +18458,7 @@ const RequestsPage = {
 
             <div class="requests-tab-actions">
               <button
-                class="btn btn-secondary btn-sm sync-online-btn"
+                class="btn-tab-action sync-online-btn"
                 @click="syncOnline"
                 :disabled="isSyncingOnline"
                 title="Synchronize requests with online cloud relay"
@@ -18378,7 +18467,7 @@ const RequestsPage = {
                 <span>{{ isSyncingOnline ? 'Syncing...' : 'Sync Online' }}</span>
               </button>
               <button
-                class="btn btn-secondary btn-sm sync-library-btn"
+                class="btn-tab-action sync-library-btn"
                 @click="syncLibrary"
                 :disabled="isSyncing"
                 title="Scan library to auto-detect if requested media has been added"
@@ -18388,8 +18477,9 @@ const RequestsPage = {
               </button>
               <button
                 v-if="devMode && activeTab === 'completed' && completedList.length > 0"
-                class="btn btn-secondary btn-sm clear-btn"
+                class="btn-tab-action clear-btn"
                 @click="clearCompleted"
+                title="Clear completed requests"
               >
                 <i class="ph-bold ph-trash"></i>
                 <span>Clear Completed</span>
@@ -18417,64 +18507,78 @@ const RequestsPage = {
             </p>
           </div>
 
-          <!-- Requests Grid -->
-          <div v-else class="requests-cards-grid">
+          <!-- Episode-Style Requests List -->
+          <div v-else class="requests-list">
             <div
               v-for="req in currentTabList"
               :key="req.id"
-              class="req-item-card"
-              :class="['status-' + req.status, { 'has-poster': !!req.poster_path, 'has-backdrop': !!req.backdrop_path, 'in-library': !!req.auto_detected }]"
+              class="req-episode-card"
+              :class="['status-' + req.status, { 'in-library': !!req.auto_detected }]"
             >
-              <!-- Ambient backdrop background layer -->
+              <!-- 16:9 Backdrop / Poster Thumbnail Container -->
               <div
-                v-if="req.backdrop_path"
-                class="req-card-backdrop"
-                :style="{ backgroundImage: 'url(' + req.backdrop_path + ')' }"
-              ></div>
-              <div class="req-card-backdrop-overlay"></div>
-
-              <!-- Left Column: The Poster Frame -->
-              <div class="req-poster-wrap">
+                class="req-episode-thumb"
+                @click="(req.status === 'completed' || req.detected_media_id) ? goToLibraryMedia(req) : null"
+                :style="{ cursor: (req.status === 'completed' || req.detected_media_id) ? 'pointer' : 'default' }"
+              >
                 <img
-                  v-if="req.poster_path"
-                  :src="req.poster_path"
+                  :src="'/api/requests/artwork/' + req.id + '/backdrop'"
                   :alt="req.title"
-                  class="req-poster-img"
+                  class="req-episode-img"
                   loading="lazy"
+                  @error="onReqImgError($event, req)"
                 />
-                <div v-else class="req-poster-fallback">
-                  <i :class="getTypeIcon(req.type)"></i>
+                <!-- Thumbnail Type / Season Overlay Badges -->
+                <div class="req-thumb-badge-top">
+                  <span class="req-media-type-chip" :class="req.type ? req.type.toLowerCase().replace(/\s+/g, '-') : 'movie'">
+                    <i :class="getTypeIcon(req.type)"></i>
+                    <span>{{ req.type || 'Movie' }}</span>
+                  </span>
+                  <span v-if="req.season" class="req-season-chip">
+                    S{{ req.season }}<template v-if="req.episode"> • E{{ req.episode }}</template>
+                  </span>
                 </div>
-                <div class="req-poster-type-badge" :class="req.type ? req.type.toLowerCase().replace(/\s+/g, '-') : 'movie'">
-                  <i :class="getTypeIcon(req.type)"></i>
+
+                <!-- Play Overlay if in Library -->
+                <div v-if="req.status === 'completed' || req.detected_media_id" class="req-thumb-play-overlay">
+                  <i class="ph-fill ph-play req-play-icon"></i>
                 </div>
               </div>
 
-              <!-- Right Column: Card Content -->
-              <div class="req-card-content">
-                <!-- Top Row: Eyebrow chips on left, Status badge on right -->
-                <div class="req-card-top-row">
-                  <div class="req-eyebrow-left">
-                    <span class="req-media-type-chip" :class="req.type ? req.type.toLowerCase().replace(/\s+/g, '-') : 'movie'">
-                      {{ req.type || 'Movie' }}
-                    </span>
-                    <span v-if="req.season" class="req-season-chip" :title="'Season ' + req.season + (req.episode ? ' Episode ' + req.episode : '')">
-                      S{{ req.season }}<template v-if="req.episode"> • E{{ req.episode }}</template>
-                    </span>
-                    <span
-                      v-if="req.digital_status_label || req.has_digital_release === false || req.has_digital_release === true"
-                      class="req-digital-chip"
-                      :class="[
-                        req.has_digital_release === true || (req.digital_status_label && req.digital_status_label.toLowerCase().includes('available')) ? 'available' :
-                        (req.digital_status_label && (req.digital_status_label.includes('Theaters') || req.digital_status_label.includes('Theatrical'))) ? 'theatrical' : 'warning'
-                      ]"
-                      :title="'Digital Status: ' + (req.digital_status_label || (req.has_digital_release ? 'Available Digitally' : 'No Digital Copy Detected'))"
-                    >
-                      <i :class="req.has_digital_release === true || (req.digital_status_label && req.digital_status_label.toLowerCase().includes('available')) ? 'ph-bold ph-check-circle' : ((req.digital_status_label && (req.digital_status_label.includes('Theaters') || req.digital_status_label.includes('Theatrical'))) ? 'ph-bold ph-ticket' : 'ph-bold ph-film-slate')"></i>
-                      <span>{{ req.digital_status_label || (req.has_digital_release === false ? 'No Digital Copy' : 'Digital Available') }}</span>
-                    </span>
+              <!-- Center Column: Metadata & Notes -->
+              <div class="req-episode-body">
+                <!-- Header: Title, Year, TMDb, Digital Status, Status Pill -->
+                <div class="req-episode-header">
+                  <div class="req-episode-title-group">
+                    <h3 class="req-episode-title" :title="req.title">
+                      {{ req.title }}
+                      <span v-if="req.year" class="req-episode-year">({{ req.year }})</span>
+                    </h3>
+
+                    <div class="req-episode-meta-row">
+                      <span v-if="req.vote_average" class="req-meta-score" title="TMDb Score">
+                        <i class="ph-fill ph-star"></i> {{ Number(req.vote_average).toFixed(1) }}
+                      </span>
+                      <span v-if="req.vote_average && req.tmdb_id" class="req-meta-dot">•</span>
+                      <span v-if="req.tmdb_id" class="req-meta-tmdb" title="Matched on TMDb">
+                        <i class="ph-bold ph-seal-check"></i> TMDb
+                      </span>
+                      <span v-if="req.digital_status_label || req.has_digital_release === false || req.has_digital_release === true" class="req-meta-dot">•</span>
+                      <span
+                        v-if="req.digital_status_label || req.has_digital_release === false || req.has_digital_release === true"
+                        class="req-digital-chip"
+                        :class="[
+                          req.has_digital_release === true || (req.digital_status_label && req.digital_status_label.toLowerCase().includes('available')) ? 'available' :
+                          (req.digital_status_label && (req.digital_status_label.includes('Theaters') || req.digital_status_label.includes('Theatrical'))) ? 'theatrical' : 'warning'
+                        ]"
+                      >
+                        <i :class="req.has_digital_release === true || (req.digital_status_label && req.digital_status_label.toLowerCase().includes('available')) ? 'ph-bold ph-check-circle' : ((req.digital_status_label && (req.digital_status_label.includes('Theaters') || req.digital_status_label.includes('Theatrical'))) ? 'ph-bold ph-ticket' : 'ph-bold ph-film-slate')"></i>
+                        <span>{{ req.digital_status_label || (req.has_digital_release === false ? 'No Digital Copy' : 'Digital Available') }}</span>
+                      </span>
+                    </div>
                   </div>
 
+                  <!-- Status Pill -->
                   <div class="req-status-pill" :class="[req.status, req.auto_detected ? 'in-library' : '']">
                     <span class="status-indicator-dot"></span>
                     <span>{{
@@ -18487,46 +18591,33 @@ const RequestsPage = {
                   </div>
                 </div>
 
-                <!-- Title & Clean Sub-Metadata Row -->
-                <div class="req-title-block">
-                  <h3 class="req-title" :title="req.title">{{ req.title }}</h3>
-                  <div class="req-sub-meta">
-                    <span v-if="req.year" class="req-meta-year">{{ req.year }}</span>
-                    <span v-if="req.year && req.vote_average" class="req-meta-dot">•</span>
-                    <span v-if="req.vote_average" class="req-meta-score" title="TMDb Score">
-                      <i class="ph-fill ph-star"></i> {{ Number(req.vote_average).toFixed(1) }}
-                    </span>
-                    <span v-if="req.tmdb_id" class="req-meta-dot">•</span>
-                    <span v-if="req.tmdb_id" class="req-meta-tmdb" title="Matched on TMDb">
-                      <i class="ph-bold ph-seal-check"></i> TMDb
-                    </span>
-                  </div>
-                </div>
-
-                <!-- Overview Synopsis -->
-                <p v-if="req.overview" class="req-overview-text" :title="req.overview">
+                <!-- Synopsis Overview -->
+                <p v-if="req.overview" class="req-episode-overview" :title="req.overview">
                   {{ req.overview }}
                 </p>
 
-                <!-- Requester Notes -->
-                <div v-if="req.notes" class="req-speech-note req-user-note">
-                  <i class="ph-fill ph-chat-circle-dots"></i>
-                  <div class="req-note-body">
-                    <span class="req-note-text">“{{ req.notes }}”</span>
+                <!-- Speech Bubble Notes -->
+                <div class="req-episode-notes-container" v-if="req.notes || req.admin_note">
+                  <!-- Requester Note -->
+                  <div v-if="req.notes" class="req-speech-note req-user-note">
+                    <i class="ph-fill ph-chat-circle-dots"></i>
+                    <div class="req-note-body">
+                      <span class="req-note-text">“{{ req.notes }}”</span>
+                    </div>
+                  </div>
+
+                  <!-- Admin Note -->
+                  <div v-if="req.admin_note" class="req-speech-note req-server-response">
+                    <i class="ph-bold ph-chats-circle"></i>
+                    <div class="req-note-body">
+                      <span class="req-note-tag">Server Response</span>
+                      <span class="req-note-text">{{ req.admin_note }}</span>
+                    </div>
                   </div>
                 </div>
 
-                <!-- Server Response Note -->
-                <div v-if="req.admin_note" class="req-speech-note req-server-response">
-                  <i class="ph-bold ph-chats-circle"></i>
-                  <div class="req-note-body">
-                    <span class="req-note-tag">Server Response</span>
-                    <span class="req-note-text">{{ req.admin_note }}</span>
-                  </div>
-                </div>
-
-                <!-- Requester Identity Row (Separate Line to prevent button collision) -->
-                <div class="req-card-meta-row">
+                <!-- Footer: Requester info & Cloud Sync -->
+                <div class="req-episode-footer">
                   <div class="req-requester-info" :title="'Requested by ' + (req.requested_by || 'User')">
                     <div class="req-avatar" :style="{ background: req.profile_color || '#e50914' }">
                       <img v-if="req.custom_avatar_url" :src="imgUrl(req.custom_avatar_url)" class="req-avatar-img" :alt="req.requested_by" />
@@ -18544,92 +18635,110 @@ const RequestsPage = {
                     <i class="ph-bold ph-cloud-check"></i> Cloud
                   </div>
                 </div>
+              </div>
 
-                <!-- Actions Toolbar Row -->
-                <div class="req-card-actions-row">
-                  <div class="req-actions-group-left">
-                    <!-- Watch Now -->
+              <!-- Right Action Toolbar Column -->
+              <div class="req-episode-actions">
+                <!-- Status / Play Actions Group -->
+                <div class="req-episode-status-group" v-if="(req.status === 'completed' || req.detected_media_id) || devMode">
+                  <!-- Watch Now Button -->
+                  <button
+                    v-if="req.status === 'completed' || req.detected_media_id"
+                    class="req-btn req-btn-watch"
+                    @click="goToLibraryMedia(req)"
+                    title="Open this title in CapsStream"
+                  >
+                    <i class="ph-bold ph-play"></i>
+                    <span>Watch</span>
+                  </button>
+
+                  <!-- DEV Status Action Buttons -->
+                  <template v-if="devMode">
+                    <!-- If completed or rejected: sleek reopen button -->
                     <button
-                      v-if="req.status === 'completed' || req.detected_media_id"
-                      class="req-btn req-btn-watch"
-                      @click="goToLibraryMedia(req)"
-                      title="Open this title in CapsStream"
+                      v-if="req.status === 'completed' || req.status === 'rejected'"
+                      class="req-btn req-btn-reopen"
+                      @click="updateStatus(req, 'pending')"
+                      title="Reopen request to Pending"
                     >
-                      <i class="ph-bold ph-play"></i>
-                      <span>Watch</span>
+                      <i class="ph-bold ph-arrow-counter-clockwise"></i>
+                      <span>Reopen</span>
                     </button>
 
-                    <!-- DEV Actions -->
-                    <template v-if="devMode">
+                    <!-- If pending or in_progress: sleek minimalist segmented action bar -->
+                    <div v-else class="req-status-segmented-bar">
                       <button
-                        v-if="req.status === 'pending'"
-                        class="req-btn req-btn-in-progress"
+                        type="button"
+                        class="req-segment-btn segment-progress"
+                        :class="{ active: req.status === 'in_progress' }"
                         @click="updateStatus(req, 'in_progress')"
-                        title="Mark as In Progress"
+                        :title="req.status === 'in_progress' ? 'Currently In Progress' : 'Mark In Progress'"
                       >
                         <i class="ph-bold ph-hourglass-high"></i>
-                        <span>In Progress</span>
+                        <span class="segment-label">Progress</span>
                       </button>
 
                       <button
-                        v-if="req.status === 'pending' || req.status === 'in_progress'"
-                        class="req-btn req-btn-complete"
+                        type="button"
+                        class="req-segment-btn segment-complete"
+                        :class="{ active: req.status === 'completed' }"
                         @click="updateStatus(req, 'completed')"
                         title="Mark as Added to drive"
                       >
                         <i class="ph-bold ph-check"></i>
-                        <span>Added</span>
+                        <span class="segment-label">Added</span>
                       </button>
 
                       <button
-                        v-if="req.status === 'pending' || req.status === 'in_progress'"
-                        class="req-btn req-btn-reject"
+                        type="button"
+                        class="req-segment-btn segment-reject"
+                        :class="{ active: req.status === 'rejected' }"
                         @click="updateStatus(req, 'rejected')"
-                        title="Decline this request"
+                        title="Decline request"
                       >
                         <i class="ph-bold ph-x"></i>
-                        <span>Decline</span>
+                        <span class="segment-label">Decline</span>
                       </button>
+                    </div>
+                  </template>
+                </div>
 
-                      <button
-                        v-if="req.status === 'completed' || req.status === 'rejected'"
-                        class="req-btn req-btn-reopen"
-                        @click="updateStatus(req, 'pending')"
-                        title="Reopen request"
-                      >
-                        <i class="ph-bold ph-arrow-counter-clockwise"></i>
-                        <span>Reopen</span>
-                      </button>
-                    </template>
-                  </div>
+                <!-- Utility / Secondary Action Icons Row -->
+                <div class="req-episode-utility-row">
+                  <!-- Refresh Artwork Button -->
+                  <button
+                    class="req-action-icon-btn req-btn-icon"
+                    @click="refreshArtwork(req)"
+                    title="Redownload missing poster/backdrop from TMDb"
+                  >
+                    <i class="ph ph-image"></i>
+                  </button>
 
-                  <div class="req-actions-group-right">
-                    <!-- Edit Button -->
-                    <button
-                      v-if="devMode"
-                      class="req-btn req-btn-icon req-btn-edit"
-                      @click="openEditModal(req)"
-                      title="Edit details & response note"
-                    >
-                      <i class="ph ph-pencil-simple"></i>
-                    </button>
+                  <!-- Edit Button -->
+                  <button
+                    v-if="devMode"
+                    class="req-action-icon-btn req-btn-icon req-btn-edit"
+                    @click="openEditModal(req)"
+                    title="Edit details & response note"
+                  >
+                    <i class="ph ph-pencil-simple"></i>
+                  </button>
 
-                    <!-- Delete / Cancel Button -->
-                    <button
-                      v-if="devMode || req.status === 'pending'"
-                      class="req-btn req-btn-icon req-btn-delete"
-                      @click="deleteRequest(req)"
-                      :title="devMode ? 'Delete request' : 'Cancel request'"
-                    >
-                      <i class="ph ph-trash"></i>
-                    </button>
-                  </div>
+                  <!-- Delete / Cancel Button -->
+                  <button
+                    v-if="devMode || req.status === 'pending'"
+                    class="req-action-icon-btn req-btn-icon req-btn-delete"
+                    @click="deleteRequest(req)"
+                    :title="devMode ? 'Delete request' : 'Cancel request'"
+                  >
+                    <i class="ph ph-trash"></i>
+                  </button>
                 </div>
               </div>
             </div>
-            </div>
           </div>
         </div>
+      </div>
 
         <!-- Edit Request Modal (DEV Mode) -->
         <transition name="fade">
@@ -18939,6 +19048,12 @@ const RequestsPage = {
         const url = `/api/tmdb/search?query=${encodeURIComponent(q)}&type=${encodeURIComponent(mtype)}`;
         const results = await API.get(url);
         tmdbResults.value = Array.isArray(results) ? results : [];
+        if (route?.query?.tmdb_id && !selectedTmdb.value) {
+          const match = tmdbResults.value.find((r) => String(r.tmdb_id || r.id) === String(route.query.tmdb_id));
+          if (match) {
+            selectTmdb(match);
+          }
+        }
       } catch (e) {
         searchError.value = true;
         tmdbResults.value = [];
@@ -19065,7 +19180,11 @@ const RequestsPage = {
           form.notes = "";
           form.type = "Movie";
           activeTab.value = "pending";
-          addToast("Request submitted successfully!", "success");
+          if (res.cloud_synced === false && res.cloud_error) {
+            addToast("Saved locally. Cloud relay warning: " + res.cloud_error, "warning");
+          } else {
+            addToast("Request submitted successfully!", "success");
+          }
         }
       } catch (err) {
         addToast(err.message || "Failed to submit request", "error");
@@ -19291,7 +19410,9 @@ const RequestsPage = {
         if (res.ok) {
           items.value = res.requests || [];
           onlineSynced.value = !!res.online_synced;
-          if (res.detected_count > 0) {
+          if (res.sync_error) {
+            addToast("Cloud relay warning: " + res.sync_error, "warning");
+          } else if (res.detected_count > 0) {
             addToast(`Synced online! ${res.detected_count} title(s) auto-completed in library.`, "success");
           } else if (res.online_synced) {
             addToast("Successfully synchronized with online cloud relay!", "success");
@@ -19326,7 +19447,6 @@ const RequestsPage = {
       }
     }
 
-
     function goToLibraryMedia(req) {
       const mtype = req.detected_media_type || (req.type === "Movie" ? "movie" : "series");
       const mid = req.detected_media_id;
@@ -19339,6 +19459,33 @@ const RequestsPage = {
         }
       } else if (req.tmdb_id) {
         router.push(`/title/${mtype}/${req.tmdb_id}${seasonQuery}`);
+      }
+    }
+
+    function onReqImgError(event, req) {
+      const img = event.target;
+      if (!img.dataset.fallbackPoster) {
+        img.dataset.fallbackPoster = "true";
+        img.src = `/api/requests/artwork/${req.id}/poster`;
+      } else if (!img.dataset.fallbackSvg) {
+        img.dataset.fallbackSvg = "true";
+        img.src = `/api/requests/artwork/${req.id}/backdrop?force_fallback=true`;
+      }
+    }
+
+    async function refreshArtwork(req) {
+      try {
+        addToast("Refreshing artwork from TMDb...", "info");
+        const res = await API.post(`/api/requests/${req.id}/refresh-artwork`);
+        if (res.ok && res.request) {
+          const idx = items.value.findIndex((i) => i.id === req.id);
+          if (idx !== -1) {
+            items.value[idx] = { ...items.value[idx], ...res.request };
+          }
+          addToast("Artwork refreshed!", "success");
+        }
+      } catch (err) {
+        addToast(err.message || "Failed to refresh artwork", "error");
       }
     }
 
@@ -19383,6 +19530,8 @@ const RequestsPage = {
       syncOnline,
       syncLibrary,
       goToLibraryMedia,
+      onReqImgError,
+      refreshArtwork,
       onTitleInput,
       onTitleFocus,
       onTypeChange,
@@ -19997,6 +20146,10 @@ const App = {
               <div class="profile-dropdown-section">
                 <div class="profile-dropdown-section-title">System & Tools</div>
                 <div class="profile-dropdown-list">
+                  <div v-if="store.features?.requests && !store.profile?.is_kids" class="profile-dropdown-item" @click.stop="goRequests" id="tv-dd-requests" tabindex="0">
+                    <i class="ph-bold ph-paper-plane-tilt" style="color:#38bdf8"></i>
+                    <span>Request Media</span>
+                  </div>
                   <div class="profile-dropdown-item" @click.stop="openShortcuts" id="tv-dd-shortcuts" tabindex="0">
                     <i class="ph-bold ph-keyboard" style="color:#38bdf8"></i>
                     <span>Keyboard Shortcuts</span>
@@ -21256,11 +21409,17 @@ const App = {
 
     function onNetworkOffline() {
       isDeviceOnline.value = false;
+      store.isOnline = false;
+      if (globalTrailerState && globalTrailerState.show) {
+        globalTrailerState.show = false;
+        addToast("Internet connection lost. Trailer playback stopped.", "info");
+      }
       updateConnectionState();
     }
 
     function onNetworkOnline() {
       isDeviceOnline.value = true;
+      store.isOnline = true;
       retryConnectionNow();
     }
 
