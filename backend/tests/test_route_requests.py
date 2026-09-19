@@ -413,6 +413,34 @@ class TestRouteRequests(unittest.TestCase):
             resp_inactive = self.client.post(f"/api/requests/{req_id}/toggle-me-too")
             self.assertEqual(resp_inactive.status_code, 400)
 
+    def test_requests_enrich_local_library_presence(self):
+        """Requests returned by API should include in_local_library, local_media_id, local_media_type, local_tmdb_id."""
+        with patch("backend.routes.requests.current_profile", return_value=1), \
+             patch("backend.routes.requests.get_profile", return_value={"name": "Alice"}):
+            resp = self.client.post("/api/requests", json={"title": "Local Playable Movie", "type": "Movie"})
+            self.assertEqual(resp.status_code, 201)
+            req_id = resp.get_json()["request"]["id"]
+
+        # When detect_media_in_library finds nothing (remote/unmatched client)
+        with patch("backend.routes.requests.detect_media_in_library", return_value=None):
+            get_resp = self.client.get("/api/requests")
+            self.assertEqual(get_resp.status_code, 200)
+            items = get_resp.get_json()["requests"]
+            item = next(i for i in items if i["id"] == req_id)
+            self.assertFalse(item["in_local_library"])
+            self.assertIsNone(item["local_media_id"])
+
+        # When detect_media_in_library finds media on this local machine
+        with patch("backend.routes.requests.detect_media_in_library", return_value={"id": 99, "type": "movie", "tmdb_id": 12345}):
+            get_resp = self.client.get("/api/requests")
+            self.assertEqual(get_resp.status_code, 200)
+            items = get_resp.get_json()["requests"]
+            item = next(i for i in items if i["id"] == req_id)
+            self.assertTrue(item["in_local_library"])
+            self.assertEqual(item["local_media_id"], 99)
+            self.assertEqual(item["local_media_type"], "movie")
+            self.assertEqual(item["local_tmdb_id"], 12345)
+
 
 if __name__ == "__main__":
     unittest.main()

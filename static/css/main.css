@@ -24850,6 +24850,17 @@ body:has(.settings-save-fab) .back-to-top-btn,
   border: 1px solid rgba(34, 197, 94, 0.35);
 }
 
+.req-status-pill.ready-next-drive {
+  background: rgba(168, 85, 247, 0.14);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+}
+
+.req-status-pill.ready-next-drive .status-indicator-dot {
+  background: #c084fc;
+  box-shadow: 0 0 6px #c084fc;
+}
+
 .req-status-pill.rejected {
   background: rgba(239, 68, 68, 0.14);
   color: #f87171;
@@ -25240,6 +25251,28 @@ body:has(.settings-save-fab) .back-to-top-btn,
   color: #ffffff;
   border-color: rgba(56, 189, 248, 0.7);
   box-shadow: 0 6px 18px rgba(56, 189, 248, 0.38);
+}
+
+.req-btn-next-drive {
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.28);
+  color: #d8b4fe;
+  cursor: default;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  font-size: 0.78rem;
+  font-weight: 600;
+  width: 100%;
+  justify-content: center;
+}
+
+.req-btn-next-drive i {
+  font-size: 0.95rem;
+  color: #c084fc;
 }
 
 .req-btn-complete {

@@ -494,6 +494,27 @@ def _enrich_item_profile(item):
                 item["profile_color"] = p.get("color")
 
 
+def _enrich_item_local_library(item):
+    """
+    Verify if the requested media physically exists in this machine's local SQLite database.
+    Sets in_local_library, local_media_id, and local_media_type.
+    """
+    if not isinstance(item, dict):
+        return item
+    matched = detect_media_in_library(item)
+    if matched:
+        item["in_local_library"] = True
+        item["local_media_id"] = matched["id"]
+        item["local_media_type"] = matched.get("type") or (item.get("type") or "Movie").lower()
+        item["local_tmdb_id"] = matched.get("tmdb_id")
+    else:
+        item["in_local_library"] = False
+        item["local_media_id"] = None
+        item["local_media_type"] = None
+        item["local_tmdb_id"] = None
+    return item
+
+
 def _check_kids_guard():
     """Kids profiles are blocked from accessing or submitting requests."""
     pid = current_profile()
@@ -516,6 +537,7 @@ def api_get_requests():
     sync_error = sync_res[3] if len(sync_res) > 3 else None
     for item in items:
         _enrich_item_profile(item)
+        _enrich_item_local_library(item)
 
     return jsonify({
         "requests": items,
@@ -792,6 +814,7 @@ def api_create_request():
                     cloud_error = str(e)
                     print(f"[Requests] Failed to push merged requester to Supabase: {e}")
 
+            _enrich_item_local_library(existing)
             return jsonify({
                 "ok": True,
                 "merged": True,
@@ -817,6 +840,7 @@ def api_create_request():
             cloud_error = str(e)
             print(f"[Requests] Failed to push new request to Supabase: {e}")
 
+    _enrich_item_local_library(new_item)
     return jsonify({
         "ok": True,
         "request": new_item,
@@ -842,6 +866,7 @@ def api_sync_library():
     items, detected_count = sync_requests_with_library()
     for item in items:
         _enrich_item_profile(item)
+        _enrich_item_local_library(item)
     return jsonify({
         "ok": True,
         "detected_count": detected_count,
@@ -860,6 +885,7 @@ def api_sync_online():
     sync_error = sync_res[3] if len(sync_res) > 3 else None
     for item in items:
         _enrich_item_profile(item)
+        _enrich_item_local_library(item)
     return jsonify({
         "ok": True,
         "online_synced": online_synced,
@@ -1008,6 +1034,7 @@ def api_update_request(req_id):
         except Exception as e:
             print(f"[Requests] Error updating request in Supabase: {e}")
 
+    _enrich_item_local_library(target)
     return jsonify({"ok": True, "request": target})
 
 
@@ -1098,6 +1125,7 @@ def api_toggle_me_too(req_id):
             cloud_error = str(e)
             print(f"[Requests] Error updating toggled request in Supabase: {e}")
 
+    _enrich_item_local_library(target)
     return jsonify({
         "ok": True,
         "joined": joined,

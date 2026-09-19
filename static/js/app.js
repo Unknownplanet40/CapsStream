@@ -616,6 +616,7 @@ function checkGlobalReadyOnDriveAlerts(itemsList) {
 
   const fulfilled = itemsList.filter(req => {
     if (req.status !== "completed" && !req.detected_media_id) return false;
+    if (!req.in_local_library && !store.sysInfo?.is_dev) return false;
     if (notifiedSet.has(req.id)) return false;
     const requesters = req.requesters || [];
     return requesters.some(r => {
@@ -633,13 +634,14 @@ function checkGlobalReadyOnDriveAlerts(itemsList) {
       label: "Watch Now",
       onClick: (t) => {
         store.toasts = store.toasts.filter(x => x.id !== t.id);
-        const mtype = req.detected_media_type || (req.type === "Movie" ? "movie" : "series");
-        const mid = req.detected_media_id;
+        const mid = req.local_media_id || req.detected_media_id;
+        const mtype = req.local_media_type || req.detected_media_type || (req.type === "Movie" ? "movie" : "series");
+        const tmdbId = req.local_tmdb_id || req.detected_tmdb_id || req.tmdb_id;
         const seasonQuery = req.season ? `?season=${req.season}` : "";
         if (mid) {
-          window.location.hash = mtype === "movie" ? `#/title/movie/${mid}` : `#/title/${mtype}/${req.detected_tmdb_id || mid}${seasonQuery}`;
-        } else if (req.tmdb_id) {
-          window.location.hash = `#/title/${mtype}/${req.tmdb_id}${seasonQuery}`;
+          window.location.hash = mtype === "movie" ? `#/title/movie/${mid}` : `#/title/${mtype}/${tmdbId || mid}${seasonQuery}`;
+        } else if (tmdbId) {
+          window.location.hash = `#/title/${mtype}/${tmdbId}${seasonQuery}`;
         } else {
           window.location.hash = `#/requests`;
         }
@@ -18674,8 +18676,8 @@ const RequestsPage = {
               <!-- 16:9 Backdrop / Poster Thumbnail Container -->
               <div
                 class="req-episode-thumb"
-                @click="(req.status === 'completed' || req.detected_media_id) ? goToLibraryMedia(req) : null"
-                :style="{ cursor: (req.status === 'completed' || req.detected_media_id) ? 'pointer' : 'default' }"
+                @click="isLocallyPlayable(req) ? goToLibraryMedia(req) : null"
+                :style="{ cursor: isLocallyPlayable(req) ? 'pointer' : 'default' }"
               >
                 <img
                   :src="'/api/requests/artwork/' + req.id + '/backdrop'"
@@ -18696,7 +18698,7 @@ const RequestsPage = {
                 </div>
 
                 <!-- Play Overlay if in Library -->
-                <div v-if="req.status === 'completed' || req.detected_media_id" class="req-thumb-play-overlay">
+                <div v-if="isLocallyPlayable(req)" class="req-thumb-play-overlay">
                   <i class="ph-fill ph-play req-play-icon"></i>
                 </div>
               </div>
@@ -18735,14 +18737,22 @@ const RequestsPage = {
                   </div>
 
                   <!-- Status Pill -->
-                  <div class="req-status-pill" :class="[req.status, req.auto_detected ? 'in-library' : '']">
+                  <div
+                    class="req-status-pill"
+                    :class="[
+                      req.status,
+                      req.auto_detected ? 'in-library' : '',
+                      (req.status === 'completed' && !isLocallyPlayable(req) && !devMode) ? 'ready-next-drive' : ''
+                    ]"
+                  >
                     <span class="status-indicator-dot"></span>
                     <span>{{
                       req.auto_detected ? 'In Library' :
-                      req.status === 'completed' ? 'Added' :
-                      req.status === 'in_progress' ? 'In Progress' :
-                      req.status === 'rejected' ? 'Declined' :
-                      'Pending'
+                      req.status === 'completed'
+                        ? ((isLocallyPlayable(req) || devMode) ? 'Added' : 'Ready on Next Drive')
+                        : req.status === 'in_progress' ? 'In Progress' :
+                        req.status === 'rejected' ? 'Declined' :
+                        'Pending'
                     }}</span>
                   </div>
                 </div>
@@ -18832,7 +18842,7 @@ const RequestsPage = {
                 <div class="req-episode-status-group" v-if="(req.status === 'completed' || req.detected_media_id) || devMode">
                   <!-- Watch Now Button -->
                   <button
-                    v-if="req.status === 'completed' || req.detected_media_id"
+                    v-if="isLocallyPlayable(req)"
                     class="req-btn req-btn-watch"
                     @click="goToLibraryMedia(req)"
                     title="Open this title in CapsStream"
@@ -18840,6 +18850,16 @@ const RequestsPage = {
                     <i class="ph-bold ph-play"></i>
                     <span>Watch</span>
                   </button>
+
+                  <!-- Next Drive Update Button (Completed on Dev but not yet synced to this drive) -->
+                  <div
+                    v-else-if="req.status === 'completed' && !devMode"
+                    class="req-btn req-btn-next-drive"
+                    title="Downloaded by admin. Will be playable once the updated hard drive is connected to this device."
+                  >
+                    <i class="ph-bold ph-package"></i>
+                    <span>Next Drive Update</span>
+                  </div>
 
                   <!-- DEV Status Action Buttons -->
                   <template v-if="devMode">
@@ -19731,15 +19751,21 @@ const RequestsPage = {
       }
     }
 
+    function isLocallyPlayable(req) {
+      if (!req) return false;
+      if (devMode.value) return req.status === "completed" || !!req.detected_media_id;
+      return !!req.in_local_library;
+    }
+
     function goToLibraryMedia(req) {
-      const mtype = req.detected_media_type || (req.type === "Movie" ? "movie" : "series");
-      const mid = req.detected_media_id;
+      const mid = req.local_media_id || req.detected_media_id;
+      const mtype = req.local_media_type || req.detected_media_type || (req.type === "Movie" ? "movie" : "series");
       const seasonQuery = req.season ? `?season=${req.season}` : "";
       if (mid) {
         if (mtype === "movie") {
           router.push(`/title/movie/${mid}`);
         } else {
-          router.push(`/title/${mtype}/${req.detected_tmdb_id || mid}${seasonQuery}`);
+          router.push(`/title/${mtype}/${req.local_tmdb_id || req.detected_tmdb_id || mid}${seasonQuery}`);
         }
       } else if (req.tmdb_id) {
         router.push(`/title/${mtype}/${req.tmdb_id}${seasonQuery}`);
@@ -19845,6 +19871,7 @@ const RequestsPage = {
       syncOnline,
       syncLibrary,
       goToLibraryMedia,
+      isLocallyPlayable,
       onReqImgError,
       refreshArtwork,
       onTitleInput,
