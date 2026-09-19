@@ -47,6 +47,24 @@ _LOCK = threading.Lock()
 REQUESTS_FILE = os.path.join(BASE_DIR, "data", "requests.json")
 
 
+def _normalize_item_requesters(item):
+    """Ensure a request item contains a valid 'requesters' list of profile objects."""
+    if not isinstance(item, dict):
+        return item
+    if "requesters" not in item or not isinstance(item.get("requesters"), list) or not item["requesters"]:
+        item["requesters"] = [{
+            "profile_id": item.get("profile_id"),
+            "requested_by": item.get("requested_by") or "CapsStream User",
+            "profile_avatar": item.get("profile_avatar") or "🎬",
+            "custom_avatar_url": item.get("custom_avatar_url") or "",
+            "profile_color": item.get("profile_color") or "#e50914",
+            "client_id": item.get("client_id"),
+            "created_at": item.get("created_at") or "",
+            "notes": item.get("notes")
+        }]
+    return item
+
+
 def _load_requests():
     """Load requests from data/requests.json with thread safety."""
     if not os.path.isfile(REQUESTS_FILE):
@@ -54,7 +72,9 @@ def _load_requests():
     try:
         with open(REQUESTS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            return data if isinstance(data, list) else []
+            if isinstance(data, list):
+                return [_normalize_item_requesters(it) for it in data if isinstance(it, dict)]
+            return []
     except Exception:
         return []
 
@@ -374,10 +394,12 @@ def sync_online_requests():
                     if not rid:
                         continue
                     if rid in items_by_id:
-                        # Merge remote fields over local (remote is source of truth for status/notes)
+                        local_reqs = items_by_id[rid].get("requesters")
                         items_by_id[rid].update(r_item)
+                        if local_reqs and not r_item.get("requesters"):
+                            items_by_id[rid]["requesters"] = local_reqs
                     else:
-                        items_by_id[rid] = r_item
+                        items_by_id[rid] = _normalize_item_requesters(r_item)
 
                 # Desktop 2 pushes any local requests that haven't reached Supabase yet
                 if not dev:
@@ -504,6 +526,61 @@ def api_get_requests():
     })
 
 
+def find_duplicate_active_request(items, tmdb_id=None, title=None, media_type="Movie", year=None, season=None, episode=None):
+    """
+    Find if an active request (pending or in_progress) already exists for this media.
+    Matches primarily by tmdb_id (and season/episode if TV/Anime),
+    or normalized title + year + type + season/episode.
+    """
+    for req in items:
+        # Only active requests are considered duplicates
+        if req.get("status") not in ("pending", "in_progress"):
+            continue
+
+        req_tmdb = req.get("tmdb_id")
+        req_type = req.get("type", "Movie")
+        req_season = req.get("season")
+        req_episode = req.get("episode")
+
+        is_tv_new = media_type in ("TV Show", "Anime")
+        is_tv_req = req_type in ("TV Show", "Anime")
+
+        # 1. Match by TMDb ID if both have it
+        if tmdb_id and req_tmdb:
+            try:
+                if int(tmdb_id) == int(req_tmdb):
+                    if is_tv_new and is_tv_req:
+                        if season == req_season and episode == req_episode:
+                            return req
+                    elif not is_tv_new and not is_tv_req:
+                        return req
+            except (ValueError, TypeError):
+                pass
+
+        # 2. Match by normalized title + year
+        if title and req.get("title"):
+            clean_new = re.sub(r"[^\w\s]", "", title.lower()).strip()
+            clean_req = re.sub(r"[^\w\s]", "", req["title"].lower()).strip()
+            if clean_new and clean_new == clean_req:
+                if (is_tv_new and is_tv_req) or (not is_tv_new and not is_tv_req):
+                    if is_tv_new:
+                        if season == req_season and episode == req_episode:
+                            return req
+                    else:
+                        req_year = str(req.get("year") or "").strip()[:4]
+                        new_year = str(year or "").strip()[:4]
+                        if req_year and new_year:
+                            try:
+                                if abs(int(req_year) - int(new_year)) <= 1:
+                                    return req
+                            except Exception:
+                                pass
+                        else:
+                            return req
+
+    return None
+
+
 @requests_bp.route("/api/requests", methods=["POST"])
 def api_create_request():
     """Submit a new media request to local data/requests.json and push to Supabase."""
@@ -618,6 +695,17 @@ def api_create_request():
         "updated_at": now_str
     }
 
+    requester_entry = {
+        "profile_id": pid,
+        "requested_by": prof["name"] if prof else (data.get("requested_by") or "CapsStream User"),
+        "profile_avatar": prof.get("avatar", "🎬") if prof else (data.get("profile_avatar") or "🎬"),
+        "custom_avatar_url": prof.get("custom_avatar_url", "") if prof else (data.get("custom_avatar_url") or ""),
+        "profile_color": prof.get("color", "#e50914") if prof else (data.get("profile_color") or "#e50914"),
+        "client_id": my_client_id,
+        "created_at": now_str,
+        "notes": notes or None
+    }
+
     # If Desktop 1 (DEV), check if already in local library
     if is_dev_mode():
         matched = detect_media_in_library(new_item)
@@ -633,6 +721,86 @@ def api_create_request():
 
     with _LOCK:
         items = _load_requests()
+        existing = find_duplicate_active_request(
+            items,
+            tmdb_id=tmdb_id,
+            title=title,
+            media_type=media_type,
+            year=year,
+            season=season,
+            episode=episode
+        )
+        if existing:
+            requesters = existing.get("requesters")
+            if not isinstance(requesters, list) or not requesters:
+                requesters = [{
+                    "profile_id": existing.get("profile_id"),
+                    "requested_by": existing.get("requested_by") or "CapsStream User",
+                    "profile_avatar": existing.get("profile_avatar") or "🎬",
+                    "custom_avatar_url": existing.get("custom_avatar_url") or "",
+                    "profile_color": existing.get("profile_color") or "#e50914",
+                    "client_id": existing.get("client_id"),
+                    "created_at": existing.get("created_at") or now_str,
+                    "notes": existing.get("notes")
+                }]
+                existing["requesters"] = requesters
+
+            # Check if this profile already requested this item
+            same_profile = False
+            for r in requesters:
+                r_pid = r.get("profile_id")
+                r_name = (r.get("requested_by") or "").strip().lower()
+                new_name = (requester_entry.get("requested_by") or "").strip().lower()
+                if (pid is not None and r_pid is not None and pid == r_pid) or (new_name and r_name == new_name):
+                    same_profile = True
+                    break
+
+            if same_profile:
+                return jsonify({
+                    "error": "You have already requested this title",
+                    "already_requested": True,
+                    "request": existing
+                }), 409
+
+            # Append new profile as additional requester
+            requesters.append(requester_entry)
+            existing["requesters"] = requesters
+            existing["updated_at"] = now_str
+
+            # Update top-level comma-separated list of names for Supabase / backward compat
+            all_names = []
+            for r in requesters:
+                n = (r.get("requested_by") or "").strip()
+                if n and n not in all_names:
+                    all_names.append(n)
+            if all_names:
+                existing["requested_by"] = ", ".join(all_names)
+
+            _save_requests(items)
+
+            # Push updated request to Supabase
+            cloud_synced = False
+            cloud_error = None
+            if is_supabase_configured():
+                try:
+                    res = update_online_request(existing["id"], {
+                        "requested_by": existing["requested_by"],
+                        "updated_at": now_str
+                    })
+                    cloud_synced = bool(res)
+                except Exception as e:
+                    cloud_error = str(e)
+                    print(f"[Requests] Failed to push merged requester to Supabase: {e}")
+
+            return jsonify({
+                "ok": True,
+                "merged": True,
+                "request": existing,
+                "cloud_synced": cloud_synced,
+                "cloud_error": cloud_error
+            }), 200
+
+        new_item["requesters"] = [requester_entry]
         items.insert(0, new_item)
         _save_requests(items)
 
@@ -841,6 +1009,102 @@ def api_update_request(req_id):
             print(f"[Requests] Error updating request in Supabase: {e}")
 
     return jsonify({"ok": True, "request": target})
+
+
+@requests_bp.route("/api/requests/<req_id>/toggle-me-too", methods=["POST"])
+def api_toggle_me_too(req_id):
+    """
+    Allow another profile to toggle joining or leaving an active request as a co-requester ("+1").
+    """
+    _check_kids_guard()
+    pid = current_profile()
+    prof = get_profile(pid) if pid is not None else None
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    my_client_id = get_client_id()
+
+    with _LOCK:
+        items = _load_requests()
+        target = next((item for item in items if item.get("id") == req_id), None)
+        if not target:
+            return jsonify({"error": "Request not found"}), 404
+
+        if target.get("status") not in ("pending", "in_progress"):
+            return jsonify({"error": "Can only join or leave pending or in-progress requests"}), 400
+
+        target = _normalize_item_requesters(target)
+        requesters = target.get("requesters") or []
+
+        pname = prof["name"] if prof else "CapsStream User"
+        existing_idx = None
+        for idx, r in enumerate(requesters):
+            r_pid = r.get("profile_id")
+            r_name = (r.get("requested_by") or "").strip().lower()
+            if (pid is not None and r_pid is not None and pid == r_pid) or (r_name and r_name == pname.strip().lower()):
+                existing_idx = idx
+                break
+
+        if existing_idx is not None:
+            # Profile already joined.
+            if len(requesters) <= 1:
+                return jsonify({
+                    "ok": False,
+                    "error": "You are the original requester for this item"
+                }), 400
+
+            requesters.pop(existing_idx)
+            joined = False
+        else:
+            # Add to requesters
+            requesters.append({
+                "profile_id": pid,
+                "requested_by": pname,
+                "profile_avatar": prof.get("avatar", "🎬") if prof else "🎬",
+                "custom_avatar_url": prof.get("custom_avatar_url", "") if prof else "",
+                "profile_color": prof.get("color", "#e50914") if prof else "#e50914",
+                "color": prof.get("color", "#e50914") if prof else "#e50914",
+                "avatar": prof.get("custom_avatar_url", "") or prof.get("avatar", "") if prof else "",
+                "client_id": my_client_id,
+                "created_at": now_str,
+                "notes": None
+            })
+            joined = True
+
+        target["requesters"] = requesters
+
+        # Update top-level comma-separated list of names for Supabase / backward compat
+        all_names = []
+        for r in requesters:
+            n = (r.get("requested_by") or "").strip()
+            if n and n not in all_names:
+                all_names.append(n)
+        if all_names:
+            target["requested_by"] = ", ".join(all_names)
+
+        target["updated_at"] = now_str
+        _save_requests(items)
+
+    # Push update to Supabase
+    cloud_synced = False
+    cloud_error = None
+    if is_supabase_configured():
+        try:
+            res = update_online_request(target["id"], {
+                "requested_by": target["requested_by"],
+                "updated_at": now_str
+            })
+            cloud_synced = bool(res)
+        except Exception as e:
+            cloud_error = str(e)
+            print(f"[Requests] Error updating toggled request in Supabase: {e}")
+
+    return jsonify({
+        "ok": True,
+        "joined": joined,
+        "request": target,
+        "cloud_synced": cloud_synced,
+        "cloud_error": cloud_error
+    })
 
 
 @requests_bp.route("/api/requests/<req_id>", methods=["DELETE"])

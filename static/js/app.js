@@ -601,6 +601,68 @@ async function checkDrivesHealth() {
   } catch (e) {}
 }
 
+function checkGlobalReadyOnDriveAlerts(itemsList) {
+  if (!itemsList || !Array.isArray(itemsList) || !store.profile) return;
+  const pid = store.profile.id;
+  const pname = (store.profile.name || "").trim().toLowerCase();
+  const storageKey = `caps_notified_reqs_${pid || "anon"}`;
+  let notifiedIds = [];
+  try {
+    notifiedIds = JSON.parse(localStorage.getItem(storageKey) || "[]");
+  } catch (e) {
+    notifiedIds = [];
+  }
+  const notifiedSet = new Set(notifiedIds);
+
+  const fulfilled = itemsList.filter(req => {
+    if (req.status !== "completed" && !req.detected_media_id) return false;
+    if (notifiedSet.has(req.id)) return false;
+    const requesters = req.requesters || [];
+    return requesters.some(r => {
+      if (pid != null && r.profile_id != null && r.profile_id === pid) return true;
+      if (pname && (r.requested_by || "").trim().toLowerCase() === pname) return true;
+      return false;
+    });
+  });
+
+  if (fulfilled.length === 0) return;
+
+  fulfilled.forEach(req => {
+    notifiedSet.add(req.id);
+    addToast(`🎬 "${req.title}" is ready on your hard drive!`, "success", 10000, {
+      label: "Watch Now",
+      onClick: (t) => {
+        store.toasts = store.toasts.filter(x => x.id !== t.id);
+        const mtype = req.detected_media_type || (req.type === "Movie" ? "movie" : "series");
+        const mid = req.detected_media_id;
+        const seasonQuery = req.season ? `?season=${req.season}` : "";
+        if (mid) {
+          window.location.hash = mtype === "movie" ? `#/title/movie/${mid}` : `#/title/${mtype}/${req.detected_tmdb_id || mid}${seasonQuery}`;
+        } else if (req.tmdb_id) {
+          window.location.hash = `#/title/${mtype}/${req.tmdb_id}${seasonQuery}`;
+        } else {
+          window.location.hash = `#/requests`;
+        }
+      }
+    });
+  });
+
+  try {
+    localStorage.setItem(storageKey, JSON.stringify([...notifiedSet]));
+  } catch (e) {}
+}
+
+async function checkFulfilledRequestsAlerts() {
+  try {
+    if (!store.features?.requests || store.profile?.is_kids) return;
+    const res = await API.get("/api/requests");
+    if (res && res.requests) {
+      checkGlobalReadyOnDriveAlerts(res.requests);
+    }
+  } catch (e) {}
+}
+window.checkFulfilledRequestsAlerts = checkFulfilledRequestsAlerts;
+
 function startDriveWatcher() {
   checkDrivesHealth();
   if (driveWatcherInterval) clearInterval(driveWatcherInterval);
@@ -13843,6 +13905,9 @@ const ProfilesPage = {
             if (typeof window.checkPostUpdateWhatsNew === "function") {
               window.checkPostUpdateWhatsNew();
             }
+            if (typeof window.checkFulfilledRequestsAlerts === "function") {
+              window.checkFulfilledRequestsAlerts();
+            }
           });
         }
       } catch (e) {
@@ -18487,6 +18552,86 @@ const RequestsPage = {
             </div>
           </div>
 
+          <!-- Filter, Search & Sort Toolbar -->
+          <div v-if="!loading && (pendingList.length > 0 || completedList.length > 0 || rejectedList.length > 0)" class="requests-filter-bar">
+            <!-- Search Box -->
+            <div class="req-search-box">
+              <i class="ph-bold ph-magnifying-glass"></i>
+              <input
+                type="text"
+                v-model="searchQuery"
+                placeholder="Search requests by title, note, or requester..."
+                class="req-search-input"
+              />
+              <button
+                v-if="searchQuery"
+                class="req-search-clear"
+                @click="searchQuery = ''"
+                title="Clear search"
+              >
+                <i class="ph-bold ph-x"></i>
+              </button>
+            </div>
+
+            <!-- Quick Filter Chips -->
+            <div class="req-filter-chips">
+              <button
+                class="req-filter-chip"
+                :class="{ active: typeFilter === 'all' }"
+                @click="typeFilter = 'all'"
+              >
+                <span>All</span>
+              </button>
+              <button
+                class="req-filter-chip"
+                :class="{ active: typeFilter === 'digital' }"
+                @click="typeFilter = 'digital'"
+                title="Only titles available digitally"
+              >
+                <i class="ph-bold ph-disc"></i>
+                <span>Digital</span>
+              </button>
+              <button
+                class="req-filter-chip"
+                :class="{ active: typeFilter === 'movie' }"
+                @click="typeFilter = 'movie'"
+              >
+                <i class="ph-bold ph-film-strip"></i>
+                <span>Movies</span>
+              </button>
+              <button
+                class="req-filter-chip"
+                :class="{ active: typeFilter === 'series' }"
+                @click="typeFilter = 'series'"
+              >
+                <i class="ph-bold ph-television"></i>
+                <span>Series</span>
+              </button>
+            </div>
+
+            <!-- Sort Toggle Pill (active on pending tab) -->
+            <div class="req-sort-group" v-if="activeTab === 'pending'">
+              <button
+                class="req-sort-btn"
+                :class="{ active: sortBy === 'newest' }"
+                @click="sortBy = 'newest'"
+                title="Sort newest first"
+              >
+                <i class="ph-bold ph-clock"></i>
+                <span>Newest</span>
+              </button>
+              <button
+                class="req-sort-btn"
+                :class="{ active: sortBy === 'popularity' }"
+                @click="sortBy = 'popularity'"
+                title="Sort by most requested"
+              >
+                <i class="ph-bold ph-fire"></i>
+                <span>Most Wanted</span>
+              </button>
+            </div>
+          </div>
+
           <!-- Loading State -->
           <div v-if="loading" class="requests-loading">
             <div class="loading-spinner"></div>
@@ -18496,15 +18641,26 @@ const RequestsPage = {
           <!-- Empty State -->
           <div v-else-if="currentTabList.length === 0" class="requests-empty">
             <div class="empty-icon-bubble">
-              <i :class="activeTab === 'pending' ? 'ph-bold ph-check-circle' : 'ph-bold ph-tray'"></i>
+              <i :class="(searchQuery || typeFilter !== 'all') ? 'ph-bold ph-funnel-x' : (activeTab === 'pending' ? 'ph-bold ph-check-circle' : 'ph-bold ph-tray')"></i>
             </div>
-            <h3>{{ activeTab === 'pending' ? 'No Pending Requests' : 'No Completed Requests Yet' }}</h3>
+            <h3>{{ (searchQuery || typeFilter !== 'all') ? 'No Matching Requests' : (activeTab === 'pending' ? 'No Pending Requests' : 'No Completed Requests Yet') }}</h3>
             <p>
-              {{ activeTab === 'pending'
-                ? 'All requested media has been added to the drive, or no requests have been submitted yet.'
-                : 'When requests are loaded onto the drive and marked as added, they will appear here.'
+              {{ (searchQuery || typeFilter !== 'all')
+                ? 'Try adjusting your search query or filter chips.'
+                : (activeTab === 'pending'
+                  ? 'All requested media has been added to the drive, or no requests have been submitted yet.'
+                  : 'When requests are loaded onto the drive and marked as added, they will appear here.')
               }}
             </p>
+            <button
+              v-if="searchQuery || typeFilter !== 'all'"
+              class="btn-tab-action"
+              style="margin-top: 14px; align-self: center;"
+              @click="searchQuery = ''; typeFilter = 'all'"
+            >
+              <i class="ph-bold ph-arrow-counter-clockwise"></i>
+              <span>Clear Filters</span>
+            </button>
           </div>
 
           <!-- Episode-Style Requests List -->
@@ -18618,18 +18774,51 @@ const RequestsPage = {
 
                 <!-- Footer: Requester info & Cloud Sync -->
                 <div class="req-episode-footer">
-                  <div class="req-requester-info" :title="'Requested by ' + (req.requested_by || 'User')">
-                    <div class="req-avatar" :style="{ background: req.profile_color || '#e50914' }">
+                  <div class="req-requester-info" :title="getRequestersTooltip(req)">
+                    <!-- Single Requester Avatar -->
+                    <div v-if="!req.requesters || req.requesters.length <= 1" class="req-avatar" :style="{ background: req.profile_color || '#e50914' }">
                       <img v-if="req.custom_avatar_url" :src="imgUrl(req.custom_avatar_url)" class="req-avatar-img" :alt="req.requested_by" />
                       <i v-else-if="req.profile_avatar && req.profile_avatar.startsWith('ph-')" :class="'ph-bold ' + req.profile_avatar"></i>
                       <span v-else>{{ req.profile_avatar || '🎬' }}</span>
                     </div>
+
+                    <!-- Multiple Requesters Overlapping Stack -->
+                    <div v-else class="req-avatar-stack">
+                      <div
+                        v-for="(r, rIdx) in req.requesters.slice(0, 3)"
+                        :key="rIdx"
+                        class="req-avatar req-avatar-stacked"
+                        :style="{ background: r.profile_color || '#e50914', zIndex: 10 - rIdx }"
+                        :title="r.requested_by + (r.created_at ? ' (' + formatDate(r.created_at) + ')' : '')"
+                      >
+                        <img v-if="r.custom_avatar_url" :src="imgUrl(r.custom_avatar_url)" class="req-avatar-img" :alt="r.requested_by" />
+                        <i v-else-if="r.profile_avatar && r.profile_avatar.startsWith('ph-')" :class="'ph-bold ' + r.profile_avatar"></i>
+                        <span v-else>{{ r.profile_avatar || '🎬' }}</span>
+                      </div>
+                      <div v-if="req.requesters.length > 3" class="req-avatar req-avatar-more" :title="'+' + (req.requesters.length - 3) + ' more'">
+                        +{{ req.requesters.length - 3 }}
+                      </div>
+                    </div>
+
                     <div class="req-requester-meta">
-                      <span class="req-user-name">{{ req.requested_by || 'CapsStream User' }}</span>
+                      <span class="req-user-name">{{ formatRequestersNames(req) }}</span>
                       <span class="req-meta-dot">•</span>
                       <span class="req-time-txt">{{ formatDate(req.created_at) }}</span>
                     </div>
                   </div>
+
+                  <!-- Quick "+1 / Want This Too" Button for Active Requests -->
+                  <button
+                    v-if="req.status === 'pending' || req.status === 'in_progress'"
+                    class="req-me-too-btn"
+                    :class="{ 'is-joined': isProfileJoined(req) }"
+                    @click.stop="toggleMeToo(req)"
+                    :title="isProfileJoined(req) ? 'You joined this request. Click to withdraw.' : 'I want this too (+1)'"
+                  >
+                    <i :class="isProfileJoined(req) ? 'ph-bold ph-check' : 'ph-bold ph-plus'"></i>
+                    <span>{{ isProfileJoined(req) ? 'Wanted' : '+1 Want this' }}</span>
+                    <span v-if="(req.requesters || []).length > 1" class="req-me-too-badge">{{ (req.requesters || []).length }}</span>
+                  </button>
 
                   <div v-if="req.supabase_id" class="req-cloud-indicator" title="Synced via Online Cloud">
                     <i class="ph-bold ph-cloud-check"></i> Cloud
@@ -18923,10 +19112,53 @@ const RequestsPage = {
     const pendingList = computed(() => items.value.filter((i) => i.status === "pending" || i.status === "in_progress"));
     const completedList = computed(() => items.value.filter((i) => i.status === "completed"));
     const rejectedList = computed(() => items.value.filter((i) => i.status === "rejected"));
+
+    const searchQuery = ref("");
+    const typeFilter = ref("all");
+    const sortBy = ref("newest");
+
     const currentTabList = computed(() => {
-      if (activeTab.value === "completed") return completedList.value;
-      if (activeTab.value === "rejected") return rejectedList.value;
-      return pendingList.value;
+      let list = [];
+      if (activeTab.value === "completed") list = completedList.value;
+      else if (activeTab.value === "rejected") list = rejectedList.value;
+      else list = pendingList.value;
+
+      // Filter by type / digital
+      if (typeFilter.value === "digital") {
+        list = list.filter((i) => i.has_digital_release === true || (i.digital_status_label && i.digital_status_label.toLowerCase().includes("available")));
+      } else if (typeFilter.value === "movie") {
+        list = list.filter((i) => (i.type || "").toLowerCase() === "movie");
+      } else if (typeFilter.value === "series") {
+        list = list.filter((i) => {
+          const t = (i.type || "").toLowerCase();
+          return t === "tv show" || t === "series" || t === "anime";
+        });
+      }
+
+      // Filter by search query (title, notes, requesters, year)
+      const q = searchQuery.value.trim().toLowerCase();
+      if (q) {
+        list = list.filter((i) => {
+          const titleMatch = (i.title || "").toLowerCase().includes(q);
+          const notesMatch = (i.notes || "").toLowerCase().includes(q) || (i.admin_note || "").toLowerCase().includes(q);
+          const yearMatch = String(i.year || "").includes(q);
+          const reqMatch = (i.requesters || []).some((r) => (r.requested_by || "").toLowerCase().includes(q)) ||
+                           (i.requested_by || "").toLowerCase().includes(q);
+          return titleMatch || notesMatch || yearMatch || reqMatch;
+        });
+      }
+
+      // Sort
+      if (activeTab.value === "pending" && sortBy.value === "popularity") {
+        return [...list].sort((a, b) => {
+          const aCount = (a.requesters && a.requesters.length) || 1;
+          const bCount = (b.requesters && b.requesters.length) || 1;
+          if (bCount !== aCount) return bCount - aCount;
+          return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+        });
+      }
+
+      return [...list].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     });
 
     const onlineSynced = ref(false);
@@ -18940,10 +19172,44 @@ const RequestsPage = {
         devMode.value = !!res.dev_mode;
         onlineSynced.value = !!res.online_synced;
         clientId.value = res.client_id || "";
+        if (typeof checkGlobalReadyOnDriveAlerts === "function") {
+          checkGlobalReadyOnDriveAlerts(items.value);
+        }
       } catch (err) {
         addToast(err.message || "Failed to load requests", "error");
       } finally {
         loading.value = false;
+      }
+    }
+
+    function isProfileJoined(req) {
+      if (!req || !req.requesters || !store.profile) return false;
+      const pid = store.profile.id;
+      const pname = (store.profile.name || "").trim().toLowerCase();
+      return (req.requesters || []).some((r) => {
+        if (pid != null && r.profile_id != null && r.profile_id === pid) return true;
+        if (pname && (r.requested_by || "").trim().toLowerCase() === pname) return true;
+        return false;
+      });
+    }
+
+    async function toggleMeToo(req) {
+      if (!req || !req.id) return;
+      try {
+        const res = await API.post(`/api/requests/${req.id}/toggle-me-too`);
+        if (res.ok && res.request) {
+          const idx = items.value.findIndex((it) => it.id === req.id);
+          if (idx !== -1) {
+            items.value[idx] = res.request;
+          }
+          if (res.joined) {
+            addToast(`Joined request for "${req.title}"! (+1)`, "success");
+          } else {
+            addToast(`Removed from request for "${req.title}"`, "info");
+          }
+        }
+      } catch (err) {
+        addToast(err.message || "Failed to update request", "error");
       }
     }
 
@@ -19175,19 +19441,37 @@ const RequestsPage = {
       try {
         const res = await API.post("/api/requests", payload);
         if (res.ok && res.request) {
-          items.value.unshift(res.request);
-          clearSearchInput();
-          form.notes = "";
-          form.type = "Movie";
-          activeTab.value = "pending";
-          if (res.cloud_synced === false && res.cloud_error) {
-            addToast("Saved locally. Cloud relay warning: " + res.cloud_error, "warning");
+          if (res.merged) {
+            const idx = items.value.findIndex((i) => i.id === res.request.id);
+            if (idx !== -1) {
+              items.value[idx] = res.request;
+            } else {
+              items.value.unshift(res.request);
+            }
+            clearSearchInput();
+            form.notes = "";
+            form.type = "Movie";
+            activeTab.value = "pending";
+            addToast("Request added! Merged with existing active request.", "success");
           } else {
-            addToast("Request submitted successfully!", "success");
+            items.value.unshift(res.request);
+            clearSearchInput();
+            form.notes = "";
+            form.type = "Movie";
+            activeTab.value = "pending";
+            if (res.cloud_synced === false && res.cloud_error) {
+              addToast("Saved locally. Cloud relay warning: " + res.cloud_error, "warning");
+            } else {
+              addToast("Request submitted successfully!", "success");
+            }
           }
         }
       } catch (err) {
-        addToast(err.message || "Failed to submit request", "error");
+        if (err.message && err.message.toLowerCase().includes("already requested")) {
+          addToast("You have already requested this title", "warning");
+        } else {
+          addToast(err.message || "Failed to submit request", "error");
+        }
       } finally {
         submitting.value = false;
       }
@@ -19489,6 +19773,37 @@ const RequestsPage = {
       }
     }
 
+    function getRequestersTooltip(req) {
+      if (!req) return "";
+      const list = req.requesters && req.requesters.length > 0 ? req.requesters : [{
+        requested_by: req.requested_by,
+        created_at: req.created_at
+      }];
+      if (list.length <= 1) {
+        return `Requested by ${list[0].requested_by || "CapsStream User"}`;
+      }
+      const lines = list.map(r => `• ${r.requested_by || "User"}${r.created_at ? " (" + formatDate(r.created_at) + ")" : ""}`);
+      return `Requested by ${list.length} users:\n${lines.join("\n")}`;
+    }
+
+    function formatRequestersNames(req) {
+      if (!req) return "CapsStream User";
+      const list = req.requesters && req.requesters.length > 0 ? req.requesters : [{
+        requested_by: req.requested_by
+      }];
+      if (list.length <= 1) {
+        return list[0].requested_by || req.requested_by || "CapsStream User";
+      }
+      const names = list.map(r => r.requested_by || "User");
+      if (names.length === 2) {
+        return `${names[0]} & ${names[1]}`;
+      }
+      if (names.length === 3) {
+        return `${names[0]}, ${names[1]} & ${names[2]}`;
+      }
+      return `${names[0]}, ${names[1]} +${names.length - 2} more`;
+    }
+
     onMounted(() => {
       loadRequests();
       if (route?.query?.title) {
@@ -19552,6 +19867,13 @@ const RequestsPage = {
       getTypeIcon,
       formatDate,
       imgUrl,
+      getRequestersTooltip,
+      formatRequestersNames,
+      searchQuery,
+      typeFilter,
+      sortBy,
+      isProfileJoined,
+      toggleMeToo,
     };
   },
 };
@@ -21644,6 +21966,9 @@ const App = {
         if (newProf && newPath && newPath !== "/profiles") {
           if (!oldProf || oldPath === "/profiles") {
             checkPostUpdateWhatsNew();
+            if (typeof window.checkFulfilledRequestsAlerts === "function") {
+              window.checkFulfilledRequestsAlerts();
+            }
           }
         }
         if (!newProf || newPath === "/profiles") {
@@ -21700,6 +22025,9 @@ const App = {
         if (p) {
           checkUpdateQuiet();
           checkPostUpdateWhatsNew();
+          if (typeof window.checkFulfilledRequestsAlerts === "function") {
+            window.checkFulfilledRequestsAlerts();
+          }
         }
       }
     );

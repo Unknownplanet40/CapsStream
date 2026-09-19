@@ -182,7 +182,15 @@ class TestDigitalReleaseRoutes(unittest.TestCase):
         self.config_patcher = patch("backend.settings.load_config", return_value={"features": {"requests": True}})
         self.config_patcher.start()
 
+        # Isolate route test from live Supabase and external TMDb artwork downloading
+        self.supabase_patcher = patch("backend.routes.requests.is_supabase_configured", return_value=False)
+        self.supabase_patcher.start()
+        self.artwork_patcher = patch("backend.routes.requests.ensure_request_artwork")
+        self.artwork_patcher.start()
+
     def tearDown(self):
+        self.artwork_patcher.stop()
+        self.supabase_patcher.stop()
         self.file_patcher.stop()
         self.config_patcher.stop()
         self.temp_dir.cleanup()

@@ -311,7 +311,110 @@ class TestRouteRequests(unittest.TestCase):
         self.assertIn("test.jpg", updated["poster_path"])
         self.assertIn("bg.jpg", updated["backdrop_path"])
 
+    def test_duplicate_request_merges_different_profile(self):
+        """When a different profile requests an active title, it merges requesters."""
+        # Alice requests Inception
+        with patch("backend.routes.requests.current_profile", return_value=1), \
+             patch("backend.routes.requests.get_profile", return_value={"name": "Alice", "color": "#ff0000"}):
+            resp1 = self.client.post("/api/requests", json={"title": "Inception", "type": "Movie", "tmdb_id": 27205})
+            self.assertEqual(resp1.status_code, 201)
+            req1 = resp1.get_json()["request"]
+            self.assertEqual(len(req1["requesters"]), 1)
+            self.assertEqual(req1["requested_by"], "Alice")
+
+        # Bob requests the same Inception
+        with patch("backend.routes.requests.current_profile", return_value=2), \
+             patch("backend.routes.requests.get_profile", return_value={"name": "Bob", "color": "#00ff00"}):
+            resp2 = self.client.post("/api/requests", json={"title": "Inception", "type": "Movie", "tmdb_id": 27205})
+            self.assertEqual(resp2.status_code, 200)
+            data2 = resp2.get_json()
+            self.assertTrue(data2.get("merged"))
+            req2 = data2["request"]
+            self.assertEqual(len(req2["requesters"]), 2)
+            self.assertEqual(req2["requesters"][0]["requested_by"], "Alice")
+            self.assertEqual(req2["requesters"][1]["requested_by"], "Bob")
+            self.assertEqual(req2["requested_by"], "Alice, Bob")
+
+        # Verify persisted file has only 1 item with 2 requesters
+        with open(self.test_file, "r", encoding="utf-8") as f:
+            persisted = json.load(f)
+            self.assertEqual(len(persisted), 1)
+            self.assertEqual(len(persisted[0]["requesters"]), 2)
+
+    def test_duplicate_request_blocked_same_profile(self):
+        """When the same profile requests an active title again, return 409 already requested."""
+        with patch("backend.routes.requests.current_profile", return_value=1), \
+             patch("backend.routes.requests.get_profile", return_value={"name": "Alice", "color": "#ff0000"}):
+            resp1 = self.client.post("/api/requests", json={"title": "Inception", "type": "Movie", "tmdb_id": 27205})
+            self.assertEqual(resp1.status_code, 201)
+
+            resp2 = self.client.post("/api/requests", json={"title": "Inception", "type": "Movie", "tmdb_id": 27205})
+            self.assertEqual(resp2.status_code, 409)
+            data2 = resp2.get_json()
+            self.assertTrue(data2.get("already_requested"))
+            self.assertIn("already requested", data2.get("error", "").lower())
+
+        with open(self.test_file, "r", encoding="utf-8") as f:
+            persisted = json.load(f)
+            self.assertEqual(len(persisted), 1)
+            self.assertEqual(len(persisted[0]["requesters"]), 1)
+
+    def test_toggle_me_too_join_and_leave(self):
+        """Co-requesters can join with toggle-me-too and subsequently unjoin."""
+        with patch("backend.routes.requests.current_profile", return_value=1), \
+             patch("backend.routes.requests.get_profile", return_value={"name": "Alice", "color": "#ff0000"}):
+            resp1 = self.client.post("/api/requests", json={"title": "Gladiator", "type": "Movie"})
+            req_id = resp1.get_json()["request"]["id"]
+
+        # Bob joins as +1
+        with patch("backend.routes.requests.current_profile", return_value=2), \
+             patch("backend.routes.requests.get_profile", return_value={"name": "Bob", "color": "#00ff00"}):
+            resp2 = self.client.post(f"/api/requests/{req_id}/toggle-me-too")
+            self.assertEqual(resp2.status_code, 200)
+            data2 = resp2.get_json()
+            self.assertTrue(data2["ok"])
+            self.assertTrue(data2["joined"])
+            self.assertEqual(len(data2["request"]["requesters"]), 2)
+            self.assertEqual(data2["request"]["requested_by"], "Alice, Bob")
+
+            # Bob toggles again to leave
+            resp3 = self.client.post(f"/api/requests/{req_id}/toggle-me-too")
+            self.assertEqual(resp3.status_code, 200)
+            data3 = resp3.get_json()
+            self.assertTrue(data3["ok"])
+            self.assertFalse(data3["joined"])
+            self.assertEqual(len(data3["request"]["requesters"]), 1)
+            self.assertEqual(data3["request"]["requested_by"], "Alice")
+
+    def test_toggle_me_too_sole_requester_cannot_leave(self):
+        """Primary/sole requester cannot leave their own request via toggle."""
+        with patch("backend.routes.requests.current_profile", return_value=1), \
+             patch("backend.routes.requests.get_profile", return_value={"name": "Alice", "color": "#ff0000"}):
+            resp1 = self.client.post("/api/requests", json={"title": "Gladiator", "type": "Movie"})
+            req_id = resp1.get_json()["request"]["id"]
+
+            resp2 = self.client.post(f"/api/requests/{req_id}/toggle-me-too")
+            self.assertEqual(resp2.status_code, 400)
+            self.assertIn("original requester", resp2.get_json().get("error", "").lower())
+
+    def test_toggle_me_too_not_found_or_inactive(self):
+        """Toggle returns 404 for unknown request and 400 for completed/rejected."""
+        with patch("backend.routes.requests.current_profile", return_value=1), \
+             patch("backend.routes.requests.get_profile", return_value={"name": "Alice"}):
+            resp_404 = self.client.post("/api/requests/non-existent-id/toggle-me-too")
+            self.assertEqual(resp_404.status_code, 404)
+
+            # Create request then patch it to completed
+            res = self.client.post("/api/requests", json={"title": "Completed Movie", "type": "Movie"})
+            req_id = res.get_json()["request"]["id"]
+            with patch("backend.routes.requests.is_dev_mode", return_value=True):
+                self.client.patch(f"/api/requests/{req_id}", json={"status": "completed"})
+
+            resp_inactive = self.client.post(f"/api/requests/{req_id}/toggle-me-too")
+            self.assertEqual(resp_inactive.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
