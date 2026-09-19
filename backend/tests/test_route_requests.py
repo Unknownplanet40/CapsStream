@@ -441,6 +441,128 @@ class TestRouteRequests(unittest.TestCase):
             self.assertEqual(item["local_media_type"], "movie")
             self.assertEqual(item["local_tmdb_id"], 12345)
 
+    def test_client_request_merges_with_remote_dev_request(self):
+        """When a client submits a title that exists on Dev/remote, it merges without creating duplicates."""
+        remote_req = {
+            "id": "req_remote_spiderman",
+            "title": "Spider-Man: Brand New Day",
+            "type": "Movie",
+            "tmdb_id": 9999,
+            "status": "pending",
+            "client_id": "client_dev_1",
+            "requested_by": "Capsss",
+            "requesters": [{
+                "profile_id": 1,
+                "requested_by": "Capsss",
+                "client_id": "client_dev_1"
+            }]
+        }
+
+        with patch("backend.routes.requests.is_dev_mode", return_value=False), \
+             patch("backend.routes.requests.get_client_id", return_value="client_prod_2"), \
+             patch("backend.routes.requests.is_supabase_configured", return_value=True), \
+             patch("backend.routes.requests.fetch_online_requests", return_value=[remote_req]), \
+             patch("backend.routes.requests.update_online_request") as mock_update, \
+             patch("backend.routes.requests.current_profile", return_value=2), \
+             patch("backend.routes.requests.get_profile", return_value={"name": "Tito"}):
+
+            resp = self.client.post("/api/requests", json={
+                "title": "Spider-Man: Brand New Day",
+                "type": "Movie",
+                "tmdb_id": 9999
+            })
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data["ok"])
+            self.assertTrue(data.get("merged"))
+            req = data["request"]
+            self.assertEqual(req["id"], "req_remote_spiderman")
+            requester_names = [r["requested_by"] for r in req["requesters"]]
+            self.assertIn("Capsss", requester_names)
+            self.assertIn("Tito", requester_names)
+            self.assertIn("Tito", req["requested_by"])
+            mock_update.assert_called_once()
+
+    def test_consolidate_duplicate_requests_helper(self):
+        """consolidate_duplicate_requests merges matching active titles and cleans remote duplicates."""
+        from backend.routes.requests import consolidate_duplicate_requests
+
+        item1 = {
+            "id": "req_1",
+            "title": "Spider-Man: Brand New Day",
+            "type": "Movie",
+            "tmdb_id": 9999,
+            "status": "pending",
+            "client_id": "client_dev_1",
+            "requested_by": "Capsss",
+            "requesters": [{"profile_id": 1, "requested_by": "Capsss", "client_id": "client_dev_1"}]
+        }
+        item2 = {
+            "id": "req_2",
+            "title": "Spider-Man: Brand New Day",
+            "type": "Movie",
+            "tmdb_id": 9999,
+            "status": "pending",
+            "client_id": "client_prod_2",
+            "requested_by": "Tito",
+            "requesters": [{"profile_id": 2, "requested_by": "Tito", "client_id": "client_prod_2"}]
+        }
+
+        with patch("backend.routes.requests.is_supabase_configured", return_value=True), \
+             patch("backend.routes.requests.delete_online_request") as mock_del, \
+             patch("backend.routes.requests.update_online_request") as mock_update:
+
+            result = consolidate_duplicate_requests([item1, item2], delete_remote=True)
+            self.assertEqual(len(result), 1)
+            consolidated = result[0]
+            self.assertEqual(consolidated["id"], "req_1")
+            names = [r["requested_by"] for r in consolidated["requesters"]]
+            self.assertIn("Capsss", names)
+            self.assertIn("Tito", names)
+            self.assertEqual(consolidated["requested_by"], "Capsss, Tito")
+            mock_del.assert_called_once_with("req_2")
+            mock_update.assert_called_once()
+
+    def test_filter_requests_for_client(self):
+        """filter_requests_for_client scopes requests correctly for non-dev vs dev clients."""
+        from backend.routes.requests import filter_requests_for_client
+
+        items = [
+            {
+                "id": "req_dev_only",
+                "title": "Gladiator",
+                "client_id": "dev_cid",
+                "requesters": [{"requested_by": "Capsss", "client_id": "dev_cid"}]
+            },
+            {
+                "id": "req_shared",
+                "title": "Spider-Man",
+                "client_id": "dev_cid",
+                "requesters": [
+                    {"requested_by": "Capsss", "client_id": "dev_cid"},
+                    {"requested_by": "Tito", "client_id": "prod_cid"}
+                ]
+            },
+            {
+                "id": "req_prod_only",
+                "title": "Inception",
+                "client_id": "prod_cid",
+                "requesters": [{"requested_by": "Tito", "client_id": "prod_cid"}]
+            }
+        ]
+
+        # Prod client sees only shared and prod_only (not dev_only)
+        prod_view = filter_requests_for_client(items, "prod_cid", dev_mode=False)
+        self.assertEqual(len(prod_view), 2)
+        prod_ids = [it["id"] for it in prod_view]
+        self.assertNotIn("req_dev_only", prod_ids)
+        self.assertIn("req_shared", prod_ids)
+        self.assertIn("req_prod_only", prod_ids)
+
+        # Dev client sees all 3
+        dev_view = filter_requests_for_client(items, "dev_cid", dev_mode=True)
+        self.assertEqual(len(dev_view), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

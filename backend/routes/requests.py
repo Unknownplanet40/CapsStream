@@ -358,14 +358,194 @@ def sync_requests_with_library(items=None):
     return items, detected_count
 
 
+def filter_requests_for_client(items, client_id, dev_mode=False):
+    """
+    Filter requests based on device context.
+    - If dev_mode: returns all requests (centralized admin view).
+    - If not dev_mode: returns only requests created by this client or joined by this client.
+    """
+    if dev_mode:
+        return items
+    filtered = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if client_id and item.get("client_id") == client_id:
+            filtered.append(item)
+            continue
+        requesters = item.get("requesters") or []
+        if client_id and any(r.get("client_id") == client_id for r in requesters if isinstance(r, dict)):
+            filtered.append(item)
+            continue
+        if not client_id and not item.get("client_id"):
+            filtered.append(item)
+    return filtered
+
+
+def find_duplicate_active_request(items, tmdb_id=None, title=None, media_type="Movie", year=None, season=None, episode=None):
+    """
+    Find if an active request (pending or in_progress) already exists for this media.
+    Matches primarily by tmdb_id (and season/episode if TV/Anime),
+    or normalized title + year + type + season/episode.
+    """
+    for req in items:
+        if not isinstance(req, dict):
+            continue
+        # Only active requests are considered duplicates
+        if req.get("status") not in ("pending", "in_progress"):
+            continue
+
+        req_tmdb = req.get("tmdb_id")
+        req_type = req.get("type", "Movie")
+        req_season = req.get("season")
+        req_episode = req.get("episode")
+
+        is_tv_new = media_type in ("TV Show", "Anime")
+        is_tv_req = req_type in ("TV Show", "Anime")
+
+        # 1. Match by TMDb ID if both have it
+        if tmdb_id and req_tmdb:
+            try:
+                if int(tmdb_id) == int(req_tmdb):
+                    if is_tv_new and is_tv_req:
+                        if season == req_season and episode == req_episode:
+                            return req
+                    elif not is_tv_new and not is_tv_req:
+                        return req
+            except (ValueError, TypeError):
+                pass
+
+        # 2. Match by normalized title + year
+        if title and req.get("title"):
+            clean_new = re.sub(r"[^\w\s]", "", title.lower()).strip()
+            clean_req = re.sub(r"[^\w\s]", "", req["title"].lower()).strip()
+            if clean_new and clean_new == clean_req:
+                if (is_tv_new and is_tv_req) or (not is_tv_new and not is_tv_req):
+                    if is_tv_new:
+                        if season == req_season and episode == req_episode:
+                            return req
+                    else:
+                        req_year = str(req.get("year") or "").strip()[:4]
+                        new_year = str(year or "").strip()[:4]
+                        if req_year and new_year:
+                            try:
+                                if abs(int(req_year) - int(new_year)) <= 1:
+                                    return req
+                            except Exception:
+                                pass
+                        else:
+                            return req
+
+    return None
+
+
+def consolidate_duplicate_requests(items, delete_remote=False):
+    """
+    Consolidate active requests that share the same media (TMDb ID or title+year+type+season/episode).
+    Merges their requesters lists, updates requested_by, and if delete_remote is True,
+    removes redundant rows from Supabase and updates the primary row.
+    """
+    if not items:
+        return []
+
+    consolidated = []
+    duplicates_to_delete = []
+    primary_to_update = []
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item = _normalize_item_requesters(item)
+
+        # Only active requests (pending or in_progress) are candidates for merging
+        if item.get("status") not in ("pending", "in_progress"):
+            consolidated.append(item)
+            continue
+
+        existing = find_duplicate_active_request(
+            consolidated,
+            tmdb_id=item.get("tmdb_id"),
+            title=item.get("title"),
+            media_type=item.get("type", "Movie"),
+            year=item.get("year"),
+            season=item.get("season"),
+            episode=item.get("episode")
+        )
+
+        if existing and existing.get("id") != item.get("id"):
+            # Merge requesters from item into existing
+            existing_reqs = existing.get("requesters") or []
+            item_reqs = item.get("requesters") or []
+
+            for r in item_reqs:
+                if not isinstance(r, dict):
+                    continue
+                r_pid = r.get("profile_id")
+                r_cid = r.get("client_id")
+                r_name = (r.get("requested_by") or "").strip().lower()
+
+                already_in = False
+                for ex_r in existing_reqs:
+                    ex_pid = ex_r.get("profile_id")
+                    ex_cid = ex_r.get("client_id")
+                    ex_name = (ex_r.get("requested_by") or "").strip().lower()
+                    if (r_pid is not None and ex_pid is not None and r_pid == ex_pid and r_cid == ex_cid) or \
+                       (r_name and ex_name and r_name == ex_name and r_cid == ex_cid):
+                        already_in = True
+                        break
+
+                if not already_in:
+                    existing_reqs.append(r)
+
+            existing["requesters"] = existing_reqs
+
+            # Update combined requested_by names
+            all_names = []
+            for r in existing_reqs:
+                n = (r.get("requested_by") or "").strip()
+                if n and n not in all_names:
+                    all_names.append(n)
+            if all_names:
+                existing["requested_by"] = ", ".join(all_names)
+
+            existing["updated_at"] = now_str
+
+            duplicates_to_delete.append(item.get("id"))
+            if existing.get("id") not in [p.get("id") for p in primary_to_update]:
+                primary_to_update.append(existing)
+        else:
+            consolidated.append(item)
+
+    if delete_remote and is_supabase_configured():
+        for dup_id in duplicates_to_delete:
+            if dup_id:
+                try:
+                    delete_online_request(dup_id)
+                except Exception as e:
+                    print(f"[Requests] Failed to delete duplicate request {dup_id} from Supabase: {e}")
+
+        for prim in primary_to_update:
+            if prim.get("id"):
+                try:
+                    update_online_request(prim["id"], {
+                        "requested_by": prim.get("requested_by"),
+                        "updated_at": prim.get("updated_at")
+                    })
+                except Exception as e:
+                    print(f"[Requests] Failed to update merged request {prim['id']} in Supabase: {e}")
+
+    return consolidated
+
+
 def sync_online_requests():
     """
     Bi-directional sync between local data/requests.json and Supabase.
-    - Desktop 1 (DEV): pulls all requests from Supabase, detects local library matches,
-      pushes status updates back to Supabase, and updates local cache.
-    - Desktop 2 (Client): pulls only requests for its client_id, updates local cache,
-      and pushes any offline-created requests to Supabase.
-    Returns (requests_to_display, detected_count, online_synced_bool).
+    - Desktop 1 (DEV): pulls all requests from Supabase, auto-deduplicates,
+      detects local library matches, pushes status updates back to Supabase, and updates local cache.
+    - Desktop 2 (Client): pulls full requests from Supabase in memory for deduplication,
+      merges any existing titles, saves to cache, but displays ONLY its own requests in the UI.
+    Returns (requests_to_display, detected_count, online_synced_bool, sync_error).
     """
     dev = is_dev_mode()
     my_client_id = get_client_id()
@@ -373,7 +553,6 @@ def sync_online_requests():
 
     with _LOCK:
         local_items = _load_requests()
-        # Backwards compatibility: ensure every local item has a client_id
         for item in local_items:
             if not item.get("client_id"):
                 item["client_id"] = my_client_id
@@ -385,9 +564,8 @@ def sync_online_requests():
         sync_error = None
         if online_available:
             try:
-                # Desktop 1 (DEV) queries all requests; Desktop 2 queries only its own
-                target_cid = None if dev else my_client_id
-                remote_items = fetch_online_requests(client_id=target_cid)
+                # Fetch full cloud dataset in memory for cross-device deduplication
+                remote_items = fetch_online_requests(client_id=None)
 
                 for r_item in remote_items:
                     rid = r_item.get("id")
@@ -401,16 +579,54 @@ def sync_online_requests():
                     else:
                         items_by_id[rid] = _normalize_item_requesters(r_item)
 
-                # Desktop 2 pushes any local requests that haven't reached Supabase yet
+                # Non-dev clients push local requests that haven't reached Supabase yet
                 if not dev:
                     remote_ids = {r.get("id") for r in remote_items if r.get("id")}
                     for item in local_items:
                         iid = item.get("id")
                         if iid and iid not in remote_ids and item.get("client_id") == my_client_id:
-                            upsert_online_request(item)
+                            # Before pushing, check if an active duplicate already exists remotely
+                            remote_dup = find_duplicate_active_request(
+                                remote_items,
+                                tmdb_id=item.get("tmdb_id"),
+                                title=item.get("title"),
+                                media_type=item.get("type", "Movie"),
+                                year=item.get("year"),
+                                season=item.get("season"),
+                                episode=item.get("episode")
+                            )
+                            if remote_dup:
+                                remote_dup = _normalize_item_requesters(remote_dup)
+                                item_reqs = item.get("requesters") or []
+                                ex_reqs = remote_dup.get("requesters") or []
+                                for r in item_reqs:
+                                    if not any(
+                                        (ex.get("profile_id") == r.get("profile_id") and ex.get("client_id") == r.get("client_id")) or
+                                        ((ex.get("requested_by") or "").strip().lower() == (r.get("requested_by") or "").strip().lower() and ex.get("client_id") == r.get("client_id"))
+                                        for ex in ex_reqs
+                                    ):
+                                        ex_reqs.append(r)
+                                remote_dup["requesters"] = ex_reqs
+                                names = [r.get("requested_by") for r in ex_reqs if r.get("requested_by")]
+                                if names:
+                                    remote_dup["requested_by"] = ", ".join(dict.fromkeys(names))
+                                remote_dup["updated_at"] = now_str
+                                update_online_request(remote_dup["id"], {
+                                    "requested_by": remote_dup["requested_by"],
+                                    "updated_at": now_str
+                                })
+                                items_by_id[remote_dup["id"]] = remote_dup
+                                if iid in items_by_id:
+                                    del items_by_id[iid]
+                            else:
+                                upsert_online_request(item)
             except Exception as e:
                 sync_error = str(e)
                 print(f"[Requests] Supabase sync error: {e}")
+
+        # Consolidate any duplicate active requests across local and remote
+        all_items = consolidate_duplicate_requests(list(items_by_id.values()), delete_remote=dev)
+        items_by_id = {it["id"]: it for it in all_items if it.get("id")}
 
         # If Desktop 1 (DEV), perform library detection against local media DB
         if dev:
@@ -469,11 +685,8 @@ def sync_online_requests():
         )
         _save_requests(all_sorted)
 
-        # Scoping: Desktop 2 sees ONLY its own requests; Desktop 1 (DEV) sees all
-        if not dev:
-            display_items = [it for it in all_sorted if it.get("client_id") == my_client_id]
-        else:
-            display_items = all_sorted
+        # Scoping: Desktop 2 sees ONLY its own/joined requests; Desktop 1 (DEV) sees all
+        display_items = filter_requests_for_client(all_sorted, my_client_id, dev)
 
         return display_items, detected_count, online_available, sync_error
 
@@ -548,59 +761,6 @@ def api_get_requests():
     })
 
 
-def find_duplicate_active_request(items, tmdb_id=None, title=None, media_type="Movie", year=None, season=None, episode=None):
-    """
-    Find if an active request (pending or in_progress) already exists for this media.
-    Matches primarily by tmdb_id (and season/episode if TV/Anime),
-    or normalized title + year + type + season/episode.
-    """
-    for req in items:
-        # Only active requests are considered duplicates
-        if req.get("status") not in ("pending", "in_progress"):
-            continue
-
-        req_tmdb = req.get("tmdb_id")
-        req_type = req.get("type", "Movie")
-        req_season = req.get("season")
-        req_episode = req.get("episode")
-
-        is_tv_new = media_type in ("TV Show", "Anime")
-        is_tv_req = req_type in ("TV Show", "Anime")
-
-        # 1. Match by TMDb ID if both have it
-        if tmdb_id and req_tmdb:
-            try:
-                if int(tmdb_id) == int(req_tmdb):
-                    if is_tv_new and is_tv_req:
-                        if season == req_season and episode == req_episode:
-                            return req
-                    elif not is_tv_new and not is_tv_req:
-                        return req
-            except (ValueError, TypeError):
-                pass
-
-        # 2. Match by normalized title + year
-        if title and req.get("title"):
-            clean_new = re.sub(r"[^\w\s]", "", title.lower()).strip()
-            clean_req = re.sub(r"[^\w\s]", "", req["title"].lower()).strip()
-            if clean_new and clean_new == clean_req:
-                if (is_tv_new and is_tv_req) or (not is_tv_new and not is_tv_req):
-                    if is_tv_new:
-                        if season == req_season and episode == req_episode:
-                            return req
-                    else:
-                        req_year = str(req.get("year") or "").strip()[:4]
-                        new_year = str(year or "").strip()[:4]
-                        if req_year and new_year:
-                            try:
-                                if abs(int(req_year) - int(new_year)) <= 1:
-                                    return req
-                            except Exception:
-                                pass
-                        else:
-                            return req
-
-    return None
 
 
 @requests_bp.route("/api/requests", methods=["POST"])
@@ -752,6 +912,24 @@ def api_create_request():
             season=season,
             episode=episode
         )
+        if not existing and is_supabase_configured():
+            try:
+                remote_items = fetch_online_requests(client_id=None)
+                remote_match = find_duplicate_active_request(
+                    remote_items,
+                    tmdb_id=tmdb_id,
+                    title=title,
+                    media_type=media_type,
+                    year=year,
+                    season=season,
+                    episode=episode
+                )
+                if remote_match:
+                    existing = _normalize_item_requesters(remote_match)
+                    items.append(existing)
+            except Exception as e:
+                print(f"[Requests] Error checking remote duplicates on create: {e}")
+
         if existing:
             requesters = existing.get("requesters")
             if not isinstance(requesters, list) or not requesters:
@@ -767,15 +945,17 @@ def api_create_request():
                 }]
                 existing["requesters"] = requesters
 
-            # Check if this profile already requested this item
+            # Check if this profile already requested this item on this device
             same_profile = False
             for r in requesters:
                 r_pid = r.get("profile_id")
+                r_cid = r.get("client_id")
                 r_name = (r.get("requested_by") or "").strip().lower()
                 new_name = (requester_entry.get("requested_by") or "").strip().lower()
-                if (pid is not None and r_pid is not None and pid == r_pid) or (new_name and r_name == new_name):
-                    same_profile = True
-                    break
+                if (r_cid == my_client_id or not r_cid or not my_client_id):
+                    if (pid is not None and r_pid is not None and pid == r_pid) or (new_name and r_name == new_name):
+                        same_profile = True
+                        break
 
             if same_profile:
                 return jsonify({
@@ -864,13 +1044,17 @@ def api_sync_library():
     """Trigger an auto-detection pass of all requests against the CapsStream library."""
     _check_kids_guard()
     items, detected_count = sync_requests_with_library()
+    dev = is_dev_mode()
+    my_client_id = get_client_id()
+    items = filter_requests_for_client(items, my_client_id, dev)
     for item in items:
         _enrich_item_profile(item)
         _enrich_item_local_library(item)
     return jsonify({
         "ok": True,
         "detected_count": detected_count,
-        "requests": items
+        "requests": items,
+        "dev_mode": dev
     })
 
 
@@ -1150,10 +1334,33 @@ def api_delete_request(req_id):
 
         # Non-dev clients can only delete their own pending requests
         if not dev:
-            if target.get("client_id") != my_client_id and target.get("profile_id") != current_profile():
+            client_matches = (not target.get("client_id") or target.get("client_id") == my_client_id)
+            profile_matches = (not target.get("profile_id") or target.get("profile_id") == current_profile())
+            is_creator = client_matches and profile_matches
+            requesters = target.get("requesters") or []
+            my_joined = [r for r in requesters if (r.get("client_id") == my_client_id and r.get("profile_id") == current_profile())]
+
+            if not is_creator and not my_joined and not client_matches:
                 return jsonify({"error": "Unauthorized to delete this request"}), 403
             if target.get("status") != "pending":
                 return jsonify({"error": "Only pending requests can be deleted in standard mode"}), 403
+
+            # If there are other requesters on this shared item, withdraw this requester instead of deleting for everyone
+            if len(requesters) > 1:
+                target["requesters"] = [r for r in requesters if not (r.get("client_id") == my_client_id and r.get("profile_id") == current_profile())]
+                all_names = [r.get("requested_by") for r in target["requesters"] if r.get("requested_by")]
+                target["requested_by"] = ", ".join(dict.fromkeys(all_names))
+                target["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                _save_requests(items)
+                if is_supabase_configured():
+                    try:
+                        update_online_request(req_id, {
+                            "requested_by": target["requested_by"],
+                            "updated_at": target["updated_at"]
+                        })
+                    except Exception as e:
+                        print(f"[Requests] Error updating withdrawn request in Supabase: {e}")
+                return jsonify({"ok": True, "withdrawn": True})
 
         items = [item for item in items if item.get("id") != req_id]
         _save_requests(items)
