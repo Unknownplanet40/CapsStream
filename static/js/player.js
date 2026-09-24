@@ -3228,8 +3228,9 @@ const PlayerPage = {
 
       // Reset credits shrink dismissal when seeking backward before credits/outro
       const dur = displayDuration.value || maxDur || 0;
+      const isMovie = media.value?.type === "movie";
       const edStart = skipTimes.value?.ed?.start || media.value?.outro_start;
-      const outroThreshold = (edStart && edStart > 0) ? (edStart - 5) : (dur > 35 ? dur - 35 : 0);
+      const outroThreshold = (edStart && edStart > 0) ? (edStart - 5) : (dur > (isMovie ? 60 : 35) ? dur - (isMovie ? 60 : 35) : 0);
       if (validTarget < outroThreshold) {
         creditsShrinkDismissed.value = false;
         if (showCreditsShrink.value) {
@@ -3508,10 +3509,12 @@ const PlayerPage = {
         // Instant priority: manual fields drive activeSkipAction right away
         Object.assign(media.value, updatedData);
       }
+      creditsShrinkDismissed.value = false;
       // Re-resolve segments (seekbar overlays + floating skip buttons read
       // skipTimes, not media fields). Server returns fresh manual-first data,
       // so new/edited/cleared markers appear with NO reload needed.
       loadSkipTimes(route.params.id);
+      checkCreditsShrink();
     }
 
     // NOTE: auto-skip is handled by checkAutoSkip() inside onTimeUpdate —
@@ -6754,13 +6757,50 @@ const PlayerPage = {
       if (!foundNext && media.value && (media.value.type === "movie" || media.value.type === "anime")) {
         try {
           const fData = await API.get(`/api/media/${mediaId}/franchise`);
-          if (fData && fData.suggested_next && fData.suggested_next.id) {
+          let nextItem = fData?.suggested_next;
+          if (!nextItem && fData?.items?.length > 1) {
+            const curIdx = fData.items.findIndex(
+              (it) => it.is_current || Number(it.id) === Number(mediaId) || (media.value.tmdb_id && it.tmdb_id === media.value.tmdb_id)
+            );
+            if (curIdx >= 0) {
+              // 1. Look forward for sequel
+              for (let i = curIdx + 1; i < fData.items.length; i++) {
+                const cand = fData.items[i];
+                if (cand && cand.id && cand.is_mounted !== false && cand.is_local !== false) {
+                  nextItem = {
+                    ...cand,
+                    suggestion_type: "sequel",
+                    franchise_name: fData.name,
+                    sequence_text: `Part ${cand.sequence_number || i + 1} of ${fData.items.length}`,
+                  };
+                  break;
+                }
+              }
+              // 2. If finale, look backward for prequel
+              if (!nextItem) {
+                for (let i = curIdx - 1; i >= 0; i--) {
+                  const cand = fData.items[i];
+                  if (cand && cand.id && cand.is_mounted !== false && cand.is_local !== false) {
+                    nextItem = {
+                      ...cand,
+                      suggestion_type: "prequel",
+                      franchise_name: fData.name,
+                      sequence_text: `Part ${cand.sequence_number || i + 1} of ${fData.items.length}`,
+                    };
+                    break;
+                  }
+                }
+              }
+            }
+          }
+
+          if (nextItem && nextItem.id) {
             foundNext = {
-              ...fData.suggested_next,
+              ...nextItem,
               is_franchise_sequel: true,
-              franchise_name: fData.name,
-              suggestion_type: fData.suggested_next.suggestion_type || "sequel",
-              sequence_text: fData.suggested_next.sequence_text,
+              franchise_name: nextItem.franchise_name || fData?.name,
+              suggestion_type: nextItem.suggestion_type || "sequel",
+              sequence_text: nextItem.sequence_text,
             };
           }
         } catch (e) {
