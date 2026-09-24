@@ -6483,12 +6483,13 @@ const SettingsPage = {
             <div class="settings-row">
               <div class="settings-label-container">
                 <div class="settings-label">Smart HEVC Compatibility</div>
-                <div class="settings-desc">Start with the original HEVC stream. When enabled, automatically switch to H.264 at the source resolution if playback freezes or the browser cannot decode it.</div>
+                <div class="settings-desc">What to do when an HEVC (H.265 / 10-bit) stream stalls or encounters browser decoder issues.</div>
               </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="form.playback.auto_convert_hevc" id="setting-hevc-compat-toggle" />
-                <span class="toggle-slider"></span>
-              </label>
+              <select v-model="form.playback.auto_convert_hevc" class="form-input" id="setting-hevc-compat-select" style="width:220px">
+                <option value="ask">Prompt with Modal (Recommended)</option>
+                <option value="auto">Auto-Switch Silently</option>
+                <option value="never">Never Convert (Error Only)</option>
+              </select>
             </div>
 
             <div class="settings-row">
@@ -8383,7 +8384,7 @@ const SettingsPage = {
         auto_play_next: true,
         inactivity_sleep_limit: 3,
         auto_skip_intro: false,
-        auto_convert_hevc: true,
+        auto_convert_hevc: "ask",
         seek_step: 10,
         default_volume: 1,
         default_speed: 1,

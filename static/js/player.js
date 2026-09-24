@@ -1171,6 +1171,34 @@ const PlayerPage = {
         </div>
       </div>
 
+      <!-- HEVC / 10-Bit Playback Issue Recovery Modal -->
+      <div v-if="showHevcConvertModal" class="modal-backdrop" @click.stop>
+        <div class="resume-modal-card hevc-convert-modal-card" @click.stop>
+          <div class="resume-card-info" style="text-align:center">
+            <div class="resume-badge" style="background:rgba(239,68,68,0.15);color:#f87171;border-color:rgba(239,68,68,0.3)">
+              <i class="ph-bold ph-warning"></i> HEVC PLAYBACK STALL
+            </div>
+            <div class="resume-card-heading">HEVC Playback Issue Detected</div>
+            <div class="resume-card-subtext" style="margin-top:8px;line-height:1.5;color:rgba(255,255,255,0.78)">
+              Your browser encountered an issue decoding the original HEVC (H.265 / 10-bit) stream. You can switch to the browser-compatible converted stream (H.264) to continue watching smoothly.
+            </div>
+          </div>
+          <div class="resume-card-actions" style="margin-top:1.5rem">
+            <button class="btn btn-primary btn-full player-issue-btn-red" @click="confirmHevcConversion" id="btn-hevc-switch-converted" autoFocus>
+              <i class="ph-bold ph-lightning"></i>
+              <span>Switch to Converted (H.264)</span>
+            </button>
+            <button class="btn btn-secondary btn-full" @click="retryHevcOriginal" id="btn-hevc-retry-original">
+              <i class="ph-bold ph-arrow-counter-clockwise"></i>
+              <span>Retry Original Stream</span>
+            </button>
+            <button class="btn btn-ghost btn-full" @click="dismissHevcModalAndGoBack" id="btn-hevc-go-back">
+              <span>Go Back</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Netflix-Style Floating Bottom-Right Next Episode / Sequel Card -->
       <transition name="fade">
         <div v-if="(showCreditsShrink || isEnded) && hasNextEp && !creditsShrinkDismissed" class="next-ep-floating-card" :class="{ 'controls-hidden': controlsHidden }" @click.stop>
@@ -3566,12 +3594,12 @@ const PlayerPage = {
       controlsHidden.value = false;
       clearTimeout(hideTimer);
       // Never auto-hide if a settings/selection submenu or modal is open
-      if (showSubMenu.value || showAudioMenu.value || showQualityMenu.value || showSpeedMenu.value || showSleepMenu.value || showChapterMenu.value || showOnlineSubModal.value || showResumeModal.value) {
+      if (showSubMenu.value || showAudioMenu.value || showQualityMenu.value || showSpeedMenu.value || showSleepMenu.value || showChapterMenu.value || showOnlineSubModal.value || showResumeModal.value || showHevcConvertModal.value) {
         return;
       }
       if (videoRef.value && !videoRef.value.paused) {
         hideTimer = setTimeout(() => {
-          if (showSubMenu.value || showAudioMenu.value || showQualityMenu.value || showSpeedMenu.value || showSleepMenu.value || showChapterMenu.value || showOnlineSubModal.value || showResumeModal.value) {
+          if (showSubMenu.value || showAudioMenu.value || showQualityMenu.value || showSpeedMenu.value || showSleepMenu.value || showChapterMenu.value || showOnlineSubModal.value || showResumeModal.value || showHevcConvertModal.value) {
             return;
           }
           controlsHidden.value = true;
@@ -5770,16 +5798,27 @@ const PlayerPage = {
           filePath.includes("x265") || filePath.includes("hevc") || filePath.includes("h.265") ||
           filePath.includes("10bit") || filePath.includes("10-bit")
         );
-        const autoConvertHevc = playerSettings.value?.playback?.auto_convert_hevc !== false;
+        const autoConvertSetting = playerSettings.value?.playback?.auto_convert_hevc;
+        const autoConvertMode = (autoConvertSetting === false || autoConvertSetting === "never")
+          ? "never"
+          : (autoConvertSetting === "auto" ? "auto" : "ask");
 
-        // Skip micro-seeks that can resubmit a frozen HEVC stream to the decoder.
-        if (isHevcDirect && autoConvertHevc) {
-          const sourceHeight = Number(vInfo.height || media.value?.height || 0);
-          console.warn("[Player FreezeGuard] HEVC/10-bit decoder stall detected. Switching to compatible playback...");
-          await saveProgressForRecovery();
-          addToast("Switching to compatible playback at the current quality...", "info", 3000);
-          await enableCompatPlayback(true, { forceSoftware: false, maxHeight: sourceHeight });
-          return;
+        // Handle HEVC direct decoder stalls: prompt modal, auto-convert, or fallback
+        if (isHevcDirect) {
+          if (autoConvertMode === "ask") {
+            console.warn("[Player FreezeGuard] HEVC/10-bit decoder stall detected. Prompting user to switch to converted stream...");
+            await saveProgressForRecovery();
+            try { v.pause(); } catch (e) {}
+            showHevcConvertModal.value = true;
+            return;
+          } else if (autoConvertMode === "auto") {
+            const sourceHeight = Number(vInfo.height || media.value?.height || 0);
+            console.warn("[Player FreezeGuard] HEVC/10-bit decoder stall detected. Switching to compatible playback automatically...");
+            await saveProgressForRecovery();
+            addToast("Switching to compatible playback at the current quality...", "info", 3000);
+            await enableCompatPlayback(true, { forceSoftware: false, maxHeight: sourceHeight });
+            return;
+          }
         }
 
         // ─── Tier 1: Soft Recovery (Attempt 1 for non-fatal stalls) ──────────────────────
@@ -5829,8 +5868,14 @@ const PlayerPage = {
         // ─── Tier 3: Fallback Recovery (Attempt 3, or Attempt 2 for fatal decode error) ──────────────────
         // Fall back to server-side error-resilient transcode (use hardware first, fallback to software if needed)
         if (consecutiveRecoveryAttempts >= 3 || (consecutiveRecoveryAttempts >= 2 && isFatalError)) {
-          if (isHevcDirect && !autoConvertHevc) {
+          if (isHevcDirect && autoConvertMode === "never") {
             freezeWarningNotice.value = "HEVC playback is still stalled. Enable Smart HEVC Compatibility to switch formats automatically.";
+            return;
+          }
+          if (isHevcDirect && autoConvertMode === "ask") {
+            await saveProgressForRecovery();
+            try { v.pause(); } catch (e) {}
+            showHevcConvertModal.value = true;
             return;
           }
           const useSw = streamState.transcode || consecutiveRecoveryAttempts > 3;
@@ -5851,7 +5896,7 @@ const PlayerPage = {
 
     function checkPlaybackStall() {
       const v = videoRef.value;
-      if (!v || v.paused || v.ended || v.seeking || !media.value || showResumeModal.value || showInactivityPrompt.value || isRecovering.value || consecutiveRecoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
+      if (!v || v.paused || v.ended || v.seeking || !media.value || showResumeModal.value || showInactivityPrompt.value || showHevcConvertModal.value || isRecovering.value || consecutiveRecoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
         lastMonitoredVideoTime = v ? v.currentTime : -1;
         lastMonitoredWallTime = Date.now();
         stallDurationMs = 0;
@@ -5959,6 +6004,49 @@ const PlayerPage = {
         console.error("[HTML5 Player Error]", e, "code:", v.error.code, "msg:", v.error.message);
         executeFreezeRecovery("video_element_error_code_" + v.error.code);
       }
+    }
+
+    // ─── HEVC Playback Stall / Converter Recovery Modal ───────────
+    const showHevcConvertModal = ref(false);
+
+    async function confirmHevcConversion() {
+      showHevcConvertModal.value = false;
+      const vInfo = media.value?.video_info || {};
+      const sourceHeight = Number(vInfo.height || media.value?.height || 0);
+      await saveProgressNow();
+      addToast("Switching to converted playback (H.264)...", "info", 3000);
+      try {
+        await enableCompatPlayback(true, { forceSoftware: false, maxHeight: sourceHeight });
+      } catch (err) {
+        console.warn("[Player] HEVC conversion switch error:", err);
+      }
+    }
+
+    async function retryHevcOriginal() {
+      showHevcConvertModal.value = false;
+      const v = videoRef.value;
+      if (!v) return;
+      consecutiveRecoveryAttempts = 0;
+      isRecovering.value = false;
+      stallDurationMs = 0;
+      lastMonitoredVideoTime = -1;
+      lastMonitoredWallTime = Date.now();
+      addToast("Retrying original stream...", "info", 2000);
+      const targetPos = Math.max(0, (v.currentTime || 0) + 0.10);
+      try {
+        if (v.fastSeek) {
+          v.fastSeek(targetPos);
+        } else {
+          v.currentTime = targetPos;
+        }
+        currentTime.value = targetPos;
+      } catch (e) {}
+      await v.play().catch(() => {});
+    }
+
+    function dismissHevcModalAndGoBack() {
+      showHevcConvertModal.value = false;
+      goBack();
     }
 
     // ─── Error recovery: reload the stream and resume from last position ──
@@ -6226,6 +6314,18 @@ const PlayerPage = {
         } else if (e.key === "Escape" || e.key === "Back") {
           e.preventDefault();
           confirmResume();
+          return;
+        }
+      }
+
+      if (showHevcConvertModal.value) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          confirmHevcConversion();
+          return;
+        } else if (e.key === "Escape" || e.key === "Back") {
+          e.preventDefault();
+          dismissHevcModalAndGoBack();
           return;
         }
       }
@@ -6521,6 +6621,7 @@ const PlayerPage = {
       fetchCompatCaps();
       playerError.value = null;
       showResumeModal.value = false;
+      showHevcConvertModal.value = false;
       resumeTime.value = 0;
       hasResumedProgress = false;
       suppressResume = false;
@@ -7241,6 +7342,10 @@ const PlayerPage = {
       goHome,
       playNext,
       showResumeModal,
+      showHevcConvertModal,
+      confirmHevcConversion,
+      retryHevcOriginal,
+      dismissHevcModalAndGoBack,
       showShortcuts,
       resumeTime,
       confirmResume,

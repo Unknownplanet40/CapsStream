@@ -127,6 +127,33 @@ class TestSettings(unittest.TestCase):
         finally:
             settings.ROOT_DIR = orig_root
 
+    def test_auto_convert_hevc_normalization(self):
+        """Verify legacy boolean values for auto_convert_hevc are normalized to 'ask' and 'never'."""
+        # 1. Default value is "ask"
+        cfg = settings.load_config()
+        self.assertEqual(cfg["playback"]["auto_convert_hevc"], "ask")
+
+        # 2. Legacy True -> "ask"
+        with open(settings.CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump({"playback": {"auto_convert_hevc": True}}, f)
+        settings._CONFIG_CACHE = {"data": None, "ts": 0.0}
+        cfg_true = settings.load_config()
+        self.assertEqual(cfg_true["playback"]["auto_convert_hevc"], "ask")
+
+        # 3. Legacy False -> "never"
+        with open(settings.CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump({"playback": {"auto_convert_hevc": False}}, f)
+        settings._CONFIG_CACHE = {"data": None, "ts": 0.0}
+        cfg_false = settings.load_config()
+        self.assertEqual(cfg_false["playback"]["auto_convert_hevc"], "never")
+
+        # 4. Explicit "auto" is preserved
+        with open(settings.CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump({"playback": {"auto_convert_hevc": "auto"}}, f)
+        settings._CONFIG_CACHE = {"data": None, "ts": 0.0}
+        cfg_auto = settings.load_config()
+        self.assertEqual(cfg_auto["playback"]["auto_convert_hevc"], "auto")
+
 
 if __name__ == "__main__":
     unittest.main()

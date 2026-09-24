@@ -23198,6 +23198,19 @@ body:has(.settings-save-fab) .back-to-top-btn,
   animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* HEVC Recovery Modal Card */
+.hevc-convert-modal-card {
+  max-width: 480px;
+  background: rgba(13, 15, 23, 0.95);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 20px;
+  padding: 1.75rem 1.5rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 35px rgba(239, 68, 68, 0.15);
+  animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 @media (max-width: 768px) {
   .next-ep-floating-card {
     top: auto !important;

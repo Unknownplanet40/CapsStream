@@ -29,6 +29,7 @@
   "playback": {
     "auto_play_next": true,
     "auto_skip_intro": false,
+    "auto_convert_hevc": "ask",
     "seek_step": 10,
     "default_volume": 1,
     "default_speed": 1,

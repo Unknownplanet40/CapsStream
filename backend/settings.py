@@ -61,7 +61,7 @@ DEFAULT_CONFIG = {
     "playback": {
         "auto_play_next": True,
         "auto_skip_intro": False,
-        "auto_convert_hevc": True,
+        "auto_convert_hevc": "ask",
         "seek_step": 10,
         "default_volume": 1,
         "default_speed": 1,
@@ -158,6 +158,14 @@ def load_config():
         # Migration: remove legacy subtitles.font_size key in favor of subtitles.appearance.fontSize
         if isinstance(merged.get("subtitles"), dict) and "font_size" in merged["subtitles"]:
             merged["subtitles"].pop("font_size", None)
+
+        # Normalization: auto_convert_hevc legacy boolean values
+        pb = merged.get("playback", {})
+        if isinstance(pb, dict):
+            if pb.get("auto_convert_hevc") is True:
+                pb["auto_convert_hevc"] = "ask"
+            elif pb.get("auto_convert_hevc") is False:
+                pb["auto_convert_hevc"] = "never"
 
         # Secrets are provided via environment / .env — env values win over
         # anything stale in config.json, and empty config values get filled.
