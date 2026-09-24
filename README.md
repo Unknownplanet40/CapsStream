@@ -186,7 +186,7 @@ Then open **http://127.0.0.1:8000** in your browser (Microsoft Edge or Google Ch
 * **Searchable Keyboard Shortcuts Cheatsheet**: Press `?` or `/` anywhere in the app to summon an elevated cheatsheet card with instant real-time search filtering.
 * **Smart HLS & Hardware-Accelerated Transcoding**: Direct streaming with zero overhead, automatic GPU hardware transcoding (NVIDIA NVENC, Intel QSV, AMD AMF), and resilient CPU fallback for 4K HEVC, 10-bit HDR, and AV1 video.
 * **Interactive Genre Chips & Quality Badges**: Sleek interactive genre chips and video quality badges adhering strictly to media source token priority (e.g. 1080p/720p UHD BluRay encodes accurately badged without defaulting to 4K).
-* **Seekbar Frame Previews & Skip Markers**: Instant visual frame previews when hovering over the progress bar, plus one-click or automated skipping for intro, recap, and outro sequences (powered by AniSkip + custom markers).
+* **Seekbar Frame Previews & Skip Markers**: Instant visual frame previews when hovering over the progress bar, plus one-click or automated skipping for intro, recap, and outro sequences (powered by AniSkip, SkipDB crowdsourcing, and custom markers).
 * **Missing Episodes & Seasons Detection**: Automatically compares local files against TMDb seasons to identify missing episodes and collection gaps at a glance.
 * **Multi-Profile, Kids Mode & Family PIN**: Custom avatar profiles, PIN-protected profiles, and automated age-appropriate content filtering for kids.
 * **Achievements, Milestones & Profile Stats**: Gamified viewing statistics, level progression, and unlockable badges for binge sessions and milestones.

@@ -25,6 +25,8 @@ def _detect_service(url):
         return "OpenSubtitles"
     if "aniskip" in netloc:
         return "AniSkip"
+    if "skipdb.tv" in netloc or "skipdb" in netloc:
+        return "SkipDB"
     if "jikan.moe" in netloc:
         return "Jikan / MAL"
     if "github.com" in netloc or "githubusercontent.com" in netloc:

@@ -22,7 +22,9 @@ DEFAULT_CONFIG = {
     "browser": "edge",
     "launch_browser_on_start": True,
     "metadata_sources": {
-        "enable_jikan": True
+        "enable_jikan": True,
+        "enable_aniskip": True,
+        "enable_skipdb": True
     },
     "port": 8000,
     "host": "127.0.0.1",

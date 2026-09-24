@@ -21,6 +21,7 @@ class TestNetworkInspector(unittest.TestCase):
         self.assertEqual(network_inspector._detect_service("https://image.tmdb.org/t/p/w500/poster.jpg"), "TMDb CDN")
         self.assertEqual(network_inspector._detect_service("https://api.opensubtitles.com/api/v1/subtitles"), "OpenSubtitles")
         self.assertEqual(network_inspector._detect_service("https://api.aniskip.com/v2/skip-times/1/1"), "AniSkip")
+        self.assertEqual(network_inspector._detect_service("https://skipdb.tv/api/segments?imdb_id=tt0903747"), "SkipDB")
         self.assertEqual(network_inspector._detect_service("https://api.jikan.moe/v4/anime"), "Jikan / MAL")
         self.assertEqual(network_inspector._detect_service("https://api.github.com/repos/CapsStream"), "GitHub")
         self.assertEqual(network_inspector._detect_service(""), "Unknown")

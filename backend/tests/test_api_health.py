@@ -19,6 +19,7 @@ class TestApiHealth(unittest.TestCase):
         result = api_health.get_api_health_snapshot({"tmdb_api_key": "key-one"}, "/tmp/capsstream")
         self.assertEqual(result["tmdb"]["status"], "checking")
         self.assertEqual(result["aniskip"]["status"], "checking")
+        self.assertEqual(result["skipdb"]["status"], "checking")
         mock_thread.assert_called_once()
 
     @patch("backend.utils.api_health.threading.Thread")

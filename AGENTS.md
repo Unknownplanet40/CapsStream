@@ -11,7 +11,7 @@ CapsStream is a portable, self-hosted personal media server for movies, TV serie
 - SQLite persistence accessed through the `backend/db/` package.
 - FFmpeg/FFprobe for probing, subtitle extraction, transcoding, thumbnails, and hardware acceleration.
 - Vue 3-style frontend JavaScript, HTML templates, CSS, and service-worker assets under `static/` and `templates/`.
-- External integrations include TMDb, AniSkip, OpenSubtitles, and GitHub APIs.
+- External integrations include TMDb, AniSkip, SkipDB, OpenSubtitles, and GitHub APIs.
 - Windows-first portable launchers: `start.bat`, `Start CapsStream Silent.vbs`, `silent_launcher.py`, and native Win32 system tray (`backend/tray.py`).
 - Android TV / Google TV native companion client (`clients/android-tv/`) with automated CI builds and release packaging.
 

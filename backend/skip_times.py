@@ -4,10 +4,11 @@ skip_times.py — Skip segment resolution for CapsStream.
 Priority order:
   1. Manual skip markers (user-stamped recap/intro/outro stored on the media row)
   2. AniSkip API — ONLY for auto-detected anime (fallback)
-  3. FFprobe embedded chapters (local, keyword-based fallback)
+  3. SkipDB API — crowdsourced movie & series skip markers via skipdb.tv
+  4. FFprobe embedded chapters (local, keyword-based fallback)
 
-Returns normalized dict: { "op": {...}, "ed": {...}, "recap": {...} }
-Each entry carries a "source" field: "manual" | "aniskip" | "chapters".
+Returns normalized dict: { "op": {...}, "ed": {...}, "recap": {...}, "preview": {...} }
+Each entry carries a "source" field: "manual" | "aniskip" | "skipdb" | "chapters".
 """
 
 import os
@@ -267,6 +268,95 @@ def is_anime(media):
     return media.get("type") == "series" and "animation" in genres
 
 
+SKIPDB_API_URL = "https://skipdb.tv/api/segments"
+
+
+def is_aniskip_enabled():
+    try:
+        from backend.settings import load_config
+        return (load_config().get("metadata_sources") or {}).get("enable_aniskip", True)
+    except Exception:
+        return True
+
+
+def is_skipdb_enabled():
+    try:
+        from backend.settings import load_config
+        return (load_config().get("metadata_sources") or {}).get("enable_skipdb", True)
+    except Exception:
+        return True
+
+
+def fetch_skipdb_times(imdb_id, season=None, episode=None, duration=None):
+    """
+    Fetches crowdsourced skip segments from SkipDB (skipdb.tv).
+    Returns dict mapping segment types ('op', 'ed', 'recap', 'preview')
+    to standard CapsStream skip interval structures with source='skipdb'.
+    """
+    if not imdb_id or not str(imdb_id).strip().startswith("tt"):
+        return {}
+
+    params = {"imdb_id": str(imdb_id).strip()}
+    if season is not None and episode is not None:
+        try:
+            s_num = int(season)
+            e_num = int(episode)
+            if s_num > 0 and e_num > 0:
+                params["season"] = s_num
+                params["episode"] = e_num
+        except (ValueError, TypeError):
+            pass
+
+    if duration:
+        try:
+            dur_int = int(round(float(duration)))
+            if dur_int > 0:
+                params["duration"] = dur_int
+        except (ValueError, TypeError):
+            pass
+
+    try:
+        r = requests.get(
+            SKIPDB_API_URL,
+            params=params,
+            headers={"User-Agent": "CapsStream/1.0"},
+            timeout=6
+        )
+        if r.status_code == 200:
+            data = r.json()
+            raw_segments = data.get("segments") or {}
+            type_mapping = {
+                "intro": "op",
+                "outro": "ed",
+                "recap": "recap",
+                "preview": "preview"
+            }
+            results = {}
+            for skipdb_type, cs_type in type_mapping.items():
+                seg = raw_segments.get(skipdb_type)
+                if isinstance(seg, dict):
+                    start_ms = seg.get("start_ms")
+                    end_ms = seg.get("end_ms")
+                    if start_ms is not None and end_ms is not None:
+                        start_s = round(float(start_ms) / 1000.0, 2)
+                        end_s = round(float(end_ms) / 1000.0, 2)
+                        if end_s > start_s:
+                            results[cs_type] = {
+                                "start": start_s,
+                                "end": end_s,
+                                "type": cs_type,
+                                "label": LABELS.get(cs_type, "Skip Segment"),
+                                "source": "skipdb",
+                            }
+            return results
+        elif r.status_code == 404:
+            print(f"[Skips] SkipDB has no segments for {imdb_id}")
+    except Exception as e:
+        print(f"[Skips] SkipDB query error for {imdb_id}: {e}")
+
+    return {}
+
+
 def fetch_skip_times(media_id):
     """
     Resolves skip segments for a media file.
@@ -274,9 +364,10 @@ def fetch_skip_times(media_id):
     Priority:
       1. Manual skip markers (always win, per-segment)
       2. AniSkip API — ONLY when the media is detected as anime
-      3. FFprobe embedded chapters
+      3. SkipDB API — crowdsourced movie and series skip times via skipdb.tv
+      4. FFprobe embedded chapters (local fallback)
 
-    Returns normalized dict: { "op": {...}, "ed": {...}, "recap": {...} }
+    Returns normalized dict: { "op": {...}, "ed": {...}, "recap": {...}, "preview": {...} }
     """
     media = get_media_by_id(media_id)
     if not media:
@@ -325,7 +416,7 @@ def fetch_skip_times(media_id):
         return skip_data
 
     # ── 2. AniSkip fallback — ONLY for auto-detected anime ──
-    if is_anime(media):
+    if is_anime(media) and is_aniskip_enabled():
         title = media.get("title") or ""
         ep_num = media.get("episode") or 1
         tmdb_id = media.get("tmdb_id")
@@ -356,7 +447,48 @@ def fetch_skip_times(media_id):
             except Exception as e:
                 print(f"[Skips] AniSkip query error: {e}")
 
-    # ── 3. FFprobe embedded chapters (local fallback) ──
+    # ── 3. SkipDB fallback (crowdsourced skip times for movies and series) ──
+    if not {"recap", "op", "ed", "preview"}.issubset(skip_data) and is_skipdb_enabled():
+        imdb_id = media.get("imdb_id")
+        if not imdb_id and media.get("tmdb_id"):
+            try:
+                from backend.matcher import fetch_imdb_id
+                mtype = media.get("type") or "movie"
+                imdb_id = fetch_imdb_id(media["tmdb_id"], mtype)
+                if imdb_id:
+                    media["imdb_id"] = imdb_id
+                    try:
+                        from backend.db import get_conn
+                        conn = get_conn()
+                        try:
+                            conn.execute("UPDATE media SET imdb_id=? WHERE id=?", (imdb_id, media["id"]))
+                            conn.commit()
+                        finally:
+                            conn.close()
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[Skips] Error resolving IMDb ID for SkipDB: {e}")
+
+        if imdb_id:
+            season = media.get("season")
+            episode = media.get("episode")
+            duration = media.get("duration")
+            skipdb_results = fetch_skipdb_times(imdb_id, season=season, episode=episode, duration=duration)
+            for k, v in skipdb_results.items():
+                if k not in skip_data:
+                    skip_data[k] = v
+
+    if {"recap", "op", "ed", "preview"}.issubset(skip_data):
+        if skip_data:
+            try:
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    json.dump(skip_data, f, indent=2)
+            except Exception:
+                pass
+        return skip_data
+
+    # ── 4. FFprobe embedded chapters (local fallback) ──
     file_path = media.get("file_path")
     if file_path:
         chapter_skips = probe_chapters_for_skips(file_path)

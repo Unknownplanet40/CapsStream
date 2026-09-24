@@ -7143,11 +7143,22 @@ const SettingsPage = {
                 </label>
               </div>
 
+              <div class="settings-row">
+                <div class="settings-label-container">
+                  <div class="settings-label">Enable SkipDB (Crowdsourced Movies & Series Skip Markers)</div>
+                  <div class="settings-desc">Fetch crowdsourced intro, recap, and credits/outro timestamps for movies and TV series via skipdb.tv.</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="form.metadata_sources.enable_skipdb" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
               <!-- Metadata Provider Info Note -->
               <div style="padding:10px 14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:10px;font-size:0.78rem;color:var(--text-secondary);display:flex;align-items:flex-start;gap:8px;line-height:1.45;margin-top:2px">
                 <i class="ph ph-info" style="color:var(--accent);font-size:1rem;margin-top:1px;flex-shrink:0"></i>
                 <div>
-                  <span>TMDb provides official artwork, metadata, and cast info. AniSkip automatically syncs anime opening/ending timestamps.</span>
+                  <span>TMDb provides official artwork, metadata, and cast info. AniSkip and SkipDB automatically sync opening, ending, and recap timestamps.</span>
                 </div>
               </div>
 
@@ -7639,6 +7650,7 @@ const SettingsPage = {
                       <option value="TMDb CDN">TMDb CDN (Images)</option>
                       <option value="OpenSubtitles">OpenSubtitles</option>
                       <option value="AniSkip">AniSkip</option>
+                      <option value="SkipDB">SkipDB</option>
                       <option value="Jikan / MAL">Jikan / MAL</option>
                       <option value="GitHub">GitHub</option>
                       <option value="YTS Subs">YTS Subs</option>
@@ -8341,7 +8353,7 @@ const SettingsPage = {
       launch_browser_on_start: true,
       host: "127.0.0.1",
       port: 8000,
-      metadata_sources: { enable_jikan: true },
+      metadata_sources: { enable_jikan: true, enable_aniskip: true, enable_skipdb: true },
       media_paths: {
         movies: [],
         series: [],
@@ -8671,10 +8683,12 @@ const SettingsPage = {
         const apiHealth = info.api_health || {};
         const tmdbStatus = healthApiStatus(apiHealth.tmdb?.status);
         const animeStatus = healthApiStatus(apiHealth.aniskip?.status);
-        const integrationStatus = [tmdbStatus, animeStatus].includes("error") ? "error" : [tmdbStatus, animeStatus].includes("unknown") ? "unknown" : [tmdbStatus, animeStatus].includes("warning") ? "warning" : "ok";
+        const skipdbStatus = healthApiStatus(apiHealth.skipdb?.status);
+        const integrationStatus = [tmdbStatus, animeStatus, skipdbStatus].includes("error") ? "error" : [tmdbStatus, animeStatus, skipdbStatus].includes("unknown") ? "unknown" : [tmdbStatus, animeStatus, skipdbStatus].includes("warning") ? "warning" : "ok";
         const integrationDetails = [
           `TMDb: ${apiHealth.tmdb?.status === "ok" ? "reachable" : apiHealth.tmdb?.status === "unconfigured" ? "not configured" : apiHealth.tmdb?.status === "error" ? "unreachable" : "unknown"}`,
           `AniSkip: ${apiHealth.aniskip?.status === "ok" ? "reachable" : apiHealth.aniskip?.status === "error" ? "unreachable" : "unknown"}`,
+          `SkipDB: ${apiHealth.skipdb?.status === "ok" ? "reachable" : apiHealth.skipdb?.status === "error" ? "unreachable" : "unknown"}`,
         ].join(" · ");
         items.push({ key: "integrations", label: "Metadata services", icon: "ph ph-globe-hemisphere-west", status: integrationStatus, value: integrationStatus === "ok" ? "Operational" : integrationStatus === "error" ? "Connection issue" : integrationStatus === "warning" ? "Setup needed" : "Could not check", detail: integrationDetails, action: "metadata", actionLabel: "Open settings" });
       }
@@ -9642,6 +9656,7 @@ const SettingsPage = {
       if (s.includes("tmdb")) return "tmdb-api";
       if (s.includes("opensub")) return "opensubtitles";
       if (s.includes("aniskip")) return "aniskip";
+      if (s.includes("skipdb")) return "skipdb";
       if (s.includes("jikan") || s.includes("mal")) return "jikan";
       if (s.includes("github")) return "github";
       if (s.includes("yts")) return "yts";
@@ -18105,7 +18120,7 @@ const AboutPage = {
         </p>
         <div class="about-hero-tags">
           <span class="about-tag">4K HEVC Ready</span>
-          <span class="about-tag">AniSkip & FFprobe</span>
+          <span class="about-tag">AniSkip & SkipDB</span>
           <span class="about-tag">Kids & Multi-Profile</span>
           <span class="about-tag">Trophy Case</span>
           <span class="about-tag">Multi-Drive Scanner</span>
@@ -18133,7 +18148,7 @@ const AboutPage = {
               <i class="ph ph-timer"></i>
             </div>
             <div class="bento-title">Smart & Manual Skip Markers</div>
-            <div class="bento-desc">Manual 1-click frame stamping for Recaps, Intros, and Outros — with automatic AniSkip lookup for anime and FFprobe chapter detection as fallbacks.</div>
+            <div class="bento-desc">Manual 1-click frame stamping for Recaps, Intros, and Outros — with automatic AniSkip for anime, SkipDB for movies/TV, and FFprobe chapters as fallbacks.</div>
           </div>
 
           <div class="bento-card">
@@ -24115,7 +24130,7 @@ const SkipTimestampsModal = {
               @click="refreshMarkers(true)"
               :disabled="loadingMarkers"
               id="btn-check-online-markers"
-              title="Re-query AniSkip and re-run detection for this episode"
+              title="Re-query AniSkip/SkipDB and re-run detection for this title"
             >
               <i :class="loadingMarkers ? 'ph ph-circle-notch' : 'ph ph-cloud-arrow-down'" :style="loadingMarkers ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
               {{ loadingMarkers ? 'Checking…' : 'Check Online' }}
@@ -24303,7 +24318,7 @@ const SkipTimestampsModal = {
     const sourceInfo = reactive({ recap: "", intro: "", outro: "", preview: "" });
     const loadingMarkers = ref(false);
     const SEG_TO_RESOLVED = { recap: "recap", intro: "op", outro: "ed", preview: "preview" };
-    const SOURCE_LABELS = { manual: "Manual", aniskip: "AniSkip", chapters: "Chapters", audio: "Audio Detect" };
+    const SOURCE_LABELS = { manual: "Manual", aniskip: "AniSkip", skipdb: "SkipDB", chapters: "Chapters", audio: "Audio Detect" };
 
     onMounted(() => refreshMarkers(false));
 

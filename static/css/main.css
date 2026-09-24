@@ -18432,6 +18432,12 @@ kbd.about-kbd {
   border: 1px solid rgba(244, 63, 94, 0.35);
 }
 
+.network-service-badge.skipdb {
+  background: rgba(14, 165, 233, 0.15);
+  color: #0ea5e9;
+  border: 1px solid rgba(14, 165, 233, 0.35);
+}
+
 .network-service-badge.jikan {
   background: rgba(168, 85, 247, 0.15);
   color: #a855f7;

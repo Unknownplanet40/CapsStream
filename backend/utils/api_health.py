@@ -34,6 +34,7 @@ def _initial_health(tmdb_configured):
     return {
         "tmdb": {"status": "checking" if tmdb_configured else "unconfigured", "latency_ms": None},
         "aniskip": {"status": "checking", "latency_ms": None},
+        "skipdb": {"status": "checking", "latency_ms": None},
         "poster_cache": {"status": "checking", "latency_ms": None},
     }
 
@@ -53,6 +54,10 @@ def _refresh_health(tmdb_key, key_fingerprint, metadata_dir):
 
         ok, latency = _probe_url("https://api.aniskip.com/v2/skip-times/21/1?types=op&episodeLength=0")
         health["aniskip"] = {"status": "ok" if ok else "error", "latency_ms": latency}
+
+        ok, latency = _probe_url("https://skipdb.tv/api/segments?imdb_id=tt0903747&season=1&episode=1")
+        health["skipdb"] = {"status": "ok" if ok else "error", "latency_ms": latency}
+
         try:
             os.makedirs(metadata_dir, exist_ok=True)
             health["poster_cache"] = {"status": "ok", "latency_ms": None}

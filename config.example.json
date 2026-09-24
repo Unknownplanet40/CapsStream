@@ -5,7 +5,9 @@
   "browser": "edge",
   "launch_browser_on_start": true,
   "metadata_sources": {
-    "enable_jikan": true
+    "enable_jikan": true,
+    "enable_aniskip": true,
+    "enable_skipdb": true
   },
   "port": 8000,
   "host": "127.0.0.1",

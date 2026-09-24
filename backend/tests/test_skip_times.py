@@ -105,6 +105,111 @@ class TestSkipTimes(unittest.TestCase):
         self.assertIn("preview", skips)
         self.assertEqual(skips["preview"]["start"], 1390.0)
 
+    @patch("backend.skip_times.requests.get")
+    def test_fetch_skipdb_times_tv(self, mock_get):
+        """Verify fetch_skipdb_times normalizes TV segment responses."""
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {
+            "imdb_id": "tt0903747",
+            "season": 1,
+            "episode": 1,
+            "segments": {
+                "intro": {"start_ms": 229500, "end_ms": 246500},
+                "recap": None,
+                "outro": {"start_ms": 3434000, "end_ms": 3500000},
+                "preview": None
+            }
+        }
+        mock_get.return_value = fake_resp
+
+        results = skip_times.fetch_skipdb_times("tt0903747", season=1, episode=1, duration=2820)
+        self.assertIn("op", results)
+        self.assertEqual(results["op"]["start"], 229.5)
+        self.assertEqual(results["op"]["end"], 246.5)
+        self.assertEqual(results["op"]["source"], "skipdb")
+        self.assertEqual(results["op"]["label"], "Skip Intro")
+
+        self.assertIn("ed", results)
+        self.assertEqual(results["ed"]["start"], 3434.0)
+        self.assertEqual(results["ed"]["end"], 3500.0)
+        self.assertEqual(results["ed"]["source"], "skipdb")
+        self.assertEqual(results["ed"]["label"], "Skip Outro")
+
+    @patch("backend.skip_times.requests.get")
+    def test_fetch_skipdb_times_movie_with_duration(self, mock_get):
+        """Verify fetch_skipdb_times normalizes movie outro segments."""
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {
+            "imdb_id": "tt0371746",
+            "season": None,
+            "episode": None,
+            "segments": {
+                "intro": None,
+                "recap": None,
+                "outro": {"start_ms": 7534800, "end_ms": 7559600},
+                "preview": None
+            }
+        }
+        mock_get.return_value = fake_resp
+
+        results = skip_times.fetch_skipdb_times("tt0371746", duration=7560)
+        self.assertIn("ed", results)
+        self.assertEqual(results["ed"]["start"], 7534.8)
+        self.assertEqual(results["ed"]["end"], 7559.6)
+        self.assertEqual(results["ed"]["source"], "skipdb")
+
+    @patch("backend.skip_times.get_media_by_id")
+    @patch("backend.skip_times.fetch_skipdb_times")
+    def test_fetch_skip_times_uses_skipdb_for_movie(self, mock_skipdb, mock_get_media):
+        """Verify fetch_skip_times queries SkipDB for movies with an IMDb ID."""
+        mock_get_media.return_value = {
+            "id": 42,
+            "title": "Iron Man",
+            "type": "movie",
+            "imdb_id": "tt0371746",
+            "duration": 7560,
+            "file_path": self.dummy_video,
+        }
+        mock_skipdb.return_value = {
+            "ed": {
+                "start": 7534.8,
+                "end": 7559.6,
+                "type": "ed",
+                "label": "Skip Outro",
+                "source": "skipdb"
+            }
+        }
+
+        skips = skip_times.fetch_skip_times(42)
+        mock_skipdb.assert_called_once_with("tt0371746", season=None, episode=None, duration=7560)
+        self.assertIn("ed", skips)
+        self.assertEqual(skips["ed"]["source"], "skipdb")
+        self.assertEqual(skips["ed"]["start"], 7534.8)
+
+    @patch("backend.skip_times.is_skipdb_enabled", return_value=False)
+    @patch("backend.skip_times.get_media_by_id")
+    @patch("backend.skip_times.fetch_skipdb_times")
+    @patch("backend.skip_times.probe_chapters_for_skips")
+    def test_fetch_skip_times_respects_skipdb_disabled(self, mock_probe, mock_skipdb, mock_get_media, mock_enabled):
+        """Verify fetch_skip_times skips SkipDB when enable_skipdb is false and falls back to chapters."""
+        mock_get_media.return_value = {
+            "id": 99,
+            "title": "Some Show",
+            "type": "series",
+            "imdb_id": "tt1234567",
+            "file_path": self.dummy_video,
+        }
+        mock_probe.return_value = {
+            "op": {"start": 10.0, "end": 90.0, "type": "op", "label": "Skip Intro", "source": "chapters"}
+        }
+
+        skips = skip_times.fetch_skip_times(99)
+        mock_skipdb.assert_not_called()
+        self.assertIn("op", skips)
+        self.assertEqual(skips["op"]["source"], "chapters")
+
 
 if __name__ == "__main__":
     unittest.main()
