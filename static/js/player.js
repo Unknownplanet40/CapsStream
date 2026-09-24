@@ -400,14 +400,14 @@ const PlayerPage = {
             </div>
 
             <div class="controls-right">
-              <!-- Next Episode Button (right side) + hover preview card -->
+              <!-- Next Episode / Sequel Button (right side) + hover preview card -->
               <div
                 v-if="hasNextEp"
                 class="ctrl-next-wrap"
                 @mouseenter="showNextPreview"
                 @mouseleave="hideNextPreview"
               >
-                <button class="ctrl-btn" @click="handleNextEpClick" title="Next Episode (N)" id="ctrl-next-ep">
+                <button class="ctrl-btn" @click="handleNextEpClick" :title="nextEp.is_franchise_sequel ? ((nextEp.suggestion_type === 'prequel' ? 'Prequel' : 'Next Movie') + ': ' + (nextEp.title || 'Sequel') + ' (N)') : 'Next Episode (N)'" id="ctrl-next-ep">
                   <i class="ph-fill ph-skip-forward"></i>
                 </button>
                 <transition name="fade">
@@ -420,18 +420,25 @@ const PlayerPage = {
                   >
                     <div class="next-ep-thumb wide">
                       <img
-                        v-if="nextEp && (nextEp.still_path || nextEp.backdrop_path || media.backdrop_path)"
-                        :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || media.backdrop_path)"
+                        v-if="nextEp && (nextEp.still_path || nextEp.backdrop_path || nextEp.poster_path || media?.backdrop_path)"
+                        :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || nextEp.poster_path || media?.backdrop_path)"
                         @error="e => e.target.style.display = 'none'"
                       />
-                      <div v-else class="next-ep-thumb-fallback"><i class="ph ph-television"></i></div>
+                      <div v-else class="next-ep-thumb-fallback"><i class="ph ph-film-strip"></i></div>
                       <span class="next-ep-dur" v-if="nextEp.duration">{{ formatDuration(nextEp.duration) }}</span>
                     </div>
                     <div class="next-ep-meta">
-                      <span class="next-ep-label">Next Episode</span>
-                      <span class="next-ep-title" :title="nextEp.ep_title || nextEp.title">
-                        S{{ (nextEp.season||1).toString().padStart(2,'0') }} E{{ (nextEp.episode||1).toString().padStart(2,'0') }}
-                        <template v-if="nextEp.ep_title"> · {{ nextEp.ep_title }}</template>
+                      <span class="next-ep-label">
+                        {{ nextEp.is_franchise_sequel ? (nextEp.suggestion_type === 'prequel' ? 'Prequel' : 'Next in Franchise') : 'Next Episode' }}
+                      </span>
+                      <span class="next-ep-title" :title="nextEp.title || nextEp.ep_title">
+                        <template v-if="nextEp.is_franchise_sequel">
+                          {{ nextEp.title }}{{ nextEp.year ? ' (' + nextEp.year + ')' : '' }}
+                        </template>
+                        <template v-else>
+                          S{{ (nextEp.season||1).toString().padStart(2,'0') }} E{{ (nextEp.episode||1).toString().padStart(2,'0') }}
+                          <template v-if="nextEp.ep_title"> · {{ nextEp.ep_title }}</template>
+                        </template>
                       </span>
                       <span class="next-ep-overview" v-if="nextEp.overview">{{ nextEp.overview }}</span>
                     </div>
@@ -1164,13 +1171,16 @@ const PlayerPage = {
         </div>
       </div>
 
-      <!-- Netflix-Style Floating Bottom-Right Next Episode Card -->
+      <!-- Netflix-Style Floating Bottom-Right Next Episode / Sequel Card -->
       <transition name="fade">
         <div v-if="(showCreditsShrink || isEnded) && hasNextEp && !creditsShrinkDismissed" class="next-ep-floating-card" :class="{ 'controls-hidden': controlsHidden }" @click.stop>
           <div class="next-ep-floating-header">
             <div class="next-ep-floating-badge">
-              <span class="next-ep-badge-label">Up Next</span>
-              <span class="next-ep-countdown-pill">{{ Math.ceil(nextEpCountdownSeconds) }}s</span>
+              <span class="next-ep-badge-label">
+                {{ nextEp.is_franchise_sequel ? (nextEp.suggestion_type === 'prequel' ? 'Prequel' : 'Next in Franchise') : 'Up Next' }}
+              </span>
+              <span v-if="!nextEp.is_franchise_sequel || nextEpCountdownSeconds > 0" class="next-ep-countdown-pill">{{ Math.ceil(nextEpCountdownSeconds) }}s</span>
+              <span v-else class="next-ep-countdown-pill">Suggested</span>
             </div>
             <button class="next-ep-floating-close" @click="dismissCreditsShrink" title="Dismiss">
               <i class="ph ph-x"></i>
@@ -1181,8 +1191,8 @@ const PlayerPage = {
           <div class="next-ep-floating-body" @click="handleNextEpClick">
             <div class="next-ep-floating-thumb-wrap">
               <img
-                v-if="nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path"
-                :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || seriesData?.backdrop_path)"
+                v-if="nextEp.still_path || nextEp.backdrop_path || nextEp.poster_path || seriesData?.backdrop_path"
+                :src="imgUrl(nextEp.still_path || nextEp.backdrop_path || nextEp.poster_path || seriesData?.backdrop_path)"
                 class="next-ep-floating-thumb-img"
                 @error="e => e.target.style.display = 'none'"
               />
@@ -1194,10 +1204,16 @@ const PlayerPage = {
 
             <div class="next-ep-floating-info">
               <div class="next-ep-floating-ep-code">
-                S{{ (nextEp.season || activeDrawerSeason || 1).toString().padStart(2,'0') }} · E{{ (nextEp.episode || 1).toString().padStart(2,'0') }}
+                <template v-if="nextEp.is_franchise_sequel">
+                  <i class="ph ph-film-strip" style="margin-right: 4px;"></i>
+                  {{ nextEp.franchise_name }}{{ nextEp.year ? ' · ' + nextEp.year : '' }}
+                </template>
+                <template v-else>
+                  S{{ (nextEp.season || activeDrawerSeason || 1).toString().padStart(2,'0') }} · E{{ (nextEp.episode || 1).toString().padStart(2,'0') }}
+                </template>
               </div>
-              <div class="next-ep-floating-title" :title="nextEp.ep_title || nextEp.title">
-                {{ nextEp.ep_title || nextEp.title || ('Episode ' + nextEp.episode) }}
+              <div class="next-ep-floating-title" :title="nextEp.title || nextEp.ep_title">
+                {{ nextEp.is_franchise_sequel ? nextEp.title : (nextEp.ep_title || nextEp.title || ('Episode ' + nextEp.episode)) }}
               </div>
               <p v-if="nextEp.overview" class="next-ep-floating-overview">{{ nextEp.overview }}</p>
             </div>
@@ -1205,7 +1221,7 @@ const PlayerPage = {
 
           <!-- Actions Row: Netflix Circular SVG Countdown Play Button + Watch Credits / Replay -->
           <div class="next-ep-floating-actions">
-            <button class="next-ep-netflix-play-btn" @click="handleNextEpClick" title="Play Next Episode Now" id="btn-next-ep-play-now">
+            <button class="next-ep-netflix-play-btn" @click="handleNextEpClick" :title="nextEp.is_franchise_sequel ? (nextEp.suggestion_type === 'prequel' ? 'Play Prequel Now' : 'Play Sequel Now') : 'Play Next Episode Now'" id="btn-next-ep-play-now">
               <div class="netflix-countdown-ring-wrap">
                 <svg class="netflix-countdown-svg" viewBox="0 0 44 44">
                   <circle class="netflix-countdown-track" cx="22" cy="22" r="18"></circle>
@@ -1213,9 +1229,11 @@ const PlayerPage = {
                 </svg>
                 <i class="ph-fill ph-play netflix-countdown-icon"></i>
               </div>
-              <span class="next-ep-play-text">Play Next</span>
+              <span class="next-ep-play-text">
+                {{ nextEp.is_franchise_sequel ? (nextEp.suggestion_type === 'prequel' ? 'Play Prequel' : 'Play Sequel') : 'Play Next' }}
+              </span>
             </button>
-            <button v-if="isEnded" class="next-ep-replay-btn" @click="replayCurrentEpisode" id="btn-next-ep-replay" title="Replay Episode">
+            <button v-if="isEnded" class="next-ep-replay-btn" @click="replayCurrentEpisode" id="btn-next-ep-replay" title="Replay">
               <i class="ph ph-arrow-counter-clockwise"></i>
               <span>Replay</span>
             </button>
@@ -5307,8 +5325,11 @@ const PlayerPage = {
         shouldShrink = true;
       }
 
-      // Universal fallback: within the last 35 seconds of media or >= 96% of media duration
-      if (!shouldShrink && dur > 0 && ((dur - curr) <= 35 || (curr / dur >= 0.96))) {
+      // Universal fallback: within the last 60 seconds for movies (or 35s for series) or >= 97% duration
+      const isMovie = media.value?.type === "movie";
+      const fallbackSec = isMovie ? 60 : 35;
+      const fallbackRatio = isMovie ? 0.97 : 0.96;
+      if (!shouldShrink && dur > 0 && ((dur - curr) <= fallbackSec || (curr / dur >= fallbackRatio))) {
         shouldShrink = true;
       }
 
@@ -5446,7 +5467,13 @@ const PlayerPage = {
         if (remaining <= 0) {
           cancelAutoAdvance();
           stopAmbientSoundscape();
-          playNext(true);
+          if (nextEp.value?.is_franchise_sequel) {
+            // For movie sequels/prequels: do not auto-advance without explicit user click!
+            nextEpCountdownSeconds.value = 0;
+            nextEpProgressPercent.value = 100;
+          } else {
+            playNext(true);
+          }
         }
       }, 50);
     }
@@ -5627,14 +5654,18 @@ const PlayerPage = {
         }
       }
 
-      // 3. Fallback to normal auto-play next episode
+      // 3. Fallback to normal auto-play next episode / movie sequel recommendation
       const autoNext = playerSettings.value?.playback?.auto_play_next !== false;
-      if (showNextEp.value && autoNext) {
+      if (showNextEp.value && autoNext && !nextEp.value?.is_franchise_sequel) {
         showCreditsShrink.value = true;
         startAutoAdvanceCountdown(10.0, true);
       } else if (showNextEp.value) {
         showCreditsShrink.value = true;
         isEnded.value = true;
+        if (nextEp.value?.is_franchise_sequel) {
+          nextEpCountdownSeconds.value = 0;
+          nextEpProgressPercent.value = 100;
+        }
       }
     }
 
@@ -6716,6 +6747,25 @@ const PlayerPage = {
       // Queue fallback: if no next episode found in series or media is in a queue
       if (!foundNext && store.queue && store.queue.length > 0 && store.queueIndex + 1 < store.queue.length) {
         foundNext = store.queue[store.queueIndex + 1];
+      }
+
+      // Movie Sequel / Prequel Recommendation:
+      // If playing a movie without a queued next item, check for a franchise sequel or prequel in library
+      if (!foundNext && media.value && (media.value.type === "movie" || media.value.type === "anime")) {
+        try {
+          const fData = await API.get(`/api/media/${mediaId}/franchise`);
+          if (fData && fData.suggested_next && fData.suggested_next.id) {
+            foundNext = {
+              ...fData.suggested_next,
+              is_franchise_sequel: true,
+              franchise_name: fData.name,
+              suggestion_type: fData.suggested_next.suggestion_type || "sequel",
+              sequence_text: fData.suggested_next.sequence_text,
+            };
+          }
+        } catch (e) {
+          console.debug("[Player] Could not fetch movie franchise:", e);
+        }
       }
 
       nextEp.value = foundNext;

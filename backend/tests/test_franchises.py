@@ -66,13 +66,43 @@ class TestFranchises(unittest.TestCase):
         """Verify get_media_franchise locates the parent collection for a sibling item."""
         from backend.franchises import get_media_franchise
         items = [
-            {"id": 1, "tmdb_id": 101, "title": "Iron Man", "year": 2008},
-            {"id": 2, "tmdb_id": 102, "title": "Thor", "year": 2011},
+            {"id": 1, "tmdb_id": 101, "title": "Iron Man", "year": 2008, "is_mounted": True},
+            {"id": 2, "tmdb_id": 102, "title": "Thor", "year": 2011, "is_mounted": True},
         ]
         franchise = get_media_franchise(items[0], library_items=items)
         self.assertIsNotNone(franchise)
         self.assertEqual(franchise["name"], "Marvel Cinematic Universe")
         self.assertEqual(franchise["item_count"], 2)
+        self.assertIsNotNone(franchise.get("suggested_next"))
+        self.assertEqual(franchise["suggested_next"]["title"], "Thor")
+        self.assertEqual(franchise["suggested_next"]["suggestion_type"], "sequel")
+
+    def test_get_media_franchise_suggests_prequel_on_finale(self):
+        """Verify get_media_franchise suggests prequel when viewing the final installment."""
+        from backend.franchises import get_media_franchise
+        items = [
+            {"id": 1, "tmdb_id": 101, "title": "Iron Man", "year": 2008, "is_mounted": True},
+            {"id": 2, "tmdb_id": 102, "title": "Thor", "year": 2011, "is_mounted": True},
+        ]
+        franchise = get_media_franchise(items[1], library_items=items)
+        self.assertIsNotNone(franchise)
+        self.assertIsNotNone(franchise.get("suggested_next"))
+        self.assertEqual(franchise["suggested_next"]["title"], "Iron Man")
+        self.assertEqual(franchise["suggested_next"]["suggestion_type"], "prequel")
+
+    def test_get_media_franchise_skips_unmounted_candidates(self):
+        """Verify get_media_franchise skips unmounted siblings when picking suggested_next."""
+        from backend.franchises import get_media_franchise
+        items = [
+            {"id": 1, "tmdb_id": 101, "title": "Iron Man", "year": 2008, "is_mounted": True},
+            {"id": 2, "tmdb_id": 102, "title": "Thor", "year": 2011, "is_mounted": False},
+            {"id": 3, "tmdb_id": 103, "title": "The Avengers", "year": 2012, "is_mounted": True},
+        ]
+        franchise = get_media_franchise(items[0], library_items=items)
+        self.assertIsNotNone(franchise)
+        self.assertIsNotNone(franchise.get("suggested_next"))
+        self.assertEqual(franchise["suggested_next"]["title"], "The Avengers")
+        self.assertEqual(franchise["suggested_next"]["suggestion_type"], "sequel")
 
 
 if __name__ == "__main__":

@@ -730,7 +730,8 @@ def get_media_franchise(media_item: Dict[str, Any], library_items: Optional[List
     if library_items is None:
         try:
             from backend.db import get_all_media
-            library_items = get_all_media()
+            from backend.db.media import enrich_mounted_list
+            library_items = enrich_mounted_list(get_all_media())
         except Exception:
             library_items = []
 
@@ -772,6 +773,36 @@ def get_media_franchise(media_item: Dict[str, Any], library_items: Optional[List
                     )
                     annotated_timeline.append(item_copy)
 
+            # Determine suggested next item (sequel first, prequel if finale)
+            cur_idx = None
+            for i, it in enumerate(annotated_items):
+                if it.get("is_current"):
+                    cur_idx = i
+                    break
+
+            suggested_next = None
+            if cur_idx is not None:
+                # 1. Look forward for direct sequel that is mounted
+                for i in range(cur_idx + 1, len(annotated_items)):
+                    cand = annotated_items[i]
+                    if cand.get("is_mounted", True) and cand.get("is_local", True) is not False:
+                        suggested_next = dict(cand)
+                        suggested_next["suggestion_type"] = "sequel"
+                        suggested_next["franchise_name"] = col["name"]
+                        suggested_next["sequence_text"] = f"Part {cand.get('sequence_number', i + 1)} of {len(annotated_items)}"
+                        break
+
+                # 2. If no forward sequel found (e.g. at the finale), look backward for prequel
+                if not suggested_next:
+                    for i in range(cur_idx - 1, -1, -1):
+                        cand = annotated_items[i]
+                        if cand.get("is_mounted", True) and cand.get("is_local", True) is not False:
+                            suggested_next = dict(cand)
+                            suggested_next["suggestion_type"] = "prequel"
+                            suggested_next["franchise_name"] = col["name"]
+                            suggested_next["sequence_text"] = f"Part {cand.get('sequence_number', i + 1)} of {len(annotated_items)}"
+                            break
+
             return {
                 "id": col["id"],
                 "name": col["name"],
@@ -785,6 +816,7 @@ def get_media_franchise(media_item: Dict[str, Any], library_items: Optional[List
                 "item_count": len(annotated_items),
                 "items": annotated_items,
                 "timeline_items": annotated_timeline,
+                "suggested_next": suggested_next,
             }
 
     return None
