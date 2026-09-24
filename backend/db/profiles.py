@@ -15,6 +15,7 @@ def get_all_profiles():
             "maturity_rating, blocked_genres, default_audio_lang, default_sub_lang, position, auto_lock_minutes, "
             "daily_limit_minutes, bedtime_curfew, COALESCE(has_completed_tour, 0) as has_completed_tour, "
             "COALESCE(default_speed, 1.0) as default_speed, "
+            "(CASE WHEN totp_secret IS NOT NULL AND totp_secret != '' THEN 1 ELSE 0 END) as totp_enabled, "
             "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
             "FROM profiles ORDER BY position ASC, id ASC"
         ).fetchall()
@@ -23,7 +24,7 @@ def get_all_profiles():
             rows = conn.execute(
                 "SELECT id, name, avatar, color, is_kids, is_admin, custom_avatar_url, "
                 "maturity_rating, blocked_genres, default_audio_lang, default_sub_lang, position, auto_lock_minutes, "
-                "daily_limit_minutes, bedtime_curfew, 0 as has_completed_tour, 1.0 as default_speed, "
+                "daily_limit_minutes, bedtime_curfew, 0 as has_completed_tour, 1.0 as default_speed, 0 as totp_enabled, "
                 "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
                 "FROM profiles ORDER BY position ASC, id ASC"
             ).fetchall()
@@ -54,6 +55,7 @@ def get_all_profiles():
         d.setdefault("is_kids", 0)
         d.setdefault("is_admin", 0)
         d.setdefault("has_pin", 0)
+        d.setdefault("totp_enabled", 0)
         d.setdefault("has_completed_tour", 0)
         d.setdefault("default_speed", 1.0)
         d.setdefault("position", 0)
@@ -74,6 +76,114 @@ def get_profile(profile_id):
     row = conn.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def get_totp_state(profile_id):
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT totp_secret, totp_last_step FROM profiles WHERE id=?", (profile_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def save_totp_secret(profile_id, encrypted_secret):
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE profiles SET totp_secret=?, totp_last_step=-1 WHERE id=?",
+            (encrypted_secret, profile_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def activate_totp(profile_id, encrypted_secret, hashes):
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "UPDATE profiles SET totp_secret=?, totp_last_step=-1 WHERE id=?",
+            (encrypted_secret, profile_id),
+        )
+        conn.execute("DELETE FROM totp_recovery_codes WHERE profile_id=?", (profile_id,))
+        conn.executemany(
+            "INSERT INTO totp_recovery_codes (profile_id, code_hash) VALUES (?, ?)",
+            [(profile_id, code_hash) for code_hash in hashes],
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def clear_totp_secret(profile_id, expected_secret=None):
+    conn = get_conn()
+    try:
+        if expected_secret is None:
+            conn.execute(
+                "UPDATE profiles SET totp_secret=NULL, totp_last_step=-1 WHERE id=?",
+                (profile_id,),
+            )
+        else:
+            conn.execute(
+                "UPDATE profiles SET totp_secret=NULL, totp_last_step=-1 WHERE id=? AND totp_secret=?",
+                (profile_id, expected_secret),
+            )
+        conn.execute("DELETE FROM totp_recovery_codes WHERE profile_id=?", (profile_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def accept_totp_step(profile_id, step, expected_secret=None):
+    conn = get_conn()
+    try:
+        if expected_secret is None:
+            cur = conn.execute(
+                "UPDATE profiles SET totp_last_step=? WHERE id=? AND COALESCE(totp_last_step, -1) < ?",
+                (int(step), profile_id, int(step)),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE profiles SET totp_last_step=? WHERE id=? AND totp_secret=? AND COALESCE(totp_last_step, -1) < ?",
+                (int(step), profile_id, expected_secret, int(step)),
+            )
+        conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
+
+
+def replace_totp_recovery_codes(profile_id, hashes):
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM totp_recovery_codes WHERE profile_id=?", (profile_id,))
+        conn.executemany(
+            "INSERT INTO totp_recovery_codes (profile_id, code_hash) VALUES (?, ?)",
+            [(profile_id, code_hash) for code_hash in hashes],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def consume_totp_recovery_code(profile_id, code_hash):
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "DELETE FROM totp_recovery_codes WHERE profile_id=? AND code_hash=?",
+            (profile_id, code_hash),
+        )
+        conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
 
 
 def create_profile(name, pin_hash, avatar="ph-film-strip", color="#e50914", is_kids=False,
@@ -119,6 +229,7 @@ def update_profile(profile_id, name, pin_hash=None, avatar="ph-film-strip", colo
     pos_val = position if position is not None else existing.get("position", 0)
     tour_val = 1 if has_completed_tour else (0 if has_completed_tour is not None else existing.get("has_completed_tour", 0))
     speed_val = float(default_speed) if default_speed is not None else float(existing.get("default_speed") or 1.0)
+    disable_totp = bool(is_kids or not admin_val)
 
     if is_kids:
         pin_hash = None
@@ -127,10 +238,12 @@ def update_profile(profile_id, name, pin_hash=None, avatar="ph-film-strip", colo
 
     if update_pin:
         conn.execute(
-            "UPDATE profiles SET name=?, pin_hash=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, "
+            "UPDATE profiles SET name=?, pin_hash=?, avatar=?, color=?, is_kids=?, "
+            "totp_secret=CASE WHEN ? THEN NULL ELSE totp_secret END, "
+            "totp_last_step=CASE WHEN ? THEN -1 ELSE totp_last_step END, daily_limit_minutes=?, "
             "bedtime_curfew=?, theme=?, is_admin=?, custom_avatar_url=?, maturity_rating=?, blocked_genres=?, "
             "default_audio_lang=?, default_sub_lang=?, position=?, auto_lock_minutes=?, has_completed_tour=?, default_speed=? WHERE id=?",
-            (name, pin_hash, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0),
+            (name, pin_hash, avatar, color, 1 if is_kids else 0, 1 if disable_totp else 0, 1 if disable_totp else 0, int(daily_limit_minutes or 0),
              str(bedtime_curfew or ''), str(theme or 'crimson'), int(admin_val or 0), str(custom_avatar or ''),
              str(maturity_rating or 'All'), str(blocked_genres or ''), str(default_audio_lang or ''),
              str(default_sub_lang or ''), int(pos_val or 0), int(auto_lock_minutes or 0), int(tour_val or 0),
@@ -138,15 +251,19 @@ def update_profile(profile_id, name, pin_hash=None, avatar="ph-film-strip", colo
         )
     else:
         conn.execute(
-            "UPDATE profiles SET name=?, avatar=?, color=?, is_kids=?, daily_limit_minutes=?, "
+            "UPDATE profiles SET name=?, avatar=?, color=?, is_kids=?, "
+            "totp_secret=CASE WHEN ? THEN NULL ELSE totp_secret END, "
+            "totp_last_step=CASE WHEN ? THEN -1 ELSE totp_last_step END, daily_limit_minutes=?, "
             "bedtime_curfew=?, theme=?, is_admin=?, custom_avatar_url=?, maturity_rating=?, blocked_genres=?, "
             "default_audio_lang=?, default_sub_lang=?, position=?, auto_lock_minutes=?, has_completed_tour=?, default_speed=? WHERE id=?",
-            (name, avatar, color, 1 if is_kids else 0, int(daily_limit_minutes or 0),
+            (name, avatar, color, 1 if is_kids else 0, 1 if disable_totp else 0, 1 if disable_totp else 0, int(daily_limit_minutes or 0),
              str(bedtime_curfew or ''), str(theme or 'crimson'), int(admin_val or 0), str(custom_avatar or ''),
              str(maturity_rating or 'All'), str(blocked_genres or ''), str(default_audio_lang or ''),
              str(default_sub_lang or ''), int(pos_val or 0), int(auto_lock_minutes or 0), int(tour_val or 0),
              speed_val, profile_id)
         )
+    if disable_totp:
+        conn.execute("DELETE FROM totp_recovery_codes WHERE profile_id=?", (profile_id,))
     conn.commit()
     conn.close()
 

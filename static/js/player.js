@@ -3181,11 +3181,16 @@ const PlayerPage = {
     // Keyframe-align a content timestamp for converted-stream restarts.
     async function alignedStreamStart(contentTime) {
       let target = Math.max(0, Math.floor(contentTime));
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
       try {
         const id = streamState.mediaId || route.params.id;
-        const r = await API.get(`/api/stream-start/${id}?start=${target}`);
+        const r = await API.get(`/api/stream-start/${id}?start=${target}`, { cache: false, signal: controller.signal });
         if (r && typeof r.start === "number") target = r.start;
       } catch (e) {}
+      finally {
+        clearTimeout(timeout);
+      }
       return target;
     }
 
@@ -3358,19 +3363,6 @@ const PlayerPage = {
         startAutoSwitched4KTimer();
       }
     }
-
-    const hevcSupported = (() => {
-      try {
-        const probe = document.createElement("video");
-        return [
-          'video/mp4; codecs="hvc1.1.6.L153.B0"',
-          'video/mp4; codecs="hev1.1.6.L153.B0"',
-          'video/mp4; codecs="hvc1"',
-        ].some((t) => (probe.canPlayType(t) || "") !== "");
-      } catch (e) {
-        return false;
-      }
-    })();
 
     // ─── Hardware-accelerated compatibility playback ────────────────
     const compatInfo = ref(null);
@@ -5720,6 +5712,18 @@ const PlayerPage = {
         addToast("Stream buffer stalled — auto-recovering...", "info", 3000);
       }
 
+      const saveProgressForRecovery = async () => {
+        let timeout;
+        try {
+          await Promise.race([
+            saveProgressNow(),
+            new Promise((resolve) => { timeout = setTimeout(resolve, 2000); }),
+          ]);
+        } finally {
+          clearTimeout(timeout);
+        }
+      };
+
       try {
         const isFatalError = reason.includes("error_code_3") || reason.includes("error_code_4") || reason.includes("decoder_error");
 
@@ -5732,15 +5736,15 @@ const PlayerPage = {
           filePath.includes("x265") || filePath.includes("hevc") || filePath.includes("h.265") ||
           filePath.includes("10bit") || filePath.includes("10-bit")
         );
+        const autoConvertHevc = playerSettings.value?.playback?.auto_convert_hevc !== false;
 
-        // Fast-track: if direct-playing HEVC freezes the browser's GPU decoder, avoid Tier 1/2 micro-seeks
-        // (which resubmit the crashing byte stream to the hung GPU process, freezing the browser).
-        // Immediately escalate to hardware-accelerated converted playback!
-        if (isHevcDirect) {
-          console.warn("[Player FreezeGuard] HEVC/10-bit direct decoder stall detected. Fast-tracking to hardware-accelerated converted stream...");
-          await saveProgressNow();
-          addToast("Switching to optimized stream for smooth playback...", "info", 3000);
-          await enableCompatPlayback(true, { forceSoftware: false });
+        // Skip micro-seeks that can resubmit a frozen HEVC stream to the decoder.
+        if (isHevcDirect && autoConvertHevc) {
+          const sourceHeight = Number(vInfo.height || media.value?.height || 0);
+          console.warn("[Player FreezeGuard] HEVC/10-bit decoder stall detected. Switching to compatible playback...");
+          await saveProgressForRecovery();
+          addToast("Switching to compatible playback at the current quality...", "info", 3000);
+          await enableCompatPlayback(true, { forceSoftware: false, maxHeight: sourceHeight });
           return;
         }
 
@@ -5765,7 +5769,7 @@ const PlayerPage = {
         // Teardown and recreate the decoder/media element to clear hung GPU decode state
         if (consecutiveRecoveryAttempts === 2 || (consecutiveRecoveryAttempts === 1 && isFatalError)) {
           console.log("[Player FreezeGuard] [Tier 2] Hard Recovery: flushing GPU decoder context and re-anchoring stream");
-          await saveProgressNow();
+          await saveProgressForRecovery();
           const atPos = Math.max(0, currentContentTime() + 0.15);
 
           try {
@@ -5791,9 +5795,13 @@ const PlayerPage = {
         // ─── Tier 3: Fallback Recovery (Attempt 3, or Attempt 2 for fatal decode error) ──────────────────
         // Fall back to server-side error-resilient transcode (use hardware first, fallback to software if needed)
         if (consecutiveRecoveryAttempts >= 3 || (consecutiveRecoveryAttempts >= 2 && isFatalError)) {
+          if (isHevcDirect && !autoConvertHevc) {
+            freezeWarningNotice.value = "HEVC playback is still stalled. Enable Smart HEVC Compatibility to switch formats automatically.";
+            return;
+          }
           const useSw = streamState.transcode || consecutiveRecoveryAttempts > 3;
           console.log(`[Player FreezeGuard] [Tier 3] Fallback Recovery: switching to error-resilient transcoding (forceSoftware: ${useSw})`);
-          await saveProgressNow();
+          await saveProgressForRecovery();
           await enableCompatPlayback(true, { forceSoftware: useSw });
           return;
         }
@@ -6571,27 +6579,10 @@ const PlayerPage = {
         }
         const force4k = routeQuery.force_4k === "1" || routeQuery.force_4k === "true";
 
-        // Pre-emptive compatibility check: if media is HEVC and browser lacks reliable decode support
+        // Start HEVC/x265 from the selected original stream; decoder failures use FreezeGuard recovery.
         const vInfo = media.value.video_info || {};
         const codecTag = (vInfo.codec || "").toLowerCase();
         const filePath = (media.value.file_path || "").toLowerCase();
-        const isHevc = codecTag.includes("265") || codecTag.includes("hevc") || filePath.includes("x265") || filePath.includes("hevc") || filePath.includes("h.265");
-
-        const autoConvertHevc = playerSettings.value?.playback?.auto_convert_hevc !== false;
-        const forceDirect = routeQuery.direct === "1" || routeQuery.direct === "true" || routeQuery.force_direct === "1";
-
-        if (isHevc && !streamState.transcode && autoConvertHevc && !forceDirect) {
-          console.info("[Player] HEVC content detected. Automatically streaming via converted compatibility mode for browser stability...");
-          streamState.transcode = true;
-          const srcHeight = vInfo.height || media.value?.height || 1080;
-          streamState.maxHeight = srcHeight >= 1080 ? 1080 : (srcHeight >= 720 ? 720 : 480);
-          isTranscodeInitialLoading.value = true;
-        } else if (isHevc && !hevcSupported && !streamState.transcode) {
-          console.info("[Player] HEVC content detected on browser without native HEVC decoder. Starting in converted mode...");
-          streamState.transcode = true;
-          isTranscodeInitialLoading.value = true;
-        }
-
         // ── 4K Hardware / Browser Compatibility Guard (Smart Auto-Switch) ──
         const mediaResStr = `${media.value?.base_label || ""} ${media.value?.resolution || ""} ${codecTag} ${filePath}`.toLowerCase();
         const hasExplicitLowerRes = (media.value?.video_info?.height > 0 && media.value?.video_info?.height < 2160) ||

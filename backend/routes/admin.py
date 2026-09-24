@@ -7,6 +7,7 @@ import re
 import time
 import shutil
 import threading
+import logging
 
 from flask import Blueprint, jsonify, request, send_file, abort, current_app, session
 
@@ -17,6 +18,7 @@ from backend.utils.formatting import format_bytes
 from backend.utils.paths import has_ffmpeg, has_ffprobe
 
 admin_bp = Blueprint("admin", __name__)
+logger = logging.getLogger(__name__)
 
 LOG_NAME_RE = re.compile(r"^capsstream_\d{8}\.log$")
 LOG_RETENTION_DAYS = 14
@@ -254,6 +256,29 @@ def api_restart_after_update():
 def api_system_diagnostics():
     from backend.utils.diagnostics import get_system_diagnostics
     return jsonify(get_system_diagnostics())
+
+
+@admin_bp.route("/api/system/supabase-status", methods=["GET"])
+def api_system_supabase_status():
+    """Check Supabase request-table connectivity without exposing credentials."""
+    require_admin()
+    from backend.settings import load_config
+    from backend.utils.supabase_client import get_supabase_config, test_supabase_connection
+
+    config = load_config()
+    features = config.get("features") or {}
+    if not features.get("online_requests", False):
+        status = "disabled"
+    elif not all(get_supabase_config()):
+        status = "not_configured"
+    else:
+        try:
+            connected, _message = test_supabase_connection()
+            status = "connected" if connected else "error"
+        except Exception:
+            status = "error"
+
+    return jsonify({"status": status, "checked_at": time.time()})
 
 
 # ─── Updates ──────────────────────────────────────────────────────────────────
@@ -664,13 +689,67 @@ def api_host_sync_open_folder():
 
 # ─── System Info ──────────────────────────────────────────────────────────────
 
+def _get_media_system_metrics(base_dir):
+    """Aggregate mounted media, storage, and marker stats from one media scan."""
+    from backend.db import get_conn
+    from backend.db.media import is_item_mounted
+
+    media_counts = {"movie": 0, "series": 0, "anime": 0}
+    storage_bytes = {"total": 0, "movie": 0, "series": 0, "anime": 0}
+    auto_marker_ids = set()
+    marker_ids = set()
+    skip_cache_dir = os.path.join(base_dir, "data", "metadata", "skip_times")
+    if os.path.isdir(skip_cache_dir):
+        for filename in os.listdir(skip_cache_dir):
+            media_id = os.path.splitext(filename)[0]
+            if media_id.isdigit():
+                auto_marker_ids.add(int(media_id))
+
+    conn = None
+    try:
+        conn = get_conn()
+        rows = conn.execute("""
+            SELECT id, type, file_path, file_size,
+                CASE WHEN
+                    (recap_start IS NOT NULL AND recap_start > 0) OR
+                    (intro_start IS NOT NULL AND intro_start > 0) OR
+                    (outro_start IS NOT NULL AND outro_start > 0) OR
+                    (preview_start IS NOT NULL AND preview_start > 0)
+                THEN 1 ELSE 0 END AS has_manual_marker
+            FROM media
+        """)
+        for row in rows:
+            media_id = row["id"]
+            if row["has_manual_marker"] or media_id in auto_marker_ids:
+                marker_ids.add(media_id)
+
+            media_type = row["type"]
+            file_path = row["file_path"]
+            if not file_path or not is_item_mounted({"file_path": file_path}):
+                continue
+            file_size = row["file_size"] or 0
+            storage_bytes["total"] += file_size
+            if media_type in media_counts:
+                media_counts[media_type] += 1
+                storage_bytes[media_type] += file_size
+    except Exception:
+        pass
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    return media_counts, storage_bytes, len(marker_ids)
+
+
 @admin_bp.route("/api/system/info", methods=["GET"])
 def api_system_info():
     import sys, platform, json
     BASE_DIR = current_app.config.get("BASE_DIR", "")
     SERVER_START_TIME = current_app.config.get("SERVER_START_TIME", time.time())
-    from backend.db import DB_PATH, get_conn, get_all_profiles
-    from backend.db.media import is_item_mounted
+    from backend.db import DB_PATH, get_all_profiles
     from backend.updater import _read_state as _updater_state
 
     db_size_str = "0 KB"
@@ -684,43 +763,12 @@ def api_system_info():
     ffmpeg_available = has_ffmpeg()
     ffprobe_available = has_ffprobe()
 
-    movies_count = series_count = anime_count = 0
-    skip_markers_count = 0
-    try:
-        conn = get_conn()
-        media_rows = conn.execute("SELECT type, file_path FROM media").fetchall()
-        for media_type, file_path in media_rows:
-            if not file_path:
-                continue
-            if not is_item_mounted({"file_path": file_path}):
-                continue
-            if media_type == "movie":
-                movies_count += 1
-            elif media_type == "series":
-                series_count += 1
-            elif media_type == "anime":
-                anime_count += 1
-        manual_marker_ids = {
-            row[0] for row in conn.execute("""
-                SELECT id FROM media WHERE
-                  (recap_start  IS NOT NULL AND recap_start  > 0) OR
-                  (intro_start  IS NOT NULL AND intro_start  > 0) OR
-                  (outro_start  IS NOT NULL AND outro_start  > 0) OR
-                  (preview_start IS NOT NULL AND preview_start > 0)
-            """).fetchall()
-        }
-        all_media_ids = {row[0] for row in conn.execute("SELECT id FROM media").fetchall()}
-        auto_marker_ids = set()
-        skip_cache_dir = os.path.join(BASE_DIR, "data", "metadata", "skip_times")
-        if os.path.isdir(skip_cache_dir):
-            for fname in os.listdir(skip_cache_dir):
-                base = os.path.splitext(fname)[0]
-                if base.isdigit():
-                    auto_marker_ids.add(int(base))
-        skip_markers_count = len(manual_marker_ids | (auto_marker_ids & all_media_ids))
-        conn.close()
-    except Exception:
-        pass
+    media_started = time.perf_counter()
+    media_counts, storage_bytes, skip_markers_count = _get_media_system_metrics(BASE_DIR)
+    logger.debug("System info media aggregation completed in %.3fs", time.perf_counter() - media_started)
+    movies_count = media_counts["movie"]
+    series_count = media_counts["series"]
+    anime_count = media_counts["anime"]
     total_count = movies_count + series_count + anime_count
 
     from backend.settings import load_config
@@ -731,28 +779,11 @@ def api_system_info():
     api_health = _get_api_health(config)
     github_profile = _get_github_profile()
 
-    # Storage
-    total_bytes, movies_bytes, series_bytes, anime_bytes = 0, 0, 0, 0
-    try:
-        conn = get_conn()
-        media_rows = conn.execute("SELECT type, file_path, file_size FROM media").fetchall()
-        for row in media_rows:
-            media_type, file_path, file_size = row
-            if not file_path or not is_item_mounted({"file_path": file_path}):
-                continue
-            file_size = file_size or 0
-            total_bytes += file_size
-            if media_type == "movie":
-                movies_bytes += file_size
-            elif media_type == "series":
-                series_bytes += file_size
-            elif media_type == "anime":
-                anime_bytes += file_size
-        conn.close()
-    except Exception:
-        pass
-
-
+    # Storage totals are accumulated alongside mounted media counts above.
+    total_bytes = storage_bytes["total"]
+    movies_bytes = storage_bytes["movie"]
+    series_bytes = storage_bytes["series"]
+    anime_bytes = storage_bytes["anime"]
     storage_info = {
         "total_size": format_bytes(total_bytes), "total_bytes": total_bytes,
         "movies_size": format_bytes(movies_bytes), "series_size": format_bytes(series_bytes),
@@ -898,56 +929,108 @@ def api_system_drives_status():
     media_paths = cfg.get("media_paths", {})
     disabled_paths = cfg.get("disabled_paths", {})
 
-    path_counts = {}
-    db_drives = set()
-    try:
-        conn = get_conn()
-        rows = conn.execute("SELECT file_path, type FROM media").fetchall()
-        for r in rows:
-            fp = r["file_path"] if r else ""
-            if fp:
-                norm_fp = fp.replace("\\", "/").lower()
-                path_counts[norm_fp] = path_counts.get(norm_fp, 0) + 1
-                dl = get_drive_identifier(fp)
-                if dl:
-                    db_drives.add((dl, r["type"] or "movies"))
-    except Exception:
-        pass
-
-    # Group by drives configured in Media Scanner Paths
     drives_by_letter = {}
-    for cat in ["movies", "series", "anime"]:
-        for p in (media_paths.get(cat) or []):
-            if not p:
-                continue
-            norm_p = os.path.normpath(p)
-            drive_letter = get_drive_identifier(norm_p)
-            if not drive_letter:
-                drive_letter = norm_p.split(os.sep)[0] or norm_p
+    configured_roots = []
+    configured_roots_by_path = {}
+    path_trie = {}
 
-            d_key = drive_letter.upper()
-            if d_key not in drives_by_letter:
-                drives_by_letter[d_key] = {
+    def normalize_path(path):
+        normalized = os.path.normpath(path).replace("\\", "/").rstrip("/").lower()
+        return normalized or "/"
+
+    for cat in ["movies", "series", "anime"]:
+        disabled = {os.path.normpath(path) for path in (disabled_paths.get(cat) or []) if path}
+        for path in (media_paths.get(cat) or []):
+            if not path:
+                continue
+            norm_path = os.path.normpath(path)
+            drive_letter = get_drive_identifier(norm_path)
+            if not drive_letter:
+                drive_letter = norm_path.split(os.sep)[0] or norm_path
+
+            drive_key = drive_letter.upper()
+            if drive_key not in drives_by_letter:
+                drives_by_letter[drive_key] = {
                     "drive_letter": drive_letter,
                     "paths": [],
                     "categories": set(),
                     "all_disabled": True,
+                    "fallback_count": 0,
+                    "matched_count": 0,
                 }
+            info = drives_by_letter[drive_key]
+            if norm_path not in info["paths"]:
+                info["paths"].append(norm_path)
+            info["categories"].add(cat)
+            if norm_path not in disabled:
+                info["all_disabled"] = False
 
-            if norm_p not in drives_by_letter[d_key]["paths"]:
-                drives_by_letter[d_key]["paths"].append(norm_p)
-            drives_by_letter[d_key]["categories"].add(cat)
+            root_key = normalize_path(norm_path)
+            root_entry = configured_roots_by_path.get(norm_path)
+            if root_entry is None:
+                root_entry = {"path": root_key, "drive_key": drive_key, "matched_count": 0}
+                configured_roots_by_path[norm_path] = root_entry
+                configured_roots.append(root_entry)
+                root_node = path_trie
+                for component in root_key.split("/"):
+                    if component:
+                        root_node = root_node.setdefault(component, {})
+                root_node.setdefault(None, []).append(root_entry)
+            else:
+                root_entry["drive_key"] = drive_key
 
-            is_p_disabled = norm_p in [os.path.normpath(dp) for dp in (disabled_paths.get(cat) or [])]
-            if not is_p_disabled:
-                drives_by_letter[d_key]["all_disabled"] = False
+    drives_started = time.perf_counter()
+    rows_seen = 0
+    path_counts = {}
+    path_drives = {}
+    path_categories = {}
+    conn = None
+    try:
+        conn = get_conn()
+        rows = conn.execute("SELECT file_path, type FROM media")
+        for row in rows:
+            rows_seen += 1
+            file_path = row["file_path"] if row else ""
+            if not file_path:
+                continue
+            norm_file = normalize_path(file_path)
+            drive = get_drive_identifier(file_path)
+            drive_key = drive.upper()
+            path_counts[norm_file] = path_counts.get(norm_file, 0) + 1
+            path_drives[norm_file] = drive_key
+            path_categories.setdefault(norm_file, set()).add(row["type"] or "movies")
+    except Exception:
+        logger.debug("Could not aggregate configured drive media paths", exc_info=True)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
-    # Only attribute indexed media categories to drives that are actively configured in media_paths
-    for dl, cat in db_drives:
-        d_key = dl.upper()
-        if d_key in drives_by_letter:
-            drives_by_letter[d_key]["categories"].add(cat)
+    for norm_file, count in path_counts.items():
+        drive_key = path_drives[norm_file]
+        if drive_key not in drives_by_letter:
+            continue
+        drives_by_letter[drive_key]["categories"].update(path_categories[norm_file])
+        drives_by_letter[drive_key]["fallback_count"] += count
+        matching_roots = []
+        node = path_trie
+        for component in norm_file.split("/"):
+            if not component:
+                continue
+            node = node.get(component)
+            if node is None:
+                break
+            matching_roots.extend(node.get(None, ()))
+        for root_entry in matching_roots:
+            root_entry["matched_count"] += count
+        # The previous implementation summed root matches into media_count, so
+        # overlapping configured roots intentionally count an item once per root.
+        for root_entry in matching_roots:
+            drives_by_letter[root_entry["drive_key"]]["matched_count"] += count
 
+    logger.debug("Drive status counted %d media rows across %d configured roots in %.3fs", rows_seen, len(configured_roots), time.perf_counter() - drives_started)
     drives_list = []
     offline_letters = set()
 
@@ -974,14 +1057,9 @@ def api_system_drives_status():
             if not all_disabled:
                 offline_letters.add(drive_letter)
 
-        m_count = 0
-        for p in paths:
-            path_key = p.replace("\\", "/").rstrip("/").lower()
-            prefix = path_key + "/"
-            m_count += sum(cnt for fp_norm, cnt in path_counts.items() if fp_norm == path_key or fp_norm.startswith(prefix))
-        if m_count == 0 and drive_letter:
-            dl_prefix = drive_letter.replace("\\", "/").rstrip("/").lower() + "/"
-            m_count = sum(cnt for fp_norm, cnt in path_counts.items() if fp_norm.startswith(dl_prefix))
+        m_count = info["matched_count"]
+        if m_count == 0:
+            m_count = info["fallback_count"]
 
         drives_list.append({
             "path": paths[0] if paths else drive_letter,

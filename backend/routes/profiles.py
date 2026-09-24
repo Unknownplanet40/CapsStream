@@ -7,7 +7,7 @@ import time
 import threading
 import uuid
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, request, session, current_app
 
 SERVER_BOOT_ID = str(uuid.uuid4())
 
@@ -21,9 +21,14 @@ from .middleware import (
 from backend.db import (
     get_all_profiles, get_profile, create_profile, update_profile,
     delete_profile, reorder_profiles, verify_pin_raw, hash_pin,
+    get_totp_state, save_totp_secret, activate_totp, clear_totp_secret,
+    accept_totp_step, replace_totp_recovery_codes, consume_totp_recovery_code,
 )
 
 profiles_bp = Blueprint("profiles", __name__)
+_TOTP_CHALLENGES = {}
+_TOTP_ENROLLMENTS = {}
+_TOTP_STATE_LOCK = threading.Lock()
 
 try:
     from flask_limiter import Limiter
@@ -52,6 +57,9 @@ def api_get_profiles():
 
     profiles = get_all_profiles()
     for p in profiles:
+        # Profile listing needs the enabled flag, never the stored encrypted secret.
+        p.pop("totp_secret", None)
+        p.pop("totp_last_step", None)
         pid = p.get("id")
         sess = active_map.get(pid)
         if sess and not sess.get("evicted"):
@@ -294,10 +302,229 @@ def api_delete_profile(profile_id):
 
 # ─── Auth Endpoints (rate limited in app.py via limiter.limit on blueprint) ───
 
+def _prune_totp_tokens(now=None):
+    now = time.time() if now is None else now
+    with _TOTP_STATE_LOCK:
+        for tokens, ttl in ((_TOTP_CHALLENGES, 300), (_TOTP_ENROLLMENTS, 600)):
+            for token, state in list(tokens.items()):
+                if now - state["created"] > ttl:
+                    tokens.pop(token, None)
+
+
+def _verify_totp_secret(encrypted_secret, code, last_step=-1):
+    from backend.utils.totp import decrypt_secret, matching_step
+    secret = decrypt_secret(encrypted_secret, current_app.secret_key)
+    return secret, matching_step(secret, code, last_step)
+
+
+def _complete_totp_challenge(profile_id, client_session_id, device_name, now):
+    with ACTIVE_PROFILE_LOCK:
+        old_sess = ACTIVE_PROFILE_SESSIONS.get(profile_id)
+        if old_sess and client_session_id and old_sess.get("session_id") and old_sess.get("session_id") != client_session_id:
+            old_sess["evicted"] = True
+        ACTIVE_PROFILE_SESSIONS[profile_id] = {
+            "session_id": client_session_id,
+            "device_name": device_name,
+            "last_seen": now,
+            "evicted": False,
+        }
+
+    profile = get_profile(profile_id)
+    if not profile:
+        return None
+    session["profile_id"] = profile_id
+    session["session_id"] = client_session_id
+    session["is_kids"] = bool(profile.get("is_kids", 0))
+    session["is_admin"] = bool(profile.get("is_admin", 0))
+    session["server_boot_id"] = SERVER_BOOT_ID
+    session.permanent = False
+    return sanitize_profile(profile)
+
+
+@profiles_bp.route("/api/profiles/auth/2fa", methods=["POST"])
+def api_auth_profile_totp():
+    data = request.json or {}
+    token = str(data.get("challenge") or "")
+    code = str(data.get("code") or "").strip()
+    if not token or len(code) > 100:
+        return jsonify({"error": "Invalid or expired two-factor challenge"}), 400
+    if request.headers.get("Origin") and request.host_url.rstrip("/") != request.headers["Origin"].rstrip("/"):
+        return jsonify({"error": "Cross-origin request rejected"}), 403
+    _prune_totp_tokens()
+    with _TOTP_STATE_LOCK:
+        challenge = _TOTP_CHALLENGES.get(token)
+        if challenge and challenge.get("in_flight"):
+            challenge = None
+        elif challenge:
+            challenge["in_flight"] = True
+    if not challenge:
+        return jsonify({"error": "Invalid or expired two-factor challenge"}), 401
+
+    profile_id = challenge["profile_id"]
+    current_challenge_session = session.get("totp_challenge")
+    if not current_challenge_session or current_challenge_session != token:
+        with _TOTP_STATE_LOCK:
+            challenge_state = _TOTP_CHALLENGES.get(token)
+            if challenge_state:
+                challenge_state.pop("in_flight", None)
+        return jsonify({"error": "Invalid or expired two-factor challenge"}), 401
+    remaining = pin_lockout_remaining(profile_id)
+    if remaining > 0:
+        with _TOTP_STATE_LOCK:
+            _TOTP_CHALLENGES.pop(token, None)
+        return jsonify({"error": f"Too many failed attempts — try again in {remaining}s", "retry_after": remaining}), 429
+
+    state = get_totp_state(profile_id)
+    if not state or not state.get("totp_secret"):
+        with _TOTP_STATE_LOCK:
+            _TOTP_CHALLENGES.pop(token, None)
+        return jsonify({"error": "Two-factor authentication is no longer enabled"}), 401
+
+    try:
+        secret, step = _verify_totp_secret(state["totp_secret"], code, state.get("totp_last_step", -1))
+    except Exception:
+        secret, step = None, None
+    ok = bool(step is not None and accept_totp_step(profile_id, step, state["totp_secret"]))
+    if not ok:
+        from backend.utils.totp import recovery_hash
+        ok = consume_totp_recovery_code(profile_id, recovery_hash(code))
+    if not ok:
+        record_pin_failure(profile_id)
+        with _TOTP_STATE_LOCK:
+            challenge_state = _TOTP_CHALLENGES.get(token)
+            if challenge_state:
+                challenge_state.pop("in_flight", None)
+        return jsonify({"error": "Invalid authentication code"}), 401
+    clear_pin_failures(profile_id)
+    with _TOTP_STATE_LOCK:
+        _TOTP_CHALLENGES.pop(token, None)
+    session.pop("totp_challenge", None)
+    profile = _complete_totp_challenge(
+        profile_id, challenge["session_id"], challenge["device_name"], time.time()
+    )
+    if not profile:
+        return jsonify({"error": "Profile not found"}), 404
+    return jsonify({"ok": True, "profile": profile})
+
+
+@profiles_bp.route("/api/profiles/<int:profile_id>/totp/enroll", methods=["POST"])
+def api_totp_enroll(profile_id):
+    profile = get_profile(profile_id)
+    if not profile or not profile.get("is_admin") or profile.get("is_kids"):
+        return jsonify({"error": "Administrator profile not found"}), 404
+    if current_profile() != profile_id or not is_admin():
+        return jsonify({"error": "Sign in to this administrator profile first"}), 403
+    data = request.json or {}
+    remaining = pin_lockout_remaining(profile_id)
+    if remaining > 0:
+        return jsonify({"error": f"Too many failed attempts — try again in {remaining}s", "retry_after": remaining}), 429
+    if not verify_pin_raw(profile_id, data.get("pin")):
+        record_pin_failure(profile_id)
+        return jsonify({"error": "Incorrect PIN"}), 401
+    from backend.utils.totp import ENROLLMENT_TTL_SECONDS, encrypt_secret, new_secret, provisioning_uri, qr_png_data_uri
+    secret = new_secret()
+    encrypted = encrypt_secret(secret, current_app.secret_key)
+    token = uuid.uuid4().hex + uuid.uuid4().hex
+    _prune_totp_tokens()
+    with _TOTP_STATE_LOCK:
+        _TOTP_ENROLLMENTS[token] = {"profile_id": profile_id, "secret": encrypted, "created": time.time()}
+    uri = provisioning_uri(secret, profile.get("name", "Administrator"))
+    return jsonify({
+        "enrollment": token,
+        "secret": secret,
+        "otpauth_uri": uri,
+        "qr_code": qr_png_data_uri(uri),
+        "expires_in": ENROLLMENT_TTL_SECONDS,
+    })
+
+
+@profiles_bp.route("/api/profiles/<int:profile_id>/totp/confirm", methods=["POST"])
+def api_totp_confirm(profile_id):
+    profile = get_profile(profile_id)
+    if not profile or not profile.get("is_admin") or profile.get("is_kids"):
+        return jsonify({"error": "Administrator profile not found"}), 404
+    if current_profile() != profile_id or not is_admin():
+        return jsonify({"error": "Sign in to this administrator profile first"}), 403
+    data = request.json or {}
+    remaining = pin_lockout_remaining(profile_id)
+    if remaining > 0:
+        return jsonify({"error": f"Too many failed attempts — try again in {remaining}s", "retry_after": remaining}), 429
+    token = str(data.get("enrollment") or "")
+    _prune_totp_tokens()
+    with _TOTP_STATE_LOCK:
+        enrollment = _TOTP_ENROLLMENTS.get(token)
+    if not enrollment or enrollment["profile_id"] != profile_id:
+        return jsonify({"error": "Enrollment expired; start again"}), 401
+
+    state = get_totp_state(profile_id)
+    if state and state.get("totp_secret"):
+        return jsonify({"error": "Two-factor authentication is already enabled"}), 409
+    try:
+        from backend.utils.totp import decrypt_secret, matching_step, encrypt_secret, recovery_codes, recovery_hash
+        secret = decrypt_secret(enrollment["secret"], current_app.secret_key)
+        step = matching_step(secret, data.get("code"))
+    except Exception:
+        step = None
+        secret = None
+    if step is None:
+        record_pin_failure(profile_id)
+        return jsonify({"error": "Invalid authentication code"}), 401
+    with _TOTP_STATE_LOCK:
+        current_enrollment = _TOTP_ENROLLMENTS.get(token)
+        if current_enrollment is not enrollment:
+            return jsonify({"error": "Enrollment expired; start again"}), 401
+        _TOTP_ENROLLMENTS.pop(token, None)
+    codes = recovery_codes()
+    encrypted_secret = encrypt_secret(secret, current_app.secret_key)
+    activate_totp(profile_id, encrypted_secret, [recovery_hash(code) for code in codes])
+    if not accept_totp_step(profile_id, step, encrypted_secret):
+        clear_totp_secret(profile_id, encrypted_secret)
+        return jsonify({"error": "Could not activate two-factor authentication; start again"}), 409
+    clear_pin_failures(profile_id)
+    return jsonify({"ok": True, "recovery_codes": codes})
+
+
+@profiles_bp.route("/api/profiles/<int:profile_id>/totp/disable", methods=["POST"])
+def api_totp_disable(profile_id):
+    pid = current_profile()
+    profile = get_profile(profile_id)
+    if not profile or not profile.get("is_admin") or profile.get("is_kids"):
+        return jsonify({"error": "Administrator profile not found"}), 404
+    if pid != profile_id or not is_admin():
+        return jsonify({"error": "Sign in to this administrator profile first"}), 403
+    data = request.json or {}
+    remaining = pin_lockout_remaining(profile_id)
+    if remaining > 0:
+        return jsonify({"error": f"Too many failed attempts — try again in {remaining}s", "retry_after": remaining}), 429
+    if not verify_pin_raw(profile_id, data.get("pin")):
+        record_pin_failure(profile_id)
+        return jsonify({"error": "Incorrect PIN"}), 401
+    state = get_totp_state(profile_id)
+    if not state or not state.get("totp_secret"):
+        return jsonify({"error": "Two-factor authentication is not enabled"}), 409
+    try:
+        secret, step = _verify_totp_secret(state["totp_secret"], data.get("code"), state.get("totp_last_step", -1))
+    except Exception:
+        secret, step = None, None
+    if step is None:
+        record_pin_failure(profile_id)
+        return jsonify({"error": "A current authentication code is required"}), 401
+    if not accept_totp_step(profile_id, step, state["totp_secret"]):
+        record_pin_failure(profile_id)
+        return jsonify({"error": "Authentication code already used"}), 401
+    clear_totp_secret(profile_id, state["totp_secret"])
+    clear_pin_failures(profile_id)
+    return jsonify({"ok": True})
+
+
 @profiles_bp.route("/api/profiles/auth", methods=["POST"])
 def api_auth_profile():
     data = request.json or {}
     profile_id = data.get("profile_id")
+    try:
+        profile_id = int(profile_id) if profile_id is not None else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid profile_id"}), 400
     raw_pin = data.get("pin")
     pin = str(raw_pin).strip() if raw_pin is not None else ""
     force_takeover = bool(data.get("force_takeover", False))
@@ -334,8 +561,26 @@ def api_auth_profile():
     if not verify_pin_raw(profile_id, pin):
         record_pin_failure(profile_id)
         return jsonify({"error": "Incorrect PIN"}), 401
-    clear_pin_failures(profile_id)
+    totp_state = get_totp_state(profile_id) if profile.get("is_admin") else None
+    if totp_state and totp_state.get("totp_secret"):
+        _prune_totp_tokens(now)
+        challenge = uuid.uuid4().hex + uuid.uuid4().hex
+        with _TOTP_STATE_LOCK:
+            _TOTP_CHALLENGES[challenge] = {
+                "profile_id": profile_id,
+                "session_id": client_session_id,
+                "device_name": device_name,
+                "created": now,
+            }
+        old_pid = session.pop("profile_id", None)
+        session.clear()
+        session["totp_challenge"] = challenge
+        if old_pid:
+            with ACTIVE_PROFILE_LOCK:
+                ACTIVE_PROFILE_SESSIONS.pop(old_pid, None)
+        return jsonify({"status": "two_factor_required", "challenge": challenge})
 
+    clear_pin_failures(profile_id)
     with ACTIVE_PROFILE_LOCK:
         old_sess = ACTIVE_PROFILE_SESSIONS.get(profile_id)
         if old_sess and client_session_id and old_sess.get("session_id") and old_sess.get("session_id") != client_session_id:

@@ -18,6 +18,7 @@ from backend.db import (
     get_random_pick, get_hero_featured, get_continue_watching, get_profile_recommendations, get_similar_media, get_progress, get_progress_for_media_items, is_favorite,
     get_unmatched, get_media_needing_recache, upsert_media,
     delete_media_by_id, delete_media_by_tmdb, delete_media_by_title_and_type,
+    get_all_sources_for_media, format_file_size_bytes,
 )
 
 media_bp = Blueprint("media", __name__)
@@ -728,6 +729,50 @@ def api_search():
 @media_bp.route("/api/genres", methods=["GET"])
 def api_genres():
     return jsonify(get_all_genres())
+
+
+@media_bp.route("/api/admin/duplicate-report", methods=["GET"])
+def api_duplicate_report():
+    require_admin()
+    from backend.db import get_all_media
+    from backend.video_probe import probe_video_resolution
+    import os
+
+    groups = {}
+    media_items = get_all_media()
+    for item in media_items:
+        identity = item.get("tmdb_id") or (item.get("title") or "").casefold()
+        key = (identity, item.get("type"), item.get("season"), item.get("episode"))
+        if key in groups:
+            continue
+        sources = get_all_sources_for_media(item)
+        unique_sources = {source.get("id"): source for source in sources if source.get("id") is not None}
+        if len(unique_sources) < 2:
+            continue
+        enriched = []
+        for source in unique_sources.values():
+            source = dict(source)
+            probe = probe_video_resolution(source.get("file_path") or "")
+            source["resolution"] = probe.get("base_label") if probe.get("width") or probe.get("height") else "Unknown"
+            source["width"] = int(probe.get("width") or 0)
+            source["height"] = int(probe.get("height") or 0)
+            source["filename"] = os.path.basename(source.get("file_path") or "")
+            enriched.append(source)
+        ranked = sorted(enriched, key=lambda source: (bool(source.get("is_mounted")), source["width"] * source["height"]), reverse=True)
+        best = ranked[0]
+        reclaimable = sum(
+            int(source.get("file_size") or 0)
+            for source in enriched
+            if source is not best and source.get("is_mounted")
+        )
+        groups[key] = {
+            "title": item.get("title"), "type": item.get("type"),
+            "season": item.get("season"), "episode": item.get("episode"),
+            "sources": enriched, "suggested_best_id": best.get("id"),
+            "estimated_reclaimable_bytes": reclaimable,
+            "estimated_reclaimable": format_file_size_bytes(reclaimable),
+        }
+    return jsonify(list(groups.values()))
 
 
 @media_bp.route("/api/unmatched", methods=["GET"])

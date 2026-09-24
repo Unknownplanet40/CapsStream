@@ -98,6 +98,7 @@ def init_db():
             name        TEXT NOT NULL,
             description TEXT DEFAULT '',
             cover_id    INTEGER,
+            rule_json   TEXT,
             created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
         );
@@ -125,6 +126,13 @@ def init_db():
             achievement_id TEXT NOT NULL,
             unlocked_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (profile_id, achievement_id),
+            FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS totp_recovery_codes (
+            profile_id INTEGER NOT NULL,
+            code_hash TEXT NOT NULL,
+            PRIMARY KEY (profile_id, code_hash),
             FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
         );
 
@@ -255,6 +263,12 @@ def init_db():
         if "default_speed" not in pcols:
             conn.execute("ALTER TABLE profiles ADD COLUMN default_speed REAL DEFAULT 1.0")
             print("[DB] Migrated: added default_speed column to profiles")
+        if "totp_secret" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN totp_secret TEXT")
+            print("[DB] Migrated: added totp_secret column to profiles")
+        if "totp_last_step" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN totp_last_step INTEGER DEFAULT -1")
+            print("[DB] Migrated: added totp_last_step column to profiles")
 
         # Guarantee at least one admin profile exists if profiles exist
         conn.execute("""
@@ -281,6 +295,9 @@ def init_db():
         if "cover_id" not in col_cols:
             conn.execute("ALTER TABLE collections ADD COLUMN cover_id INTEGER")
             print("[DB] Migrated: added cover_id column to collections")
+        if "rule_json" not in col_cols:
+            conn.execute("ALTER TABLE collections ADD COLUMN rule_json TEXT")
+            print("[DB] Migrated: added rule_json column to collections")
     except Exception as e:
         print("[DB] Migration notice (collections):", e)
 

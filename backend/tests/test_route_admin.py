@@ -3,7 +3,9 @@
 Tests for Admin Route Endpoints (backend/routes/admin.py)
 Covers settings retrieval, test-api endpoint, system cache stats, and health checks.
 """
+import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 from flask import Flask
@@ -14,11 +16,38 @@ if "app" not in sys.modules:
     mock_app_module._get_github_profile.return_value = {}
     sys.modules["app"] = mock_app_module
 
-from backend.routes.admin import admin_bp
+from backend.routes.admin import admin_bp, _get_media_system_metrics
 from backend.routes.middleware import has_active_profile_session
 
 
 class TestRouteAdmin(unittest.TestCase):
+    @patch("backend.db.media.is_item_mounted")
+    @patch("backend.db.get_conn")
+    def test_system_media_metrics_use_one_traversal_and_mount_check(self, mock_get_conn, mock_mounted):
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = iter([
+            {"id": 1, "type": "movie", "file_path": "D:\\Movies\\one.mkv", "file_size": 100, "has_manual_marker": 1},
+            {"id": 2, "type": "series", "file_path": "E:\\Series\\ep.mkv", "file_size": 200, "has_manual_marker": 0},
+            {"id": 3, "type": "anime", "file_path": "D:\\Anime\\ep.mkv", "file_size": 300, "has_manual_marker": 0},
+            {"id": 4, "type": "movie", "file_path": "D:\\Offline\\offline.mkv", "file_size": 400, "has_manual_marker": 0},
+            {"id": 5, "type": "movie", "file_path": "", "file_size": 500, "has_manual_marker": 0},
+        ])
+        mock_get_conn.return_value = mock_conn
+        mock_mounted.side_effect = lambda item: "Offline" not in item["file_path"]
+
+        with tempfile.TemporaryDirectory() as base_dir:
+            marker_dir = os.path.join(base_dir, "data", "metadata", "skip_times")
+            os.makedirs(marker_dir)
+            with open(os.path.join(marker_dir, "3.json"), "w", encoding="utf-8") as marker_file:
+                marker_file.write("{}")
+            counts, byte_totals, marker_count = _get_media_system_metrics(base_dir)
+
+        self.assertEqual(counts, {"movie": 1, "series": 1, "anime": 1})
+        self.assertEqual(byte_totals, {"total": 600, "movie": 100, "series": 200, "anime": 300})
+        self.assertEqual(marker_count, 2)
+        self.assertEqual(mock_mounted.call_count, 4)
+        mock_get_conn.return_value.execute.assert_called_once()
+
     def setUp(self):
         self.app = Flask(__name__)
         self.app.secret_key = "test_admin_secret"
@@ -137,9 +166,10 @@ class TestRouteAdmin(unittest.TestCase):
         self.assertIn("sync_dir", data)
         self.assertIn("is_dev", data)
 
+    @patch("backend.routes.admin._get_media_system_metrics", return_value=({"movie": 2, "series": 1, "anime": 0}, {"total": 3072, "movie": 2048, "series": 1024, "anime": 0}, 3))
     @patch("backend.utils.network.get_device_ip", return_value="192.168.1.55")
     @patch("backend.utils.network.get_all_device_ips", return_value=["192.168.1.55"])
-    def test_system_info_device_ip(self, mock_all_ips, mock_ip):
+    def test_system_info_device_ip(self, mock_all_ips, mock_ip, mock_metrics):
         """Verify GET /api/system/info returns device_ip, all_device_ips, and device_url."""
         res = self.client.get("/api/system/info")
         self.assertEqual(res.status_code, 200)
@@ -147,6 +177,10 @@ class TestRouteAdmin(unittest.TestCase):
         self.assertEqual(data.get("device_ip"), "192.168.1.55")
         self.assertEqual(data.get("all_device_ips"), ["192.168.1.55"])
         self.assertIn("192.168.1.55", data.get("device_url", ""))
+        self.assertEqual(data["media_counts"], {"total": 3, "movies": 2, "series": 1, "anime": 0})
+        self.assertEqual(data["storage_info"]["total_bytes"], 3072)
+        self.assertEqual(data["storage_info"]["movies_pct"], 66.7)
+        mock_metrics.assert_called_once()
 
 
     @patch("backend.routes.admin.is_dev_mode", return_value=True)
@@ -211,6 +245,50 @@ class TestRouteAdmin(unittest.TestCase):
         mock_clear.assert_any_call("E:\\OldMovies")
         mock_clear.assert_any_call("E:")
         mock_prune.assert_called_once()
+
+    @patch("backend.settings.load_config", return_value={"features": {"online_requests": False}})
+    @patch("backend.utils.supabase_client.get_supabase_config", return_value=("https://demo.supabase.co", "anon-key"))
+    @patch("backend.utils.supabase_client.test_supabase_connection")
+    @patch("backend.routes.admin.require_admin")
+    def test_api_system_supabase_status_disabled(self, mock_admin, mock_test, mock_config, mock_load):
+        resp = self.client.get("/api/system/supabase-status")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["status"], "disabled")
+        mock_test.assert_not_called()
+
+    @patch("backend.settings.load_config", return_value={"features": {"online_requests": True}})
+    @patch("backend.utils.supabase_client.get_supabase_config", return_value=("", ""))
+    @patch("backend.routes.admin.require_admin")
+    def test_api_system_supabase_status_not_configured(self, mock_admin, mock_config, mock_load):
+        resp = self.client.get("/api/system/supabase-status")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["status"], "not_configured")
+        self.assertIn("checked_at", resp.get_json())
+
+    @patch("backend.settings.load_config", return_value={"features": {"online_requests": True}})
+    @patch("backend.utils.supabase_client.get_supabase_config", return_value=("https://demo.supabase.co", "anon-key"))
+    @patch("backend.utils.supabase_client.test_supabase_connection", return_value=(True, "connected"))
+    @patch("backend.routes.admin.require_admin")
+    def test_api_system_supabase_status_connected(self, mock_admin, mock_test, mock_config, mock_load):
+        resp = self.client.get("/api/system/supabase-status")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["status"], "connected")
+        mock_test.assert_called_once_with()
+
+    @patch("backend.settings.load_config", return_value={"features": {"online_requests": True}})
+    @patch("backend.utils.supabase_client.get_supabase_config", return_value=("https://demo.supabase.co", "anon-key"))
+    @patch("backend.utils.supabase_client.test_supabase_connection", return_value=(False, "secret URL/key must not be returned"))
+    @patch("backend.routes.admin.require_admin")
+    def test_api_system_supabase_status_failure_is_sanitized(self, mock_admin, mock_test, mock_config, mock_load):
+        resp = self.client.get("/api/system/supabase-status")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["status"], "error")
+        self.assertNotIn("secret", resp.get_data(as_text=True))
+
+    @patch("backend.routes.admin.require_admin", side_effect=__import__("werkzeug.exceptions", fromlist=["Forbidden"]).Forbidden())
+    def test_api_system_supabase_status_requires_admin(self, mock_admin):
+        resp = self.client.get("/api/system/supabase-status")
+        self.assertEqual(resp.status_code, 403)
 
     @patch("backend.utils.diagnostics.get_system_diagnostics")
     def test_api_system_diagnostics(self, mock_get_diag):

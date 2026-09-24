@@ -155,9 +155,6 @@ def verify_admin_pin(pin):
 
 def is_admin():
     """True when the active session profile is an Admin or a valid admin PIN was supplied."""
-    if session.get("is_admin"):
-        return True
-
     admin_pin = request.headers.get("X-Admin-PIN")
     if admin_pin is None and request.is_json and request.json:
         admin_pin = request.json.get("admin_pin")
@@ -183,9 +180,6 @@ def is_admin():
         all_profs = get_all_profiles()
         return len(all_profs) == 0
 
-    cached = session.get("is_admin")
-    if cached is not None:
-        return bool(cached)
     try:
         from backend.db import get_profile
         prof = get_profile(pid)
@@ -327,6 +321,7 @@ def sanitize_profile(profile):
         "daily_limit_minutes": int(profile.get("daily_limit_minutes", 0) or 0),
         "bedtime_curfew": str(profile.get("bedtime_curfew", "") or ""),
         "has_pin": bool(profile.get("pin_hash")),
+        "totp_enabled": bool(profile.get("totp_secret")),
         "has_completed_tour": bool(profile.get("has_completed_tour", 0)),
         "default_speed": float(profile.get("default_speed", 1.0) or 1.0),
     }

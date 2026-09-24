@@ -34,6 +34,7 @@ _scan_status = {
     "scan_total": 0,
     "matched": 0,
     "elapsed": 0,
+    "completed_at": None,
     "errors": [],
 }
 _scan_started_at = 0.0
@@ -82,6 +83,7 @@ def reset_scan_status():
         "scan_total": 0,
         "matched": 0,
         "elapsed": 0,
+        "completed_at": None,
         "errors": [],
     }
 
@@ -377,6 +379,7 @@ def scan_library(callback=None):
         "scan_total": 0,
         "matched": 0,
         "elapsed": 0,
+        "completed_at": None,
         "errors": [],
     }
 
@@ -580,6 +583,7 @@ def scan_library(callback=None):
             phase="complete",
             count=count,
             matched=matched_count,
+            completed_at=time.time(),
             progress=f"Scan complete. Processed {count} new files.",
         )
         print(f"[Scanner] Scan complete. {count} new files added.")

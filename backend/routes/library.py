@@ -12,8 +12,9 @@ from backend.db import (
     get_media_by_id, get_media_by_tmdb, get_unique_shows, get_recently_added, get_top_rated,
     get_progress, save_progress, delete_progress, get_continue_watching,
     get_favorites, toggle_favorite, is_favorite,
-    get_collections, create_collection, update_collection, delete_collection,
-    add_to_collection, remove_from_collection,
+    get_collections, create_collection, update_collection, update_smart_collection_rule, delete_collection,
+    add_to_collection, remove_from_collection, get_progress_for_media_items,
+    validate_smart_collection_rule,
     get_playlists, get_playlist, create_playlist, update_playlist,
     delete_playlist, add_to_playlist, remove_from_playlist, reorder_playlist,
     is_media_in_playlist,
@@ -176,19 +177,24 @@ def api_toggle_favorite(media_id=None):
 @library_bp.route("/api/collections", methods=["GET"])
 def api_get_collections():
     pid = require_profile()
-    result = get_collections(pid)
-    all_media = get_unique_shows(None)
+    all_media = filter_for_profile(get_unique_shows(None))
     kids = active_is_kids()
-    if kids:
-        all_media = filter_for_profile(all_media)
+    progress_by_id = get_progress_for_media_items(pid, all_media)
+    from backend.video_probe import probe_video_resolution
+    result = get_collections(pid, progress_by_id, probe_video_resolution, media_items=all_media)
 
     def _smart(cid, name, desc, items):
         return {"id": cid, "name": name, "description": desc, "smart": True, "items": items}
 
-    unwatched = [m for m in all_media if not get_progress(pid, m.get("id"))]
+    unwatched = [m for m in all_media if progress_by_id.get(m.get("id")) is None]
     result.insert(0, _smart("smart-unwatched", "Unwatched", "Library titles you haven't started yet", unwatched[:20]))
-    result.insert(1, _smart("smart-recent", "Recently Added", "The newest additions to your library", get_recently_added(limit=20)))
-    result.insert(2, _smart("smart-top", "Top Rated", "Highest rated titles in your library", get_top_rated(limit=20)))
+    recent = get_recently_added(limit=20)
+    top = get_top_rated(limit=20)
+    if kids:
+        recent = filter_for_profile(recent)
+        top = filter_for_profile(top)
+    result.insert(1, _smart("smart-recent", "Recently Added", "The newest additions to your library", recent))
+    result.insert(2, _smart("smart-top", "Top Rated", "Highest rated titles in your library", top))
 
     universe_collections = get_universe_collections(all_media, min_count=2)
     result.extend(universe_collections)
@@ -196,13 +202,8 @@ def api_get_collections():
     country_collections = get_country_collections(all_media, min_count=2)
     result.extend(country_collections)
 
-    if kids:
-        filtered = []
-        for col in result:
-            items = filter_for_profile(col.get("items"))
-            if items:
-                filtered.append({**col, "items": items})
-        result = filtered
+    filtered = [{**col, "items": filter_for_profile(col.get("items"))} for col in result]
+    result = [col for col in filtered if col["items"]] if kids else filtered
 
     return jsonify(result)
 
@@ -211,12 +212,18 @@ def api_get_collections():
 def api_create_collection():
     pid = require_profile()
     data = request.json or {}
-    name = data.get("name", "").strip()
-    desc = data.get("description", "")
+    name = str(data.get("name", "") or "").strip()
+    desc = str(data.get("description", "") or "")
     if not name:
         return jsonify({"error": "Name required"}), 400
-    cid = create_collection(pid, name, desc)
-    return jsonify({"id": cid, "name": name, "description": desc, "items": []}), 201
+    if len(name) > 100 or len(desc) > 500:
+        return jsonify({"error": "Name must be 100 characters or fewer and description 500 or fewer"}), 400
+    rule = data.get("rule")
+    try:
+        cid = create_collection(pid, name, desc, rule=rule)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"id": cid, "name": name, "description": desc, "items": [], "smart": rule is not None, "rule": rule}), 201
 
 
 @library_bp.route("/api/collections/<int:collection_id>", methods=["DELETE"])
@@ -232,10 +239,20 @@ def api_update_collection(collection_id):
     data = request.json or {}
     name = data.get("name")
     desc = data.get("description")
+    if name is not None and (not isinstance(name, str) or not name.strip() or len(name.strip()) > 100):
+        return jsonify({"error": "Name must be 1–100 characters"}), 400
+    if desc is not None and (not isinstance(desc, str) or len(desc) > 500):
+        return jsonify({"error": "Description must be 500 characters or fewer"}), 400
     kwargs = {}
     if "cover_id" in data:
         kwargs["cover_id"] = data["cover_id"]
-    update_collection(collection_id, pid, name=name, description=desc, **kwargs)
+    update_collection(collection_id, pid, name=name.strip() if isinstance(name, str) else name, description=desc, **kwargs)
+    if "rule" in data:
+        try:
+            if not update_smart_collection_rule(collection_id, pid, data["rule"]):
+                return jsonify({"error": "Collection not found"}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
     return jsonify({"ok": True, "cover_id": data.get("cover_id")})
 
 

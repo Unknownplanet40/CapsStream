@@ -49,6 +49,10 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
     # ── Auth / PIN — 5 per minute ───────────────────────────────────────────
     for view_func_name in [
         "profiles.api_auth_profile",
+        "profiles.api_auth_profile_totp",
+        "profiles.api_totp_enroll",
+        "profiles.api_totp_confirm",
+        "profiles.api_totp_disable",
         "profiles.api_verify_admin_pin",
     ]:
         limiter.limit("5 per minute")(app.view_functions[view_func_name])

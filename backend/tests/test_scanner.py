@@ -69,6 +69,7 @@ class TestMediaScanner(unittest.TestCase):
         self.assertFalse(status["running"])
         self.assertEqual(status["phase"], "idle")
         self.assertEqual(status["progress"], "")
+        self.assertIsNone(status["completed_at"])
 
     def test_resolve_paths_ignores_empty_or_invalid(self):
         """Verify _resolve_paths never resolves empty strings or invalid types to BASE_DIR."""
@@ -99,6 +100,7 @@ class TestMediaScanner(unittest.TestCase):
         status = get_scan_status()
         self.assertFalse(status["running"], "Scanner must never stay running on fatal exception")
         self.assertEqual(status["phase"], "complete")
+        self.assertIsNotNone(status["completed_at"])
         self.assertTrue(any("Disk failure test" in e for e in status["errors"]))
 
 

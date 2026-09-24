@@ -153,68 +153,29 @@ def _teardown_db_conn(exc):
 
 # ─── API Health / GitHub cache (used by admin blueprint) ───────────────────────
 
-_API_HEALTH_CACHE = {"ts": 0.0, "data": None}
-API_HEALTH_TTL_SEC = 120
+_GITHUB_PROFILE_TTL_SEC = 3600
 _GITHUB_PROFILE_CACHE = {"data": None, "fetched_at": 0.0}
-
-
-def _probe_url(url, timeout=4):
-    """Return (reachable, latency_ms). Any HTTP response counts as reachable."""
-    import urllib.request
-    import urllib.error
-    start = time.monotonic()
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "CapsStream-Diagnostics"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            resp.read(256)
-        return True, int((time.monotonic() - start) * 1000)
-    except urllib.error.HTTPError:
-        return True, int((time.monotonic() - start) * 1000)
-    except Exception:
-        return False, None
+_GITHUB_PROFILE_LOCK = threading.Lock()
+_GITHUB_PROFILE_REFRESHING = False
+_GITHUB_PROFILE_DEFAULT = {
+    "login": "Unknownplanet40",
+    "name": "<Caps />",
+    "avatar_url": "https://avatars.githubusercontent.com/u/57881134?v=4",
+    "html_url": "https://github.com/Unknownplanet40",
+    "bio": "I debug life the same way I debug code with patience, caffeine, and a bit of panic.",
+    "location": "Philippines",
+    "public_repos": 20, "followers": 13, "following": 8, "created_year": "2019"
+}
 
 
 def _get_api_health(config):
-    now = time.time()
-    if _API_HEALTH_CACHE["data"] is not None and now - _API_HEALTH_CACHE["ts"] < API_HEALTH_TTL_SEC:
-        return _API_HEALTH_CACHE["data"]
-
-    health = {}
-    tmdb_key = (config.get("tmdb_api_key") or "").strip()
-    if tmdb_key:
-        ok, ms = _probe_url(f"https://api.themoviedb.org/3/configuration?api_key={tmdb_key}")
-        health["tmdb"] = {"status": "ok" if ok else "error", "latency_ms": ms}
-    else:
-        health["tmdb"] = {"status": "unconfigured", "latency_ms": None}
-
-    ok, ms = _probe_url("https://api.aniskip.com/v2/skip-times/21/1?types=op&episodeLength=0")
-    health["aniskip"] = {"status": "ok" if ok else "error", "latency_ms": ms}
-
-    try:
-        os.makedirs(os.path.join(BASE_DIR, "data", "metadata"), exist_ok=True)
-        health["poster_cache"] = {"status": "ok", "latency_ms": None}
-    except Exception:
-        health["poster_cache"] = {"status": "error", "latency_ms": None}
-
-    _API_HEALTH_CACHE["data"] = health
-    _API_HEALTH_CACHE["ts"] = now
-    return health
+    from backend.utils.api_health import get_api_health_snapshot
+    return get_api_health_snapshot(config, BASE_DIR)
 
 
-def _get_github_profile():
-    """Cached GitHub profile — refreshed at most once per hour."""
-    now = time.time()
-    if _GITHUB_PROFILE_CACHE["data"] and now - _GITHUB_PROFILE_CACHE["fetched_at"] < 3600:
-        return _GITHUB_PROFILE_CACHE["data"]
-    profile = {
-        "login": "Unknownplanet40",
-        "name": "<Caps />",
-        "avatar_url": "https://avatars.githubusercontent.com/u/57881134?v=4",
-        "html_url": "https://github.com/Unknownplanet40",
-        "bio": "I debug life the same way I debug code with patience, caffeine, and a bit of panic.",
-        "location": "Philippines",
-        "public_repos": 20, "followers": 13, "following": 8, "created_year": "2019"
-    }
+def _refresh_github_profile():
+    global _GITHUB_PROFILE_REFRESHING
+    profile = dict(_GITHUB_PROFILE_DEFAULT)
     try:
         import urllib.request
         req = urllib.request.Request("https://api.github.com/users/Unknownplanet40", headers={"User-Agent": "CapsStream"})
@@ -235,9 +196,28 @@ def _get_github_profile():
                     profile["created_year"] = created_raw[:4]
     except Exception:
         pass
-    _GITHUB_PROFILE_CACHE["data"] = profile
-    _GITHUB_PROFILE_CACHE["fetched_at"] = now
-    return profile
+    finally:
+        with _GITHUB_PROFILE_LOCK:
+            _GITHUB_PROFILE_CACHE.update({"data": profile, "fetched_at": time.time()})
+            _GITHUB_PROFILE_REFRESHING = False
+
+
+def _get_github_profile():
+    """Return the cached profile immediately and refresh it at most hourly."""
+    global _GITHUB_PROFILE_REFRESHING
+    now = time.time()
+    with _GITHUB_PROFILE_LOCK:
+        profile = _GITHUB_PROFILE_CACHE["data"]
+        fresh = profile and now - _GITHUB_PROFILE_CACHE["fetched_at"] < _GITHUB_PROFILE_TTL_SEC
+        if fresh:
+            return dict(profile)
+        if not _GITHUB_PROFILE_REFRESHING:
+            _GITHUB_PROFILE_REFRESHING = True
+            try:
+                threading.Thread(target=_refresh_github_profile, daemon=True, name="capsstream-github-profile").start()
+            except Exception:
+                _GITHUB_PROFILE_REFRESHING = False
+        return dict(profile or _GITHUB_PROFILE_DEFAULT)
 
 
 # ─── Main Page & Static Routes ─────────────────────────────────────────────────

@@ -57,7 +57,7 @@ const API = {
       return entry.data;
     }
 
-    const r = await fetch(finalUrl);
+    const r = await fetch(finalUrl, { signal: options.signal });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       throw new Error(err.error || `API error: ${r.status}`);
@@ -5867,8 +5867,60 @@ const SettingsPage = {
       </div>
 
       <template v-else>
-        <!-- Main Content Area (all sections visible) -->
         <main class="settings-content">
+
+        <section class="settings-section" id="settings-duplicate-report" v-if="isAdmin">
+          <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <span><i class="ph ph-files" style="color:var(--accent);margin-right:6px"></i>Duplicate &amp; Quality Report</span>
+            <button class="btn btn-secondary btn-sm" @click="loadDuplicateReport" :disabled="duplicateReportLoading"><i class="ph ph-arrows-clockwise"></i> {{ duplicateReportLoading ? 'Scanning…' : 'Scan library' }}</button>
+          </div>
+          <div class="settings-desc">Read-only inventory of duplicate sources. Suggested versions use measured resolution and mounted status; no files are changed or deleted.</div>
+          <div v-if="duplicateReportError" class="settings-desc" style="color:#f87171">{{ duplicateReportError }}</div>
+          <div v-else-if="duplicateReport.length" style="display:grid;gap:12px;margin-top:12px">
+            <article v-for="group in duplicateReport" :key="group.title + group.type + group.season + group.episode" style="border:1px solid var(--border-subtle);border-radius:12px;padding:14px">
+              <strong>{{ group.title }}<template v-if="group.season"> · S{{ group.season }}E{{ group.episode }}</template></strong>
+              <div style="font-size:.82rem;color:var(--text-secondary);margin:4px 0 10px">Suggested best source · estimated reclaimable {{ group.estimated_reclaimable }}</div>
+              <div v-for="source in group.sources" :key="source.id" style="font-size:.8rem;color:var(--text-secondary);padding:4px 0;overflow-wrap:anywhere">
+                <i :class="source.id === group.suggested_best_id ? 'ph-fill ph-star' : 'ph ph-film-strip'" :style="source.id === group.suggested_best_id ? 'color:#fbbf24' : ''"></i>
+                {{ source.filename }} · {{ source.resolution }} · {{ formatFileSize(source.file_size || 0) }} · {{ source.is_mounted ? 'Mounted' : 'Offline' }}
+              </div>
+            </article>
+          </div>
+          <div v-else class="settings-desc" style="margin-top:8px">{{ duplicateReportLoaded ? 'No duplicate source groups found.' : 'Run a scan to compare sources.' }}</div>
+        </section>
+
+        <!-- ══════ System Health Center ══════ -->
+        <section class="settings-section" id="settings-health-center" v-if="isAdmin" aria-labelledby="settings-health-title">
+          <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:8px">
+              <i class="ph ph-heartbeat" style="color:var(--accent)"></i>
+              <span id="settings-health-title">System Health Center</span>
+              <span v-if="healthCenter" class="server-status-pill" :class="healthCenterSummary.status" style="font-size:.7rem;padding:2px 8px">
+                <span class="status-dot"></span>{{ healthCenterSummary.label }}
+              </span>
+            </div>
+            <button class="btn btn-secondary btn-sm" @click="refreshHealthCenter" :disabled="healthCenterLoading" aria-label="Refresh system health">
+              <i :class="healthCenterLoading ? 'ph-bold ph-spinner ph-spin' : 'ph ph-arrows-clockwise'" style="margin-right:5px"></i>
+              {{ healthCenterLoading ? 'Checking…' : 'Refresh' }}
+            </button>
+          </div>
+          <div class="settings-desc" style="margin:0 0 12px">A snapshot of this server and its integrations. Scan history is in-memory and resets when the server restarts.</div>
+          <div v-if="healthCenterLoading && !healthCenter" style="display:flex;justify-content:center;padding:1.5rem"><div class="loading-spinner"></div></div>
+          <div v-else-if="healthCenter" class="diagnostics-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))">
+            <article v-for="item in healthCenter.items" :key="item.key" class="diag-item" style="border:1px solid var(--border-subtle);border-radius:12px;padding:14px;min-width:0">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                <i :class="item.icon" :style="{color: healthTone(item.status), fontSize:'1.1rem'}"></i>
+                <div class="diag-label" style="margin:0">{{ item.label }}</div>
+              </div>
+              <div class="diag-val" :style="{color:healthTone(item.status),fontSize:'.95rem'}">{{ item.value }}</div>
+              <div class="diag-sub" style="margin-top:5px;line-height:1.4">{{ item.detail }}</div>
+              <button v-if="item.action" class="btn btn-secondary btn-sm" style="margin-top:10px" @click="runHealthAction(item.action)">{{ item.actionLabel }}</button>
+            </article>
+          </div>
+          <div v-else class="settings-desc">Health checks could not be loaded. Try refreshing.</div>
+          <div v-if="healthCenterError" class="settings-desc" style="margin-top:8px;color:#f87171">Some checks could not be completed: {{ healthCenterError }}</div>
+          <div v-if="healthCenter?.checkedAt" class="settings-desc" style="margin-top:10px">Last checked {{ formatHealthTime(healthCenter.checkedAt) }}</div>
+        </section>
 
         <!-- ══════ Updates Card (Moved to Top) ══════ -->
         <div class="settings-section" id="settings-updates-section" :class="{ 'update-section-disabled': sysInfo?.is_dev }" v-if="isAdmin">
@@ -6431,7 +6483,7 @@ const SettingsPage = {
             <div class="settings-row">
               <div class="settings-label-container">
                 <div class="settings-label">Smart HEVC Compatibility</div>
-                <div class="settings-desc">Automatically stream HEVC (H.265 / x265) media using hardware-accelerated H.264 conversion to prevent browser hangs, freezes, and crashes.</div>
+                <div class="settings-desc">Start with the original HEVC stream. When enabled, automatically switch to H.264 at the source resolution if playback freezes or the browser cannot decode it.</div>
               </div>
               <label class="toggle-switch">
                 <input type="checkbox" v-model="form.playback.auto_convert_hevc" id="setting-hevc-compat-toggle" />
@@ -8262,6 +8314,23 @@ const SettingsPage = {
     const loading = ref(true);
     const saving = ref(false);
     const testingApi = ref(null);
+    const duplicateReport = ref([]);
+    const duplicateReportLoading = ref(false);
+    const duplicateReportLoaded = ref(false);
+    const duplicateReportError = ref("");
+
+    async function loadDuplicateReport() {
+      duplicateReportLoading.value = true;
+      duplicateReportError.value = "";
+      try {
+        duplicateReport.value = await API.get("/api/admin/duplicate-report", { cache: false });
+        duplicateReportLoaded.value = true;
+      } catch (e) {
+        duplicateReportError.value = e.message || "Could not load duplicate report";
+      } finally {
+        duplicateReportLoading.value = false;
+      }
+    }
     const newPaths = ref({ movies: "", series: "", anime: "" });
 
     const form = ref({
@@ -8515,6 +8584,178 @@ const SettingsPage = {
 
     // ─── Updates ──────────────────────────────────────────────
     const sysInfo = ref(store.sysInfo || null);
+    const healthCenter = ref(null);
+    const healthCenterLoading = ref(false);
+    const healthCenterError = ref("");
+    const healthCenterSummary = computed(() => {
+      const items = healthCenter.value?.items || [];
+      if (items.some(item => item.status === "error" || item.status === "warning")) {
+        return { status: "offline", label: "Attention needed" };
+      }
+      if (items.some(item => item.status === "unknown")) {
+        return { status: "offline", label: "Partially checked" };
+      }
+      return { status: "online", label: "All checks look good" };
+    });
+
+    function healthTone(status) {
+      return ({ ok: "#10b981", warning: "#f59e0b", error: "#ef4444", unknown: "var(--text-muted)", info: "#38bdf8" })[status] || "var(--text-muted)";
+    }
+
+    function formatHealthTime(timestamp) {
+      if (!timestamp) return "just now";
+      return new Date(timestamp * 1000).toLocaleString();
+    }
+
+    function relativeAge(timestamp) {
+      const seconds = Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
+      if (seconds < 3600) return `${Math.max(1, Math.floor(seconds / 60))} minutes ago`;
+      if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+      const days = Math.floor(seconds / 86400);
+      return `${days} day${days === 1 ? "" : "s"} ago`;
+    }
+
+    function healthApiStatus(status) {
+      if (status === "ok") return "ok";
+      if (status === "error") return "error";
+      if (status === "unconfigured" || status === "disabled") return "warning";
+      return "unknown";
+    }
+
+    async function refreshHealthCenter() {
+      healthCenterLoading.value = true;
+      healthCenterError.value = "";
+      const endpoints = [
+        ["drives", "/api/system/drives-status"],
+        ["scan", "/api/scan/status"],
+        ["backup", "/api/system/backup/status"],
+        ["supabase", "/api/system/supabase-status"],
+      ];
+      try {
+      const [infoResult, ...results] = await Promise.allSettled([
+        loadSystemInfo(),
+        ...endpoints.map(([, path]) => API.get(path, { cache: false })),
+      ]);
+      const snapshot = {};
+      const failed = [];
+      if (infoResult.status === "fulfilled" && infoResult.value) snapshot.info = infoResult.value;
+      else failed.push("info");
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") snapshot[endpoints[index][0]] = result.value;
+        else failed.push(endpoints[index][0]);
+      });
+
+      if (snapshot.info) {
+        sysInfo.value = snapshot.info;
+        store.sysInfo = snapshot.info;
+      }
+
+      const info = snapshot.info;
+      const drives = snapshot.drives;
+      const scan = snapshot.scan;
+      const backup = snapshot.backup;
+      const items = [];
+
+      if (!info) {
+        items.push({ key: "server", label: "Server & tools", icon: "ph ph-cpu", status: "unknown", value: "Could not check", detail: "System information is unavailable." });
+        items.push({ key: "integrations", label: "Metadata services", icon: "ph ph-globe-hemisphere-west", status: "unknown", value: "Could not check", detail: "Integration health is unavailable." });
+      } else {
+        const ffmpegOk = !!info.has_ffmpeg && !!info.has_ffprobe;
+        items.push({
+          key: "server", label: "Server & media tools", icon: "ph ph-cpu",
+          status: ffmpegOk ? "ok" : "error",
+          value: ffmpegOk ? "Ready" : (!info.has_ffmpeg ? "FFmpeg missing" : "FFprobe missing"),
+          detail: `Version ${info.version || "unknown"} · ${info.server_uptime || "Running"}`,
+          action: ffmpegOk ? null : "metadata", actionLabel: "Check setup",
+        });
+        const apiHealth = info.api_health || {};
+        const tmdbStatus = healthApiStatus(apiHealth.tmdb?.status);
+        const animeStatus = healthApiStatus(apiHealth.aniskip?.status);
+        const integrationStatus = [tmdbStatus, animeStatus].includes("error") ? "error" : [tmdbStatus, animeStatus].includes("unknown") ? "unknown" : [tmdbStatus, animeStatus].includes("warning") ? "warning" : "ok";
+        const integrationDetails = [
+          `TMDb: ${apiHealth.tmdb?.status === "ok" ? "reachable" : apiHealth.tmdb?.status === "unconfigured" ? "not configured" : apiHealth.tmdb?.status === "error" ? "unreachable" : "unknown"}`,
+          `AniSkip: ${apiHealth.aniskip?.status === "ok" ? "reachable" : apiHealth.aniskip?.status === "error" ? "unreachable" : "unknown"}`,
+        ].join(" · ");
+        items.push({ key: "integrations", label: "Metadata services", icon: "ph ph-globe-hemisphere-west", status: integrationStatus, value: integrationStatus === "ok" ? "Operational" : integrationStatus === "error" ? "Connection issue" : integrationStatus === "warning" ? "Setup needed" : "Could not check", detail: integrationDetails, action: "metadata", actionLabel: "Open settings" });
+      }
+
+      if (!drives) {
+        items.push({ key: "drives", label: "Library drives", icon: "ph ph-hard-drives", status: "unknown", value: "Could not check", detail: "Drive status is unavailable." });
+      } else if (!drives.drives?.length) {
+        items.push({ key: "drives", label: "Library drives", icon: "ph ph-hard-drives", status: "warning", value: "No drives configured", detail: "Add movie, series, or anime folders to start building your library.", action: "paths", actionLabel: "Configure library" });
+      } else {
+        const offline = (drives.drives || []).filter(d => !d.is_mounted && !d.is_disabled);
+        const disabled = (drives.drives || []).filter(d => d.is_disabled);
+        const online = (drives.drives || []).filter(d => d.is_mounted && !d.is_disabled);
+        const driveStatus = offline.length ? "error" : disabled.length ? "warning" : "ok";
+        const driveValue = offline.length
+          ? `${offline.length} drive${offline.length === 1 ? "" : "s"} offline`
+          : disabled.length && online.length
+            ? `${online.length} online · ${disabled.length} disabled`
+            : disabled.length
+              ? `${disabled.length} drive${disabled.length === 1 ? "" : "s"} disabled`
+              : `${online.length} drive${online.length === 1 ? "" : "s"} online`;
+        items.push({
+          key: "drives", label: "Library drives", icon: "ph ph-hard-drives", status: driveStatus,
+          value: driveValue,
+          detail: offline.length ? `Offline: ${offline.map(d => d.drive_letter).join(", ")}` : `${drives.drives.reduce((sum, d) => sum + (d.media_count || 0), 0)} indexed media files · ${disabled.length} disabled`,
+          action: offline.length || disabled.length ? "paths" : null, actionLabel: "Review drives",
+        });
+      }
+
+      if (!scan) {
+        items.push({ key: "scan", label: "Library scan", icon: "ph ph-magnifying-glass", status: "unknown", value: "Could not check", detail: "Scan status is unavailable." });
+      } else if (scan.running) {
+        items.push({ key: "scan", label: "Library scan", icon: "ph ph-magnifying-glass", status: "info", value: "Scan in progress", detail: scan.progress || "The scanner is working.", action: "scanning", actionLabel: "View scan settings" });
+      } else if (scan.phase === "complete") {
+        const errorCount = (scan.errors || []).length;
+        items.push({ key: "scan", label: "Last library scan", icon: "ph ph-magnifying-glass", status: errorCount ? "warning" : "ok", value: errorCount ? `Finished with ${errorCount} issue${errorCount === 1 ? "" : "s"}` : "Finished successfully", detail: `${scan.count || 0} files processed · ${scan.matched || 0} metadata matches${scan.completed_at ? ` · ${relativeAge(scan.completed_at)}` : ""}`, action: "scan", actionLabel: "Run scan" });
+      } else {
+        items.push({ key: "scan", label: "Library scan", icon: "ph ph-magnifying-glass", status: "warning", value: "No recent result", detail: "Scan history is only retained while the server is running.", action: "scan", actionLabel: "Run scan" });
+      }
+
+      if (!backup) {
+        items.push({ key: "backup", label: "Automatic backup", icon: "ph ph-archive-box", status: "unknown", value: "Could not check", detail: "Backup status is unavailable." });
+      } else if (!backup.latest) {
+        items.push({ key: "backup", label: "Automatic backup", icon: "ph ph-archive-box", status: "warning", value: "No backup found", detail: "No automatic backup is available yet.", action: "backup", actionLabel: "Backup options" });
+      } else {
+        const ageDays = Math.floor(Math.max(0, Date.now() / 1000 - backup.latest.timestamp) / 86400);
+        const stale = ageDays >= 14;
+        items.push({ key: "backup", label: "Automatic backup", icon: "ph ph-archive-box", status: stale ? "warning" : "ok", value: stale ? `Last backup ${ageDays} days ago` : `Current · ${relativeAge(backup.latest.timestamp)}`, detail: `${backup.count} saved backup${backup.count === 1 ? "" : "s"} · ${backup.latest.size_formatted}`, action: stale ? "backup" : "download-backup", actionLabel: stale ? "Review backup settings" : "Download latest" });
+      }
+
+      const supabase = snapshot.supabase;
+      if (!supabase && !failed.includes("supabase")) failed.push("supabase");
+      const supabaseStatus = supabase?.status;
+      const supabaseMap = { connected: ["ok", "Connected"], error: ["error", "Connection failed"], disabled: ["info", "Disabled"], not_configured: ["warning", "Not configured"] };
+      const [sbTone, sbValue] = supabaseMap[supabaseStatus] || ["unknown", "Could not check"];
+      items.push({ key: "supabase", label: "Online request sync", icon: "ph ph-cloud", status: sbTone, value: sbValue, detail: supabaseStatus === "connected" ? "Supabase request table is reachable." : supabaseStatus === "error" ? "Check the URL, anon key, network, and table read policy." : supabaseStatus === "disabled" ? "Enable online requests to use cross-device sync." : supabaseStatus === "not_configured" ? "Set the Supabase project URL and anon key." : "Supabase status is unavailable.", action: "supabase", actionLabel: "Open request settings" });
+
+      healthCenter.value = { items, checkedAt: Date.now() / 1000, backup };
+      if (failed.length) healthCenterError.value = failed.map(key => ({ info: "server tools", drives: "drive status", scan: "scan status", backup: "backup status", supabase: "Supabase" }[key]).toLowerCase()).join(", ");
+      } catch (error) {
+        healthCenterError.value = error.message || "Health check failed";
+      } finally {
+        healthCenterLoading.value = false;
+      }
+    }
+
+    function runHealthAction(action) {
+      const targets = { paths: "settings-paths-section", scanning: "settings-scanning-section", metadata: "settings-metadata-section", supabase: "settings-metadata-section", backup: "settings-backup-section" };
+      if (action === "scan") {
+        manualScan();
+        return;
+      }
+      if (action === "download-backup") {
+        const backup = healthCenter.value?.backup?.latest || autoBackupInfo.value?.latest;
+        if (backup?.filename) window.location.href = "/api/system/backup/download-auto?filename=" + encodeURIComponent(backup.filename);
+        else loadAutoBackupStatus();
+        return;
+      }
+      const element = document.getElementById(targets[action] || "settings-paths-section");
+      if (element) element.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
     // updateState lives in store so it survives Settings re-mounts and navigation.
     // Read/write as a computed so all existing code works unchanged.
     const updateState = Vue.computed({
@@ -8525,14 +8766,22 @@ const SettingsPage = {
       const updateInstalling = ref(false);
       const restartPending = ref(false);
 
+    let systemInfoRequest = null;
     async function loadSystemInfo() {
-      try {
-        const info = await API.get("/api/system/info");
+      if (systemInfoRequest) return systemInfoRequest;
+      const request = API.get("/api/system/info", { cache: false }).then(info => {
         if (info) {
           sysInfo.value = info;
           store.sysInfo = info;
         }
-      } catch (e) {}
+        return info;
+      }).catch(() => null);
+      systemInfoRequest = request;
+      try {
+        return await request;
+      } finally {
+        if (systemInfoRequest === request) systemInfoRequest = null;
+      }
     }
 
     const deviceIp = computed(() => {
@@ -8762,7 +9011,8 @@ const SettingsPage = {
       }
       loadSettings();
       loadCacheInfo();
-      loadSystemInfo();
+      if (isAdmin.value) refreshHealthCenter();
+      else loadSystemInfo();
       loadAllProfiles();
       loadUnmatched();
       loadNeedsRecache();
@@ -9768,6 +10018,12 @@ const SettingsPage = {
 
     return {
       isAdmin,
+      duplicateReport,
+      duplicateReportLoading,
+      duplicateReportLoaded,
+      duplicateReportError,
+      loadDuplicateReport,
+      formatFileSize,
       isRefreshingDrives,
       refreshDrivesHealth,
       activeTab,
@@ -9791,6 +10047,14 @@ const SettingsPage = {
       saveKidsProfileLimits,
       store,
       sysInfo,
+      healthCenter,
+      healthCenterLoading,
+      healthCenterError,
+      healthCenterSummary,
+      refreshHealthCenter,
+      healthTone,
+      formatHealthTime,
+      runHealthAction,
       deviceIp,
       allDeviceIps,
       isServerBoundZero,
@@ -10530,6 +10794,9 @@ const CollectionsPage = {
               <i class="ph ph-folder"></i> Custom <span class="collections-tab-count">{{ customCount }}</span>
             </button>
           </div>
+          <button v-if="!store.profile?.is_kids" class="btn btn-secondary" @click="showSmartCreate = true" id="create-smart-collection-btn">
+            <i class="ph ph-lightning"></i> New Smart List
+          </button>
           <button v-if="!store.profile?.is_kids" class="btn btn-primary" @click="showCreate = true" id="create-collection-btn">
             <i class="ph ph-plus"></i> New Collection
           </button>
@@ -10545,9 +10812,10 @@ const CollectionsPage = {
         <div class="empty-icon"><i class="ph-bold ph-books"></i></div>
         <div class="empty-title">No collections yet</div>
         <div class="empty-subtitle">Create a collection to group your favourite titles or add titles to auto-generate cinematic universes and sequel franchises.</div>
-        <button v-if="!store.profile?.is_kids" class="btn btn-primary" style="margin-top:1rem" @click="showCreate = true" id="create-first-col-btn">
-          <i class="ph ph-plus"></i> Create First Collection
-        </button>
+        <div v-if="!store.profile?.is_kids" style="display:flex;gap:10px;justify-content:center;margin-top:1rem">
+          <button class="btn btn-secondary" @click="resetSmartForm()"><i class="ph ph-lightning"></i> Create Smart List</button>
+          <button class="btn btn-primary" @click="showCreate = true" id="create-first-col-btn"><i class="ph ph-plus"></i> Create First Collection</button>
+        </div>
       </div>
 
       <div v-else-if="filteredCollections.length === 0" class="empty-state">
@@ -10619,7 +10887,32 @@ const CollectionsPage = {
               {{ col.movie_count || 0 }} movie{{ col.movie_count === 1 ? '' : 's' }} · {{ col.series_count || 0 }} series
             </div>
             <div class="collection-count" v-else>{{ col.items ? col.items.length : 0 }} title{{ !col.items || col.items.length !== 1 ? 's' : '' }}</div>
+            <div v-if="col.rule && !store.profile?.is_kids" style="display:flex;gap:8px;margin-top:8px" @click.stop>
+              <button class="btn btn-ghost" @click="editSmartCollection(col)">Edit rules</button>
+              <button class="btn btn-ghost" @click="deleteSmartCollection(col)">Delete</button>
+            </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Create Smart List Modal -->
+      <div class="modal-backdrop" v-if="showSmartCreate" @click.self="showSmartCreate = false">
+        <div class="modal">
+          <h3>{{ editingSmart ? 'Edit Smart List' : 'New Smart List' }}</h3>
+          <div class="form-group"><label class="form-label">Name</label><input class="form-input" v-model="smartForm.name" maxlength="80" placeholder="e.g. Unwatched 4K films"></div>
+          <div class="form-group"><label class="form-label">Description (optional)</label><input class="form-input" v-model="smartForm.description" maxlength="300" placeholder="What belongs in this list?"></div>
+          <div class="form-group"><label class="form-label">Content type</label><select class="form-input" v-model="smartForm.rule.type"><option value="">Any type</option><option value="movie">Movies</option><option value="series">Series</option><option value="anime">Anime</option></select></div>
+          <div class="form-group"><label class="form-label">Genre contains</label><input class="form-input" v-model="smartForm.rule.genre" maxlength="60" placeholder="e.g. Science Fiction"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="form-group"><label class="form-label">Year from</label><input class="form-input" v-model="smartForm.rule.year_from" type="number" min="1888" max="2100"></div>
+            <div class="form-group"><label class="form-label">Year to</label><input class="form-input" v-model="smartForm.rule.year_to" type="number" min="1888" max="2100"></div>
+            <div class="form-group"><label class="form-label">Minimum runtime (minutes)</label><input class="form-input" v-model="smartForm.rule.duration_min" type="number" min="0" max="10000"></div>
+            <div class="form-group"><label class="form-label">Maximum runtime (minutes)</label><input class="form-input" v-model="smartForm.rule.duration_max" type="number" min="0" max="10000"></div>
+          </div>
+          <div class="form-group"><label class="form-label">Minimum resolution</label><select class="form-input" v-model="smartForm.rule.resolution"><option value="">Any resolution</option><option value="480">480p+</option><option value="720">720p+</option><option value="1080">1080p+</option><option value="1440">1440p+</option><option value="2160">2160p / 4K</option></select></div>
+          <div class="form-group"><label class="form-label">Watch status</label><select class="form-input" v-model="smartForm.watched"><option value="">Any status</option><option value="false">Unwatched</option><option value="true">Watched</option></select></div>
+          <div v-if="smartError" class="pin-modal-error">{{ smartError }}</div>
+          <div style="display:flex;gap:0.75rem;margin-top:1rem"><button class="btn btn-primary btn-full" @click="saveSmartCollection">{{ editingSmart ? 'Save' : 'Create' }}</button><button class="btn btn-ghost btn-full" @click="showSmartCreate = false">Cancel</button></div>
         </div>
       </div>
 
@@ -10706,6 +10999,24 @@ const CollectionsPage = {
     const showCreate = ref(false);
     const newName = ref("");
     const newDesc = ref("");
+    const showSmartCreate = ref(false);
+    const editingSmart = ref(null);
+    const smartError = ref("");
+    const smartForm = reactive({ name: "", description: "", rule: { type: "", genre: "", year_from: "", year_to: "", duration_min: "", duration_max: "", resolution: "" }, watched: "" });
+
+    function resetSmartForm(collection = null) {
+      const rule = collection?.rule || {};
+      smartForm.name = collection?.name || "";
+      smartForm.description = collection?.description || "";
+      smartForm.rule = {
+        type: rule.type || "", genre: rule.genre || "", year_from: rule.year_from ?? "", year_to: rule.year_to ?? "",
+        duration_min: rule.duration_min ?? "", duration_max: rule.duration_max ?? "", resolution: rule.resolution ?? "",
+      };
+      smartForm.watched = rule.watched === undefined ? "" : String(rule.watched);
+      smartError.value = "";
+      editingSmart.value = collection;
+      showSmartCreate.value = true;
+    }
 
     const countriesCount = computed(() => collections.value.filter((c) => c.is_country_hub).length);
     const universesCount = computed(() => collections.value.filter((c) => c.universe || c.is_franchise).length);
@@ -10741,6 +11052,60 @@ const CollectionsPage = {
         addToast("Collection created", "success");
       } catch (e) {
         addToast("Failed to create collection", "error");
+      }
+    }
+
+    async function saveSmartCollection() {
+      const rule = {};
+      for (const key of ["type", "genre", "year_from", "year_to", "duration_min", "duration_max", "resolution"]) {
+        const value = smartForm.rule[key];
+        if (value !== "" && value !== null && value !== undefined) rule[key] = key === "type" || key === "genre" ? String(value).trim() : Number(value);
+      }
+      if (smartForm.watched !== "") rule.watched = smartForm.watched === "true";
+      if (!smartForm.name.trim() || Object.keys(rule).length === 0) {
+        smartError.value = "Enter a name and at least one filter";
+        return;
+      }
+      smartError.value = "";
+      try {
+        let collection;
+        if (editingSmart.value) {
+          collection = await API.patch(`/api/collections/${editingSmart.value.id}`, {
+            name: smartForm.name.trim(), description: smartForm.description.trim(), rule,
+          });
+        } else {
+          collection = await API.post("/api/collections", {
+            name: smartForm.name.trim(), description: smartForm.description.trim(), rule,
+          });
+        }
+        API.clearCache("/api/collections");
+        await load();
+        showSmartCreate.value = false;
+        editingSmart.value = null;
+        addToast("Smart list saved", "success");
+      } catch (e) {
+        smartError.value = e.message || "Failed to save smart list";
+      }
+    }
+
+    function editSmartCollection(collection) {
+      resetSmartForm(collection);
+    }
+
+    async function deleteSmartCollection(collection) {
+      const confirmed = await customConfirm({
+        title: "Delete Smart List",
+        message: `Delete “${collection.name}”? This does not delete any media.`,
+        icon: "ph ph-trash",
+        okText: "Delete",
+        danger: true,
+      });
+      if (!confirmed) return;
+      try {
+        await API.del(`/api/collections/${collection.id}`);
+        collections.value = collections.value.filter((item) => item.id !== collection.id);
+      } catch (e) {
+        addToast(e.message || "Failed to delete smart list", "error");
       }
     }
 
@@ -10788,6 +11153,14 @@ const CollectionsPage = {
       showCreate,
       newName,
       newDesc,
+      showSmartCreate,
+      editingSmart,
+      smartForm,
+      smartError,
+      resetSmartForm,
+      saveSmartCollection,
+      editSmartCollection,
+      deleteSmartCollection,
       router,
       imgUrl,
       getCollectionCover,
@@ -12825,6 +13198,49 @@ const ProfilesPage = {
               </div>
 
               <!-- Admin Privileges Toggle (if Admin Unlocked) -->
+              <div v-if="isAdminUnlocked && editTarget && store.profile?.id === editTarget.id && editProfile.is_admin && !editProfile.is_kids" style="border-top:1px solid var(--border);padding-top:18px">
+                <div style="font-size:0.95rem;color:var(--text-primary);font-weight:600;margin-bottom:4px">Administrator Two-Factor Authentication</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:10px">Require an authenticator code or recovery code when signing in to this administrator profile.</div>
+                <section v-if="totpRecoveryCodes.length" aria-labelledby="totp-recovery-title" style="padding:16px;border:1px solid rgba(16,185,129,.45);border-radius:12px;background:linear-gradient(145deg,rgba(16,185,129,.12),rgba(16,185,129,.04));display:grid;gap:12px">
+                  <div style="display:flex;gap:12px;align-items:flex-start">
+                    <i class="ph-fill ph-shield-check" aria-hidden="true" style="font-size:1.4rem;color:#10b981"></i>
+                    <div>
+                      <h3 id="totp-recovery-title" style="margin:0 0 4px;color:var(--text-primary);font-size:1rem">Save your recovery codes</h3>
+                      <p style="margin:0;color:var(--text-secondary);font-size:.84rem;line-height:1.45">Each code works once if you lose access to your authenticator. Store them somewhere private and offline. You won’t be able to view them again after closing this panel.</p>
+                    </div>
+                  </div>
+                  <ol aria-label="One-time recovery codes" style="list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:8px;counter-reset:recovery">
+                    <li v-for="(code,index) in totpRecoveryCodes" :key="code" style="counter-increment:recovery;display:flex;align-items:center;gap:10px;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary);font:600 .95rem/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.04em">
+                      <span aria-hidden="true" style="min-width:1.5em;color:var(--text-muted);font:500 .75rem/1 system-ui">{{ String(index + 1).padStart(2, '0') }}</span>
+                      <span style="overflow-wrap:anywhere">{{ code }}</span>
+                    </li>
+                  </ol>
+                  <div style="display:flex;flex-wrap:wrap;gap:8px">
+                    <button type="button" class="btn btn-secondary" @click="copyTotpRecoveryCodes"><i class="ph ph-copy" aria-hidden="true"></i> Copy all codes</button>
+                    <button type="button" class="btn btn-secondary" @click="downloadTotpRecoveryCodes"><i class="ph ph-download-simple" aria-hidden="true"></i> Download .txt</button>
+                    <button type="button" class="btn btn-primary" @click="dismissTotpRecoveryCodes">I’ve saved them</button>
+                  </div>
+                </section>
+                <div v-else-if="totpEnrollment" style="display:grid;gap:10px">
+                  <img :src="totpEnrollment.qr_code" alt="Authenticator setup QR code" style="width:200px;height:200px;background:white;padding:8px;border-radius:8px">
+                  <div style="font-size:.82rem;color:var(--text-secondary)">Or enter this setup key manually: <code>{{ totpEnrollment.secret }}</code></div>
+                  <input class="form-input" v-model="totpSetupCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Enter the 6-digit authenticator code">
+                  <div v-if="totpError" class="pin-modal-error">{{ totpError }}</div>
+                  <div style="display:flex;gap:8px"><button class="btn btn-primary" @click="confirmTotpEnrollment">Verify and enable</button><button class="btn btn-ghost" @click="cancelTotpEnrollment">Cancel</button></div>
+                </div>
+                <div v-else-if="editTarget.totp_enabled" style="display:grid;gap:8px">
+                  <div style="color:#10b981;font-weight:600">Two-factor authentication is enabled.</div>
+                  <input class="form-input" v-model="totpPin" inputmode="numeric" maxlength="4" :placeholder="editTarget.has_pin ? 'Profile PIN' : 'No profile PIN set — leave blank'">
+                  <input class="form-input" v-model="totpSetupCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Current authenticator code">
+                  <div v-if="totpError" class="pin-modal-error">{{ totpError }}</div>
+                  <button class="btn btn-ghost" @click="disableTotp">Disable two-factor authentication</button>
+                </div>
+                <div v-else style="display:grid;gap:8px">
+                  <input class="form-input" v-model="totpPin" inputmode="numeric" maxlength="4" :placeholder="editTarget.has_pin ? 'Profile PIN' : 'No profile PIN set — leave blank'">
+                  <div v-if="totpError" class="pin-modal-error">{{ totpError }}</div>
+                  <button class="btn btn-ghost" @click="beginTotpEnrollment">Set up authenticator</button>
+                </div>
+              </div>
               <div v-if="isAdminUnlocked" style="border-top:1px solid var(--border);padding-top:18px">
                 <label class="netflix-checkbox-label">
                   <input type="checkbox" v-model="editProfile.is_admin">
@@ -13137,8 +13553,21 @@ const ProfilesPage = {
         </div>
       </div>
 
+      <!-- TOTP Challenge Modal -->
+      <div class="pin-modal-backdrop" v-if="totpChallenge" @click.self="cancelTotpChallenge">
+        <div class="pin-modal-card" @click.stop>
+          <div class="pin-modal-identity">
+            <div class="pin-profile-avatar-wrap"><div class="pin-profile-avatar-icon" style="background:#262626"><i class="ph-bold ph-shield-check" style="color:#e50914"></i></div></div>
+            <div class="pin-identity-text"><div class="pin-modal-lock-label">Two-Factor Authentication</div><h3 class="pin-modal-title">Enter the code for {{ pinTarget?.name || totpChallenge.profile?.name }}</h3></div>
+          </div>
+          <input class="form-input" v-model="totpCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Authenticator or recovery code" @keyup.enter="submitTotpCode" />
+          <div class="pin-modal-error" v-if="totpError"><i class="ph-fill ph-warning-circle"></i><span>{{ totpError }}</span></div>
+          <div style="display:flex;gap:10px;margin-top:18px"><button class="btn btn-primary" @click="submitTotpCode">Verify</button><button class="btn btn-ghost" @click="cancelTotpChallenge">Cancel</button></div>
+        </div>
+      </div>
+
       <!-- PIN Modal (Authentic Netflix Style) -->
-      <div class="pin-modal-backdrop" v-if="pinTarget" @click.self="pinTarget = null">
+      <div class="pin-modal-backdrop" v-if="pinTarget && !totpChallenge" @click.self="pinTarget = null">
         <div class="pin-modal-card" @click.stop>
           <button class="pin-modal-close" @click="pinTarget = null" title="Cancel">
             <i class="ph ph-x"></i>
@@ -13424,6 +13853,13 @@ const ProfilesPage = {
     const takeoverTarget = ref(null);
     const pin = ref("");
     const pinError = ref("");
+    const totpChallenge = ref(null);
+    const totpCode = ref("");
+    const totpError = ref("");
+    const totpEnrollment = ref(null);
+    const totpSetupCode = ref("");
+    const totpPin = ref("");
+    const totpRecoveryCodes = ref([]);
     const mathGateTarget = ref(null);
     const mathAnswer = ref("");
     const mathGateError = ref("");
@@ -13502,6 +13938,7 @@ const ProfilesPage = {
     });
 
     function exitEditView() {
+      totpRecoveryCodes.value = [];
       editTarget.value = null;
       if (route.query.edit_id && store.profile) {
         router.push("/");
@@ -13686,6 +14123,60 @@ const ProfilesPage = {
       }
     }
 
+    function dismissTotpRecoveryCodes() {
+      totpRecoveryCodes.value = [];
+    }
+
+    async function copyTotpRecoveryCodes() {
+      if (!totpRecoveryCodes.value.length) return;
+      const text = totpRecoveryCodes.value.join("\n");
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const input = document.createElement("textarea");
+          input.value = text;
+          input.setAttribute("readonly", "");
+          input.style.position = "fixed";
+          input.style.opacity = "0";
+          document.body.appendChild(input);
+          input.select();
+          const copied = document.execCommand("copy");
+          document.body.removeChild(input);
+          if (!copied) throw new Error("Clipboard copy is unavailable");
+        }
+        addToast("Recovery codes copied", "success");
+      } catch (e) {
+        addToast("Could not copy recovery codes — use Download instead", "error");
+      }
+    }
+
+    function downloadTotpRecoveryCodes() {
+      if (!totpRecoveryCodes.value.length) return;
+      let url;
+      try {
+        const text = [
+          "CapsStream administrator recovery codes",
+          "Each code can be used once. Keep this file private and offline.",
+          "",
+          ...totpRecoveryCodes.value,
+          "",
+        ].join("\n");
+        url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "capsstream-recovery-codes.txt";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        addToast("Recovery codes downloaded", "success");
+      } catch (e) {
+        addToast("Could not download recovery codes", "error");
+      } finally {
+        if (url) setTimeout(() => URL.revokeObjectURL(url), 0);
+      }
+    }
+
     function openEditView(profile) {
       editTarget.value = profile;
       editProfile.name = profile.name;
@@ -13695,6 +14186,12 @@ const ProfilesPage = {
       editProfile.is_kids = !!profile.is_kids;
       editProfile.is_admin = !!profile.is_admin;
       editProfile.custom_avatar_url = profile.custom_avatar_url || "";
+      editTarget.value = { ...profile, totp_enabled: !!profile.totp_enabled };
+      totpEnrollment.value = null;
+      totpSetupCode.value = "";
+      totpPin.value = "";
+      totpError.value = "";
+      totpRecoveryCodes.value = [];
       editProfile.maturity_rating = profile.maturity_rating || "All";
       editProfile.blocked_genres_list = (profile.blocked_genres || "").split(",").map((s) => s.trim()).filter(Boolean);
       editProfile.default_audio_lang = profile.default_audio_lang || "";
@@ -13887,13 +14384,120 @@ const ProfilesPage = {
       }
     }
 
+    function completeProfileAuth(profile, result) {
+      try { sessionStorage.setItem("cs_active_profile_id", String(profile.id)); } catch (e) {}
+      store.profile = result.profile;
+      pinTarget.value = null;
+      takeoverTarget.value = null;
+      totpChallenge.value = null;
+      totpCode.value = "";
+      totpError.value = "";
+      router.push("/").then(() => {
+        startLibraryScan();
+        if (typeof window.checkPostUpdateWhatsNew === "function") window.checkPostUpdateWhatsNew();
+        if (typeof window.checkFulfilledRequestsAlerts === "function") window.checkFulfilledRequestsAlerts();
+      });
+    }
+
+    async function submitTotpCode() {
+      if (!totpChallenge.value || !totpCode.value.trim()) return;
+      totpError.value = "";
+      try {
+        const result = await API.post("/api/profiles/auth/2fa", {
+          challenge: totpChallenge.value.token,
+          code: totpCode.value.trim(),
+        });
+        completeProfileAuth(totpChallenge.value.profile, result);
+      } catch (e) {
+        totpError.value = e.message || "Invalid authentication code";
+        totpCode.value = "";
+      }
+    }
+
+    function cancelTotpChallenge() {
+      totpChallenge.value = null;
+      totpCode.value = "";
+      totpError.value = "";
+      pinTarget.value = null;
+    }
+
+    async function beginTotpEnrollment() {
+      if (!editTarget.value || (editTarget.value.has_pin && !totpPin.value.trim())) {
+        totpError.value = "Enter this profile's PIN first";
+        return;
+      }
+      totpError.value = "";
+      try {
+        totpEnrollment.value = await API.post(`/api/profiles/${editTarget.value.id}/totp/enroll`, { pin: totpPin.value.trim() });
+        totpSetupCode.value = "";
+      } catch (e) {
+        totpError.value = e.message || "Could not start authenticator setup";
+      }
+    }
+
+    function cancelTotpEnrollment() {
+      totpEnrollment.value = null;
+      totpSetupCode.value = "";
+      totpError.value = "";
+    }
+
+    async function confirmTotpEnrollment() {
+      if (!totpEnrollment.value || !totpSetupCode.value.trim()) {
+        totpError.value = "Enter the code from your authenticator app";
+        return;
+      }
+      totpError.value = "";
+      try {
+        const result = await API.post(`/api/profiles/${editTarget.value.id}/totp/confirm`, {
+          enrollment: totpEnrollment.value.enrollment,
+          code: totpSetupCode.value.trim(),
+        });
+        totpEnrollment.value = null;
+        totpSetupCode.value = "";
+        totpRecoveryCodes.value = result.recovery_codes || [];
+        editTarget.value.totp_enabled = true;
+        const updated = { ...editTarget.value };
+        profiles.value = profiles.value.map((p) => p.id === updated.id ? { ...p, totp_enabled: true } : p);
+        addToast("Two-factor authentication enabled", "success");
+      } catch (e) {
+        totpError.value = e.message || "Could not enable two-factor authentication";
+      }
+    }
+
+    async function disableTotp() {
+      if (!editTarget.value || (editTarget.value.has_pin && !totpPin.value.trim()) || !totpSetupCode.value.trim()) {
+        totpError.value = "Enter the profile PIN (if set) and current authenticator code";
+        return;
+      }
+      const confirmed = await customConfirm({
+        title: "Disable Two-Factor Authentication",
+        message: "This will remove the authenticator requirement and invalidate all recovery codes.",
+        icon: "ph ph-shield-warning",
+        okText: "Disable 2FA",
+        danger: true,
+      });
+      if (!confirmed) return;
+      totpError.value = "";
+      try {
+        await API.post(`/api/profiles/${editTarget.value.id}/totp/disable`, {
+          pin: totpPin.value.trim(),
+          code: totpSetupCode.value.trim(),
+        });
+        editTarget.value.totp_enabled = false;
+        profiles.value = profiles.value.map((p) => p.id === editTarget.value.id ? { ...p, totp_enabled: false } : p);
+        totpSetupCode.value = "";
+        addToast("Two-factor authentication disabled", "success");
+      } catch (e) {
+        totpError.value = e.message || "Could not disable two-factor authentication";
+      }
+    }
+
     async function authProfile(profile, enteredPin, forceTakeover = false) {
       let clientSessionId = sessionStorage.getItem("cs_session_id");
       if (!clientSessionId) {
         clientSessionId = "sess_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
       }
       try { sessionStorage.setItem("cs_session_id", clientSessionId); } catch (e) {}
-      try { sessionStorage.setItem("cs_active_profile_id", String(profile.id)); } catch (e) {}
       try { localStorage.removeItem("cs_session_id"); } catch (e) {}
       try { localStorage.removeItem("capsstream_profile_id"); } catch (e) {}
       try { localStorage.removeItem("cs_active_profile_id"); } catch (e) {}
@@ -13907,23 +14511,16 @@ const ProfilesPage = {
           session_id: clientSessionId,
           device_name: deviceName,
         });
-        if (res.ok) {
-          try { sessionStorage.setItem("cs_active_profile_id", String(profile.id)); } catch (e) {}
-          store.profile = res.profile;
+        if (res.status === "two_factor_required") {
+          totpChallenge.value = { token: res.challenge, profile, sessionId: clientSessionId, deviceName };
+          totpCode.value = "";
+          totpError.value = "";
           pinTarget.value = null;
-          takeoverTarget.value = null;
-          // Wait for the route to settle on "/" before starting the scan,
-          // so the library scan doesn't fire while still on the profile page.
-          router.push("/").then(() => {
-            startLibraryScan();
-            if (typeof window.checkPostUpdateWhatsNew === "function") {
-              window.checkPostUpdateWhatsNew();
-            }
-            if (typeof window.checkFulfilledRequestsAlerts === "function") {
-              window.checkFulfilledRequestsAlerts();
-            }
-          });
+          pin.value = "";
+          store.profile = null;
+          return;
         }
+        if (res.ok) completeProfileAuth(profile, res);
       } catch (e) {
         if (e.status === "in_use" || (e.message && e.message.includes("currently active"))) {
           if (profile.has_pin) {
@@ -14092,6 +14689,22 @@ const ProfilesPage = {
       pinTarget,
       pin,
       pinError,
+      totpChallenge,
+      totpCode,
+      totpError,
+      submitTotpCode,
+      cancelTotpChallenge,
+      totpEnrollment,
+      totpSetupCode,
+      totpPin,
+      totpRecoveryCodes,
+      dismissTotpRecoveryCodes,
+      copyTotpRecoveryCodes,
+      downloadTotpRecoveryCodes,
+      beginTotpEnrollment,
+      cancelTotpEnrollment,
+      confirmTotpEnrollment,
+      disableTotp,
       pinKeyLayout,
       adminPinModalTarget,
       adminPin,

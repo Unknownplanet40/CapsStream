@@ -2,5 +2,7 @@ flask>=3.0
 requests>=2.31
 python-dotenv>=1.0
 flask-limiter>=3.7
+cryptography>=42.0
+qrcode[pil]>=7.4
 flask-socketio>=5.3
 simple-websocket>=1.0
