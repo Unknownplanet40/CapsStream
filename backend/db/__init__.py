@@ -72,6 +72,7 @@ from .profiles import (
 
 from .playback import (
     get_progress,
+    get_progress_for_media_items,
     save_progress,
     delete_progress,
     get_continue_watching,
@@ -171,6 +172,7 @@ __all__ = [
     "set_kids_override",
     "remove_kids_override",
     "get_progress",
+    "get_progress_for_media_items",
     "save_progress",
     "delete_progress",
     "get_continue_watching",

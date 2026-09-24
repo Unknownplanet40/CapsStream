@@ -5723,6 +5723,27 @@ const PlayerPage = {
       try {
         const isFatalError = reason.includes("error_code_3") || reason.includes("error_code_4") || reason.includes("decoder_error");
 
+        // Detect if active media is HEVC / x265 or 10-bit
+        const vInfo = media.value?.video_info || {};
+        const codecTag = (vInfo.codec || "").toLowerCase();
+        const filePath = (media.value?.file_path || "").toLowerCase();
+        const isHevcDirect = !streamState.transcode && (
+          codecTag.includes("265") || codecTag.includes("hevc") ||
+          filePath.includes("x265") || filePath.includes("hevc") || filePath.includes("h.265") ||
+          filePath.includes("10bit") || filePath.includes("10-bit")
+        );
+
+        // Fast-track: if direct-playing HEVC freezes the browser's GPU decoder, avoid Tier 1/2 micro-seeks
+        // (which resubmit the crashing byte stream to the hung GPU process, freezing the browser).
+        // Immediately escalate to hardware-accelerated converted playback!
+        if (isHevcDirect) {
+          console.warn("[Player FreezeGuard] HEVC/10-bit direct decoder stall detected. Fast-tracking to hardware-accelerated converted stream...");
+          await saveProgressNow();
+          addToast("Switching to optimized stream for smooth playback...", "info", 3000);
+          await enableCompatPlayback(true, { forceSoftware: false });
+          return;
+        }
+
         // ─── Tier 1: Soft Recovery (Attempt 1 for non-fatal stalls) ──────────────────────
         // Micro time-shift (+0.08s to +0.12s) to step over corrupt frame/NAL unit without stream reload
         if (consecutiveRecoveryAttempts === 1 && !isFatalError) {
@@ -5768,11 +5789,12 @@ const PlayerPage = {
         }
 
         // ─── Tier 3: Fallback Recovery (Attempt 3, or Attempt 2 for fatal decode error) ──────────────────
-        // Fall back to server-side error-resilient transcode with software decoding (FFmpeg discardcorrupt)
+        // Fall back to server-side error-resilient transcode (use hardware first, fallback to software if needed)
         if (consecutiveRecoveryAttempts >= 3 || (consecutiveRecoveryAttempts >= 2 && isFatalError)) {
-          console.log("[Player FreezeGuard] [Tier 3] Fallback Recovery: switching to error-resilient software transcoding");
+          const useSw = streamState.transcode || consecutiveRecoveryAttempts > 3;
+          console.log(`[Player FreezeGuard] [Tier 3] Fallback Recovery: switching to error-resilient transcoding (forceSoftware: ${useSw})`);
           await saveProgressNow();
-          await enableCompatPlayback(true, { forceSoftware: true });
+          await enableCompatPlayback(true, { forceSoftware: useSw });
           return;
         }
       } catch (err) {
@@ -6549,13 +6571,22 @@ const PlayerPage = {
         }
         const force4k = routeQuery.force_4k === "1" || routeQuery.force_4k === "true";
 
-        // Pre-emptive compatibility check: if media is HEVC and browser lacks native decode support
+        // Pre-emptive compatibility check: if media is HEVC and browser lacks reliable decode support
         const vInfo = media.value.video_info || {};
         const codecTag = (vInfo.codec || "").toLowerCase();
         const filePath = (media.value.file_path || "").toLowerCase();
         const isHevc = codecTag.includes("265") || codecTag.includes("hevc") || filePath.includes("x265") || filePath.includes("hevc") || filePath.includes("h.265");
 
-        if (isHevc && !hevcSupported && !streamState.transcode) {
+        const autoConvertHevc = playerSettings.value?.playback?.auto_convert_hevc !== false;
+        const forceDirect = routeQuery.direct === "1" || routeQuery.direct === "true" || routeQuery.force_direct === "1";
+
+        if (isHevc && !streamState.transcode && autoConvertHevc && !forceDirect) {
+          console.info("[Player] HEVC content detected. Automatically streaming via converted compatibility mode for browser stability...");
+          streamState.transcode = true;
+          const srcHeight = vInfo.height || media.value?.height || 1080;
+          streamState.maxHeight = srcHeight >= 1080 ? 1080 : (srcHeight >= 720 ? 720 : 480);
+          isTranscodeInitialLoading.value = true;
+        } else if (isHevc && !hevcSupported && !streamState.transcode) {
           console.info("[Player] HEVC content detected on browser without native HEVC decoder. Starting in converted mode...");
           streamState.transcode = true;
           isTranscodeInitialLoading.value = true;

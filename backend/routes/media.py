@@ -15,7 +15,7 @@ from backend.db import (
     get_all_media, get_media_by_id, get_media_by_tmdb, get_best_media_source,
     get_media_quality_options, search_media as db_search_media, get_unique_shows,
     get_recently_added, get_top_rated, get_top_10, get_by_genre, get_all_genres,
-    get_random_pick, get_hero_featured, get_continue_watching, get_profile_recommendations, get_similar_media, get_progress, is_favorite,
+    get_random_pick, get_hero_featured, get_continue_watching, get_profile_recommendations, get_similar_media, get_progress, get_progress_for_media_items, is_favorite,
     get_unmatched, get_media_needing_recache, upsert_media,
     delete_media_by_id, delete_media_by_tmdb, delete_media_by_title_and_type,
 )
@@ -33,7 +33,7 @@ def bust_home_cache():
     _HOME_CACHE["ts"] = 0.0
 
 
-def _merge_season_episodes(tmdb_id, s_num, local_map, pid, fallback_backdrop=None, show_title=None):
+def _merge_season_episodes(tmdb_id, s_num, local_map, pid, fallback_backdrop=None, show_title=None, progress_by_media_id=None):
     from backend.matcher import fetch_season_episodes
     from datetime import datetime, timezone
     today = datetime.now(timezone.utc).date()
@@ -70,7 +70,7 @@ def _merge_season_episodes(tmdb_id, s_num, local_map, pid, fallback_backdrop=Non
                 if meta.get("runtime"):
                     ep["duration"] = meta.get("runtime") * 60
                 if pid and ep.get("id"):
-                    ep_progress = get_progress(pid, ep["id"])
+                    ep_progress = (progress_by_media_id or {}).get(ep["id"])
                     ep["progress"] = dict(ep_progress) if ep_progress else None
                 merged_list.append(ep)
             else:
@@ -94,7 +94,7 @@ def _merge_season_episodes(tmdb_id, s_num, local_map, pid, fallback_backdrop=Non
                 ep_dict["is_local"] = True
                 ep_dict["is_unaired"] = False
                 if pid and ep_dict.get("id"):
-                    ep_progress = get_progress(pid, ep_dict["id"])
+                    ep_progress = (progress_by_media_id or {}).get(ep_dict["id"])
                     ep_dict["progress"] = dict(ep_progress) if ep_progress else None
                 merged_list.append(ep_dict)
     else:
@@ -104,7 +104,7 @@ def _merge_season_episodes(tmdb_id, s_num, local_map, pid, fallback_backdrop=Non
                 ep_dict["is_local"] = True
                 ep_dict["is_unaired"] = False
                 if pid and ep_dict.get("id"):
-                    ep_progress = get_progress(pid, ep_dict["id"])
+                    ep_progress = (progress_by_media_id or {}).get(ep_dict["id"])
                     ep_dict["progress"] = dict(ep_progress) if ep_progress else None
                 merged_list.append(ep_dict)
     return sorted(merged_list, key=lambda e: e.get("episode") or 0)
@@ -456,11 +456,13 @@ def api_media_detail(media_id):
         if not s_nums:
             s_nums = [1]
 
+        progress_by_media_id = get_progress_for_media_items(pid, all_eps) if pid else {}
         for s_num in s_nums:
             seasons[str(s_num)] = _merge_season_episodes(
                 media["tmdb_id"], s_num, local_map, pid,
                 fallback_backdrop=media.get("backdrop_path"),
-                show_title=media.get("title")
+                show_title=media.get("title"),
+                progress_by_media_id=progress_by_media_id,
             )
         media["seasons"] = seasons
 
@@ -616,6 +618,7 @@ def api_show_detail(tmdb_id):
     pid = current_profile()
     from backend.matcher import fetch_season_episodes
 
+    progress_by_media_id = get_progress_for_media_items(pid, episodes) if pid else {}
     local_map = {}
     for ep_row in episodes:
         ep = dict(ep_row)
@@ -641,7 +644,8 @@ def api_show_detail(tmdb_id):
         seasons[str(s_num)] = _merge_season_episodes(
             show_tmdb_id, s_num, local_map, pid,
             fallback_backdrop=show.get("backdrop_path"),
-            show_title=show.get("title")
+            show_title=show.get("title"),
+            progress_by_media_id=progress_by_media_id,
         )
 
     # Missing seasons (placeholder)

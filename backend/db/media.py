@@ -142,10 +142,8 @@ def is_item_disabled(item, disabled_roots=None):
 
 
 
-def get_all_sources_for_media(media):
-    """
-    Find all media records in SQLite for the same title/episode across multiple sources.
-    """
+def _get_all_sources_for_media(media, candidate_rows=None):
+    """Find equivalent media sources, optionally using preloaded candidate rows."""
     if not media:
         return []
     if isinstance(media, (int, str)):
@@ -156,30 +154,48 @@ def get_all_sources_for_media(media):
             return []
         media = dict(row)
 
-    conn = get_conn()
     tmdb_id = media.get("tmdb_id")
     mtype = media.get("type", "movie")
     season = media.get("season")
     episode = media.get("episode")
     title = media.get("title")
 
-    if tmdb_id:
-        if mtype in ("series", "anime"):
-            sql = "SELECT * FROM media WHERE tmdb_id=? AND type=? AND season IS ? AND episode IS ?"
-            rows = conn.execute(sql, (tmdb_id, mtype, season, episode)).fetchall()
+    if candidate_rows is None:
+        conn = get_conn()
+        if tmdb_id:
+            if mtype in ("series", "anime"):
+                sql = "SELECT * FROM media WHERE tmdb_id=? AND type=? AND season IS ? AND episode IS ?"
+                rows = conn.execute(sql, (tmdb_id, mtype, season, episode)).fetchall()
+            else:
+                sql = "SELECT * FROM media WHERE tmdb_id=? AND type=?"
+                rows = conn.execute(sql, (tmdb_id, mtype)).fetchall()
         else:
-            sql = "SELECT * FROM media WHERE tmdb_id=? AND type=?"
-            rows = conn.execute(sql, (tmdb_id, mtype)).fetchall()
+            if mtype in ("series", "anime"):
+                sql = "SELECT * FROM media WHERE title=? AND type=? AND season IS ? AND episode IS ?"
+                rows = conn.execute(sql, (title, mtype, season, episode)).fetchall()
+            else:
+                sql = "SELECT * FROM media WHERE title=? AND type=?"
+                rows = conn.execute(sql, (title, mtype)).fetchall()
+        conn.close()
+        items = [dict(r) for r in rows]
     else:
-        if mtype in ("series", "anime"):
-            sql = "SELECT * FROM media WHERE title=? AND type=? AND season IS ? AND episode IS ?"
-            rows = conn.execute(sql, (title, mtype, season, episode)).fetchall()
+        items = [dict(row) for row in candidate_rows]
+        if tmdb_id and mtype in ("series", "anime"):
+            items = [
+                item for item in items
+                if item.get("tmdb_id") == tmdb_id and item.get("type") == mtype
+                and item.get("season") == season and item.get("episode") == episode
+            ]
+        elif tmdb_id:
+            items = [item for item in items if item.get("tmdb_id") == tmdb_id and item.get("type") == mtype]
+        elif mtype in ("series", "anime"):
+            items = [
+                item for item in items
+                if item.get("title") == title and item.get("type") == mtype
+                and item.get("season") == season and item.get("episode") == episode
+            ]
         else:
-            sql = "SELECT * FROM media WHERE title=? AND type=?"
-            rows = conn.execute(sql, (title, mtype)).fetchall()
-
-    conn.close()
-    items = [dict(r) for r in rows]
+            items = [item for item in items if item.get("title") == title and item.get("type") == mtype]
 
     # For series/anime: strictly verify that candidate sources are genuine duplicates across
     # different library roots / drives, and NOT different episodes, extras, specials, or OADs.
@@ -256,6 +272,69 @@ def get_all_sources_for_media(media):
         item["is_mounted"] = is_item_mounted(item)
         item["drive_letter"] = get_drive_identifier(item.get("file_path"))
     return items
+
+
+def get_all_sources_for_media(media):
+    """Find all media records in SQLite for the same title/episode across sources."""
+    return _get_all_sources_for_media(media)
+
+
+def get_all_sources_for_media_items(media_items):
+    """Resolve equivalent source rows for multiple media records in shared queries."""
+    items = [item for item in (media_items or []) if isinstance(item, dict)]
+    if not items:
+        return {}
+
+    conn = get_conn()
+    try:
+        predicates = []
+        for item in items:
+            mtype = item.get("type", "movie")
+            if item.get("tmdb_id"):
+                if mtype in ("series", "anime"):
+                    predicates.append((
+                        "(tmdb_id=? AND type=? AND season IS ? AND episode IS ?)",
+                        (item.get("tmdb_id"), mtype, item.get("season"), item.get("episode")),
+                    ))
+                else:
+                    predicates.append(("(tmdb_id=? AND type=?)", (item.get("tmdb_id"), mtype)))
+            elif mtype in ("series", "anime"):
+                predicates.append((
+                    "(title=? AND type=? AND season IS ? AND episode IS ?)",
+                    (item.get("title"), mtype, item.get("season"), item.get("episode")),
+                ))
+            else:
+                predicates.append(("(title=? AND type=?)", (item.get("title"), mtype)))
+
+        candidate_rows = []
+        for offset in range(0, len(predicates), 180):
+            chunk = predicates[offset:offset + 180]
+            where_sql = [predicate[0] for predicate in chunk]
+            chunk_params = [value for _, values in chunk for value in values]
+            sql = "SELECT * FROM media WHERE " + " OR ".join(where_sql)
+            candidate_rows.extend(dict(row) for row in conn.execute(sql, chunk_params).fetchall())
+    finally:
+        conn.close()
+
+    def _source_group_key(item):
+        mtype = item.get("type", "movie")
+        tmdb_id = item.get("tmdb_id")
+        title = None if tmdb_id else item.get("title")
+        season = item.get("season") if mtype in ("series", "anime") else None
+        episode = item.get("episode") if mtype in ("series", "anime") else None
+        return tmdb_id, title, mtype, season, episode
+
+    candidates_by_key = {}
+    for candidate in candidate_rows:
+        candidates_by_key.setdefault(_source_group_key(candidate), []).append(candidate)
+
+    sources_by_id = {}
+    for item in items:
+        if item.get("id") is not None:
+            sources_by_id[item["id"]] = _get_all_sources_for_media(
+                item, candidates_by_key.get(_source_group_key(item), [])
+            )
+    return sources_by_id
 
 
 def resolve_best_media(media):
@@ -411,11 +490,18 @@ def get_media_quality_options(media_id):
             ]
         elif max_h >= 1080 or max_w >= 1900:
             target_presets = [
+                (1080, "1080p", "Convert to 1080p (Full HD)"),
+                (720, "720p", "Convert to 720p (HD)"),
+                (480, "480p", "Convert to 480p (SD)"),
+            ] if is_x265_source else [
                 (720, "720p", "Convert to 720p (HD)"),
                 (480, "480p", "Convert to 480p (SD)"),
             ]
         elif max_h >= 720 or max_w >= 1200:
             target_presets = [
+                (720, "720p", "Convert to 720p (HD)"),
+                (480, "480p", "Convert to 480p (SD)"),
+            ] if is_x265_source else [
                 (480, "480p", "Convert to 480p (SD)"),
             ]
         else:
@@ -424,10 +510,17 @@ def get_media_quality_options(media_id):
             ]
 
     # Only add conversion presets where a physical copy of roughly that resolution does not already exist
+    # (Unless the source is x265/HEVC, where conversion to H.264 is needed for browser stability even if a physical copy exists)
     primary_source = probed[0]["source"] if probed else media
     for t_h, base_lbl, disp_lbl in target_presets:
         already_has_physical = any(
-            abs(p["height"] - t_h) <= 120 or base_lbl.lower() in p["base_label"].lower()
+            (abs(p["height"] - t_h) <= 120 or base_lbl.lower() in p["base_label"].lower()) and
+            not (
+                (p["codec"] or "").lower() in ("x265", "hevc", "h265") or
+                "x265" in p["res_label"].lower() or "hevc" in p["res_label"].lower() or "h265" in p["res_label"].lower() or "h.265" in p["res_label"].lower() or
+                "x265" in str(p["source"].get("file_path") or "").lower() or "hevc" in str(p["source"].get("file_path") or "").lower() or
+                "h265" in str(p["source"].get("file_path") or "").lower() or "h.265" in str(p["source"].get("file_path") or "").lower()
+            )
             for p in probed if p["height"] > 0
         )
         if not already_has_physical:

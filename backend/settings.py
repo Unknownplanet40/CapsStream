@@ -59,6 +59,7 @@ DEFAULT_CONFIG = {
     "playback": {
         "auto_play_next": True,
         "auto_skip_intro": False,
+        "auto_convert_hevc": True,
         "seek_step": 10,
         "default_volume": 1,
         "default_speed": 1,

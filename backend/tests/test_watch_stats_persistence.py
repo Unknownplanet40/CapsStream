@@ -16,7 +16,7 @@ import shutil
 from unittest.mock import patch
 
 from backend.tests import create_isolated_test_db
-from backend.db.playback import save_progress, get_progress, restore_progress_for_media
+from backend.db.playback import save_progress, get_progress, get_progress_for_media_items, restore_progress_for_media
 from backend.db.stats import get_profile_watch_stats, get_profile_wrapped_analytics
 from backend.db.media import upsert_media
 from backend.settings import clear_cache
@@ -163,6 +163,83 @@ class TestWatchStatsPersistence(unittest.TestCase):
         self.assertIsNotNone(restored_wp)
         self.assertEqual(restored_wp["position"], 1500)
         self.assertEqual(restored_wp["duration"], 3180)
+
+    def test_get_progress_for_media_items_preserves_direct_and_alternate_progress(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        direct_id = conn.execute(
+            "INSERT INTO media (type, tmdb_id, title, season, episode, file_path) VALUES ('series', 700, 'Batch Show', 1, 1, 'D:/Batch/S01E01.mkv')"
+        ).lastrowid
+        alternate_id = conn.execute(
+            "INSERT INTO media (type, tmdb_id, title, season, episode, file_path) VALUES ('series', 700, 'Batch Show', 1, 2, 'D:/Batch/S01E02.mkv')"
+        ).lastrowid
+        alternate_copy_id = conn.execute(
+            "INSERT INTO media (type, tmdb_id, title, season, episode, file_path) VALUES ('series', 700, 'Batch Show', 1, 2, 'E:/Batch/S01E02.mkv')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO watch_progress (profile_id, media_id, position, duration, completed) VALUES (1, ?, 100, 600, 0)",
+            (direct_id,),
+        )
+        conn.execute(
+            "INSERT INTO watch_progress (profile_id, media_id, position, duration, completed) VALUES (1, ?, 200, 600, 0)",
+            (alternate_copy_id,),
+        )
+        conn.commit()
+        conn.close()
+
+        items = [
+            {"id": direct_id, "type": "series", "tmdb_id": 700, "title": "Batch Show", "season": 1, "episode": 1, "file_path": "D:/Batch/S01E01.mkv"},
+            {"id": alternate_id, "type": "series", "tmdb_id": 700, "title": "Batch Show", "season": 1, "episode": 2, "file_path": "D:/Batch/S01E02.mkv"},
+            {"id": 99999, "type": "series", "tmdb_id": 700, "title": "Batch Show", "season": 1, "episode": 3, "file_path": "D:/Batch/S01E03.mkv"},
+        ]
+        progress = get_progress_for_media_items(1, items)
+
+        self.assertEqual(progress[direct_id]["position"], 100)
+        self.assertEqual(progress[alternate_id]["position"], 200)
+        self.assertIsNone(progress[99999])
+        self.assertEqual(get_progress_for_media_items(None, items), {
+            direct_id: None,
+            alternate_id: None,
+            99999: None,
+        })
+
+    def test_get_progress_for_media_items_batches_large_id_sets(self):
+        from backend.db import playback
+
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        media_items = []
+        for episode in range(1, playback._PROGRESS_QUERY_CHUNK_SIZE + 25):
+            media_id = conn.execute(
+                "INSERT INTO media (type, tmdb_id, title, season, episode, file_path) VALUES ('series', 701, 'Large Show', 1, ?, ?)",
+                (episode, f"D:/Large/S01E{episode:03}.mkv"),
+            ).lastrowid
+            media_items.append({
+                "id": media_id, "type": "series", "tmdb_id": 701, "title": "Large Show",
+                "season": 1, "episode": episode, "file_path": f"D:/Large/S01E{episode:03}.mkv",
+            })
+        conn.commit()
+        conn.close()
+
+        # Count SQL statements across both the progress and equivalent-source batch lookups.
+        traced_queries = []
+        playback_get_conn = playback.get_conn
+        media_get_conn = __import__("backend.db.media", fromlist=["get_conn"]).get_conn
+
+        def traced_connection(get_connection):
+            conn = get_connection()
+            conn.set_trace_callback(traced_queries.append)
+            return conn
+
+        with patch("backend.db.playback.get_conn", side_effect=lambda: traced_connection(playback_get_conn)), \
+             patch("backend.db.media.get_conn", side_effect=lambda: traced_connection(media_get_conn)):
+            progress = get_progress_for_media_items(1, media_items)
+
+        select_queries = [query for query in traced_queries if query.lstrip().upper().startswith("SELECT")]
+        self.assertEqual(len(progress), len(media_items))
+        self.assertTrue(all(row is None for row in progress.values()))
+        self.assertGreater(len(select_queries), 1)
+        self.assertLess(len(select_queries), len(media_items))
 
     def test_clear_cache_does_not_delete_media_or_watch_data(self):
         """Verify clear_cache only deletes disk metadata files and leaves media, progress, and history untouched."""

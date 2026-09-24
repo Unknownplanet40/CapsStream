@@ -6430,6 +6430,17 @@ const SettingsPage = {
 
             <div class="settings-row">
               <div class="settings-label-container">
+                <div class="settings-label">Smart HEVC Compatibility</div>
+                <div class="settings-desc">Automatically stream HEVC (H.265 / x265) media using hardware-accelerated H.264 conversion to prevent browser hangs, freezes, and crashes.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.playback.auto_convert_hevc" id="setting-hevc-compat-toggle" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-container">
                 <div class="settings-label">Playback — Resume Behavior</div>
                 <div class="settings-desc">What to do when a video has saved watch progress.</div>
               </div>
@@ -8291,6 +8302,7 @@ const SettingsPage = {
         auto_play_next: true,
         inactivity_sleep_limit: 3,
         auto_skip_intro: false,
+        auto_convert_hevc: true,
         seek_step: 10,
         default_volume: 1,
         default_speed: 1,

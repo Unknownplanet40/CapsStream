@@ -444,7 +444,11 @@ class TestStreamingRouteIntegration(unittest.TestCase):
         transcode_opts = [o for o in opts if o.get("is_transcode")]
         self.assertTrue(len(transcode_opts) >= 1)
         target_heights = [o["target_height"] for o in transcode_opts]
+        self.assertIn(1080, target_heights)
+        self.assertIn(720, target_heights)
         self.assertIn(480, target_heights)
+        opt_1080 = next(o for o in transcode_opts if o["target_height"] == 1080)
+        self.assertEqual(opt_1080["display_label"], "Convert to 1080p (Full HD)")
 
 
 if __name__ == "__main__":

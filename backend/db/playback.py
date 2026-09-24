@@ -3,7 +3,10 @@ import os
 import json
 import sqlite3
 from .connection import get_conn
-from .media import is_item_mounted, is_item_disabled, get_media_by_id, get_all_sources_for_media, enrich_mounted_list
+from .media import (
+    is_item_mounted, is_item_disabled, get_media_by_id,
+    get_all_sources_for_media, get_all_sources_for_media_items, enrich_mounted_list,
+)
 
 def get_progress(profile_id, media_id):
     conn = get_conn()
@@ -26,6 +29,67 @@ def get_progress(profile_id, media_id):
                         break
     conn.close()
     return dict(row) if row else None
+
+
+_PROGRESS_QUERY_CHUNK_SIZE = 900
+
+
+def _fetch_progress_rows(conn, profile_id, media_ids):
+    """Fetch progress rows for media IDs in parameter-safe batches."""
+    rows_by_media_id = {}
+    media_ids = list(dict.fromkeys(media_ids))
+    for offset in range(0, len(media_ids), _PROGRESS_QUERY_CHUNK_SIZE):
+        chunk = media_ids[offset:offset + _PROGRESS_QUERY_CHUNK_SIZE]
+        placeholders = ",".join("?" for _ in chunk)
+        rows = conn.execute(
+            f"SELECT * FROM watch_progress WHERE profile_id=? AND media_id IN ({placeholders})",
+            (profile_id, *chunk),
+        ).fetchall()
+        rows_by_media_id.update({row["media_id"]: dict(row) for row in rows})
+    return rows_by_media_id
+
+
+def get_progress_for_media_items(profile_id, media_items):
+    """Return progress by media ID, batching direct and equivalent-source lookups."""
+    items_by_id = {}
+    for item in media_items or []:
+        media_id = item.get("id") if isinstance(item, dict) else None
+        if media_id is not None:
+            items_by_id.setdefault(media_id, item)
+
+    if not profile_id or not items_by_id:
+        return {media_id: None for media_id in items_by_id}
+
+    conn = get_conn()
+    try:
+        progress_by_id = _fetch_progress_rows(conn, profile_id, items_by_id)
+        missing_ids = [media_id for media_id in items_by_id if media_id not in progress_by_id]
+        sources_by_id = {}
+        alternate_ids = []
+
+        # Resolve only episodes without direct progress, preserving the existing
+        # source-equivalence checks and source ordering from get_all_sources_for_media.
+        missing_items = [items_by_id[media_id] for media_id in missing_ids]
+        source_groups = get_all_sources_for_media_items(missing_items)
+        for media_id in missing_ids:
+            sources = source_groups.get(media_id, [])
+            alternatives = [
+                source["id"] for source in sources
+                if source.get("id") is not None and source["id"] != media_id
+            ]
+            sources_by_id[media_id] = alternatives
+            alternate_ids.extend(alternatives)
+
+        alternate_progress = _fetch_progress_rows(conn, profile_id, alternate_ids)
+        for media_id in missing_ids:
+            for alternate_id in sources_by_id[media_id]:
+                if alternate_id in alternate_progress:
+                    progress_by_id[media_id] = alternate_progress[alternate_id]
+                    break
+
+        return {media_id: progress_by_id.get(media_id) for media_id in items_by_id}
+    finally:
+        conn.close()
 
 
 def save_progress(profile_id, media_id, position, duration=0, completed=False):

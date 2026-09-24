@@ -133,6 +133,33 @@ class TestRouteMedia(unittest.TestCase):
         self.assertIsNone(merged[1]["id"])
         self.assertEqual(merged[1]["ep_title"], "Chapter 2")
 
+    @patch("backend.routes.media.get_progress")
+    @patch("backend.matcher.fetch_season_episodes")
+    def test_merge_season_episodes_uses_batched_progress_map(self, mock_fetch_tmdb, mock_get_progress):
+        """Verify local episode progress comes from the shared batch result."""
+        mock_fetch_tmdb.return_value = [
+            {"episode_number": 1, "name": "Pilot"},
+            {"episode_number": 2, "name": "Second Episode"},
+        ]
+        progress = {"profile_id": 1, "media_id": 10, "position": 120, "duration": 600, "completed": 0}
+        local_map = {
+            (1, 1): {"id": 10, "season": 1, "episode": 1, "title": "My Show"},
+            (1, 2): {"id": 11, "season": 1, "episode": 2, "title": "My Show"},
+        }
+
+        merged = _merge_season_episodes(
+            tmdb_id=500,
+            s_num=1,
+            local_map=local_map,
+            pid=1,
+            show_title="My Show",
+            progress_by_media_id={10: progress, 11: None},
+        )
+
+        self.assertEqual(merged[0]["progress"], progress)
+        self.assertIsNone(merged[1]["progress"])
+        mock_get_progress.assert_not_called()
+
     @patch("backend.matcher.fetch_season_episodes")
     def test_merge_season_episodes_unaired_vs_missing(self, mock_fetch_tmdb):
         """Verify _merge_season_episodes distinguishes between aired-missing and future-unaired episodes."""
