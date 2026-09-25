@@ -6591,7 +6591,7 @@ const SettingsPage = {
       <template v-else>
         <main class="settings-content">
 
-        <section class="settings-section settings-desktop-only" id="settings-duplicate-report" v-if="isAdmin">
+        <section class="settings-section settings-desktop-only" id="settings-duplicate-report" v-if="isAdmin && !isMobileScreen">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
             <span><i class="ph ph-files" style="color:var(--accent);margin-right:6px"></i>Duplicate &amp; Quality Report</span>
             <button class="btn btn-secondary btn-sm" @click="loadDuplicateReport" :disabled="duplicateReportLoading"><i class="ph ph-arrows-clockwise"></i> {{ duplicateReportLoading ? 'Scanning…' : 'Scan library' }}</button>
@@ -6612,7 +6612,7 @@ const SettingsPage = {
         </section>
 
         <!-- ══════ System Health Center ══════ -->
-        <section class="settings-section settings-desktop-only" id="settings-health-center" v-if="isAdmin" aria-labelledby="settings-health-title">
+        <section class="settings-section settings-desktop-only" id="settings-health-center" v-if="isAdmin && !isMobileScreen" aria-labelledby="settings-health-title">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
             <div style="display:flex;align-items:center;gap:8px">
               <i class="ph ph-heartbeat" style="color:var(--accent)"></i>
@@ -6645,7 +6645,7 @@ const SettingsPage = {
         </section>
 
         <!-- ══════ Updates Card (Moved to Top) ══════ -->
-        <div class="settings-section settings-desktop-only" id="settings-updates-section" :class="{ 'update-section-disabled': sysInfo?.is_dev }" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-updates-section" :class="{ 'update-section-disabled': sysInfo?.is_dev }" v-if="isAdmin && !isMobileScreen">
           <div class="settings-section-title">
             <i class="ph ph-arrow-circle-up" :style="{ color: sysInfo?.is_dev ? '#fbbf24' : 'var(--accent)' }"></i>
             <span>Updates &amp; Version</span>
@@ -7380,7 +7380,7 @@ const SettingsPage = {
         </div>
 
         <!-- ══════ Media Scanner Paths (Full Width) ══════ -->
-        <div class="settings-section settings-desktop-only" id="settings-paths-section" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-paths-section" v-if="isAdmin && !isMobileScreen">
           <div class="settings-section-title">
             <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
             <span>Media Scanner Paths</span>
@@ -7758,9 +7758,9 @@ const SettingsPage = {
           </div>
 
         <!-- ══════ Side-by-Side: Library Scanning & Metadata Providers ══════ -->
-        <div class="settings-grid-row settings-desktop-only">
+        <div class="settings-grid-row settings-desktop-only" v-if="isAdmin && !isMobileScreen">
           <!-- 2b. Library & Scanning -->
-          <div class="settings-section settings-desktop-only" id="settings-scanning-section" v-if="isAdmin">
+          <div class="settings-section settings-desktop-only" id="settings-scanning-section" v-if="isAdmin && !isMobileScreen">
             <div class="settings-section-title">
               <i class="ph ph-file-video" style="color:var(--accent)"></i>
               <span>Library & Scanning</span>
@@ -7836,7 +7836,7 @@ const SettingsPage = {
           </div>
 
           <!-- ══════ Metadata Providers ══════ -->
-          <div class="settings-section settings-desktop-only" id="settings-metadata-section" v-if="isAdmin">
+          <div class="settings-section settings-desktop-only" id="settings-metadata-section" v-if="isAdmin && !isMobileScreen">
             <div class="settings-section-title">
               <i class="ph ph-database" style="color:var(--accent)"></i>
               <span>Metadata Providers & API Keys</span>
@@ -7939,7 +7939,7 @@ const SettingsPage = {
         </div>
 
                 <!-- 2c. Unmatched Media & Fix Match Inspector -->
-        <div class="settings-section settings-desktop-only" id="settings-unmatched-section" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-unmatched-section" v-if="isAdmin && !isMobileScreen">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
               <i class="ph ph-warning-circle" style="color:var(--accent)"></i>
@@ -8013,7 +8013,7 @@ const SettingsPage = {
         </div>
 
         <!-- 2d. Missing Artwork & Re-cache Manager -->
-        <div class="settings-section settings-desktop-only" id="settings-recache-section" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-recache-section" v-if="isAdmin && !isMobileScreen">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
               <i class="ph ph-image-broken" style="color:var(--accent)"></i>
@@ -8140,9 +8140,9 @@ const SettingsPage = {
         </div>
 
         <!-- ══════ Side-by-Side: Web Browser & System Config and Server Config ══════ -->
-        <div class="settings-grid-row settings-desktop-only">
+        <div class="settings-grid-row settings-desktop-only" v-if="isAdmin && !isMobileScreen">
           <!-- Web Browser & System Config Card -->
-          <div class="settings-section settings-desktop-only" id="settings-browser-section" v-if="isAdmin">
+          <div class="settings-section settings-desktop-only" id="settings-browser-section" v-if="isAdmin && !isMobileScreen">
             <div class="settings-section-title">
               <i class="ph ph-globe-hemisphere-west" style="color:var(--accent)"></i>
               <span>Web Browser & System Configuration</span>
@@ -8185,7 +8185,7 @@ const SettingsPage = {
           </div>
 
           <!-- Server Configuration Card -->
-          <div class="settings-section settings-desktop-only" id="settings-server-section" v-if="isAdmin">
+          <div class="settings-section settings-desktop-only" id="settings-server-section" v-if="isAdmin && !isMobileScreen">
             <div class="settings-section-title">
               <i class="ph ph-hard-drives" style="color:var(--accent)"></i>
               <span>Server Configuration</span>
@@ -8304,7 +8304,7 @@ const SettingsPage = {
         </div>
 
                 <!-- ══════ Outgoing Network Activity ══════ -->
-        <div class="settings-section settings-desktop-only" id="settings-network-section" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-network-section" v-if="isAdmin && !isMobileScreen">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
               <i class="ph ph-broadcast" style="color:var(--accent)"></i>
@@ -8457,7 +8457,7 @@ const SettingsPage = {
           </div>
         </div>
                 <!-- ══════ Storage, Cache & System Backup (Full Width) ══════ -->
-        <div class="settings-section settings-desktop-only" id="settings-backup-section" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-backup-section" v-if="isAdmin && !isMobileScreen">
           <div class="settings-section-title">
             <i class="ph ph-archive-box" style="color:var(--accent)"></i>
             <span>Storage, Cache & System Backup</span>
@@ -8643,7 +8643,7 @@ const SettingsPage = {
           </div>
         </div>
                 <!-- ══════ System Maintenance & Server Control ══════ -->
-        <div class="settings-section settings-desktop-only" id="settings-danger-section" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-danger-section" v-if="isAdmin && !isMobileScreen">
           <div class="settings-section-title">
             <i class="ph ph-warning-octagon" style="color:#ef4444"></i>
             <span style="color:#ef4444">System Maintenance & Server Control</span>
@@ -9066,6 +9066,28 @@ const SettingsPage = {
     });
 
     const isAdmin = computed(() => !!(store.profile?.is_admin || !store.profile));
+    const isMobileScreen = computed(() => {
+      if (typeof window === "undefined") return false;
+      if (store.isMobileScreen) return true;
+      if (window.innerWidth < 768) return true;
+      const ua = (typeof navigator !== "undefined" && navigator.userAgent) ? navigator.userAgent.toLowerCase() : "";
+      const isAndroid = /android/.test(ua);
+      const isIos = /iphone|ipad|ipod/.test(ua);
+      const isCapsStreamNative = typeof window.CapsStreamNative !== "undefined";
+      const isTouch = ("ontouchstart" in window) || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0);
+      const isLandscapeMobile = window.innerHeight < 600 && isTouch;
+      return isAndroid || isIos || isCapsStreamNative || isLandscapeMobile;
+    });
+
+    watch(isMobileScreen, (val) => {
+      if (typeof document !== "undefined" && document.body) {
+        if (val) {
+          document.body.classList.add("device-mobile-restricted");
+        } else {
+          document.body.classList.remove("device-mobile-restricted");
+        }
+      }
+    }, { immediate: true });
 
     // ─── Settings Quick Search ──────────────────────────────────
     const searchQuery = ref("");
@@ -9996,6 +10018,9 @@ const SettingsPage = {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       window.removeEventListener("keydown", handleGlobalKeyDown);
       document.removeEventListener("click", handleDocumentClick);
+      if (typeof document !== "undefined" && document.body) {
+        document.body.classList.remove("device-mobile-restricted");
+      }
       if (highlightTimer) clearTimeout(highlightTimer);
       if (animeDetectTimer) clearInterval(animeDetectTimer);
       stopDiagPolling();
@@ -10638,8 +10663,6 @@ const SettingsPage = {
     function selectTheme(themeId) {
       applyTheme(themeId, true);
     }
-
-    const isMobileScreen = computed(() => store.isMobileScreen);
 
     function setLayoutMode(mode) {
       if (mode === "tv" && isMobileScreen.value) {

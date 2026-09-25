@@ -32798,6 +32798,22 @@ body.perf-lite-mode .media-card:hover {
   }
 }
 
+/* Landscape mobile / Android companion app / phone viewport hiding */
+body.device-mobile-restricted .settings-desktop-only,
+.device-mobile-restricted .settings-desktop-only {
+  display: none !important;
+}
+
+body.device-mobile-restricted .settings-header {
+  flex-direction: column;
+  align-items: stretch !important;
+  gap: 12px;
+}
+
+body.device-mobile-restricted .settings-search-wrap {
+  max-width: 100%;
+}
+
 .settings-search-item-badge.desktop-only {
   font-size: 0.68rem;
   font-weight: 700;
