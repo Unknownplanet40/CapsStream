@@ -154,6 +154,34 @@ class TestSettings(unittest.TestCase):
         cfg_auto = settings.load_config()
         self.assertEqual(cfg_auto["playback"]["auto_convert_hevc"], "auto")
 
+    def test_movie_source_config_default_and_merge(self):
+        """Verify movie_source config defaults and merges correctly."""
+        cfg = settings.load_config()
+        self.assertIn("movie_source", cfg)
+        self.assertEqual(cfg["movie_source"]["site_url"], "https://siteformovies.com")
+        self.assertEqual(cfg["movie_source"]["api_url"], "https://movies-api.accel.li/api/v2")
+
+        # Custom site_url override preserves default api_url
+        with open(settings.CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump({"movie_source": {"site_url": "https://custommovies.org"}}, f)
+        settings._CONFIG_CACHE = {"data": None, "ts": 0.0}
+        merged_cfg = settings.load_config()
+        self.assertEqual(merged_cfg["movie_source"]["site_url"], "https://custommovies.org")
+        self.assertEqual(merged_cfg["movie_source"]["api_url"], "https://movies-api.accel.li/api/v2")
+
+    def test_test_api_key_movie_source(self):
+        """Verify test_api_key tests the movie_source API endpoint correctly."""
+        from unittest.mock import patch, MagicMock
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"status": "ok"}).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            ok, msg = settings.test_api_key("movie_source", url="https://movies-api.accel.li/api/v2")
+            self.assertTrue(ok)
+            self.assertIn("connected successfully", msg)
+
 
 if __name__ == "__main__":
     unittest.main()
+

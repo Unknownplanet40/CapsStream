@@ -24695,6 +24695,19 @@ body:has(.settings-save-fab) .back-to-top-btn,
   color: #f87171;
 }
 
+.req-action-icon-btn.req-btn-movie-source:hover,
+.req-btn-icon.req-btn-movie-source:hover {
+  background: rgba(168, 85, 247, 0.2) !important;
+  border-color: rgba(168, 85, 247, 0.45) !important;
+  color: #c084fc !important;
+}
+
+.req-action-icon-btn.is-loading,
+.req-btn-icon.is-loading {
+  opacity: 0.7;
+  cursor: wait !important;
+}
+
 .req-action-icon-btn i,
 .req-btn-icon i {
   font-size: 0.95rem;
@@ -24818,6 +24831,43 @@ body:has(.settings-save-fab) .back-to-top-btn,
   background: rgba(34, 197, 94, 0.14);
   border: 1px solid rgba(34, 197, 94, 0.38);
   color: #4ade80;
+}
+
+.req-source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill, 9999px);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: rgba(168, 85, 247, 0.15);
+  border: 1px solid rgba(168, 85, 247, 0.38);
+  color: #c084fc;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  text-decoration: none;
+}
+
+.req-source-chip:hover {
+  background: rgba(168, 85, 247, 0.28);
+  border-color: rgba(168, 85, 247, 0.6);
+  color: #e9d5ff;
+  transform: translateY(-1px);
+}
+
+.req-source-chip:active {
+  transform: scale(0.95);
+}
+
+.req-source-chip:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.req-source-chip i {
+  font-size: 0.76rem;
 }
 
 /* Status Pill */

@@ -563,8 +563,97 @@ class TestRouteRequests(unittest.TestCase):
         dev_view = filter_requests_for_client(items, "dev_cid", dev_mode=True)
         self.assertEqual(len(dev_view), 3)
 
+    def test_movie_source_url_by_imdb(self):
+        """Verify /api/requests/movie-source-url matches movie by IMDb code."""
+        from unittest.mock import MagicMock
+        mock_data = {
+            "status": "ok",
+            "data": {
+                "movies": [
+                    {
+                        "id": 1234,
+                        "title": "Inception",
+                        "year": 2010,
+                        "slug": "inception-2010",
+                        "imdb_code": "tt1375666",
+                        "rating": 8.8
+                    }
+                ]
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            resp = self.client.get("/api/requests/movie-source-url?imdb_id=tt1375666&title=Inception")
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data["ok"])
+            self.assertEqual(data["slug"], "inception-2010")
+            self.assertEqual(data["url"], "https://siteformovies.com/movies/inception-2010")
+            self.assertTrue(data["matched"])
+
+    def test_movie_source_url_by_title_and_year(self):
+        """Verify /api/requests/movie-source-url searches and matches by title and year."""
+        from unittest.mock import MagicMock
+        mock_data = {
+            "status": "ok",
+            "data": {
+                "movies": [
+                    {
+                        "id": 999,
+                        "title": "Oppenheimer: The Real Story",
+                        "year": 2023,
+                        "slug": "oppenheimer-the-real-story-2023"
+                    },
+                    {
+                        "id": 1000,
+                        "title": "Oppenheimer",
+                        "year": 2023,
+                        "slug": "oppenheimer-2023"
+                    }
+                ]
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            resp = self.client.get("/api/requests/movie-source-url?title=Oppenheimer&year=2023")
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data["ok"])
+            self.assertEqual(data["slug"], "oppenheimer-2023")
+            self.assertEqual(data["url"], "https://siteformovies.com/movies/oppenheimer-2023")
+            self.assertTrue(data["matched"])
+
+    def test_movie_source_url_fallback(self):
+        """Verify /api/requests/movie-source-url falls back to browse search URL when not found."""
+        from unittest.mock import MagicMock
+        mock_data = {
+            "status": "ok",
+            "data": {
+                "movies": []
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            resp = self.client.get("/api/requests/movie-source-url?title=NonExistentMovie")
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data["ok"])
+            self.assertIsNone(data["slug"])
+            self.assertFalse(data["matched"])
+            self.assertEqual(data["url"], "https://siteformovies.com/browse-movies/NonExistentMovie")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

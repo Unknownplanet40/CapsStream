@@ -6273,6 +6273,17 @@ const SETTINGS_INDEX = [
     adminOnly: true,
     desktopOnly: true,
   },
+  {
+    id: "setting-movie-source",
+    targetId: "setting-movie-source",
+    title: "Movie Source Redirection & API",
+    section: "Metadata Providers",
+    icon: "ph ph-film-slate",
+    desc: "Configure destination website and API endpoint for movie requests redirection.",
+    keywords: ["movie source", "siteformovies", "movies api", "requests redirect", "movie redirect"],
+    adminOnly: true,
+    desktopOnly: true,
+  },
 
   // Duplicate & Quality Report
   {
@@ -7944,6 +7955,33 @@ const SettingsPage = {
                     </div>
                   </div>
                 </div>
+
+                <!-- ══════ Movie Source Site & API Integration ══════ -->
+                <div class="settings-divider" style="margin: 16px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
+                <div class="settings-row" id="setting-movie-source" style="flex-direction:column;align-items:flex-start">
+                  <div class="settings-label-container">
+                    <div class="settings-label" style="display:flex;align-items:center;gap:8px">
+                      <i class="ph-bold ph-film-slate" style="color:#a855f7"></i>
+                      <span>Movie Source Redirection & API</span>
+                    </div>
+                    <div class="settings-desc">Specify destination website and API endpoint used for movie request lookup and external redirection buttons.</div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:10px;width:100%;margin-top:10px">
+                    <div style="display:flex;flex-direction:column;gap:4px;width:100%">
+                      <label style="font-size:0.78rem;font-weight:600;color:var(--text-secondary)">Movie Destination Website Base URL</label>
+                      <input type="text" v-model="form.movie_source.site_url" class="form-input" placeholder="e.g. https://siteformovies.com" style="width:100%" />
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px;width:100%">
+                      <label style="font-size:0.78rem;font-weight:600;color:var(--text-secondary)">Movies API Endpoint Base URL</label>
+                      <div style="display:flex;gap:8px;width:100%">
+                        <input type="text" v-model="form.movie_source.api_url" class="form-input" placeholder="e.g. https://movies-api.accel.li/api/v2" style="flex:1" />
+                        <button class="btn btn-secondary" @click="testApi('movie_source', form.movie_source.api_url)" :disabled="testingApi === 'movie_source'">
+                          {{ testingApi === 'movie_source' ? 'Testing...' : 'Test Movie API' }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </template>
             </div>
           </div>
@@ -9435,6 +9473,10 @@ const SettingsPage = {
         requests: true,
         online_requests: true,
       },
+      movie_source: {
+        site_url: "https://siteformovies.com",
+        api_url: "https://movies-api.accel.li/api/v2",
+      },
     });
 
     // Built-in default media folders were removed — all paths are user-provided.
@@ -9517,6 +9559,7 @@ const SettingsPage = {
             },
             playback: { ...form.value.playback, ...(data.playback || {}) },
             host_sync: { ...form.value.host_sync, ...(data.host_sync || {}) },
+            movie_source: { ...form.value.movie_source, ...(data.movie_source || {}) },
           };
           if (data.hide_unmounted_items !== undefined) {
             store.hideOfflineMedia = !!data.hide_unmounted_items;
@@ -10099,7 +10142,15 @@ const SettingsPage = {
     });
 
     async function testApi(provider, key) {
-      if (!key || !key.trim()) {
+      if (provider === "movie_source") {
+        if (!key && form.value?.movie_source?.api_url) {
+          key = form.value.movie_source.api_url;
+        }
+        if (!key || !key.trim()) {
+          addToast("Please enter a Movies API URL to test", "warning");
+          return;
+        }
+      } else if (!key || !key.trim()) {
         addToast("Please enter an API key to test", "warning");
         return;
       }
@@ -10108,19 +10159,20 @@ const SettingsPage = {
         const payload = { provider, key: key.trim() };
         if (provider === "supabase" && form.value?.supabase_url) {
           payload.url = form.value.supabase_url.trim();
+        } else if (provider === "movie_source") {
+          payload.url = (form.value?.movie_source?.api_url || key).trim();
         }
         const res = await API.post("/api/settings/test-api", payload);
         if (res.ok) {
           addToast(res.message, "success");
         } else {
-          addToast(res.message || "API key test failed", "error");
+          addToast(res.message || "API test failed", "error");
         }
       } catch (e) {
-        addToast("API key test request failed", "error");
+        addToast("API test request failed", "error");
       } finally {
         testingApi.value = null;
       }
-
     }
 
     async function addPath(cat) {
@@ -20444,6 +20496,22 @@ const RequestsPage = {
                         <i :class="req.has_digital_release === true || (req.digital_status_label && req.digital_status_label.toLowerCase().includes('available')) ? 'ph-bold ph-check-circle' : ((req.digital_status_label && (req.digital_status_label.includes('Theaters') || req.digital_status_label.includes('Theatrical'))) ? 'ph-bold ph-ticket' : 'ph-bold ph-film-slate')"></i>
                         <span>{{ req.digital_status_label || (req.has_digital_release === false ? 'No Digital Copy' : 'Digital Available') }}</span>
                       </span>
+
+                      <!-- Movie Source Redirect Chip (Movies only) -->
+                      <template v-if="req.type === 'Movie' || (!req.type && !req.season)">
+                        <span class="req-meta-dot">•</span>
+                        <button
+                          type="button"
+                          class="req-source-chip"
+                          :disabled="loadingMovieSourceId === req.id"
+                          @click.stop="openMovieSource(req)"
+                          title="Open on external Movie Source site"
+                        >
+                          <i v-if="loadingMovieSourceId === req.id" class="ph-bold ph-spinner ph-spin"></i>
+                          <i v-else class="ph-bold ph-arrow-square-out"></i>
+                          <span>Movie Source</span>
+                        </button>
+                      </template>
                     </div>
                   </div>
 
@@ -20625,6 +20693,19 @@ const RequestsPage = {
 
                 <!-- Utility / Secondary Action Icons Row -->
                 <div class="req-episode-utility-row">
+                  <!-- Movie Source Redirect Button (Movies only) -->
+                  <button
+                    v-if="req.type === 'Movie' || (!req.type && !req.season)"
+                    class="req-action-icon-btn req-btn-icon req-btn-movie-source"
+                    :class="{ 'is-loading': loadingMovieSourceId === req.id }"
+                    :disabled="loadingMovieSourceId === req.id"
+                    @click.stop="openMovieSource(req)"
+                    :title="loadingMovieSourceId === req.id ? 'Connecting to Movie Source...' : 'Open ' + req.title + ' on Movie Source'"
+                  >
+                    <i v-if="loadingMovieSourceId === req.id" class="ph-bold ph-spinner ph-spin"></i>
+                    <i v-else class="ph-bold ph-arrow-square-out"></i>
+                  </button>
+
                   <!-- Refresh Artwork Button -->
                   <button
                     class="req-action-icon-btn req-btn-icon"
@@ -21541,6 +21622,31 @@ const RequestsPage = {
       return `${names[0]}, ${names[1]} +${names.length - 2} more`;
     }
 
+    const loadingMovieSourceId = ref(null);
+
+    async function openMovieSource(req) {
+      if (!req || loadingMovieSourceId.value === req.id) return;
+      loadingMovieSourceId.value = req.id;
+      try {
+        const params = new URLSearchParams();
+        if (req.title) params.append("title", req.title);
+        if (req.year) params.append("year", req.year);
+        if (req.tmdb_id) params.append("tmdb_id", req.tmdb_id);
+        if (req.imdb_id) params.append("imdb_id", req.imdb_id);
+
+        const res = await API.get(`/api/requests/movie-source-url?${params.toString()}`);
+        if (res && res.url) {
+          window.open(res.url, "_blank", "noopener,noreferrer");
+        } else {
+          addToast("Could not determine movie source URL", "warning");
+        }
+      } catch (err) {
+        addToast(err.message || "Failed to connect to movie source", "error");
+      } finally {
+        loadingMovieSourceId.value = null;
+      }
+    }
+
     onMounted(() => {
       loadRequests();
       if (route?.query?.title) {
@@ -21555,6 +21661,8 @@ const RequestsPage = {
     return {
       store,
       items,
+      loadingMovieSourceId,
+      openMovieSource,
       devMode,
       loading,
       submitting,

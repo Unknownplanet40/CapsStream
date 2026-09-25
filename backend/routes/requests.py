@@ -1478,6 +1478,133 @@ def api_refresh_request_artwork(req_id):
     return jsonify({"ok": True, "request": target})
 
 
+@requests_bp.route("/api/requests/movie-source-url", methods=["GET"])
+def get_movie_source_url():
+    """
+    Resolve direct external Movie Source URL for a given requested movie.
+    Searches the configured Movies API using IMDb ID or title/year to locate the movie slug.
+    Falls back to a browse search URL on the target site if not found.
+    """
+    import urllib.parse
+    import urllib.request
+    from backend.settings import load_config
+
+    cfg = load_config()
+    ms_config = cfg.get("movie_source", {})
+    site_url = (ms_config.get("site_url") or "https://siteformovies.com").strip().rstrip("/")
+    api_url = (ms_config.get("api_url") or "https://movies-api.accel.li/api/v2").strip().rstrip("/")
+
+    title = (request.args.get("title") or "").strip()
+    year = (request.args.get("year") or "").strip()
+    tmdb_id = (request.args.get("tmdb_id") or "").strip()
+    imdb_id = (request.args.get("imdb_id") or "").strip()
+
+    # If imdb_id not provided but tmdb_id is, try looking up imdb_id via TMDB
+    if not imdb_id and tmdb_id:
+        try:
+            from backend.matcher import fetch_imdb_id
+            imdb_id = fetch_imdb_id(tmdb_id, "movie") or ""
+        except Exception:
+            imdb_id = ""
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+    }
+
+    matched_movie = None
+
+    # 1. Search by IMDb code if available
+    if imdb_id and imdb_id.startswith("tt"):
+        try:
+            q_imdb = urllib.parse.quote(imdb_id)
+            url_req = f"{api_url}/list_movies.json?query_term={q_imdb}&limit=5"
+            req = urllib.request.Request(url_req, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                movies = data.get("data", {}).get("movies", [])
+                for m in movies:
+                    if m.get("imdb_code") == imdb_id:
+                        matched_movie = m
+                        break
+                if not matched_movie and movies:
+                    matched_movie = movies[0]
+        except Exception as e:
+            print(f"[MovieSource] IMDb lookup failed ({imdb_id}): {e}")
+
+    # 2. Search by title if not matched yet
+    if not matched_movie and title:
+        try:
+            q_title = urllib.parse.quote(title)
+            url_req = f"{api_url}/list_movies.json?query_term={q_title}&limit=10"
+            req = urllib.request.Request(url_req, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                movies = data.get("data", {}).get("movies", [])
+
+                clean_target = title.lower().strip()
+                # Check for exact title and year match first
+                for m in movies:
+                    m_title = (m.get("title") or "").lower().strip()
+                    m_year = str(m.get("year") or "").strip()
+                    if m_title == clean_target and year and m_year == str(year):
+                        matched_movie = m
+                        break
+
+                # Check for exact title match
+                if not matched_movie:
+                    for m in movies:
+                        m_title = (m.get("title") or "").lower().strip()
+                        if m_title == clean_target:
+                            matched_movie = m
+                            break
+
+                # Check for starts-with or contains
+                if not matched_movie:
+                    for m in movies:
+                        m_title = (m.get("title") or "").lower().strip()
+                        if clean_target in m_title or m_title in clean_target:
+                            matched_movie = m
+                            break
+
+                # Fallback to first result if available
+                if not matched_movie and movies:
+                    matched_movie = movies[0]
+        except Exception as e:
+            print(f"[MovieSource] Title lookup failed ({title}): {e}")
+
+    if matched_movie and matched_movie.get("slug"):
+        slug = matched_movie["slug"]
+        target_url = f"{site_url}/movies/{slug}"
+        return jsonify({
+            "ok": True,
+            "url": target_url,
+            "slug": slug,
+            "movie": {
+                "id": matched_movie.get("id"),
+                "title": matched_movie.get("title"),
+                "year": matched_movie.get("year"),
+                "slug": slug,
+                "rating": matched_movie.get("rating"),
+            },
+            "matched": True
+        })
+
+    # Fallback search URL on target website
+    if title:
+        fallback_query = urllib.parse.quote(title)
+        fallback_url = f"{site_url}/browse-movies/{fallback_query}"
+    else:
+        fallback_url = site_url
+
+    return jsonify({
+        "ok": True,
+        "url": fallback_url,
+        "slug": None,
+        "matched": False
+    })
+
+
 # Background poller for Desktop 1 (DEV mode)
 _BACKGROUND_SYNC_RUNNING = False
 

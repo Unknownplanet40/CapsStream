@@ -83,6 +83,10 @@ DEFAULT_CONFIG = {
         "enabled": False,
         "drive_tag": ""
     },
+    "movie_source": {
+        "site_url": "https://siteformovies.com",
+        "api_url": "https://movies-api.accel.li/api/v2"
+    },
     "auto_sync_host": False
 }
 
@@ -118,7 +122,7 @@ def load_config():
         merged.update(data)
 
         # Deep merge nested dicts
-        for key in ["metadata_sources", "media_paths", "disabled_paths", "library", "updates", "subtitles", "playback", "profiles", "features", "host_sync"]:
+        for key in ["metadata_sources", "media_paths", "disabled_paths", "library", "updates", "subtitles", "playback", "profiles", "features", "host_sync", "movie_source"]:
             if key in data and isinstance(data[key], dict):
                 default_sub = dict(DEFAULT_CONFIG.get(key, {}))
                 for sub_k, sub_v in data[key].items():
@@ -259,13 +263,41 @@ def save_config(new_data):
         return False, str(e)
 
 
-def test_api_key(provider, api_key, url=None):
-    """Test an API key live."""
+def test_api_key(provider, api_key="", url=None):
+    """Test an API key or external service connection live."""
+    prov = (provider or "").lower().strip()
+    if prov in ("movie_source", "movies_api", "movie_api"):
+        test_url = (url or "").strip()
+        if not test_url:
+            test_url = (api_key or "").strip()
+        if not test_url:
+            cfg = load_config()
+            ms = cfg.get("movie_source", {})
+            test_url = ms.get("api_url") or "https://movies-api.accel.li/api/v2"
+        endpoint = f"{test_url.rstrip('/')}/list_movies.json?limit=1"
+        try:
+            req = urllib.request.Request(
+                endpoint,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    "Accept": "application/json"
+                }
+            )
+            with urllib.request.urlopen(req, timeout=6) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                if data.get("status") == "ok":
+                    return True, "Movie API connected successfully"
+                return False, f"Movie API status: {data.get('status')}"
+        except urllib.error.HTTPError as e:
+            return False, f"HTTP Error {e.code}: {e.reason}"
+        except Exception as e:
+            return False, f"Connection error: {str(e)}"
+
     if not api_key or not api_key.strip():
         return False, "API key cannot be empty"
 
     key = api_key.strip()
-    if provider.lower() == "tmdb":
+    if prov == "tmdb":
         endpoint = f"https://api.themoviedb.org/3/authentication?api_key={key}"
         try:
             req = urllib.request.Request(endpoint, headers={"User-Agent": "CapsStream/1.0"})
@@ -283,7 +315,7 @@ def test_api_key(provider, api_key, url=None):
         except Exception as e:
             return False, f"Connection error: {str(e)}"
 
-    if provider.lower() == "supabase":
+    if prov == "supabase":
         from backend.utils.supabase_client import test_supabase_connection
         cfg = load_config()
         supabase_url = (url or "").strip() or cfg.get("supabase_url") or os.environ.get("SUPABASE_URL", "")
