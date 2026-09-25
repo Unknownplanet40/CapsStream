@@ -5862,6 +5862,7 @@ const SETTINGS_INDEX = [
     desc: "Check for new releases, changelog, and automatic update checks.",
     keywords: ["update", "version", "upgrade", "latest", "release", "patch", "changelog", "github", "whats new"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-auto-updates",
@@ -5872,6 +5873,7 @@ const SETTINGS_INDEX = [
     desc: "Periodically check for new CapsStream releases.",
     keywords: ["update", "auto update", "check", "version", "release"],
     adminOnly: true,
+    desktopOnly: true,
   },
 
   // Parental Controls
@@ -6122,6 +6124,7 @@ const SETTINGS_INDEX = [
     desc: "Add, remove, or browse folders for Movies, Series, and Anime libraries.",
     keywords: ["path", "folder", "library", "movies folder", "series folder", "anime folder", "media path", "directory", "scanner"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-naming-guide",
@@ -6132,6 +6135,7 @@ const SETTINGS_INDEX = [
     desc: "Folder and filename conventions for accurate movie and episode matching.",
     keywords: ["naming", "format", "guide", "structure", "convention", "season", "episode", "s01e01"],
     adminOnly: true,
+    desktopOnly: true,
   },
 
   // Storage Health
@@ -6166,6 +6170,7 @@ const SETTINGS_INDEX = [
     desc: "Automatically scan media folders when server logs in.",
     keywords: ["startup scan", "auto scan", "boot", "login scan"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-scan-interval",
@@ -6176,6 +6181,7 @@ const SETTINGS_INDEX = [
     desc: "Scheduled periodic scans (hourly, 6h, 12h, 24h).",
     keywords: ["interval", "schedule", "periodic scan", "timer", "cron", "auto scan"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-manual-scan",
@@ -6186,6 +6192,7 @@ const SETTINGS_INDEX = [
     desc: "Trigger a full scan now to discover new files and refresh metadata.",
     keywords: ["scan now", "manual scan", "refresh library", "rescan", "sync"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-skip-patterns",
@@ -6196,6 +6203,7 @@ const SETTINGS_INDEX = [
     desc: "Comma-separated keywords to ignore during scans (samples, trailers, extras).",
     keywords: ["skip patterns", "ignore", "exclude", "sample", "trailer", "filter"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-detect-anime",
@@ -6206,6 +6214,7 @@ const SETTINGS_INDEX = [
     desc: "Reclassify Japanese animation from Series to the Anime library.",
     keywords: ["detect anime", "reclassify", "move anime", "animation", "japanese"],
     adminOnly: true,
+    desktopOnly: true,
   },
 
   // Metadata Providers
@@ -6218,6 +6227,7 @@ const SETTINGS_INDEX = [
     desc: "The Movie Database API key for posters, backdrops, and cast info.",
     keywords: ["tmdb", "api key", "metadata", "themoviedb", "poster", "backdrop", "token"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-jikan-api",
@@ -6228,6 +6238,7 @@ const SETTINGS_INDEX = [
     desc: "Use MyAnimeList / Jikan API for anime metadata matching fallback.",
     keywords: ["jikan", "mal", "myanimelist", "anime metadata", "fallback"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-skipdb",
@@ -6238,6 +6249,7 @@ const SETTINGS_INDEX = [
     desc: "Fetch crowdsourced intro, recap, and outro timestamps via skipdb.tv.",
     keywords: ["skipdb", "markers", "intro skip", "credits", "skipdb.tv", "timestamps"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-media-requests",
@@ -6248,6 +6260,7 @@ const SETTINGS_INDEX = [
     desc: "Allow users to submit requests for missing movies, TV shows, and anime.",
     keywords: ["requests", "media requests", "request missing", "wishlist"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-supabase-relay",
@@ -6258,6 +6271,7 @@ const SETTINGS_INDEX = [
     desc: "Sync requests across instances over internet without opening ports.",
     keywords: ["supabase", "relay", "cloud", "sync requests", "api key", "anon key"],
     adminOnly: true,
+    desktopOnly: true,
   },
 
   // Duplicate & Quality Report
@@ -6270,6 +6284,7 @@ const SETTINGS_INDEX = [
     desc: "Inventory duplicate sources across libraries and suggest highest quality files.",
     keywords: ["duplicate", "quality", "report", "reclaimable", "multiple files", "best version"],
     adminOnly: true,
+    desktopOnly: true,
   },
 
   // System Health Center
@@ -6282,6 +6297,7 @@ const SETTINGS_INDEX = [
     desc: "Status snapshot of FFmpeg, database, TMDb API, disk mounts, and memory.",
     keywords: ["health", "status", "ffmpeg", "system health", "diagnostics", "check", "database check"],
     adminOnly: true,
+    desktopOnly: true,
   },
 
   // Unmatched Media & Fix Match
@@ -6294,6 +6310,7 @@ const SETTINGS_INDEX = [
     desc: "Files that could not match automatically. Search and manually link to TMDb.",
     keywords: ["unmatched", "fix match", "match", "manual match", "missing metadata", "identify"],
     adminOnly: true,
+    desktopOnly: true,
   },
 
   // Missing Artwork & Re-cache Manager
@@ -6306,6 +6323,7 @@ const SETTINGS_INDEX = [
     desc: "Re-download missing posters and backdrops for matched titles.",
     keywords: ["recache", "artwork", "missing poster", "missing backdrop", "cache artwork", "download poster"],
     adminOnly: true,
+    desktopOnly: true,
   },
 
   // Web Browser & System Config
@@ -6318,6 +6336,7 @@ const SETTINGS_INDEX = [
     desc: "Choose browser for media streaming (Microsoft Edge recommended for 4K HEVC).",
     keywords: ["browser", "edge", "chrome", "default browser", "launch browser", "hevc browser"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-hide-system-files",
@@ -6328,6 +6347,7 @@ const SETTINGS_INDEX = [
     desc: "Hides all files and folders in root project except media and start.bat.",
     keywords: ["hide system files", "clean folder", "hidden files", "explorer", "root"],
     adminOnly: true,
+    desktopOnly: true,
   },
 
   // Server Configuration
@@ -6340,6 +6360,7 @@ const SETTINGS_INDEX = [
     desc: "Bind interface (127.0.0.1 for local only, 0.0.0.0 for LAN network access).",
     keywords: ["host", "ip", "address", "0.0.0.0", "127.0.0.1", "network", "lan", "wifi", "remote access"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-server-port",
@@ -6350,6 +6371,7 @@ const SETTINGS_INDEX = [
     desc: "TCP port the server listens on (e.g. 5000).",
     keywords: ["port", "tcp", "listen", "5000", "network port"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-browser-launch",
@@ -6360,6 +6382,7 @@ const SETTINGS_INDEX = [
     desc: "Automatically launch default browser when starting CapsStream.",
     keywords: ["launch browser", "open on start", "auto open", "start.bat"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-server-logs",
@@ -6370,6 +6393,7 @@ const SETTINGS_INDEX = [
     desc: "View live backend terminal and HTTP server logs.",
     keywords: ["logs", "server log", "terminal", "console", "debug log", "view logs"],
     adminOnly: true,
+    desktopOnly: true,
   },
 
   // Outgoing Network Activity
@@ -6382,6 +6406,7 @@ const SETTINGS_INDEX = [
     desc: "Inspect outgoing HTTP calls to TMDb, OpenSubtitles, AniSkip, and latency.",
     keywords: ["network", "http", "outgoing", "requests", "latency", "traffic", "inspector", "api calls"],
     adminOnly: true,
+    desktopOnly: true,
   },
 
   // Storage, Cache & System Backup
@@ -6394,6 +6419,7 @@ const SETTINGS_INDEX = [
     desc: "Clear cached posters, backdrops, and probe results to free storage.",
     keywords: ["cache", "clear cache", "wipe cache", "probe cache", "free space", "delete cache"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-backup-zip",
@@ -6404,6 +6430,7 @@ const SETTINGS_INDEX = [
     desc: "Export settings, database, watch history, and skip markers as a zip file.",
     keywords: ["backup", "download backup", "export", "zip", "save backup", "dump"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-restore-backup",
@@ -6414,6 +6441,7 @@ const SETTINGS_INDEX = [
     desc: "Upload a backup zip file to restore database and settings.",
     keywords: ["restore", "upload backup", "import backup", "recover"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-auto-backups",
@@ -6424,6 +6452,7 @@ const SETTINGS_INDEX = [
     desc: "View and download periodic database backups saved in data/backups.",
     keywords: ["auto backup", "automatic backup", "snapshots", "history backup"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "setting-host-sync",
@@ -6434,6 +6463,7 @@ const SETTINGS_INDEX = [
     desc: "Seamlessly backup watch data to Documents folder for USB drive swapping.",
     keywords: ["host sync", "documents", "pc sync", "usb swap", "portable sync", "user data sync"],
     adminOnly: true,
+    desktopOnly: true,
   },
 
   // System Maintenance & Server Control
@@ -6446,6 +6476,7 @@ const SETTINGS_INDEX = [
     desc: "Real-time CPU load, RAM usage, active streams, and database size.",
     keywords: ["diagnostics", "cpu", "ram", "memory", "streams", "resource", "stats", "utilization"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "settings-reset-section",
@@ -6456,6 +6487,7 @@ const SETTINGS_INDEX = [
     desc: "Unlink media paths, wipe database, and reset to fresh installation state.",
     keywords: ["reset", "fresh start", "wipe", "factory reset", "clean install", "clear all"],
     adminOnly: true,
+    desktopOnly: true,
   },
   {
     id: "settings-shutdown-section",
@@ -6466,6 +6498,7 @@ const SETTINGS_INDEX = [
     desc: "Restart server to apply configuration changes, or cleanly shutdown CapsStream.",
     keywords: ["shutdown", "restart", "stop server", "reboot", "power off", "server control"],
     adminOnly: true,
+    desktopOnly: true,
   }
 ];
 
@@ -6539,7 +6572,10 @@ const SettingsPage = {
                   <i :class="item.icon || 'ph ph-gear'"></i>
                   {{ item.section }}
                 </span>
-                <span v-if="item.adminOnly" class="settings-search-item-badge">Admin</span>
+                <span v-if="isMobileScreen && item.desktopOnly" class="settings-search-item-badge desktop-only">
+                  <i class="ph ph-laptop"></i> Desktop Only
+                </span>
+                <span v-else-if="item.adminOnly" class="settings-search-item-badge">Admin</span>
               </div>
               <div class="settings-search-item-title">{{ item.title }}</div>
               <div class="settings-search-item-desc" v-if="item.desc">{{ item.desc }}</div>
@@ -6555,7 +6591,7 @@ const SettingsPage = {
       <template v-else>
         <main class="settings-content">
 
-        <section class="settings-section" id="settings-duplicate-report" v-if="isAdmin">
+        <section class="settings-section settings-desktop-only" id="settings-duplicate-report" v-if="isAdmin">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
             <span><i class="ph ph-files" style="color:var(--accent);margin-right:6px"></i>Duplicate &amp; Quality Report</span>
             <button class="btn btn-secondary btn-sm" @click="loadDuplicateReport" :disabled="duplicateReportLoading"><i class="ph ph-arrows-clockwise"></i> {{ duplicateReportLoading ? 'Scanning…' : 'Scan library' }}</button>
@@ -6576,7 +6612,7 @@ const SettingsPage = {
         </section>
 
         <!-- ══════ System Health Center ══════ -->
-        <section class="settings-section" id="settings-health-center" v-if="isAdmin" aria-labelledby="settings-health-title">
+        <section class="settings-section settings-desktop-only" id="settings-health-center" v-if="isAdmin" aria-labelledby="settings-health-title">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
             <div style="display:flex;align-items:center;gap:8px">
               <i class="ph ph-heartbeat" style="color:var(--accent)"></i>
@@ -6609,7 +6645,7 @@ const SettingsPage = {
         </section>
 
         <!-- ══════ Updates Card (Moved to Top) ══════ -->
-        <div class="settings-section" id="settings-updates-section" :class="{ 'update-section-disabled': sysInfo?.is_dev }" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-updates-section" :class="{ 'update-section-disabled': sysInfo?.is_dev }" v-if="isAdmin">
           <div class="settings-section-title">
             <i class="ph ph-arrow-circle-up" :style="{ color: sysInfo?.is_dev ? '#fbbf24' : 'var(--accent)' }"></i>
             <span>Updates &amp; Version</span>
@@ -7344,7 +7380,7 @@ const SettingsPage = {
         </div>
 
         <!-- ══════ Media Scanner Paths (Full Width) ══════ -->
-        <div class="settings-section" id="settings-paths-section" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-paths-section" v-if="isAdmin">
           <div class="settings-section-title">
             <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
             <span>Media Scanner Paths</span>
@@ -7722,9 +7758,9 @@ const SettingsPage = {
           </div>
 
         <!-- ══════ Side-by-Side: Library Scanning & Metadata Providers ══════ -->
-        <div class="settings-grid-row">
+        <div class="settings-grid-row settings-desktop-only">
           <!-- 2b. Library & Scanning -->
-          <div class="settings-section" id="settings-scanning-section" v-if="isAdmin">
+          <div class="settings-section settings-desktop-only" id="settings-scanning-section" v-if="isAdmin">
             <div class="settings-section-title">
               <i class="ph ph-file-video" style="color:var(--accent)"></i>
               <span>Library & Scanning</span>
@@ -7800,7 +7836,7 @@ const SettingsPage = {
           </div>
 
           <!-- ══════ Metadata Providers ══════ -->
-          <div class="settings-section" id="settings-metadata-section" v-if="isAdmin">
+          <div class="settings-section settings-desktop-only" id="settings-metadata-section" v-if="isAdmin">
             <div class="settings-section-title">
               <i class="ph ph-database" style="color:var(--accent)"></i>
               <span>Metadata Providers & API Keys</span>
@@ -7903,7 +7939,7 @@ const SettingsPage = {
         </div>
 
                 <!-- 2c. Unmatched Media & Fix Match Inspector -->
-        <div class="settings-section" id="settings-unmatched-section" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-unmatched-section" v-if="isAdmin">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
               <i class="ph ph-warning-circle" style="color:var(--accent)"></i>
@@ -7977,7 +8013,7 @@ const SettingsPage = {
         </div>
 
         <!-- 2d. Missing Artwork & Re-cache Manager -->
-        <div class="settings-section" id="settings-recache-section" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-recache-section" v-if="isAdmin">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
               <i class="ph ph-image-broken" style="color:var(--accent)"></i>
@@ -8104,9 +8140,9 @@ const SettingsPage = {
         </div>
 
         <!-- ══════ Side-by-Side: Web Browser & System Config and Server Config ══════ -->
-        <div class="settings-grid-row">
+        <div class="settings-grid-row settings-desktop-only">
           <!-- Web Browser & System Config Card -->
-          <div class="settings-section" id="settings-browser-section" v-if="isAdmin">
+          <div class="settings-section settings-desktop-only" id="settings-browser-section" v-if="isAdmin">
             <div class="settings-section-title">
               <i class="ph ph-globe-hemisphere-west" style="color:var(--accent)"></i>
               <span>Web Browser & System Configuration</span>
@@ -8149,7 +8185,7 @@ const SettingsPage = {
           </div>
 
           <!-- Server Configuration Card -->
-          <div class="settings-section" id="settings-server-section" v-if="isAdmin">
+          <div class="settings-section settings-desktop-only" id="settings-server-section" v-if="isAdmin">
             <div class="settings-section-title">
               <i class="ph ph-hard-drives" style="color:var(--accent)"></i>
               <span>Server Configuration</span>
@@ -8268,7 +8304,7 @@ const SettingsPage = {
         </div>
 
                 <!-- ══════ Outgoing Network Activity ══════ -->
-        <div class="settings-section" id="settings-network-section" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-network-section" v-if="isAdmin">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
               <i class="ph ph-broadcast" style="color:var(--accent)"></i>
@@ -8421,7 +8457,7 @@ const SettingsPage = {
           </div>
         </div>
                 <!-- ══════ Storage, Cache & System Backup (Full Width) ══════ -->
-        <div class="settings-section" id="settings-backup-section" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-backup-section" v-if="isAdmin">
           <div class="settings-section-title">
             <i class="ph ph-archive-box" style="color:var(--accent)"></i>
             <span>Storage, Cache & System Backup</span>
@@ -8607,7 +8643,7 @@ const SettingsPage = {
           </div>
         </div>
                 <!-- ══════ System Maintenance & Server Control ══════ -->
-        <div class="settings-section" id="settings-danger-section" v-if="isAdmin">
+        <div class="settings-section settings-desktop-only" id="settings-danger-section" v-if="isAdmin">
           <div class="settings-section-title">
             <i class="ph ph-warning-octagon" style="color:#ef4444"></i>
             <span style="color:#ef4444">System Maintenance & Server Control</span>
@@ -8696,9 +8732,30 @@ const SettingsPage = {
             </div>
           </div>
         </div>
+      <!-- Subtle Mobile Guidance Notice for Desktop Settings -->
+      <div v-if="isMobileScreen" class="mobile-desktop-settings-hint-card">
+        <div class="mobile-desktop-hint-icon"><i class="ph-bold ph-laptop"></i></div>
+        <div>
+          <div class="mobile-desktop-hint-title">Looking for Server &amp; Library Controls?</div>
+          <div class="mobile-desktop-hint-desc">Media scanner paths, TMDb API keys, server host/port, live network inspector, backups, and maintenance tools are configured on a desktop or laptop screen.</div>
+        </div>
+      </div>
 
     </main>
   </template>
+
+      <!-- Desktop Only Setting Notice Modal -->
+      <div v-if="desktopNoticeModal.show" class="modal-backdrop" style="z-index:100060;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="desktopNoticeModal.show = false">
+        <div class="shortcuts-modal-card desktop-notice-modal-card" style="max-width:440px" @click.stop>
+          <div class="shortcuts-modal-inner" style="text-align:center;padding:2rem 1.5rem">
+            <div class="desktop-notice-icon-wrap"><i class="ph-bold ph-laptop"></i></div>
+            <h3 style="font-size:1.2rem;font-weight:800;color:var(--text-primary);margin:14px 0 6px">Desktop Only Setting</h3>
+            <div style="font-size:0.88rem;font-weight:700;color:var(--accent);margin-bottom:12px">{{ desktopNoticeModal.title }} ({{ desktopNoticeModal.section }})</div>
+            <p style="font-size:0.84rem;color:var(--text-secondary);line-height:1.55;margin:0 0 1.5rem">This configuration is an advanced administrative setting designed for desktop and laptop displays. It is not accessible on mobile or phone viewports.<br><br>Please open CapsStream on your computer or desktop browser to adjust this setting.</p>
+            <button class="btn btn-primary" style="width:100%;justify-content:center;font-weight:700" @click="desktopNoticeModal.show = false">Got It</button>
+          </div>
+        </div>
+      </div>
 
       <!-- Shutdown Confirmation Modal -->
       <div v-if="showShutdownModal" class="modal-backdrop" style="z-index:100050;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showShutdownModal = false">
@@ -9018,6 +9075,7 @@ const SettingsPage = {
     const searchInputRef = ref(null);
     const searchWrapRef = ref(null);
     let highlightTimer = null;
+    const desktopNoticeModal = ref({ show: false, title: "", section: "" });
 
     const filteredSettings = computed(() => {
       const q = searchQuery.value.trim().toLowerCase();
@@ -9122,6 +9180,14 @@ const SettingsPage = {
       isSearchOpen.value = false;
       if (searchInputRef.value) {
         searchInputRef.value.blur();
+      }
+      if (isMobileScreen.value && item.desktopOnly) {
+        desktopNoticeModal.value = {
+          show: true,
+          title: item.title,
+          section: item.section
+        };
+        return;
       }
       scrollToSetting(item.targetId || item.id);
     }
@@ -11071,6 +11137,7 @@ const SettingsPage = {
       selectSearchResult,
       scrollToSetting,
       onSearchKeydown,
+      desktopNoticeModal,
     };
   },
 };
