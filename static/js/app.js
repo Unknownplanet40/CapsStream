@@ -5849,6 +5849,626 @@ const DetailPage = {
   },
 };
 
+// ─── Settings Search Index ────────────────────────────────────
+
+const SETTINGS_INDEX = [
+  // Updates & Version
+  {
+    id: "settings-updates-section",
+    targetId: "setting-auto-updates",
+    title: "Updates & Version",
+    section: "Updates",
+    icon: "ph ph-arrow-circle-up",
+    desc: "Check for new releases, changelog, and automatic update checks.",
+    keywords: ["update", "version", "upgrade", "latest", "release", "patch", "changelog", "github", "whats new"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-auto-updates",
+    targetId: "setting-auto-updates",
+    title: "Automatic Update Checks",
+    section: "Updates",
+    icon: "ph ph-arrow-circle-up",
+    desc: "Periodically check for new CapsStream releases.",
+    keywords: ["update", "auto update", "check", "version", "release"],
+    adminOnly: true,
+  },
+
+  // Parental Controls
+  {
+    id: "settings-parental-section",
+    targetId: "setting-kids-limits",
+    title: "Parental Controls & Kids Screen Time",
+    section: "Parental Controls",
+    icon: "ph ph-shield-check",
+    desc: "Daily cartoon time limits, bedtime curfews, and content filtering.",
+    keywords: ["parental", "kids", "children", "curfew", "screen time", "bedtime", "limit", "filter"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-kids-overrides",
+    targetId: "setting-kids-overrides",
+    title: "Title Overrides for Kids Mode",
+    section: "Parental Controls",
+    icon: "ph ph-shield-check",
+    desc: "Always allow or block specific titles in Kids Mode.",
+    keywords: ["override", "whitelist", "blacklist", "block", "allow", "kids mode", "parental"],
+    adminOnly: false,
+  },
+
+  // Appearance & Themes
+  {
+    id: "setting-layout-mode",
+    targetId: "setting-layout-mode",
+    title: "Interface Layout Mode (Standard vs TV)",
+    section: "Appearance",
+    icon: "ph ph-browsers",
+    desc: "Switch between standard web browsing and cinematic 10-foot TV layout.",
+    keywords: ["layout", "tv", "mode", "10-foot", "standard", "remote", "dpad", "display"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-theme-preset",
+    targetId: "setting-theme-preset",
+    title: "Active Theme Preset & Accents",
+    section: "Appearance",
+    icon: "ph ph-palette",
+    desc: "Curated visual color presets and accent themes.",
+    keywords: ["theme", "preset", "color", "accent", "dark", "light", "appearance", "style", "skin"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-perf-mode",
+    targetId: "setting-perf-mode",
+    title: "Performance Mode (Lite UI)",
+    section: "Appearance",
+    icon: "ph ph-lightning",
+    desc: "Disable GPU backdrop blurs and frosted glass for low-spec hardware.",
+    keywords: ["performance", "lite", "gpu", "blur", "lag", "celeron", "low spec", "hardware", "speed", "fast"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-hw-specs",
+    targetId: "setting-hw-specs",
+    title: "Current Device Hardware Specifications",
+    section: "Appearance",
+    icon: "ph ph-cpu",
+    desc: "Detected CPU, RAM, GPU, OS, resolution, and display scaling.",
+    keywords: ["specs", "hardware", "cpu", "ram", "gpu", "graphics", "resolution", "display", "processor", "memory"],
+    adminOnly: false,
+  },
+
+  // Interactive Onboarding & Guide
+  {
+    id: "setting-replay-tour",
+    targetId: "setting-replay-tour",
+    title: "Replay Product Tour",
+    section: "Help & Guide",
+    icon: "ph ph-compass",
+    desc: "Take a guided walkthrough of CapsStream features, playlists, and settings.",
+    keywords: ["tour", "guide", "onboarding", "walkthrough", "tutorial", "help"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-app-hotkeys",
+    targetId: "setting-app-hotkeys",
+    title: "Keyboard Shortcuts & Hotkeys",
+    section: "Help & Guide",
+    icon: "ph ph-keyboard",
+    desc: "View full list of keyboard shortcuts for playback, search, and navigation.",
+    keywords: ["shortcuts", "hotkeys", "keyboard", "cheatsheet", "keys", "dpad", "controls"],
+    adminOnly: false,
+  },
+
+  // Playback & Subtitle Defaults
+  {
+    id: "setting-subtitles-autoload",
+    targetId: "setting-subtitles-autoload",
+    title: "Subtitles — Auto-Load",
+    section: "Playback & Subtitles",
+    icon: "ph ph-subtitles",
+    desc: "Automatically enable matching subtitles on video launch.",
+    keywords: ["subtitles", "autoload", "captions", "cc", "srt", "vtt"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-subtitles-lang",
+    targetId: "setting-subtitles-lang",
+    title: "Subtitles — Preferred Language",
+    section: "Playback & Subtitles",
+    icon: "ph ph-translate",
+    desc: "Default subtitle language preference (English, Spanish, etc.).",
+    keywords: ["language", "subtitle language", "english", "captions", "audio"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-autoplay-next",
+    targetId: "setting-autoplay-next",
+    title: "Autoplay Next Episode",
+    section: "Playback & Subtitles",
+    icon: "ph ph-play-circle",
+    desc: "Queue and play the next episode automatically when finishing a video.",
+    keywords: ["autoplay", "next", "binge", "queue", "episode", "continuous"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-inactivity-sleep",
+    targetId: "setting-inactivity-sleep",
+    title: "Inactivity Sleep Prompt",
+    section: "Playback & Subtitles",
+    icon: "ph ph-moon",
+    desc: "Pause and prompt 'Are you still watching?' after uninterrupted auto-advances.",
+    keywords: ["sleep", "inactivity", "idle", "still watching", "timer", "pause"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-auto-skip",
+    targetId: "setting-auto-skip",
+    title: "Auto-Skip Intro, Recap & Outro",
+    section: "Playback & Subtitles",
+    icon: "ph ph-fast-forward",
+    desc: "Automatically skip intro, recap, and credits ranges during playback.",
+    keywords: ["skip", "intro", "recap", "outro", "credits", "aniskip", "skipdb", "auto-skip", "opening", "ending"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-hevc-compat",
+    targetId: "setting-hevc-compat",
+    title: "Smart HEVC / H.265 Compatibility",
+    section: "Playback & Subtitles",
+    icon: "ph ph-film-slate",
+    desc: "Transcoding or direct playback fallback when HEVC / 10-bit playback stalls.",
+    keywords: ["hevc", "h265", "transcode", "compatibility", "stalling", "10-bit", "video decoder", "h.265", "gpu"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-resume-behavior",
+    targetId: "setting-resume-behavior",
+    title: "Playback — Resume Behavior",
+    section: "Playback & Subtitles",
+    icon: "ph ph-play",
+    desc: "Resume automatically or prompt when a video has saved watch progress.",
+    keywords: ["resume", "progress", "prompt", "timestamp", "continue watching"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-playback-speed",
+    targetId: "setting-playback-speed",
+    title: "Playback — Default Speed",
+    section: "Playback & Subtitles",
+    icon: "ph ph-gauge",
+    desc: "Default playback speed applied when launching videos (1x, 1.25x, etc.).",
+    keywords: ["speed", "playback speed", "rate", "fast forward", "velocity"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-auto-fullscreen",
+    targetId: "setting-auto-fullscreen",
+    title: "Playback — Auto-Fullscreen",
+    section: "Playback & Subtitles",
+    icon: "ph ph-corners-out",
+    desc: "Automatically enter fullscreen mode when video playback starts.",
+    keywords: ["fullscreen", "maximize", "full screen", "window"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-start-muted",
+    targetId: "setting-start-muted",
+    title: "Playback — Start Muted",
+    section: "Playback & Subtitles",
+    icon: "ph ph-speaker-slash",
+    desc: "Launch video player muted regardless of volume level.",
+    keywords: ["mute", "muted", "quiet", "silent", "sound", "volume"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-trailers",
+    targetId: "setting-trailers",
+    title: "Trailers & Ambient Video Previews",
+    section: "Playback & Subtitles",
+    icon: "ph ph-film-strip",
+    desc: "Play ambient video previews and trailers on hero banner and media cards.",
+    keywords: ["trailer", "preview", "hero", "video preview", "teaser"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-subtitles-opensubs",
+    targetId: "setting-subtitles-opensubs",
+    title: "OpenSubtitles API Key",
+    section: "Playback & Subtitles",
+    icon: "ph ph-key",
+    desc: "Automatic subtitle downloads matched to exact media files.",
+    keywords: ["opensubtitles", "api key", "subtitles", "download subtitles", "token"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-subtitles-appearance",
+    targetId: "setting-subtitles-appearance",
+    title: "Subtitles — Appearance & Styling",
+    section: "Playback & Subtitles",
+    icon: "ph ph-text-aa",
+    desc: "Font color, subtitle text size, and background box opacity.",
+    keywords: ["subtitle size", "font size", "subtitle color", "caption appearance", "opacity", "background", "styling"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-seek-step",
+    targetId: "setting-seek-step",
+    title: "Playback — Seek Step (Seconds)",
+    section: "Playback & Subtitles",
+    icon: "ph ph-timer",
+    desc: "Seconds skipped when pressing Arrow Left/Right or seek buttons.",
+    keywords: ["seek", "jump", "seconds", "skip seconds", "arrow keys", "step"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-default-volume",
+    targetId: "setting-default-volume",
+    title: "Playback — Default Volume",
+    section: "Playback & Subtitles",
+    icon: "ph ph-speaker-high",
+    desc: "Initial volume level percentage when launching player.",
+    keywords: ["volume", "sound", "audio level", "loudness", "level"],
+    adminOnly: false,
+  },
+
+  // Media Scanner Paths
+  {
+    id: "setting-library-folders",
+    targetId: "setting-library-folders",
+    title: "Media Library Folders & Paths",
+    section: "Library & Paths",
+    icon: "ph ph-folder",
+    desc: "Add, remove, or browse folders for Movies, Series, and Anime libraries.",
+    keywords: ["path", "folder", "library", "movies folder", "series folder", "anime folder", "media path", "directory", "scanner"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-naming-guide",
+    targetId: "setting-naming-guide",
+    title: "Accepted Naming Formats & File Structure Guide",
+    section: "Library & Paths",
+    icon: "ph ph-file-text",
+    desc: "Folder and filename conventions for accurate movie and episode matching.",
+    keywords: ["naming", "format", "guide", "structure", "convention", "season", "episode", "s01e01"],
+    adminOnly: true,
+  },
+
+  // Storage Health
+  {
+    id: "setting-drive-health",
+    targetId: "setting-drive-health",
+    title: "Storage Health & Connected Drives",
+    section: "Storage Health",
+    icon: "ph ph-hard-drive",
+    desc: "Monitor mounted external drives, free space, and disconnected storage alerts.",
+    keywords: ["drive", "disk", "storage", "space", "free space", "mounted", "offline drive", "hard drive", "external"],
+    adminOnly: false,
+  },
+  {
+    id: "setting-hide-offline-media",
+    targetId: "setting-hide-offline-media",
+    title: "Hide Offline Media",
+    section: "Storage Health",
+    icon: "ph ph-eye-slash",
+    desc: "Hide files on disconnected external drives from your library views.",
+    keywords: ["offline", "hide offline", "unmounted", "disconnected", "external drive"],
+    adminOnly: false,
+  },
+
+  // Library & Scanning
+  {
+    id: "setting-scan-startup",
+    targetId: "setting-scan-startup",
+    title: "Scan Library on Startup",
+    section: "Scanning",
+    icon: "ph ph-arrows-clockwise",
+    desc: "Automatically scan media folders when server logs in.",
+    keywords: ["startup scan", "auto scan", "boot", "login scan"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-scan-interval",
+    targetId: "setting-scan-interval",
+    title: "Auto-Scan Interval",
+    section: "Scanning",
+    icon: "ph ph-clock",
+    desc: "Scheduled periodic scans (hourly, 6h, 12h, 24h).",
+    keywords: ["interval", "schedule", "periodic scan", "timer", "cron", "auto scan"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-manual-scan",
+    targetId: "setting-manual-scan",
+    title: "Manual Library Scan",
+    section: "Scanning",
+    icon: "ph ph-arrows-clockwise",
+    desc: "Trigger a full scan now to discover new files and refresh metadata.",
+    keywords: ["scan now", "manual scan", "refresh library", "rescan", "sync"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-skip-patterns",
+    targetId: "setting-skip-patterns",
+    title: "Skip Patterns (Ignored Keywords)",
+    section: "Scanning",
+    icon: "ph ph-prohibit",
+    desc: "Comma-separated keywords to ignore during scans (samples, trailers, extras).",
+    keywords: ["skip patterns", "ignore", "exclude", "sample", "trailer", "filter"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-detect-anime",
+    targetId: "setting-detect-anime",
+    title: "Detect Anime in Series",
+    section: "Scanning",
+    icon: "ph ph-magic-wand",
+    desc: "Reclassify Japanese animation from Series to the Anime library.",
+    keywords: ["detect anime", "reclassify", "move anime", "animation", "japanese"],
+    adminOnly: true,
+  },
+
+  // Metadata Providers
+  {
+    id: "setting-tmdb-key",
+    targetId: "setting-tmdb-key",
+    title: "TMDb API Key",
+    section: "Metadata Providers",
+    icon: "ph ph-database",
+    desc: "The Movie Database API key for posters, backdrops, and cast info.",
+    keywords: ["tmdb", "api key", "metadata", "themoviedb", "poster", "backdrop", "token"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-jikan-api",
+    targetId: "setting-jikan-api",
+    title: "Jikan API (Anime Metadata Fallback)",
+    section: "Metadata Providers",
+    icon: "ph ph-database",
+    desc: "Use MyAnimeList / Jikan API for anime metadata matching fallback.",
+    keywords: ["jikan", "mal", "myanimelist", "anime metadata", "fallback"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-skipdb",
+    targetId: "setting-skipdb",
+    title: "SkipDB (Crowdsourced Skip Markers)",
+    section: "Metadata Providers",
+    icon: "ph ph-fast-forward",
+    desc: "Fetch crowdsourced intro, recap, and outro timestamps via skipdb.tv.",
+    keywords: ["skipdb", "markers", "intro skip", "credits", "skipdb.tv", "timestamps"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-media-requests",
+    targetId: "setting-media-requests",
+    title: "Media Requests Feature",
+    section: "Metadata Providers",
+    icon: "ph ph-paper-plane-tilt",
+    desc: "Allow users to submit requests for missing movies, TV shows, and anime.",
+    keywords: ["requests", "media requests", "request missing", "wishlist"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-supabase-relay",
+    targetId: "setting-supabase-relay",
+    title: "Supabase Cloud Relay for Online Requests",
+    section: "Metadata Providers",
+    icon: "ph ph-cloud",
+    desc: "Sync requests across instances over internet without opening ports.",
+    keywords: ["supabase", "relay", "cloud", "sync requests", "api key", "anon key"],
+    adminOnly: true,
+  },
+
+  // Duplicate & Quality Report
+  {
+    id: "settings-duplicate-report",
+    targetId: "settings-duplicate-report",
+    title: "Duplicate & Quality Report",
+    section: "Library & Quality",
+    icon: "ph ph-files",
+    desc: "Inventory duplicate sources across libraries and suggest highest quality files.",
+    keywords: ["duplicate", "quality", "report", "reclaimable", "multiple files", "best version"],
+    adminOnly: true,
+  },
+
+  // System Health Center
+  {
+    id: "settings-health-center",
+    targetId: "settings-health-center",
+    title: "System Health Center",
+    section: "System Health",
+    icon: "ph ph-heartbeat",
+    desc: "Status snapshot of FFmpeg, database, TMDb API, disk mounts, and memory.",
+    keywords: ["health", "status", "ffmpeg", "system health", "diagnostics", "check", "database check"],
+    adminOnly: true,
+  },
+
+  // Unmatched Media & Fix Match
+  {
+    id: "settings-unmatched-section",
+    targetId: "settings-unmatched-section",
+    title: "Unmatched Media & Fix Match Inspector",
+    section: "Library & Metadata",
+    icon: "ph ph-warning-circle",
+    desc: "Files that could not match automatically. Search and manually link to TMDb.",
+    keywords: ["unmatched", "fix match", "match", "manual match", "missing metadata", "identify"],
+    adminOnly: true,
+  },
+
+  // Missing Artwork & Re-cache Manager
+  {
+    id: "settings-recache-section",
+    targetId: "settings-recache-section",
+    title: "Missing Artwork & Re-cache Manager",
+    section: "Library & Metadata",
+    icon: "ph ph-image-broken",
+    desc: "Re-download missing posters and backdrops for matched titles.",
+    keywords: ["recache", "artwork", "missing poster", "missing backdrop", "cache artwork", "download poster"],
+    adminOnly: true,
+  },
+
+  // Web Browser & System Config
+  {
+    id: "setting-default-browser",
+    targetId: "setting-default-browser",
+    title: "Default Web Browser (Edge / Chrome / System)",
+    section: "Browser & System",
+    icon: "ph ph-globe",
+    desc: "Choose browser for media streaming (Microsoft Edge recommended for 4K HEVC).",
+    keywords: ["browser", "edge", "chrome", "default browser", "launch browser", "hevc browser"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-hide-system-files",
+    targetId: "setting-hide-system-files",
+    title: "Hide System Files & Folders",
+    section: "Browser & System",
+    icon: "ph ph-eye-slash",
+    desc: "Hides all files and folders in root project except media and start.bat.",
+    keywords: ["hide system files", "clean folder", "hidden files", "explorer", "root"],
+    adminOnly: true,
+  },
+
+  // Server Configuration
+  {
+    id: "setting-server-host",
+    targetId: "setting-server-host",
+    title: "Host Address & Network IP",
+    section: "Server Configuration",
+    icon: "ph ph-broadcast",
+    desc: "Bind interface (127.0.0.1 for local only, 0.0.0.0 for LAN network access).",
+    keywords: ["host", "ip", "address", "0.0.0.0", "127.0.0.1", "network", "lan", "wifi", "remote access"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-server-port",
+    targetId: "setting-server-port",
+    title: "Server Port",
+    section: "Server Configuration",
+    icon: "ph ph-hash",
+    desc: "TCP port the server listens on (e.g. 5000).",
+    keywords: ["port", "tcp", "listen", "5000", "network port"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-browser-launch",
+    targetId: "setting-browser-launch",
+    title: "Open Browser on Launch",
+    section: "Server Configuration",
+    icon: "ph ph-browsers",
+    desc: "Automatically launch default browser when starting CapsStream.",
+    keywords: ["launch browser", "open on start", "auto open", "start.bat"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-server-logs",
+    targetId: "setting-server-logs",
+    title: "Live Server Logs",
+    section: "Server Configuration",
+    icon: "ph ph-scroll",
+    desc: "View live backend terminal and HTTP server logs.",
+    keywords: ["logs", "server log", "terminal", "console", "debug log", "view logs"],
+    adminOnly: true,
+  },
+
+  // Outgoing Network Activity
+  {
+    id: "settings-network-section",
+    targetId: "settings-network-section",
+    title: "Outgoing Network Activity & Request Inspector",
+    section: "Network & Security",
+    icon: "ph ph-broadcast",
+    desc: "Inspect outgoing HTTP calls to TMDb, OpenSubtitles, AniSkip, and latency.",
+    keywords: ["network", "http", "outgoing", "requests", "latency", "traffic", "inspector", "api calls"],
+    adminOnly: true,
+  },
+
+  // Storage, Cache & System Backup
+  {
+    id: "settings-cache-row",
+    targetId: "settings-cache-row",
+    title: "Cached Metadata, Images & Artwork",
+    section: "Storage & Backup",
+    icon: "ph ph-trash",
+    desc: "Clear cached posters, backdrops, and probe results to free storage.",
+    keywords: ["cache", "clear cache", "wipe cache", "probe cache", "free space", "delete cache"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-backup-zip",
+    targetId: "setting-backup-zip",
+    title: "Download Backup (ZIP)",
+    section: "Storage & Backup",
+    icon: "ph ph-download-simple",
+    desc: "Export settings, database, watch history, and skip markers as a zip file.",
+    keywords: ["backup", "download backup", "export", "zip", "save backup", "dump"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-restore-backup",
+    targetId: "setting-restore-backup",
+    title: "Restore From Backup",
+    section: "Storage & Backup",
+    icon: "ph ph-upload-simple",
+    desc: "Upload a backup zip file to restore database and settings.",
+    keywords: ["restore", "upload backup", "import backup", "recover"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-auto-backups",
+    targetId: "setting-auto-backups",
+    title: "Automated Periodic Backups",
+    section: "Storage & Backup",
+    icon: "ph ph-clock-counter-clockwise",
+    desc: "View and download periodic database backups saved in data/backups.",
+    keywords: ["auto backup", "automatic backup", "snapshots", "history backup"],
+    adminOnly: true,
+  },
+  {
+    id: "setting-host-sync",
+    targetId: "setting-host-sync",
+    title: "Host PC Documents User Data Sync",
+    section: "Storage & Backup",
+    icon: "ph ph-laptop",
+    desc: "Seamlessly backup watch data to Documents folder for USB drive swapping.",
+    keywords: ["host sync", "documents", "pc sync", "usb swap", "portable sync", "user data sync"],
+    adminOnly: true,
+  },
+
+  // System Maintenance & Server Control
+  {
+    id: "settings-diagnostics-row",
+    targetId: "settings-diagnostics-row",
+    title: "Live Server Diagnostics (CPU / RAM / Streams)",
+    section: "System Maintenance",
+    icon: "ph ph-activity",
+    desc: "Real-time CPU load, RAM usage, active streams, and database size.",
+    keywords: ["diagnostics", "cpu", "ram", "memory", "streams", "resource", "stats", "utilization"],
+    adminOnly: true,
+  },
+  {
+    id: "settings-reset-section",
+    targetId: "settings-reset-section",
+    title: "Fresh Start & System Reset",
+    section: "System Maintenance",
+    icon: "ph ph-arrows-counter-clockwise",
+    desc: "Unlink media paths, wipe database, and reset to fresh installation state.",
+    keywords: ["reset", "fresh start", "wipe", "factory reset", "clean install", "clear all"],
+    adminOnly: true,
+  },
+  {
+    id: "settings-shutdown-section",
+    targetId: "settings-shutdown-section",
+    title: "Server Control (Restart & Shutdown)",
+    section: "System Maintenance",
+    icon: "ph ph-power",
+    desc: "Restart server to apply configuration changes, or cleanly shutdown CapsStream.",
+    keywords: ["shutdown", "restart", "stop server", "reboot", "power off", "server control"],
+    adminOnly: true,
+  }
+];
+
 // ─── Settings Page ────────────────────────────────────────────
 
 const SettingsPage = {
@@ -5860,6 +6480,71 @@ const SettingsPage = {
           <span>Application Settings</span>
           <span v-if="store.profile?.is_admin" class="admin-profile-badge" style="font-size:0.75rem;padding:3px 10px;margin-left:8px">Administrator Mode</span>
           <span v-else class="teen-profile-badge" style="font-size:0.75rem;padding:3px 10px;margin-left:8px">Personal Preferences</span>
+        </div>
+
+        <!-- Quick Settings Search Bar -->
+        <div class="settings-search-wrap" ref="searchWrapRef" @click.stop>
+          <div class="settings-search-input-box" :class="{ focused: isSearchFocused, 'has-query': searchQuery.trim().length > 0 }">
+            <i class="ph ph-magnifying-glass settings-search-icon"></i>
+            <input
+              ref="searchInputRef"
+              type="text"
+              v-model="searchQuery"
+              @focus="onSearchFocus"
+              @blur="onSearchBlur"
+              @keydown="onSearchKeydown"
+              class="settings-search-input"
+              placeholder="Search settings... (Ctrl+K or /)"
+              aria-label="Search settings and options"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button
+              v-if="searchQuery.trim().length > 0"
+              type="button"
+              class="settings-search-clear"
+              @click="clearSettingsSearch"
+              title="Clear search"
+            >
+              <i class="ph ph-x"></i>
+            </button>
+            <div class="settings-search-shortcut" v-else>
+              <kbd class="settings-kbd">Ctrl K</kbd>
+            </div>
+          </div>
+
+          <!-- Autocomplete Dropdown -->
+          <div
+            v-if="isSearchOpen"
+            class="settings-search-dropdown"
+            role="listbox"
+          >
+            <div v-if="filteredSettings.length === 0" class="settings-search-empty">
+              <i class="ph ph-warning-circle"></i>
+              <span>No settings found matching "<strong>{{ searchQuery }}</strong>"</span>
+            </div>
+            <div
+              v-else
+              v-for="(item, idx) in filteredSettings"
+              :key="item.id"
+              class="settings-search-item"
+              :class="{ active: idx === selectedResultIndex }"
+              @mousedown.prevent="selectSearchResult(item)"
+              @mouseenter="selectedResultIndex = idx"
+              role="option"
+              :aria-selected="idx === selectedResultIndex"
+            >
+              <div class="settings-search-item-header">
+                <span class="settings-search-item-section">
+                  <i :class="item.icon || 'ph ph-gear'"></i>
+                  {{ item.section }}
+                </span>
+                <span v-if="item.adminOnly" class="settings-search-item-badge">Admin</span>
+              </div>
+              <div class="settings-search-item-title">{{ item.title }}</div>
+              <div class="settings-search-item-desc" v-if="item.desc">{{ item.desc }}</div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -5953,7 +6638,7 @@ const SettingsPage = {
               </div>
             </div>
 
-            <div class="settings-row" :style="sysInfo?.is_dev ? 'cursor:not-allowed;' : ''">
+            <div class="settings-row" id="setting-auto-updates" :style="sysInfo?.is_dev ? 'cursor:not-allowed;' : ''">
               <div class="settings-label-container">
                 <div class="settings-label">Automatic Update Checks</div>
                 <div class="settings-desc">Periodically check for new CapsStream releases and show a banner when one is available.</div>
@@ -6033,7 +6718,7 @@ const SettingsPage = {
             <i class="ph ph-shield-check" style="color:#fdcb6e"></i>
             <span>Parental Controls & Kids Screen Time</span>
           </div>
-          <div class="settings-group">
+          <div class="settings-group" id="setting-kids-limits">
             <div v-if="!kidsProfiles.length" style="padding:1.25rem;color:var(--text-muted);font-size:0.9rem">
               No Kids profiles created yet. Create or edit a profile in <router-link to="/profiles?manage=true" style="color:var(--accent);font-weight:700">Manage Profiles</router-link> to set daily cartoon time limits and bedtime curfews.
             </div>
@@ -6086,7 +6771,7 @@ const SettingsPage = {
               </div>
 
               <!-- Parental override rules (allow/block titles) -->
-              <div v-if="kidsOverrides.length" style="border-top:1px solid var(--border);margin-top:18px;padding-top:16px">
+              <div v-if="kidsOverrides.length" id="setting-kids-overrides" style="border-top:1px solid var(--border);margin-top:18px;padding-top:16px">
                 <div class="settings-label" style="margin-bottom:4px">Title Overrides for Kids Mode</div>
                 <div class="settings-desc" style="margin-bottom:10px">Rules set via right-click → "Kids Mode: Always Allow / Block Title". These win over automatic filtering.</div>
                 <div v-for="ov in kidsOverrides" :key="ov.tmdb_id"
@@ -6115,7 +6800,7 @@ const SettingsPage = {
           </div>
           <div class="settings-group">
             <!-- Interface Layout Mode (Standard vs TV Layout) -->
-            <div class="settings-label-container" style="margin-bottom:12px">
+            <div class="settings-label-container" id="setting-layout-mode" style="margin-bottom:12px">
               <div class="settings-label">Interface Layout Mode</div>
               <div class="settings-desc">Choose between standard responsive web browsing and the cinematic TV 10-foot experience.</div>
             </div>
@@ -6184,7 +6869,7 @@ const SettingsPage = {
 
             <div class="settings-divider" style="margin: 20px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
 
-            <div class="settings-label-container" style="margin-bottom:14px">
+            <div class="settings-label-container" id="setting-theme-preset" style="margin-bottom:14px">
               <div class="settings-label">Active Theme Preset</div>
               <div class="settings-desc">Choose a curated visual theme for your profile. Changes apply instantly across the entire interface.</div>
             </div>
@@ -6280,7 +6965,7 @@ const SettingsPage = {
             <!-- Performance Mode (Lite UI) Row -->
             <div class="settings-divider" style="margin: 24px 0 16px; border-top: 1px solid rgba(255,255,255,0.08)"></div>
 
-            <div class="settings-row" style="align-items: center; padding: 14px 18px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-inner, 10px); gap: 20px;">
+            <div class="settings-row" id="setting-perf-mode" style="align-items: center; padding: 14px 18px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-inner, 10px); gap: 20px;">
               <div class="settings-label-container" style="flex: 1; min-width: 0;">
                 <div class="settings-label" style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.95rem;">
                   <i class="ph-fill ph-lightning" style="color: #f59e0b; font-size: 1.15rem;"></i>
@@ -6298,7 +6983,7 @@ const SettingsPage = {
             </div>
 
             <!-- Current Device Hardware Specifications Card -->
-            <div class="client-specs-card" style="margin-top: 14px; padding: 16px 18px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-inner, 10px);">
+            <div class="client-specs-card" id="setting-hw-specs" style="margin-top: 14px; padding: 16px 18px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: var(--radius-inner, 10px);">
               <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
                 <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 700; color: var(--text-secondary, #a1a1aa); text-transform: uppercase; letter-spacing: 0.5px;">
                   <i class="ph-bold ph-cpu" style="color: var(--accent); font-size: 1rem;"></i>
@@ -6367,7 +7052,7 @@ const SettingsPage = {
             <span>Interactive Onboarding & Guide</span>
           </div>
           <div class="settings-group">
-            <div class="settings-row">
+            <div class="settings-row" id="setting-replay-tour">
               <div class="settings-label-container">
                 <div class="settings-label">Replay Product Tour</div>
                 <div class="settings-desc">Take a guided walkthrough of CapsStream's core interface, features, playlists, and settings.</div>
@@ -6378,7 +7063,7 @@ const SettingsPage = {
             </div>
 
             <!-- Keyboard Shortcuts & Navigation -->
-            <div class="settings-row" style="border-top:1px solid rgba(255,255,255,0.07);margin-top:6px;padding-top:12px;align-items:flex-start">
+            <div class="settings-row" id="setting-app-hotkeys" style="border-top:1px solid rgba(255,255,255,0.07);margin-top:6px;padding-top:12px;align-items:flex-start">
               <div class="settings-label-container">
                 <div style="display:flex;align-items:center;justify-content:space-between;width:100%;margin-bottom:4px">
                   <div class="settings-label" style="display:flex;align-items:center;gap:8px">
@@ -6420,7 +7105,7 @@ const SettingsPage = {
             <span>Player & Subtitle Defaults</span>
           </div>
           <div class="settings-group">
-            <div class="settings-row">
+            <div class="settings-row" id="setting-subtitles-autoload">
               <div class="settings-label-container">
                 <div class="settings-label">Subtitles — Auto Load</div>
                 <div class="settings-desc">Automatically enable and show subtitles on video start if available.</div>
@@ -6431,7 +7116,7 @@ const SettingsPage = {
               </label>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-subtitles-lang">
               <div class="settings-label-container">
                 <div class="settings-label">Subtitles — Preferred Language</div>
                 <div class="settings-desc">Default language track selected when loading video subtitles.</div>
@@ -6446,7 +7131,7 @@ const SettingsPage = {
               </select>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-autoplay-next">
               <div class="settings-label-container">
                 <div class="settings-label">Auto Play Next Episode</div>
                 <div class="settings-desc">Automatically play the next episode when the current one finishes.</div>
@@ -6457,7 +7142,7 @@ const SettingsPage = {
               </label>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-inactivity-sleep">
               <div class="settings-label-container">
                 <div class="settings-label">Inactivity Sleep Prompt</div>
                 <div class="settings-desc">Pause playback and prompt 'Are you still watching?' after uninterrupted auto-advances.</div>
@@ -6470,7 +7155,7 @@ const SettingsPage = {
               </select>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-auto-skip">
               <div class="settings-label-container">
                 <div class="settings-label">Auto-Skip Intro & Recap</div>
                 <div class="settings-desc">Automatically skip intro, recap, and outro ranges when video playback enters their timestamp window.</div>
@@ -6481,7 +7166,7 @@ const SettingsPage = {
               </label>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-hevc-compat">
               <div class="settings-label-container">
                 <div class="settings-label">Smart HEVC Compatibility</div>
                 <div class="settings-desc">What to do when an HEVC (H.265 / 10-bit) stream stalls or encounters browser decoder issues.</div>
@@ -6493,7 +7178,7 @@ const SettingsPage = {
               </select>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-resume-behavior">
               <div class="settings-label-container">
                 <div class="settings-label">Playback — Resume Behavior</div>
                 <div class="settings-desc">What to do when a video has saved watch progress.</div>
@@ -6505,7 +7190,7 @@ const SettingsPage = {
               </select>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-playback-speed">
               <div class="settings-label-container">
                 <div class="settings-label">Playback — Default Speed</div>
                 <div class="settings-desc">Playback speed applied when a video starts.</div>
@@ -6520,7 +7205,7 @@ const SettingsPage = {
               </select>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-auto-fullscreen">
               <div class="settings-label-container">
                 <div class="settings-label">Playback — Auto-Fullscreen</div>
                 <div class="settings-desc">Automatically enter fullscreen mode when video playback starts.</div>
@@ -6531,7 +7216,7 @@ const SettingsPage = {
               </label>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-start-muted">
               <div class="settings-label-container">
                 <div class="settings-label">Playback — Start Muted</div>
                 <div class="settings-desc">Launch videos muted regardless of the default volume level.</div>
@@ -6542,7 +7227,7 @@ const SettingsPage = {
               </label>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-trailers">
               <div class="settings-label-container">
                 <div class="settings-label">Trailers &amp; Video Previews</div>
                 <div class="settings-desc">Play video trailers and ambient previews on the homepage hero banner, TV layout, and media cards.</div>
@@ -6553,7 +7238,7 @@ const SettingsPage = {
               </label>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-subtitles-opensubs">
               <div class="settings-label-container">
                 <div class="settings-label">OpenSubtitles API Key</div>
                 <div class="settings-desc">Enables automatic subtitle downloads matched to your exact files. Free key at opensubtitles.com/api — free accounts allow 5 downloads per day.</div>
@@ -6572,7 +7257,7 @@ const SettingsPage = {
               </label>
             </div>
 
-            <div class="settings-row" style="flex-direction:column;align-items:flex-start">
+            <div class="settings-row" id="setting-subtitles-appearance" style="flex-direction:column;align-items:flex-start">
               <div class="settings-label-container">
                 <div class="settings-label">Subtitles — Appearance</div>
                 <div class="settings-desc">Default subtitle text color, size, and background box opacity in the player.</div>
@@ -6625,7 +7310,7 @@ const SettingsPage = {
               </div>
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-seek-step">
               <div class="settings-label-container">
                 <div class="settings-label">Playback — Seek Step (Seconds)</div>
                 <div class="settings-desc">Time in seconds skipped when pressing Arrow Left/Right or skip buttons.</div>
@@ -6633,7 +7318,7 @@ const SettingsPage = {
               <input type="number" v-model.number="form.playback.seek_step" min="1" max="60" class="form-input" style="width:120px" />
             </div>
 
-            <div class="settings-row">
+            <div class="settings-row" id="setting-default-volume">
               <div class="settings-label-container">
                 <div class="settings-label">Playback — Default Volume</div>
                 <div class="settings-desc">Initial volume level when launching the video player.</div>
@@ -6695,7 +7380,7 @@ const SettingsPage = {
                   </div>
 
                   <!-- Accepted Naming Formats Guide (Interactive Section) -->
-                  <div v-if="showNamingGuide" class="naming-guide-section">
+                  <div v-if="showNamingGuide" class="naming-guide-section" id="setting-naming-guide">
                     <div class="naming-guide-title">
                       <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
                       <span>Accepted Naming Formats & File Structure</span>
@@ -6861,7 +7546,7 @@ const SettingsPage = {
                 </div>
               </div>
 
-              <div class="paths-grid">
+              <div class="paths-grid" id="setting-library-folders">
                 <div v-for="cat in ['movies', 'series', 'anime']" :key="cat" class="path-cat-card" :id="'paths-card-' + cat">
                   <!-- Category header -->
                   <div class="path-cat-header">
@@ -6974,7 +7659,7 @@ const SettingsPage = {
               <i class="ph ph-hard-drive"></i> No storage drives detected yet.
             </div>
 
-            <div v-else class="drive-status-cards-grid">
+            <div v-else class="drive-status-cards-grid" id="setting-drive-health">
               <div v-for="d in store.drivesStatus" :key="d.drive_letter" class="drive-status-card" :class="{ 'is-offline': !d.is_mounted }">
                 <div class="drive-card-header">
                   <div class="drive-card-title-group">
@@ -7017,7 +7702,7 @@ const SettingsPage = {
             </div>
 
             <!-- Hide Offline Media Setting -->
-            <div class="settings-group" style="margin-top:16px; border-top:1px solid rgba(255,255,255,0.06); padding-top:14px;">
+            <div class="settings-group" id="setting-hide-offline-media" style="margin-top:16px; border-top:1px solid rgba(255,255,255,0.06); padding-top:14px;">
               <div class="settings-row">
                 <div class="settings-label-container">
                   <div class="settings-label" style="display:flex; align-items:center; gap:8px;">
@@ -7029,7 +7714,7 @@ const SettingsPage = {
                   </div>
                 </div>
                 <label class="toggle-switch">
-                  <input type="checkbox" v-model="form.hide_unmounted_items" id="setting-hide-offline-media" />
+                  <input type="checkbox" v-model="form.hide_unmounted_items" id="toggle-hide-offline-media" />
                   <span class="toggle-slider"></span>
                 </label>
               </div>
@@ -7045,7 +7730,7 @@ const SettingsPage = {
               <span>Library & Scanning</span>
             </div>
             <div class="settings-group">
-              <div class="settings-row">
+              <div class="settings-row" id="setting-scan-startup">
                 <div class="settings-label-container">
                   <div class="settings-label">Scan Library on Startup</div>
                   <div class="settings-desc">Automatically scan your media folders for new files when you log in.</div>
@@ -7056,7 +7741,7 @@ const SettingsPage = {
                 </label>
               </div>
 
-              <div class="settings-row">
+              <div class="settings-row" id="setting-scan-interval">
                 <div class="settings-label-container">
                   <div class="settings-label">Auto-Scan Interval</div>
                   <div class="settings-desc">Automatically scan the library on a schedule while the server is running. New episodes are announced with a toast.</div>
@@ -7070,7 +7755,7 @@ const SettingsPage = {
                 </select>
               </div>
 
-              <div class="settings-row">
+              <div class="settings-row" id="setting-manual-scan">
                 <div class="settings-label-container">
                   <div class="settings-label">Manual Library Scan</div>
                   <div class="settings-desc">Run a full disk scan now to pick up new files, refresh metadata, and apply any library changes.</div>
@@ -7084,7 +7769,7 @@ const SettingsPage = {
                 </button>
               </div>
 
-              <div class="settings-row">
+              <div class="settings-row" id="setting-skip-patterns">
                 <div class="settings-label-container">
                   <div class="settings-label">Skip Patterns</div>
                   <div class="settings-desc">Comma-separated keywords — files or folders whose name contains any of these are ignored during scans (e.g. samples, trailers, extras).</div>
@@ -7092,7 +7777,7 @@ const SettingsPage = {
                 <input type="text" v-model="form.library.skip_patterns" class="form-input" style="width:280px" placeholder="sample,trailer,extras" />
               </div>
 
-              <div class="settings-row">
+              <div class="settings-row" id="setting-detect-anime">
                 <div class="settings-label-container">
                   <div class="settings-label">Detect Anime in Series</div>
                   <div class="settings-desc">Scans your Series library against TMDb and moves Japanese animation shows (Animation genre + Japanese origin) to the Anime page — including every episode. Safe to re-run.</div>
@@ -7121,7 +7806,7 @@ const SettingsPage = {
               <span>Metadata Providers & API Keys</span>
             </div>
             <div class="settings-group">
-              <div class="settings-row" style="flex-direction:column;align-items:flex-start">
+              <div class="settings-row" id="setting-tmdb-key" style="flex-direction:column;align-items:flex-start">
                 <div class="settings-label-container">
                   <div class="settings-label">TMDb API Key (Main Metadata Provider)</div>
                   <div class="settings-desc">Used for fetching movie/series posters, backdrops, ratings, overviews, and cast info.</div>
@@ -7134,7 +7819,7 @@ const SettingsPage = {
                 </div>
               </div>
 
-              <div class="settings-row">
+              <div class="settings-row" id="setting-jikan-api">
                 <div class="settings-label-container">
                   <div class="settings-label">Enable Jikan API (Anime Metadata Fallback)</div>
                   <div class="settings-desc">Use MyAnimeList/Jikan API for fallback anime metadata matching.</div>
@@ -7145,7 +7830,7 @@ const SettingsPage = {
                 </label>
               </div>
 
-              <div class="settings-row">
+              <div class="settings-row" id="setting-skipdb">
                 <div class="settings-label-container">
                   <div class="settings-label">Enable SkipDB (Crowdsourced Movies & Series Skip Markers)</div>
                   <div class="settings-desc">Fetch crowdsourced intro, recap, and credits/outro timestamps for movies and TV series via skipdb.tv.</div>
@@ -7166,7 +7851,7 @@ const SettingsPage = {
 
               <!-- ══════ Media Requests Feature ══════ -->
               <div class="settings-divider" style="margin: 16px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
-              <div class="settings-row">
+              <div class="settings-row" id="setting-media-requests">
                 <div class="settings-label-container">
                   <div class="settings-label" style="display:flex;align-items:center;gap:8px">
                     <i class="ph-bold ph-paper-plane-tilt" style="color:#38bdf8"></i>
@@ -7183,7 +7868,7 @@ const SettingsPage = {
               <!-- ══════ Supabase Cloud Relay for Online Requests ══════ -->
               <template v-if="form.features?.requests">
                 <div class="settings-divider" style="margin: 16px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
-                <div class="settings-row">
+                <div class="settings-row" id="setting-supabase-relay">
                   <div class="settings-label-container">
                     <div class="settings-label" style="display:flex;align-items:center;gap:8px">
                       <i class="ph-bold ph-cloud" style="color:#38bdf8"></i>
@@ -7427,7 +8112,7 @@ const SettingsPage = {
               <span>Web Browser & System Configuration</span>
             </div>
             <div class="settings-group">
-              <div class="settings-row">
+              <div class="settings-row" id="setting-default-browser">
                 <div class="settings-label-container">
                   <div class="settings-label">Default Web Browser</div>
                   <div class="settings-desc">Choose preferred browser for launching media streaming. Microsoft Edge is recommended for native 4K HEVC and Dolby AC-3 decoding.</div>
@@ -7439,7 +8124,7 @@ const SettingsPage = {
                 </select>
               </div>
 
-              <div class="settings-row">
+              <div class="settings-row" id="setting-hide-system-files">
                 <div class="settings-label-container">
                   <div class="settings-label">Hide System Files & Folders</div>
                   <div class="settings-desc">When enabled, hides all files and folders in the root project except media folders and start.bat.</div>
@@ -7450,7 +8135,7 @@ const SettingsPage = {
                 </label>
               </div>
 
-              <div class="settings-row">
+              <div class="settings-row" id="setting-hide-offline-browser">
                 <div class="settings-label-container">
                   <div class="settings-label">Hide Offline Media</div>
                   <div class="settings-desc">When enabled, automatically hides media files located on disconnected external drives or unmounted storage paths.</div>
@@ -7470,7 +8155,7 @@ const SettingsPage = {
               <span>Server Configuration</span>
             </div>
             <div class="settings-group">
-              <div class="settings-row" :style="(isHostZero && deviceIp) ? 'align-items: flex-start;' : ''">
+              <div class="settings-row" id="setting-server-host" :style="(isHostZero && deviceIp) ? 'align-items: flex-start;' : ''">
                 <div class="settings-label-container">
                   <div class="settings-label">Host Address</div>
                   <div class="settings-desc">Network interface the server binds to. Use 127.0.0.1 for this PC only, or 0.0.0.0 to allow other devices on your network.</div>
@@ -7545,7 +8230,7 @@ const SettingsPage = {
                 </div>
               </div>
 
-              <div class="settings-row">
+              <div class="settings-row" id="setting-server-port">
                 <div class="settings-label-container">
                   <div class="settings-label">Port</div>
                   <div class="settings-desc">TCP port the server listens on (1–65535).</div>
@@ -7553,7 +8238,7 @@ const SettingsPage = {
                 <input type="number" v-model.number="form.port" min="1" max="65535" class="form-input" style="width:120px" />
               </div>
 
-              <div class="settings-row">
+              <div class="settings-row" id="setting-browser-launch">
                 <div class="settings-label-container">
                   <div class="settings-label">Open Browser on Launch</div>
                   <div class="settings-desc">Automatically open CapsStream in your browser when start.bat runs.</div>
@@ -7569,7 +8254,7 @@ const SettingsPage = {
                 Host and Port changes take effect after restarting CapsStream (close the server and run start.bat again).
               </div>
 
-              <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+              <div id="setting-server-logs" style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
                 <button class="btn btn-secondary btn-sm" @click="$router.push('/logs')" title="View live server log">
                   <i class="ph ph-scroll" style="margin-right:4px"></i> View Live Logs
                 </button>
@@ -7764,7 +8449,7 @@ const SettingsPage = {
             </div>
 
             <!-- Download Backup -->
-            <div class="settings-row" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:6px;padding-top:12px">
+            <div class="settings-row" id="setting-backup-zip" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:6px;padding-top:12px">
               <div class="settings-label-container">
                 <div class="settings-label">Download Backup</div>
                 <div class="settings-desc">Exports your settings and library database (watch history, skip markers, profiles, achievements) as a zip file.</div>
@@ -7779,7 +8464,7 @@ const SettingsPage = {
             </div>
 
             <!-- Restore Backup -->
-            <div class="settings-row" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:6px;padding-top:12px">
+            <div class="settings-row" id="setting-restore-backup" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:6px;padding-top:12px">
               <div class="settings-label-container">
                 <div class="settings-label">Restore From Backup</div>
                 <div class="settings-desc">Upload a backup zip. The current config is kept in <code>data/pre_restore/</code>. Database restores apply on next server start.</div>
@@ -7794,7 +8479,7 @@ const SettingsPage = {
             </div>
 
             <!-- Automated Backups Stored Indicator -->
-            <div class="settings-row" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:6px;padding-top:12px">
+            <div class="settings-row" id="setting-auto-backups" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:6px;padding-top:12px">
               <div class="settings-label-container">
                 <div class="settings-label" style="display:flex;align-items:center;gap:8px">
                   <span>Automated Backups</span>
@@ -7829,7 +8514,7 @@ const SettingsPage = {
             </div>
 
             <!-- ══════ Host PC Documents User Data Sync ══════ -->
-            <div class="settings-row" style="border-top:1px solid rgba(255,255,255,0.08);margin-top:8px;padding-top:14px;display:flex;flex-direction:column;gap:12px">
+            <div class="settings-row" id="setting-host-sync" style="border-top:1px solid rgba(255,255,255,0.08);margin-top:8px;padding-top:14px;display:flex;flex-direction:column;gap:12px">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;flex-wrap:wrap;gap:10px">
                 <div class="settings-label-container" style="max-width:640px">
                   <div class="settings-label" style="display:flex;align-items:center;gap:8px">
@@ -8324,6 +9009,198 @@ const SettingsPage = {
     });
 
     const isAdmin = computed(() => !!(store.profile?.is_admin || !store.profile));
+
+    // ─── Settings Quick Search ──────────────────────────────────
+    const searchQuery = ref("");
+    const isSearchFocused = ref(false);
+    const isSearchOpen = ref(false);
+    const selectedResultIndex = ref(0);
+    const searchInputRef = ref(null);
+    const searchWrapRef = ref(null);
+    let highlightTimer = null;
+
+    const filteredSettings = computed(() => {
+      const q = searchQuery.value.trim().toLowerCase();
+      if (!q) return [];
+      const tokens = q.split(/\s+/).filter(Boolean);
+
+      const matches = [];
+      for (const item of SETTINGS_INDEX) {
+        if (item.adminOnly && !isAdmin.value) continue;
+
+        const title = item.title.toLowerCase();
+        const section = item.section.toLowerCase();
+        const desc = (item.desc || "").toLowerCase();
+        const keywords = item.keywords || [];
+
+        let score = 0;
+        let allTokensMatched = true;
+
+        for (const token of tokens) {
+          let tokenMatched = false;
+          if (title === token) {
+            score += 100;
+            tokenMatched = true;
+          } else if (title.startsWith(token)) {
+            score += 40;
+            tokenMatched = true;
+          } else if (title.includes(token)) {
+            score += 25;
+            tokenMatched = true;
+          }
+
+          for (const kw of keywords) {
+            const kwLower = kw.toLowerCase();
+            if (kwLower === token) {
+              score += 35;
+              tokenMatched = true;
+            } else if (kwLower.includes(token)) {
+              score += 15;
+              tokenMatched = true;
+            }
+          }
+
+          if (section.includes(token)) {
+            score += 10;
+            tokenMatched = true;
+          }
+
+          if (desc.includes(token)) {
+            score += 5;
+            tokenMatched = true;
+          }
+
+          if (!tokenMatched) {
+            allTokensMatched = false;
+            break;
+          }
+        }
+
+        if (allTokensMatched) {
+          matches.push({ item, score });
+        }
+      }
+
+      matches.sort((a, b) => b.score - a.score);
+      return matches.slice(0, 10).map(m => m.item);
+    });
+
+    watch(searchQuery, (newVal) => {
+      if (newVal.trim().length > 0) {
+        isSearchOpen.value = true;
+        selectedResultIndex.value = 0;
+      } else {
+        isSearchOpen.value = false;
+      }
+    });
+
+    function onSearchFocus() {
+      isSearchFocused.value = true;
+      if (searchQuery.value.trim().length > 0) {
+        isSearchOpen.value = true;
+      }
+    }
+
+    function onSearchBlur() {
+      isSearchFocused.value = false;
+      setTimeout(() => {
+        isSearchOpen.value = false;
+      }, 200);
+    }
+
+    function clearSettingsSearch() {
+      searchQuery.value = "";
+      isSearchOpen.value = false;
+      selectedResultIndex.value = 0;
+      if (searchInputRef.value) {
+        searchInputRef.value.focus();
+      }
+    }
+
+    function selectSearchResult(item) {
+      if (!item) return;
+      isSearchOpen.value = false;
+      if (searchInputRef.value) {
+        searchInputRef.value.blur();
+      }
+      scrollToSetting(item.targetId || item.id);
+    }
+
+    function scrollToSetting(targetId) {
+      if (!targetId) return;
+      if (targetId === "setting-naming-guide") {
+        showNamingGuide.value = true;
+      }
+      setTimeout(() => {
+        const el = document.getElementById(targetId);
+        if (!el) return;
+        document.querySelectorAll(".setting-search-highlight").forEach(e => e.classList.remove("setting-search-highlight"));
+        const rect = el.getBoundingClientRect();
+        const targetY = window.pageYOffset + rect.top - 88;
+        try {
+          window.scrollTo({ top: Math.max(0, targetY), behavior: "smooth" });
+        } catch (e) {
+          window.scrollTo(0, Math.max(0, targetY));
+        }
+        el.classList.add("setting-search-highlight");
+        if (highlightTimer) clearTimeout(highlightTimer);
+        highlightTimer = setTimeout(() => {
+          el.classList.remove("setting-search-highlight");
+        }, 2600);
+      }, 60);
+    }
+
+    function onSearchKeydown(e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        isSearchOpen.value = false;
+        if (searchInputRef.value) searchInputRef.value.blur();
+        return;
+      }
+      if (!isSearchOpen.value || filteredSettings.value.length === 0) {
+        if (e.key === "Enter" && searchQuery.value.trim()) {
+          isSearchOpen.value = true;
+        }
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selectedResultIndex.value = (selectedResultIndex.value + 1) % filteredSettings.value.length;
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selectedResultIndex.value = (selectedResultIndex.value - 1 + filteredSettings.value.length) % filteredSettings.value.length;
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const item = filteredSettings.value[selectedResultIndex.value];
+        if (item) {
+          selectSearchResult(item);
+        }
+      }
+    }
+
+    function handleGlobalKeyDown(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        if (searchInputRef.value) {
+          searchInputRef.value.focus();
+          searchInputRef.value.select();
+        }
+        return;
+      }
+      if (e.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) {
+        e.preventDefault();
+        if (searchInputRef.value) {
+          searchInputRef.value.focus();
+          searchInputRef.value.select();
+        }
+      }
+    }
+
+    function handleDocumentClick(e) {
+      if (searchWrapRef.value && !searchWrapRef.value.contains(e.target)) {
+        isSearchOpen.value = false;
+      }
+    }
 
     const loading = ref(true);
     const saving = ref(false);
@@ -9038,6 +9915,8 @@ const SettingsPage = {
       if (!store.profile?.is_kids) loadKidsOverrides();
       startDiagPolling();
       window.addEventListener("beforeunload", handleBeforeUnload);
+      window.addEventListener("keydown", handleGlobalKeyDown);
+      document.addEventListener("click", handleDocumentClick);
       // Auto-run the update check when arriving from the update banner
       if (store.pendingUpdateCheck) {
         store.pendingUpdateCheck = false;
@@ -9049,6 +9928,9 @@ const SettingsPage = {
 
     onUnmounted(() => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("keydown", handleGlobalKeyDown);
+      document.removeEventListener("click", handleDocumentClick);
+      if (highlightTimer) clearTimeout(highlightTimer);
       if (animeDetectTimer) clearInterval(animeDetectTimer);
       stopDiagPolling();
     });
@@ -10176,6 +11058,19 @@ const SettingsPage = {
       loadNeedsRecache,
       recacheSingleItem,
       recacheAllMissing,
+      searchQuery,
+      isSearchFocused,
+      isSearchOpen,
+      selectedResultIndex,
+      searchInputRef,
+      searchWrapRef,
+      filteredSettings,
+      onSearchFocus,
+      onSearchBlur,
+      clearSettingsSearch,
+      selectSearchResult,
+      scrollToSetting,
+      onSearchKeydown,
     };
   },
 };
