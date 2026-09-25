@@ -71,6 +71,20 @@ def api_post_settings():
         if isinstance(plist, list) for p in plist if p
     )
 
+    client_ip = request.remote_addr or ""
+    is_local_client = client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith("127.")
+    if not is_local_client and "media_paths" in data:
+        new_incoming_paths = set(
+            os.path.normcase(os.path.normpath(p)).replace("\\", "/").rstrip("/")
+            for plist in (data.get("media_paths") or {}).values()
+            if isinstance(plist, list) for p in plist if p
+        )
+        if new_incoming_paths - old_paths:
+            return jsonify({
+                "ok": False,
+                "error": "Media scanner paths can only be added directly on the host server PC."
+            }), 403
+
     ok, result = save_config(data)
     if ok:
         new_paths = set(
@@ -869,11 +883,16 @@ def api_system_info():
     srv_port = config.get("port", 8000)
     dev_url = f"{proto}://{dev_ip}:{srv_port}"
 
+    client_ip = request.remote_addr or ""
+    is_local_client = client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith("127.")
+
     return jsonify({
         "version": get_app_version(),
         "is_dev": is_dev_mode(),
         "app_name": "CapsStream",
         "remote_exposed": (config.get("host", "127.0.0.1") not in ("127.0.0.1", "localhost", "::1")),
+        "is_local_client": is_local_client,
+        "client_ip": client_ip,
         "device_ip": dev_ip,
         "all_device_ips": all_dev_ips,
         "device_url": dev_url,
@@ -899,6 +918,10 @@ def api_system_info():
 
 @admin_bp.route("/api/system/browse-folder", methods=["POST"])
 def api_system_browse_folder():
+    client_ip = request.remote_addr or ""
+    is_local_client = client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith("127.")
+    if not is_local_client:
+        return jsonify({"ok": False, "error": "Folder browser dialog can only be opened on the host PC."}), 403
     from backend.settings import browse_folder_dialog
     folder_path = browse_folder_dialog()
     if folder_path:

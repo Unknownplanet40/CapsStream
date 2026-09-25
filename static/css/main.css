@@ -32891,6 +32891,43 @@ body.device-mobile-restricted .settings-search-wrap {
   line-height: 1.45;
 }
 
+/* ─── Remote Client Storage Guard Notice & Modals ─────────────── */
+.remote-client-path-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: var(--radius-inner, 10px);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  text-align: left;
+}
+
+.path-add-row-remote {
+  cursor: pointer;
+  position: relative;
+}
+
+.path-add-row-remote input {
+  cursor: pointer;
+  background: rgba(245, 158, 11, 0.04) !important;
+  border-color: rgba(245, 158, 11, 0.2) !important;
+}
+
+.path-add-row-remote .path-add-btn.primary {
+  background: rgba(245, 158, 11, 0.15) !important;
+  border-color: rgba(245, 158, 11, 0.35) !important;
+  color: #f59e0b !important;
+}
+
+.remote-path-notice-modal-card {
+  background: rgba(15, 15, 23, 0.95) !important;
+  border: 1px solid rgba(245, 158, 11, 0.35) !important;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.95), 0 0 35px rgba(245, 158, 11, 0.18) !important;
+  border-radius: var(--radius-outer, 18px);
+}
+
 
 
 

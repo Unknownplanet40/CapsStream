@@ -338,6 +338,29 @@ class TestRouteAdmin(unittest.TestCase):
         self.assertTrue(data.get("ok"))
         self.assertIsNone(probe_cache.get(("dummy_path", 123, 456)))
 
+    def test_remote_client_browse_folder_blocked(self):
+        """Verify remote client cannot trigger host folder browser dialog."""
+        res = self.client.post("/api/system/browse-folder", environ_base={"REMOTE_ADDR": "192.168.1.120"})
+        self.assertEqual(res.status_code, 403)
+        data = res.get_json()
+        self.assertFalse(data.get("ok"))
+        self.assertIn("host PC", data.get("error", ""))
+
+    @patch("backend.routes.admin.is_admin", return_value=True)
+    def test_remote_client_add_media_path_blocked(self, mock_is_admin):
+        """Verify remote client cannot add new media paths to server settings."""
+        with self.client.session_transaction() as sess:
+            sess["profile_id"] = 1
+        res = self.client.post(
+            "/api/settings",
+            json={"media_paths": {"movies": ["D:/RemoteMovies"]}},
+            environ_base={"REMOTE_ADDR": "192.168.1.120"}
+        )
+        self.assertEqual(res.status_code, 403)
+        data = res.get_json()
+        self.assertFalse(data.get("ok"))
+        self.assertIn("host server PC", data.get("error", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

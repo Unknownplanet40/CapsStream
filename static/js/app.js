@@ -7580,6 +7580,16 @@ const SettingsPage = {
                     </div>
                   </div>
                 </div>
+              <!-- Remote Client Storage Notice Banner -->
+              <div v-if="isRemoteClient" class="remote-client-path-notice">
+                <i class="ph-bold ph-shield-warning" style="font-size:1.35rem;color:#f59e0b;flex-shrink:0;margin-top:2px"></i>
+                <div>
+                  <div style="font-weight:700;color:var(--text-primary);margin-bottom:3px;display:flex;align-items:center;gap:6px">
+                    <span>Remote Client Device ({{ clientRemoteHost }})</span>
+                    <span class="server-status-pill pending" style="font-size:0.68rem;padding:1px 6px">Host Only</span>
+                  </div>
+                  <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.45">Media paths point to physical storage drives attached to the host server PC. Adding new folder paths must be performed directly on the host computer.</div>
+                </div>
               </div>
 
               <div class="paths-grid" id="setting-library-folders">
@@ -7649,19 +7659,20 @@ const SettingsPage = {
                   </div>
 
                   <!-- Add path row -->
-                  <div class="path-add-row">
+                  <div class="path-add-row" :class="{ 'path-add-row-remote': isRemoteClient }" @click="isRemoteClient ? (showRemotePathModal = true) : null">
                     <input
                       type="text"
                       v-model="newPaths[cat]"
                       class="form-input path-add-input"
-                      :placeholder="'D:/Entertainment/' + cat + '...'"
-                      @keyup.enter="addPath(cat)"
+                      :placeholder="isRemoteClient ? 'Adding paths must be done on Host PC...' : ('D:/Entertainment/' + cat + '...')"
+                      @keyup.enter="onAddPathAttempt(cat)"
+                      :readonly="isRemoteClient"
                     />
-                    <button class="path-add-btn" @click="handleBrowseFolder(cat)" :disabled="browsingFolder === cat" :id="'btn-browse-' + cat" title="Browse folders">
+                    <button class="path-add-btn" @click.stop="handleBrowseFolder(cat)" :disabled="browsingFolder === cat" :id="'btn-browse-' + cat" :title="isRemoteClient ? 'Browse is disabled on remote devices' : 'Browse folders'">
                       <i :class="browsingFolder === cat ? 'ph ph-circle-notch' : 'ph ph-folder-open'" :style="browsingFolder === cat ? 'animation:spin 1s linear infinite' : ''"></i>
                     </button>
-                    <button class="path-add-btn primary" @click="addPath(cat)" title="Add Path">
-                      <i class="ph ph-plus"></i>
+                    <button class="path-add-btn primary" @click.stop="onAddPathAttempt(cat)" :title="isRemoteClient ? 'Media paths can only be added on host PC' : 'Add Path'">
+                      <i :class="isRemoteClient ? 'ph-bold ph-lock-simple' : 'ph ph-plus'"></i>
                     </button>
                   </div>
                 </div>
@@ -8757,6 +8768,32 @@ const SettingsPage = {
         </div>
       </div>
 
+      <!-- Remote Client Path Block Notice Modal -->
+      <div v-if="showRemotePathModal" class="modal-backdrop" style="z-index:100060;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showRemotePathModal = false">
+        <div class="shortcuts-modal-card remote-path-notice-modal-card" style="max-width:480px" @click.stop>
+          <div class="shortcuts-modal-inner" style="text-align:center;padding:2rem 1.6rem">
+            <div class="desktop-notice-icon-wrap" style="color:#f59e0b;background:rgba(245,158,11,0.12);border-color:rgba(245,158,11,0.3)">
+              <i class="ph-bold ph-hard-drives"></i>
+            </div>
+            <h3 style="font-size:1.25rem;font-weight:800;color:var(--text-primary);margin:16px 0 6px">Host PC Action Required</h3>
+            <div style="font-size:0.88rem;font-weight:700;color:#f59e0b;margin-bottom:14px">Media Folders Must Be Added on the Host Server</div>
+            <div style="font-size:0.84rem;color:var(--text-secondary);line-height:1.55;text-align:left;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:14px;margin:0 0 1.5rem">
+              <p style="margin:0 0 10px">
+                You are currently connected to CapsStream remotely from <strong>{{ clientRemoteHost }}</strong>.
+              </p>
+              <p style="margin:0 0 10px">
+                CapsStream scans disk folders physically located on or attached to the host computer (e.g. <code>C:\</code>, <code>D:\</code>, or external USB drives). Paths cannot be added from a remote PC.
+              </p>
+              <div style="display:flex;align-items:flex-start;gap:8px;font-size:0.8rem;color:var(--text-primary);border-top:1px solid rgba(255,255,255,0.06);padding-top:10px;margin-top:10px">
+                <i class="ph-bold ph-lightbulb" style="color:#f59e0b;flex-shrink:0;margin-top:2px"></i>
+                <span>Please open CapsStream directly on the host PC (at <code>http://localhost:{{ (sysInfo?.server_addr || '').split(':')[1] || '8000' }}</code>) to add or browse library media paths.</span>
+              </div>
+            </div>
+            <button class="btn btn-primary" style="width:100%;justify-content:center;font-weight:700" @click="showRemotePathModal = false">Got It</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Shutdown Confirmation Modal -->
       <div v-if="showShutdownModal" class="modal-backdrop" style="z-index:100050;background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);" @click.self="showShutdownModal = false">
         <div class="shortcuts-modal-card" style="max-width:480px" @click.stop>
@@ -9089,6 +9126,37 @@ const SettingsPage = {
       }
     }, { immediate: true });
 
+    // ─── Remote Client Storage Protection ───────────────────────
+    const showRemotePathModal = ref(false);
+
+    const isRemoteClient = computed(() => {
+      if (typeof window === "undefined") return false;
+      const host = window.location.hostname;
+      const isLocalHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+      if (sysInfo.value && typeof sysInfo.value.is_local_client === "boolean") {
+        return !sysInfo.value.is_local_client;
+      }
+      return !isLocalHost;
+    });
+
+    const clientRemoteHost = computed(() => {
+      if (sysInfo.value?.client_ip && sysInfo.value.client_ip !== "127.0.0.1") {
+        return sysInfo.value.client_ip;
+      }
+      if (typeof window !== "undefined" && window.location.hostname) {
+        return window.location.hostname;
+      }
+      return "another computer";
+    });
+
+    function onAddPathAttempt(cat) {
+      if (isRemoteClient.value) {
+        showRemotePathModal.value = true;
+        return;
+      }
+      addPath(cat);
+    }
+
     // ─── Settings Quick Search ──────────────────────────────────
     const searchQuery = ref("");
     const isSearchFocused = ref(false);
@@ -9405,6 +9473,10 @@ const SettingsPage = {
     }
 
     async function handleBrowseFolder(cat) {
+      if (isRemoteClient.value) {
+        showRemotePathModal.value = true;
+        return;
+      }
       browsingFolder.value = cat;
       try {
         const res = await API.post("/api/system/browse-folder");
@@ -10052,6 +10124,10 @@ const SettingsPage = {
     }
 
     async function addPath(cat) {
+      if (isRemoteClient.value) {
+        showRemotePathModal.value = true;
+        return;
+      }
       let val = newPaths.value[cat]?.trim();
       if (!val) {
         addToast("Please enter or browse a folder path to add", "warning");
@@ -11161,6 +11237,10 @@ const SettingsPage = {
       scrollToSetting,
       onSearchKeydown,
       desktopNoticeModal,
+      showRemotePathModal,
+      isRemoteClient,
+      clientRemoteHost,
+      onAddPathAttempt,
     };
   },
 };
