@@ -1482,9 +1482,14 @@ def api_refresh_request_artwork(req_id):
 def get_movie_source_url():
     """
     Resolve direct external Movie Source URL for a given requested movie.
+    Only available on the admin development side.
     Searches the configured Movies API using IMDb ID or title/year to locate the movie slug.
     Falls back to a browse search URL on the target site if not found.
     """
+    from backend.routes.middleware import is_admin
+    if not is_dev_mode() and not is_admin():
+        return jsonify({"error": "Admin development side access required"}), 403
+
     import urllib.parse
     import urllib.request
     from backend.settings import load_config

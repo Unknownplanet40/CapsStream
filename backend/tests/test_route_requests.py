@@ -563,7 +563,8 @@ class TestRouteRequests(unittest.TestCase):
         dev_view = filter_requests_for_client(items, "dev_cid", dev_mode=True)
         self.assertEqual(len(dev_view), 3)
 
-    def test_movie_source_url_by_imdb(self):
+    @patch("backend.routes.requests.is_dev_mode", return_value=True)
+    def test_movie_source_url_by_imdb(self, mock_dev):
         """Verify /api/requests/movie-source-url matches movie by IMDb code."""
         from unittest.mock import MagicMock
         mock_data = {
@@ -594,7 +595,8 @@ class TestRouteRequests(unittest.TestCase):
             self.assertEqual(data["url"], "https://siteformovies.com/movies/inception-2010")
             self.assertTrue(data["matched"])
 
-    def test_movie_source_url_by_title_and_year(self):
+    @patch("backend.routes.requests.is_dev_mode", return_value=True)
+    def test_movie_source_url_by_title_and_year(self, mock_dev):
         """Verify /api/requests/movie-source-url searches and matches by title and year."""
         from unittest.mock import MagicMock
         mock_data = {
@@ -629,7 +631,8 @@ class TestRouteRequests(unittest.TestCase):
             self.assertEqual(data["url"], "https://siteformovies.com/movies/oppenheimer-2023")
             self.assertTrue(data["matched"])
 
-    def test_movie_source_url_fallback(self):
+    @patch("backend.routes.requests.is_dev_mode", return_value=True)
+    def test_movie_source_url_fallback(self, mock_dev):
         """Verify /api/requests/movie-source-url falls back to browse search URL when not found."""
         from unittest.mock import MagicMock
         mock_data = {
@@ -650,6 +653,16 @@ class TestRouteRequests(unittest.TestCase):
             self.assertIsNone(data["slug"])
             self.assertFalse(data["matched"])
             self.assertEqual(data["url"], "https://siteformovies.com/browse-movies/NonExistentMovie")
+
+    @patch("backend.routes.requests.is_dev_mode", return_value=False)
+    @patch("backend.routes.middleware.is_admin", return_value=False)
+    def test_movie_source_url_forbidden_for_non_dev_client(self, mock_admin, mock_dev):
+        """Verify /api/requests/movie-source-url returns 403 for non-dev / non-admin clients."""
+        resp = self.client.get("/api/requests/movie-source-url?title=Inception")
+        self.assertEqual(resp.status_code, 403)
+        data = resp.get_json()
+        self.assertIn("error", data)
+        self.assertIn("Admin development side access required", data["error"])
 
 
 if __name__ == "__main__":

@@ -20497,15 +20497,15 @@ const RequestsPage = {
                         <span>{{ req.digital_status_label || (req.has_digital_release === false ? 'No Digital Copy' : 'Digital Available') }}</span>
                       </span>
 
-                      <!-- Movie Source Redirect Chip (Movies only) -->
-                      <template v-if="req.type === 'Movie' || (!req.type && !req.season)">
+                      <!-- Movie Source Redirect Chip (Admin / Dev Mode - Movies only) -->
+                      <template v-if="(devMode || store.isAdmin) && (req.type === 'Movie' || (!req.type && !req.season))">
                         <span class="req-meta-dot">•</span>
                         <button
                           type="button"
                           class="req-source-chip"
                           :disabled="loadingMovieSourceId === req.id"
                           @click.stop="openMovieSource(req)"
-                          title="Open on external Movie Source site"
+                          title="Open on external Movie Source site (Admin / Dev)"
                         >
                           <i v-if="loadingMovieSourceId === req.id" class="ph-bold ph-spinner ph-spin"></i>
                           <i v-else class="ph-bold ph-arrow-square-out"></i>
@@ -20693,9 +20693,9 @@ const RequestsPage = {
 
                 <!-- Utility / Secondary Action Icons Row -->
                 <div class="req-episode-utility-row">
-                  <!-- Movie Source Redirect Button (Movies only) -->
+                  <!-- Movie Source Redirect Button (Admin / Dev Mode - Movies only) -->
                   <button
-                    v-if="req.type === 'Movie' || (!req.type && !req.season)"
+                    v-if="(devMode || store.isAdmin) && (req.type === 'Movie' || (!req.type && !req.season))"
                     class="req-action-icon-btn req-btn-icon req-btn-movie-source"
                     :class="{ 'is-loading': loadingMovieSourceId === req.id }"
                     :disabled="loadingMovieSourceId === req.id"
@@ -21625,7 +21625,7 @@ const RequestsPage = {
     const loadingMovieSourceId = ref(null);
 
     async function openMovieSource(req) {
-      if (!req || loadingMovieSourceId.value === req.id) return;
+      if (!req || loadingMovieSourceId.value === req.id || (!devMode.value && !store.isAdmin)) return;
       loadingMovieSourceId.value = req.id;
       try {
         const params = new URLSearchParams();
