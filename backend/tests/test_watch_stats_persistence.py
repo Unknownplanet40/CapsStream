@@ -276,6 +276,43 @@ class TestWatchStatsPersistence(unittest.TestCase):
         self.assertEqual(wh_cnt, 1)
         conn.close()
 
+    def test_recent_history_media_id_and_ep_count(self):
+        """Verify recent_history returns media.id as id/media_id and does not multiply series rows."""
+        conn = sqlite3.connect(self.db_path)
+        # Create a series with 3 episodes
+        ep1 = conn.execute("INSERT INTO media (type, tmdb_id, title, season, episode, file_path) VALUES ('series', 9999, 'Test Show', 1, 1, '/path/s01e01.mkv')").lastrowid
+        ep2 = conn.execute("INSERT INTO media (type, tmdb_id, title, season, episode, file_path) VALUES ('series', 9999, 'Test Show', 1, 2, '/path/s01e02.mkv')").lastrowid
+        ep3 = conn.execute("INSERT INTO media (type, tmdb_id, title, season, episode, file_path) VALUES ('series', 9999, 'Test Show', 1, 3, '/path/s01e03.mkv')").lastrowid
+        # Create a movie
+        mov = conn.execute("INSERT INTO media (type, tmdb_id, title, file_path) VALUES ('movie', 8888, 'Test Movie', '/path/movie.mkv')").lastrowid
+        conn.commit()
+        conn.close()
+
+        # Save progress on all 3 episodes and movie
+        save_progress(1, ep1, position=100, duration=1000)
+        save_progress(1, ep2, position=200, duration=1000)
+        save_progress(1, ep3, position=300, duration=1000)
+        save_progress(1, mov, position=500, duration=5000)
+
+        stats = get_profile_watch_stats(1)
+        recent = stats["recent_history"]
+
+        # Consolidated into 2 items (movie and show)
+        self.assertEqual(len(recent), 2)
+        
+        # Test Movie item
+        mov_item = next(r for r in recent if r["type"] == "movie")
+        self.assertEqual(mov_item["id"], mov)
+        self.assertEqual(mov_item["media_id"], mov)
+        self.assertEqual(mov_item["tmdb_id"], 8888)
+
+        # Test Show item
+        show_item = next(r for r in recent if r["type"] == "series")
+        self.assertEqual(show_item["tmdb_id"], 9999)
+        self.assertEqual(show_item["ep_count"], 3)  # exactly 3 episodes, not 3x3=9!
+        self.assertIn(show_item["media_id"], (ep1, ep2, ep3))
+
 
 if __name__ == "__main__":
     unittest.main()
+

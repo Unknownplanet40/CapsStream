@@ -5165,6 +5165,7 @@ const DetailPage = {
       // Only show skeleton if we don't already have media data (e.g. from optimistic sibling navigation)
       if (!media.value || (String(media.value.id) !== String(id) && String(media.value.tmdb_id) !== String(id))) {
         loading.value = true;
+        media.value = null;
       }
       backdropFailed.value = false;   // reset fallback when loading a title
       clearLoadingTimers();
@@ -17363,7 +17364,7 @@ const StatsPage = {
           <div v-if="stats?.recent_history && stats.recent_history.length" style="display:flex;flex-direction:column;gap:10px">
             <div
               v-for="item in stats.recent_history"
-              :key="item.id"
+              :key="item.history_id || item.id"
               style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(255,255,255,0.03);border-radius:14px;cursor:pointer;transition:background 0.2s ease"
               class="history-row-item"
               @click="openMedia(item)"
@@ -18004,10 +18005,14 @@ const StatsPage = {
     }
 
     function openMedia(item) {
-      if (item.type === "movie" && item.id) {
-        router.push(`/title/movie/${item.id}`);
-      } else if (item.tmdb_id) {
-        router.push(`/title/${item.type || "series"}/${item.tmdb_id}`);
+      if (!item) return;
+      const mtype = item.type || "movie";
+      if (mtype === "movie") {
+        const mid = item.media_id || item.id || item.tmdb_id;
+        if (mid) router.push(`/title/movie/${mid}`);
+      } else {
+        const targetId = item.tmdb_id || item.media_id || item.id;
+        if (targetId) router.push(`/title/${mtype}/${targetId}`);
       }
     }
 

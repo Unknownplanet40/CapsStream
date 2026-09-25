@@ -593,6 +593,16 @@ def api_show_detail(tmdb_id):
         if single:
             if single.get("tmdb_id"):
                 episodes = get_media_by_tmdb(single["tmdb_id"], single.get("type", media_type))
+            elif single.get("title"):
+                from backend.db.connection import get_conn
+                conn = get_conn()
+                episodes = conn.execute(
+                    "SELECT * FROM media WHERE title=? AND type=? ORDER BY season, episode",
+                    (single["title"], single.get("type", media_type))
+                ).fetchall()
+                conn.close()
+                if not episodes:
+                    episodes = [single]
             else:
                 episodes = [single]
     if not episodes:

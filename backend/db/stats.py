@@ -159,18 +159,23 @@ def get_profile_watch_stats(profile_id):
     # 7. Recent history (Consolidated 10 distinct titles watched)
     if use_history:
         all_history = conn.execute("""
-            SELECT wh.id, wh.title, wh.type, wh.season, wh.episode, wh.ep_title, wh.genres, wh.year,
-                   wh.poster_path, wh.position, wh.duration, wh.completed, wh.updated_at as last_watched, wh.tmdb_id,
-                   m.id as media_id, m.rating, m.vote_count, m.backdrop_path, m.file_path
+            SELECT wh.id as history_id, COALESCE(m.id, wh.id) as id, m.id as media_id,
+                   wh.title, wh.type, wh.season, wh.episode, wh.ep_title, wh.genres, wh.year,
+                   wh.poster_path, wh.position, wh.duration, wh.completed, wh.updated_at as last_watched,
+                   COALESCE(wh.tmdb_id, m.tmdb_id) as tmdb_id,
+                   m.rating, m.vote_count, m.backdrop_path, m.file_path
             FROM watch_history wh
-            LEFT JOIN media m ON (wh.tmdb_id IS NOT NULL AND m.tmdb_id = wh.tmdb_id AND m.type = wh.type)
-                              OR (wh.title = m.title AND m.type = wh.type)
+            LEFT JOIN media m ON (
+                ((wh.tmdb_id IS NOT NULL AND m.tmdb_id = wh.tmdb_id) OR (wh.title = m.title))
+                AND m.type = wh.type
+                AND (wh.type = 'movie' OR (COALESCE(m.season, 1) = COALESCE(wh.season, 1) AND COALESCE(m.episode, 1) = COALESCE(wh.episode, 1)))
+            )
             WHERE wh.profile_id=?
             ORDER BY wh.updated_at DESC
         """, (profile_id,)).fetchall()
     else:
         all_history = conn.execute("""
-            SELECT m.*, wp.position, wp.duration, wp.completed, wp.updated_at as last_watched
+            SELECT m.*, m.id as media_id, wp.position, wp.duration, wp.completed, wp.updated_at as last_watched
             FROM watch_progress wp
             JOIN media m ON m.id = wp.media_id
             WHERE wp.profile_id=?
@@ -191,7 +196,7 @@ def get_profile_watch_stats(profile_id):
         elif title:
             group_key = f"{m_type}_{title.lower()}"
         else:
-            group_key = f"{m_type}_{item.get('id')}"
+            group_key = f"{m_type}_{item.get('media_id') or item.get('id') or item.get('history_id')}"
 
         if group_key not in seen_groups:
             seen_groups.add(group_key)
@@ -294,15 +299,18 @@ def get_profile_wrapped_analytics(profile_id, period="year", year=None):
     # 1. Base query for all matching watch progress + media
     if use_history:
         base_query = f"""
-            SELECT wh.id as media_id, wh.position, wh.duration as wp_duration, wh.completed, wh.updated_at,
-                   wh.id as m_id, wh.type as m_type, wh.title, wh.title as original_title, wh.year as m_year,
+            SELECT wh.id as history_id, COALESCE(m.id, wh.id) as media_id, wh.position, wh.duration as wp_duration, wh.completed, wh.updated_at,
+                   COALESCE(m.id, wh.id) as m_id, wh.type as m_type, wh.title, COALESCE(m.original_title, wh.title) as original_title, wh.year as m_year,
                    wh.season, wh.episode, wh.ep_title, wh.duration as m_duration, wh.genres,
                    COALESCE(m.rating, 0) as rating, wh.poster_path, COALESCE(m.backdrop_path, '') as backdrop_path,
                    COALESCE(m.file_path, '') as file_path, COALESCE(m.file_size, 0) as file_size,
-                   COALESCE(m.cast_json, '[]') as cast_json, wh.tmdb_id
+                   COALESCE(m.cast_json, '[]') as cast_json, COALESCE(wh.tmdb_id, m.tmdb_id) as tmdb_id
             FROM watch_history wh
-            LEFT JOIN media m ON (wh.tmdb_id IS NOT NULL AND m.tmdb_id = wh.tmdb_id AND m.type = wh.type)
-                              OR (wh.title = m.title AND m.type = wh.type)
+            LEFT JOIN media m ON (
+                ((wh.tmdb_id IS NOT NULL AND m.tmdb_id = wh.tmdb_id) OR (wh.title = m.title))
+                AND m.type = wh.type
+                AND (wh.type = 'movie' OR (COALESCE(m.season, 1) = COALESCE(wh.season, 1) AND COALESCE(m.episode, 1) = COALESCE(wh.episode, 1)))
+            )
             WHERE wh.profile_id=? {date_filter_applied}
             ORDER BY wh.updated_at DESC
         """
