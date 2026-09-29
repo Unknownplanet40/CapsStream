@@ -292,6 +292,26 @@ class TestUtorrentHook(unittest.TestCase):
         mock_save.assert_called_once()
 
 
+    @patch("subprocess.Popen")
+    @patch("sys.platform", "win32")
+    def test_show_windows_notification_structure(self, mock_popen):
+        from backend.utorrent_hook import show_windows_notification
+        import base64
+
+        show_windows_notification("CapsStream Request", "Movie completed")
+        self.assertTrue(mock_popen.called)
+        call_args = mock_popen.call_args[0][0]
+        # Verify powershell command was called with encoded command
+        self.assertIn("powershell.exe", call_args[0])
+        self.assertIn("-EncodedCommand", call_args)
+        enc_idx = call_args.index("-EncodedCommand") + 1
+        decoded_ps = base64.b64decode(call_args[enc_idx]).decode("utf-16le")
+        self.assertIn("appLogoOverride", decoded_ps)
+        self.assertIn("CreateToastNotifier('CapsStream')", decoded_ps)
+        self.assertIn("CapsStream Request", decoded_ps)
+        self.assertIn("Movie completed", decoded_ps)
+
+
 if __name__ == "__main__":
     unittest.main()
 

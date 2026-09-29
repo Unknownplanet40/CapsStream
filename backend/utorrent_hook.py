@@ -367,30 +367,61 @@ def trigger_server_sync(port: int = SERVER_PORT):
         logger.debug(f"CapsStream server notification on port {port} skipped or offline: {e}")
 
 
+def register_app_identity():
+    """Register CapsStream AppUserModelId under HKCU so toasts show the CapsStream brand."""
+    if sys.platform != "win32":
+        return
+    try:
+        import winreg
+        key_path = r"Software\Classes\AppUserModelId\CapsStream"
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "CapsStream")
+            icon = os.path.join(BASE_DIR, "static", "img", "favicon.png")
+            if os.path.isfile(icon):
+                winreg.SetValueEx(key, "IconUri", 0, winreg.REG_SZ, icon)
+    except Exception:
+        pass
+
+
 def show_windows_notification(title: str, message: str):
-    """Display a native Windows Toast notification without flashing any terminal or console window."""
+    """Display a native Windows Toast notification with CapsStream logo without flashing any terminal or console window."""
     if sys.platform != "win32":
         return
 
     try:
         import base64
+        import pathlib
         import subprocess
+
+        register_app_identity()
+
+        icon = os.path.join(BASE_DIR, "static", "img", "favicon.png")
+        image_el = ""
+        if os.path.isfile(icon):
+            icon_uri = pathlib.Path(icon).as_uri()
+            clean_icon_uri = icon_uri.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', '&quot;')
+            image_el = f'<image placement="appLogoOverride" src="{clean_icon_uri}" />'
 
         clean_title = (title or "CapsStream").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', '&quot;')
         clean_msg = (message or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', '&quot;')
 
-        xml = f"<toast><visual><binding template='ToastGeneric'><text>{clean_title}</text><text>{clean_msg}</text></binding></visual></toast>"
+        xml = f'<toast><visual><binding template="ToastGeneric">{image_el}<text>{clean_title}</text><text>{clean_msg}</text></binding></visual></toast>'
+        xml_ps = xml.replace("'", "''")
         ps_code = (
             "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null\n"
-            "$x = [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]::new()\n"
-            f"$x.LoadXml(\"{xml}\")\n"
-            "$t = [Windows.UI.Notifications.ToastNotification, Windows.UI.Notifications, ContentType = WindowsRuntime]::new($x)\n"
-            "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show($t)\n"
+            "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null\n"
+            "$x = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
+            f"$x.LoadXml('{xml_ps}')\n"
+            "$t = New-Object Windows.UI.Notifications.ToastNotification $x\n"
+            "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('CapsStream').Show($t)\n"
         )
-        enc = base64.b64encode(ps_code.encode("utf-16le")).decode("utf-8")
+        enc = base64.b64encode(ps_code.encode("utf-16le")).decode("ascii")
         subprocess.Popen(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", enc],
-            creationflags=0x08000000  # CREATE_NO_WINDOW
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
         )
     except Exception as e:
         logger.debug(f"Failed to display native Windows notification: {e}")
