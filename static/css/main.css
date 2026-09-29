@@ -877,6 +877,108 @@ ol {
 }
 
 /* Changelog box (Settings → Updates) */
+/* ─── Auto-Update Ready Modal ─────────────────────────────── */
+.au-modal-backdrop {
+  z-index: 1600;
+  align-items: center;
+  justify-content: center;
+}
+
+.au-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  padding: 36px 32px 28px;
+  width: 90%;
+  max-width: 420px;
+  text-align: center;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05);
+  animation: modal-in 0.28s cubic-bezier(0.34,1.56,0.64,1);
+}
+
+.au-modal-icon {
+  font-size: 3rem;
+  color: var(--accent);
+  margin-bottom: 12px;
+  line-height: 1;
+}
+
+.au-modal-title {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+  letter-spacing: -0.01em;
+}
+
+.au-modal-version {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 14px;
+  background: rgba(229, 9, 20, 0.12);
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 99px;
+  border: 1px solid rgba(229, 9, 20, 0.25);
+}
+
+.au-modal-desc {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin-bottom: 22px;
+}
+
+.au-progress-wrap { margin-bottom: 22px; }
+
+.au-progress-bar-outer {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.au-progress-bar-inner {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.au-progress-indeterminate {
+  width: 40%;
+  animation: au-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes au-indeterminate {
+  0%   { transform: translateX(-150%); }
+  100% { transform: translateX(350%); }
+}
+
+.au-progress-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.au-modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.au-install-btn {
+  width: 100%;
+  justify-content: center;
+  font-size: 0.95rem;
+  padding: 12px 20px;
+}
+
 .changelog-box {
   margin: 0;
   padding: 12px 14px;

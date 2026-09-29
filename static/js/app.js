@@ -6696,6 +6696,17 @@ const SettingsPage = {
               </label>
             </div>
 
+            <div class="settings-row" id="setting-auto-download" :style="(!form.updates.auto_check || sysInfo?.is_dev) ? 'cursor:not-allowed;opacity:0.5;' : ''">
+              <div class="settings-label-container">
+                <div class="settings-label">Auto-Download Updates</div>
+                <div class="settings-desc">Automatically download updates in the background and show a prompt when ready to install. Requires Auto Check to be on.</div>
+              </div>
+              <label class="toggle-switch" :style="(!form.updates.auto_check || sysInfo?.is_dev) ? 'cursor:not-allowed;' : ''">
+                <input type="checkbox" v-model="form.updates.auto_download" :disabled="!form.updates.auto_check || sysInfo?.is_dev" />
+                <span class="toggle-slider" :style="(!form.updates.auto_check || sysInfo?.is_dev) ? 'opacity:0.5;cursor:not-allowed;' : ''"></span>
+              </label>
+            </div>
+
             <div
               class="update-status-line"
               :style="{ color: sysInfo?.is_dev ? '#fbbf24' : updateState.status === 'available' ? 'var(--accent)' : updateState.status === 'error' ? '#ef4444' : 'var(--text-secondary)' }"
@@ -9444,6 +9455,7 @@ const SettingsPage = {
       },
       updates: {
         auto_check: true,
+        auto_download: true,
       },
       subtitles: {
         auto_load: true,
@@ -23328,6 +23340,55 @@ const App = {
         </button>
       </transition>
 
+      <!-- Global Auto-Update Ready Modal -->
+      <transition name="fade">
+        <div
+          v-if="autoUpdateReady && !autoUpdateSnoozed && store.profile && $route.path !== '/profiles' && !isPlayerRoute"
+          class="modal-backdrop au-modal-backdrop"
+        >
+          <div class="au-modal" @click.stop>
+            <div class="au-modal-icon">
+              <i class="ph ph-arrow-circle-up"></i>
+            </div>
+            <div class="au-modal-title">Update Ready to Install</div>
+            <div class="au-modal-version">CapsStream v{{ autoUpdateVersion }}</div>
+            <div class="au-modal-desc">
+              A new version has been downloaded and is ready to apply.
+              CapsStream will restart automatically after installing.
+            </div>
+
+            <!-- Progress bar while installing -->
+            <div v-if="autoUpdateInstalling" class="au-progress-wrap">
+              <div v-if="autoUpdateProgress && autoUpdateProgress.stage === 'downloading' && autoUpdateProgress.total" class="au-progress-bar-outer">
+                <div class="au-progress-bar-inner" :style="{ width: Math.round(100 * (autoUpdateProgress.bytes_done || 0) / (autoUpdateProgress.total || 1)) + '%' }"></div>
+              </div>
+              <div v-else class="au-progress-bar-outer">
+                <div class="au-progress-bar-inner au-progress-indeterminate"></div>
+              </div>
+              <div class="au-progress-label">
+                <i class="ph ph-circle-notch" style="animation:spin 1s linear infinite;margin-right:5px"></i>
+                <span v-if="autoUpdateProgress?.stage === 'downloading' && autoUpdateProgress?.total">
+                  Downloading… {{ Math.round((autoUpdateProgress.bytes_done || 0) / 1048576 * 10) / 10 }} / {{ Math.round((autoUpdateProgress.total || 0) / 1048576 * 10) / 10 }} MB
+                </span>
+                <span v-else-if="autoUpdateProgress?.stage === 'restarting'">Restarting server…</span>
+                <span v-else>{{ autoUpdateProgress?.message || (autoUpdateProgress?.stage ? (autoUpdateProgress.stage[0].toUpperCase() + autoUpdateProgress.stage.slice(1)) + '…' : 'Preparing…') }}</span>
+              </div>
+            </div>
+
+            <div class="au-modal-actions" v-if="!autoUpdateInstalling">
+              <button class="btn btn-primary au-install-btn" @click="doAutoUpdateInstall">
+                <i class="ph ph-download-simple" style="margin-right:6px"></i>
+                Install &amp; Restart
+              </button>
+              <button class="btn btn-secondary" @click="doAutoUpdateSnooze">
+                <i class="ph ph-clock" style="margin-right:6px"></i>
+                Remind Me Later
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+
       <!-- Global What's New Post-Update Modal -->
       <transition name="fade">
         <div
@@ -23801,6 +23862,79 @@ const App = {
       }
     }
 
+    // ─── Global auto-update modal state ─────────────────────
+    const autoUpdateReady    = ref(false);
+    const autoUpdateSnoozed  = ref(false);
+    const autoUpdateVersion  = ref("");
+    const autoUpdateInstalling = ref(false);
+    const autoUpdateProgress = ref(null);
+    let _auProgressTimer = null;
+    let _auPollTimer = null;
+
+    function _startAuProgressPoll() {
+      if (_auProgressTimer) return;
+      _auProgressTimer = setInterval(async () => {
+        try {
+          const p = await API.get("/api/system/update-progress");
+          autoUpdateProgress.value = p;
+          const stage = p.stage || "idle";
+          if (stage === "done" || stage === "failed" || stage === "idle") {
+            clearInterval(_auProgressTimer);
+            _auProgressTimer = null;
+          }
+        } catch (e) {}
+      }, 800);
+    }
+
+    async function _pollAutoUpdateStatus() {
+      try {
+        const s = await API.get("/api/system/auto-update-status");
+        autoUpdateSnoozed.value = s.snoozed || false;
+        if (s.ready_to_apply && !s.snoozed) {
+          autoUpdateReady.value = true;
+          autoUpdateVersion.value = s.version || "";
+        }
+      } catch (e) {}
+    }
+
+    function startAutoUpdatePoller() {
+      _pollAutoUpdateStatus();
+      if (_auPollTimer) clearInterval(_auPollTimer);
+      _auPollTimer = setInterval(_pollAutoUpdateStatus, 60000);
+    }
+
+    async function doAutoUpdateInstall() {
+      autoUpdateInstalling.value = true;
+      autoUpdateProgress.value = null;
+      _startAuProgressPoll();
+      try {
+        const r = await API.post("/api/system/apply-update", {});
+        if (r.success) {
+          autoUpdateProgress.value = { stage: "restarting", message: "Restarting server…" };
+          try { await API.post("/api/system/restart-after-update", {}); } catch (e) {}
+          sessionStorage.setItem("cs_server_restarted", "1");
+          const check = setInterval(async () => {
+            try {
+              const res = await fetch("/api/system/info", { cache: "no-store" });
+              if (res.ok) { clearInterval(check); location.href = location.origin + location.pathname + "?v=" + Date.now(); }
+            } catch (e) {}
+          }, 1500);
+        } else {
+          addToast(r.message || "Install failed", "error");
+          autoUpdateInstalling.value = false;
+        }
+      } catch (e) {
+        addToast(e.message || "Install failed", "error");
+        autoUpdateInstalling.value = false;
+      }
+    }
+
+    async function doAutoUpdateSnooze() {
+      try { await API.post("/api/system/snooze-update", { hours: 4 }); } catch (e) {}
+      autoUpdateSnoozed.value = true;
+      autoUpdateReady.value = false;
+    }
+
     const whatsNewSections = computed(() => {
       const body = store.whatsNewData?.body || "";
       return parseChangelogToSections(body);
@@ -23904,6 +24038,7 @@ const App = {
         if (p) {
           checkUpdateQuiet();
           checkPostUpdateWhatsNew();
+          startAutoUpdatePoller();
           if (typeof window.checkFulfilledRequestsAlerts === "function") {
             window.checkFulfilledRequestsAlerts();
           }
@@ -24946,6 +25081,13 @@ const App = {
       remoteBannerDismissed,
       showRemoteInfoModal,
       dismissRemoteBanner,
+      autoUpdateReady,
+      autoUpdateSnoozed,
+      autoUpdateVersion,
+      autoUpdateInstalling,
+      autoUpdateProgress,
+      doAutoUpdateInstall,
+      doAutoUpdateSnooze,
       isPlayerRoute,
       isDetailRoute,
       isRoute,

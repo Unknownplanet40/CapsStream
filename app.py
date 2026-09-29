@@ -411,6 +411,36 @@ def start_scan_scheduler():
     threading.Thread(target=_scan_scheduler_loop, daemon=True).start()
 
 
+# ─── Auto-Update Background Loop ───────────────────────────────────────────────
+
+_AUTO_UPDATE_INTERVAL = 24 * 3600  # 24 hours
+
+
+def _auto_update_loop():
+    """Check for updates on startup (30s delay) then every 24h.
+    Silently downloads if auto_download is enabled; sets updater state so the
+    frontend modal can fire once the package is ready to apply."""
+    from backend.settings import load_config as _lc
+    from backend.updater import check_for_update, apply_update, _write_progress
+    time.sleep(30)  # let the server finish booting before hitting GitHub
+    while True:
+        try:
+            cfg = _lc()
+            upd = (cfg.get("updates") or {})
+            if upd.get("auto_check", True) and not is_dev_mode():
+                info = check_for_update()
+                if info.get("status") == "available" and upd.get("auto_download", True):
+                    print(f"[AutoUpdate] Newer version v{info.get('latest')} found — downloading in background")
+                    _write_progress(stage="idle", message="")  # reset so modal knows it's fresh
+                    apply_update(download_url=info.get("download_url"))
+        except Exception as e:
+            print(f"[AutoUpdate] Background check error: {e}")
+        time.sleep(_AUTO_UPDATE_INTERVAL)
+
+
+def start_auto_updater():
+    threading.Thread(target=_auto_update_loop, daemon=True, name="auto-updater").start()
+
 # ─── Auto-Backup ───────────────────────────────────────────────────────────────
 
 AUTO_BACKUP_DIR = os.path.join(BASE_DIR, "data", "backups")
@@ -672,6 +702,7 @@ if __name__ == "__main__":
 
     init_db()
     start_scan_scheduler()
+    start_auto_updater()
 
     from backend.scanner import start_intro_detection_pass
     threading.Timer(120, start_intro_detection_pass).start()

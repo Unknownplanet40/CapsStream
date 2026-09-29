@@ -106,34 +106,45 @@ CapsStream includes a standalone automation hook (`scripts/utorrent_request_upda
 
 1. Open µTorrent and press **Ctrl+P** (or click **Options** $\rightarrow$ **Preferences**).
 2. On the left sidebar, click **Advanced** $\rightarrow$ **Run Program**.
-3. Choose one of the silent execution methods below:
 
-#### Method A: Silent VBS Launcher (Recommended — 100% Invisible, No Terminal Window)
-Use `wscript.exe` with `utorrent_request_updater.vbs` to ensure no black console window ever flashes:
+#### Scenario 1: You ONLY want to run when a download finishes (Simplest)
+Leave *"Run this program when a torrent changes state"* **BLANK**, and in **"Run this program when a torrent finishes"**, paste:
 
-**Run this program when a torrent finishes:**
+**Option A (Direct Pythonw — 100% Invisible, Fastest):**
 ```cmd
-wscript.exe "<CapsStream-Root>\scripts\utorrent_request_updater.vbs" --finish "%N" "%S" "%D" "%F"
-```
-*(Replace `<CapsStream-Root>` with your folder path, e.g. `C:\Users\ryanj\OneDrive\Desktop\CapsStream`)*
-
-**Run this program when a torrent changes state:**
-```cmd
-wscript.exe "<CapsStream-Root>\scripts\utorrent_request_updater.vbs" "%N" "%S" "%D" "%F"
+"C:\Users\ryanj\OneDrive\Desktop\CapsStream\winpython\python\pythonw.exe" "C:\Users\ryanj\OneDrive\Desktop\CapsStream\backend\utorrent_hook.py" --finish "%N" "%S" "%D" "%F"
 ```
 
-#### Method B: Direct Pythonw Execution
-You can also launch `pythonw.exe` directly:
+**Option B (VBScript Launcher — 100% Invisible):**
 ```cmd
-"<CapsStream-Root>\winpython\python\pythonw.exe" "<CapsStream-Root>\backend\utorrent_hook.py" --finish "%N" "%S" "%D" "%F"
+wscript.exe "C:\Users\ryanj\OneDrive\Desktop\CapsStream\scripts\utorrent_finish.vbs" "%N" "%S" "%D" "%F"
 ```
 
-4. Click **Apply** and **OK**.
+---
+
+#### Scenario 2: You want to use "Run this program when a torrent changes state"
+To get 100% accurate state tracking (auto-transitions to `in_progress` when downloading, and auto-transitions to `completed` when seeding/finished), pass the status message `%M` as well:
+
+**In "Run this program when a torrent changes state":**
+
+**Option A (Direct Pythonw — Recommended):**
+```cmd
+"C:\Users\ryanj\OneDrive\Desktop\CapsStream\winpython\python\pythonw.exe" "C:\Users\ryanj\OneDrive\Desktop\CapsStream\backend\utorrent_hook.py" "%N" "%S" "%D" "%F" "%M" "%P"
+```
+
+**Option B (VBScript Launcher):**
+```cmd
+wscript.exe "C:\Users\ryanj\OneDrive\Desktop\CapsStream\scripts\utorrent_state_change.vbs" "%N" "%S" "%D" "%F" "%M" "%P"
+```
+
+*(Note: You can leave "Run this program when a torrent finishes" BLANK, or configure both. The built-in cross-process file lock and status resolver will prevent any race conditions or duplicate notifications).*
+
+3. Click **Apply** and **OK**.
 
 ### Testing the Automation Manually:
 
-You can test matching without waiting for a download using dry-run mode in PowerShell or Command Prompt:
+You can test matching without waiting for a download using dry-run mode:
 
 ```powershell
-python scripts\utorrent_hook.py --dry-run --name "Runner.2026.1080p.WEBRip" --state 11
+.\winpython\python\python.exe backend\utorrent_hook.py --dry-run --name "Runner.2026.1080p.WEBRip" --finish
 ```

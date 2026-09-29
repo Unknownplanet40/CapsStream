@@ -346,8 +346,23 @@ def api_system_changelog():
         return jsonify({"version": version or get_app_version(), "body": "", "error": str(e)}), 500
 
 
+@admin_bp.route("/api/system/auto-update-status", methods=["GET"])
+def api_auto_update_status():
+    """Lightweight poll endpoint for the global update-ready modal."""
+    from backend.updater import get_auto_update_status
+    return jsonify(get_auto_update_status())
 
-# ─── Logs ─────────────────────────────────────────────────────────────────────
+
+@admin_bp.route("/api/system/snooze-update", methods=["POST"])
+def api_snooze_update():
+    """Snooze the update-ready notification for N hours (default 4)."""
+    require_admin()
+    from backend.updater import snooze_update
+    hours = (request.json or {}).get("hours", 4)
+    snooze_update(hours=hours)
+    return jsonify({"ok": True, "snoozed_hours": hours})
+
+
 
 @admin_bp.route("/api/system/logs", methods=["GET"])
 def api_system_logs():

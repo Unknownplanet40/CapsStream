@@ -45,7 +45,8 @@ DEFAULT_CONFIG = {
         "remove_missing_files": True
     },
     "updates": {
-        "auto_check": True
+        "auto_check": True,
+        "auto_download": True
     },
     "subtitles": {
         "auto_load": True,

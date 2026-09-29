@@ -178,10 +178,11 @@ class TestUtorrentHook(unittest.TestCase):
         # Should catch exception and not raise error when server is closed
         trigger_server_sync(port=8700)
 
+    @patch("backend.utorrent_hook._should_suppress_notification", return_value=False)
     @patch("backend.utorrent_hook.show_windows_notification")
     @patch("backend.utorrent_hook.load_requests")
     @patch("backend.utorrent_hook.save_requests")
-    def test_process_event_triggers_notification(self, mock_save, mock_load, mock_notify):
+    def test_process_event_triggers_notification(self, mock_save, mock_load, mock_notify, mock_suppress):
         mock_load.return_value = [dict(r) for r in self.sample_requests]
 
         res = process_utorrent_event(
@@ -193,6 +194,90 @@ class TestUtorrentHook(unittest.TestCase):
         title_arg, msg_arg = mock_notify.call_args[0]
         self.assertIn("Runner", msg_arg)
         self.assertIn("Completed", msg_arg)
+
+    @patch("backend.utorrent_hook.load_requests")
+    @patch("backend.utorrent_hook.save_requests")
+    def test_process_event_state_20_moving_treated_as_finished(self, mock_save, mock_load):
+        mock_load.return_value = [dict(r) for r in self.sample_requests]
+
+        # State 20 is "Moving" when uTorrent finishes a torrent
+        res = process_utorrent_event(
+            torrent_name="Runner.2026.1080p.WEBRip",
+            state=20
+        )
+        self.assertTrue(res["ok"])
+        self.assertTrue(res.get("updated"))
+        self.assertEqual(res["request"]["status"], "completed")
+
+    @patch("backend.utorrent_hook.load_requests")
+    @patch("backend.utorrent_hook.save_requests")
+    def test_process_event_with_is_finish_flag_forces_completed(self, mock_save, mock_load):
+        mock_load.return_value = [dict(r) for r in self.sample_requests]
+
+        res = process_utorrent_event(
+            torrent_name="Runner.2026.1080p.WEBRip",
+            is_finish=True
+        )
+        self.assertTrue(res["ok"])
+        self.assertTrue(res.get("updated"))
+        self.assertEqual(res["request"]["status"], "completed")
+
+    def test_resolve_torrent_status_messages(self):
+        from backend.utorrent_hook import resolve_torrent_status
+        # Status message string (%M) takes precedence and provides 100% precision
+        self.assertEqual(resolve_torrent_status(status_msg="Downloading 55.4%"), "in_progress")
+        self.assertEqual(resolve_torrent_status(status_msg="Seeding"), "completed")
+        self.assertEqual(resolve_torrent_status(status_msg="Finished"), "completed")
+        self.assertEqual(resolve_torrent_status(status_msg="Connecting to peers"), "in_progress")
+        self.assertIsNone(resolve_torrent_status(status_msg="Queued"))
+        self.assertIsNone(resolve_torrent_status(status_msg="Paused"))
+        self.assertIsNone(resolve_torrent_status(status_msg="Stopped"))
+        self.assertIsNone(resolve_torrent_status(status_msg="Error: Disk full"))
+
+    def test_resolve_torrent_status_state_codes(self):
+        from backend.utorrent_hook import resolve_torrent_status
+        # Downloading states
+        self.assertEqual(resolve_torrent_status(state=6), "in_progress")
+        self.assertEqual(resolve_torrent_status(state=9), "in_progress")
+        self.assertEqual(resolve_torrent_status(state=18), "in_progress")  # Downloading metadata
+        # Finished states
+        self.assertEqual(resolve_torrent_status(state=11), "completed")  # Finished
+        self.assertEqual(resolve_torrent_status(state=5), "completed")   # Seeding
+        self.assertEqual(resolve_torrent_status(state=20), "completed")  # Moving
+        self.assertEqual(resolve_torrent_status(state=21), "completed")  # Flushing
+        # Inactive / Queued states do not advance pending requests
+        self.assertIsNone(resolve_torrent_status(state=12))  # Queued
+        self.assertIsNone(resolve_torrent_status(state=3))   # Paused
+        self.assertIsNone(resolve_torrent_status(state=13))  # Stopped
+        self.assertIsNone(resolve_torrent_status(state=2))   # Checked
+
+    @patch("backend.utorrent_hook.load_requests")
+    @patch("backend.utorrent_hook.save_requests")
+    def test_queued_state_does_not_falsely_mark_in_progress(self, mock_save, mock_load):
+        mock_load.return_value = [dict(r) for r in self.sample_requests]
+
+        # State 12 is Queued (waiting for slot), should not change status
+        res = process_utorrent_event(
+            torrent_name="Spider-Man.Brand.New.Day.2026.720p.HDTV",
+            state=12
+        )
+        self.assertTrue(res["ok"])
+        self.assertFalse(res.get("updated", False))
+        mock_save.assert_not_called()
+
+    @patch("backend.utorrent_hook.load_requests")
+    @patch("backend.utorrent_hook.save_requests")
+    def test_status_msg_downloading_marks_in_progress(self, mock_save, mock_load):
+        mock_load.return_value = [dict(r) for r in self.sample_requests]
+
+        res = process_utorrent_event(
+            torrent_name="Spider-Man.Brand.New.Day.2026.720p.HDTV",
+            status_msg="Downloading 74.3%"
+        )
+        self.assertTrue(res["ok"])
+        self.assertTrue(res.get("updated"))
+        self.assertEqual(res["request"]["status"], "in_progress")
+        mock_save.assert_called_once()
 
 
 if __name__ == "__main__":

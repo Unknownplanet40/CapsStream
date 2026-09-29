@@ -84,6 +84,55 @@ RESTART_INDICATORS = ("app.py", "backend/", "routes/", "requirements.txt", "star
 RESTART_HINT_RE = re.compile(r"\[restart\]|\+restart", re.IGNORECASE)
 
 
+# ─── Snooze + auto-download state ────────────────────────────
+
+def snooze_update(hours=4):
+    """Record a snooze timestamp so the auto-update modal stays hidden."""
+    state = _read_state()
+    state["snoozed_until"] = time.time() + hours * 3600
+    _write_state(state)
+
+
+def is_snoozed():
+    """True when the user has snoozed the update notification."""
+    until = _read_state().get("snoozed_until") or 0
+    return time.time() < until
+
+
+def get_auto_update_status():
+    """
+    Current status for the auto-update modal, safe to call from any thread.
+    Returns dict with keys: ready_to_apply, version, snoozed, stage, message.
+    """
+    state = _read_state()
+    prog = {}
+    try:
+        with open(PROGRESS_FILE, encoding="utf-8") as f:
+            prog = json.load(f) or {}
+    except Exception:
+        pass
+
+    stage = prog.get("stage", "idle")
+    snoozed = is_snoozed()
+    latest = state.get("latest") or ""
+    current = get_local_version()
+    ready = (
+        stage == "done"
+        and state.get("status") == "available"
+        and latest
+        and latest != current
+    )
+    return {
+        "ready_to_apply": ready,
+        "version": latest,
+        "current": current,
+        "snoozed": snoozed,
+        "stage": stage,
+        "message": prog.get("message", ""),
+        "restart_required": state.get("restart_required", False),
+    }
+
+
 # ─── Small helpers ────────────────────────────────────────────
 
 def _http_get(url, timeout=20):
