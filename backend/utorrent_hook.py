@@ -118,10 +118,26 @@ def file_lock(lock_path: str = LOCK_FILE, timeout: float = 6.0):
 def resolve_torrent_status(state: int = None, status_msg: str = "", is_finish: bool = False):
     """
     Accurately resolve the target request status ('in_progress', 'completed', or None).
-    Combines explicit finish flag, status message string (%M), and state code (%S).
+
+    Priority (highest → lowest):
+      1. is_finish flag  → always completed
+      2. state code      → hard gate (INACTIVE/DOWNLOADING always wins, even if msg says "Finished")
+      3. status_msg (%M) → used only when state is None or unknown
     """
     if is_finish:
         return "completed"
+
+    # State code is a hard gate — if µTorrent tells us the state explicitly,
+    # trust it over the human-readable %M string, which can lag or carry
+    # stale text (e.g. state=12 Queued shows msg="Finished" from prior seeding).
+    if state is not None:
+        if state in INACTIVE_STATES or state in ERROR_STATES:
+            return None
+        if state in DOWNLOADING_STATES:
+            return "in_progress"
+        if state in FINISHED_STATES:
+            return "completed"
+        # Unknown state — fall through to msg parsing below
 
     msg = (status_msg or "").strip().lower()
     if msg:
@@ -130,14 +146,6 @@ def resolve_torrent_status(state: int = None, status_msg: str = "", is_finish: b
         if any(term in msg for term in ["download", "connecting", "metadata", "allocat", "peers", "finding", "resolv"]):
             return "in_progress"
         if any(term in msg for term in ["paused", "stopped", "queued", "error"]):
-            return None
-
-    if state is not None:
-        if state in FINISHED_STATES:
-            return "completed"
-        if state in DOWNLOADING_STATES:
-            return "in_progress"
-        if state in INACTIVE_STATES or state in ERROR_STATES:
             return None
 
     return None

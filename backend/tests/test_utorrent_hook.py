@@ -224,7 +224,7 @@ class TestUtorrentHook(unittest.TestCase):
 
     def test_resolve_torrent_status_messages(self):
         from backend.utorrent_hook import resolve_torrent_status
-        # Status message string (%M) takes precedence and provides 100% precision
+        # Status message (%M) used only when state is None or unknown
         self.assertEqual(resolve_torrent_status(status_msg="Downloading 55.4%"), "in_progress")
         self.assertEqual(resolve_torrent_status(status_msg="Seeding"), "completed")
         self.assertEqual(resolve_torrent_status(status_msg="Finished"), "completed")
@@ -250,6 +250,18 @@ class TestUtorrentHook(unittest.TestCase):
         self.assertIsNone(resolve_torrent_status(state=3))   # Paused
         self.assertIsNone(resolve_torrent_status(state=13))  # Stopped
         self.assertIsNone(resolve_torrent_status(state=2))   # Checked
+
+    def test_state_wins_over_stale_msg(self):
+        """Regression: state=12 (Queued/INACTIVE) with msg='Finished' must NOT mark completed.
+        This was the root cause of false 'download complete' notifications when a new torrent
+        was added to the queue while a previously-seeded torrent had a stale Finished msg."""
+        from backend.utorrent_hook import resolve_torrent_status
+        # The bug: msg='Finished' used to win over state=12 (INACTIVE), firing a false notification
+        self.assertIsNone(resolve_torrent_status(state=12, status_msg="Finished"))
+        self.assertIsNone(resolve_torrent_status(state=3, status_msg="Seeding"))    # Paused + stale seed msg
+        self.assertIsNone(resolve_torrent_status(state=13, status_msg="Finished"))  # Stopped + stale msg
+        # Downloading state must also win over a stale "Finished" msg
+        self.assertEqual(resolve_torrent_status(state=6, status_msg="Finished"), "in_progress")
 
     @patch("backend.utorrent_hook.load_requests")
     @patch("backend.utorrent_hook.save_requests")
