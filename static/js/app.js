@@ -20494,7 +20494,7 @@ const RequestsPage = {
                         ]"
                       >
                         <i :class="req.has_digital_release === true || (req.digital_status_label && req.digital_status_label.toLowerCase().includes('available')) ? 'ph-bold ph-check-circle' : ((req.digital_status_label && (req.digital_status_label.includes('Theaters') || req.digital_status_label.includes('Theatrical'))) ? 'ph-bold ph-ticket' : 'ph-bold ph-film-slate')"></i>
-                        <span>{{ req.digital_status_label || (req.has_digital_release === false ? 'No Digital Copy' : 'Digital Available') }}</span>
+                        <span>{{ formatDigitalChip(req) }}</span>
                       </span>
 
                       <!-- Movie Source Redirect Chip (Admin / Dev Mode - Movies only) -->
@@ -20542,7 +20542,7 @@ const RequestsPage = {
                 </p>
 
                 <!-- Speech Bubble Notes -->
-                <div class="req-episode-notes-container" v-if="req.notes || req.admin_note">
+                <div class="req-episode-notes-container" v-if="req.notes || getCleanAdminNote(req.admin_note)">
                   <!-- Requester Note -->
                   <div v-if="req.notes" class="req-speech-note req-user-note">
                     <i class="ph-fill ph-chat-circle-dots"></i>
@@ -20552,11 +20552,11 @@ const RequestsPage = {
                   </div>
 
                   <!-- Admin Note -->
-                  <div v-if="req.admin_note" class="req-speech-note req-server-response">
+                  <div v-if="getCleanAdminNote(req.admin_note)" class="req-speech-note req-server-response">
                     <i class="ph-bold ph-chats-circle"></i>
                     <div class="req-note-body">
                       <span class="req-note-tag">Server Response</span>
-                      <span class="req-note-text">{{ req.admin_note }}</span>
+                      <span class="req-note-text">{{ getCleanAdminNote(req.admin_note) }}</span>
                     </div>
                   </div>
                 </div>
@@ -21475,6 +21475,37 @@ const RequestsPage = {
       }
     }
 
+    function formatDigitalChip(req) {
+      if (!req) return "";
+      let label = (req.digital_status_label || "").trim();
+      if (!label) {
+        if (req.has_digital_release === false) return "No Digital Copy";
+        if (req.has_digital_release === true) return "Digital Available";
+        return "Digital Available";
+      }
+
+      // Convert any ISO date pattern (YYYY-MM-DD) into e.g. "September 1, 2021"
+      return label.replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (match, y, m, d) => {
+        try {
+          const year = parseInt(y, 10);
+          const month = parseInt(m, 10) - 1;
+          const day = parseInt(d, 10);
+          const dt = new Date(Date.UTC(year, month, day));
+          return dt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+        } catch (e) {
+          return match;
+        }
+      });
+    }
+
+    function getCleanAdminNote(note) {
+      if (!note || typeof note !== "string") return "";
+      let clean = note.replace(/\[\s*uTorrent:[^\]]*\]/gi, "");
+      clean = clean.replace(/\buTorrent\b/gi, "");
+      clean = clean.replace(/\s+/g, " ").trim();
+      return clean;
+    }
+
     function handleDocClick(e) {
       if (!e.target.closest(".search-input-group")) {
         showDropdown.value = false;
@@ -21720,6 +21751,8 @@ const RequestsPage = {
       sortBy,
       isProfileJoined,
       toggleMeToo,
+      formatDigitalChip,
+      getCleanAdminNote,
     };
   },
 };

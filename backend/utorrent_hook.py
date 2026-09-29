@@ -1,0 +1,480 @@
+# -*- coding: utf-8 -*-
+"""
+backend/utorrent_hook.py — Standalone uTorrent Automation Hook for CapsStream Media Requests.
+
+This script can be executed by uTorrent's "Run Program" feature:
+  - When a torrent finishes downloading (State 11 / Seeding / Finished)
+  - On any state change while downloading or seeding
+
+Key Features:
+  - Operates standalone: Updates data/requests.json directly even when CapsStream is NOT open / running.
+  - Automatically matches torrent titles, filenames, and directories to active media requests.
+  - Handles movie requests (title + year) and TV/Anime requests (title + season/episode).
+  - Pushes status updates to Supabase (if configured) so client devices are immediately notified.
+  - If CapsStream server happens to be running, triggers an instant library scan/sync via HTTP.
+  - Logs all execution events and matching decisions to logs/utorrent_updater.log.
+"""
+
+import os
+import sys
+import re
+import json
+import time
+import argparse
+import difflib
+import logging
+from datetime import datetime
+
+# Ensure project root is in sys.path
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from backend.utils.paths import BASE_DIR
+from backend.utils.supabase_client import is_supabase_configured, update_online_request
+from backend.matcher import _clean_name
+from backend.scanner import _parse_episode
+
+REQUESTS_FILE = os.path.join(BASE_DIR, "data", "requests.json")
+LOGS_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOGS_DIR, "utorrent_updater.log")
+
+# Setup logger
+logger = logging.getLogger("utorrent_updater")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    fh.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    logger.addHandler(fh)
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(logging.Formatter("[uTorrentHook] %(message)s"))
+    logger.addHandler(sh)
+
+
+# uTorrent State Definitions (from docs/utorrent-run-program.md)
+FINISHED_STATES = {4, 5, 7, 8, 10, 11}       # Super seeding, Seeding, Seeding [F], Queued seed, Finished
+DOWNLOADING_STATES = {6, 9, 12, 17, 18, 19, 20, 21, 22, 23, 24, 25}  # Downloading, Preallocating, etc.
+ERROR_STATES = {1}
+
+
+def _normalize_str(text: str) -> str:
+    """Normalize string by removing punctuation and lowercasing."""
+    if not text:
+        return ""
+    return re.sub(r"[^\w\s]", "", str(text).lower()).strip()
+
+
+def _extract_candidates(name: str = "", filename: str = "", dir_path: str = ""):
+    """Extract candidate (title, year, season, episode) parsed info from arguments."""
+    candidates = []
+    seen = set()
+
+    for raw in [name, filename, os.path.basename(dir_path or "") if dir_path else ""]:
+        raw_str = (raw or "").strip()
+        if not raw_str or raw_str in seen:
+            continue
+        seen.add(raw_str)
+
+        clean_t, parsed_year, imdb_id = _clean_name(raw_str)
+        season, episode = _parse_episode(raw_str)
+
+        # Fallback season check from dir_path if not found in raw string
+        if season is None and dir_path:
+            from backend.scanner import _parse_season_dir
+            season = _parse_season_dir(dir_path)
+
+        candidates.append({
+            "raw": raw_str,
+            "title": clean_t,
+            "norm_title": _normalize_str(clean_t),
+            "year": parsed_year,
+            "season": season,
+            "episode": episode,
+            "imdb_id": imdb_id
+        })
+
+    return candidates
+
+
+def match_torrent_to_request(torrent_name: str, filename: str = "", dir_path: str = "", requests_list: list = None):
+    """
+    Find the best matching media request in requests_list.
+    Returns (matched_request, match_reason, match_score).
+    """
+    if requests_list is None:
+        return None, "No requests to check", 0.0
+
+    candidates = _extract_candidates(torrent_name, filename, dir_path)
+    if not candidates:
+        return None, "No candidate titles extracted from arguments", 0.0
+
+    best_match = None
+    best_score = 0.0
+    best_reason = ""
+
+    for req in requests_list:
+        if not isinstance(req, dict):
+            continue
+
+        req_title = req.get("title") or ""
+        norm_req_title = _normalize_str(req_title)
+        if not norm_req_title:
+            continue
+
+        req_year = None
+        if req.get("year"):
+            try:
+                req_year = int(str(req.get("year"))[:4])
+            except (ValueError, TypeError):
+                req_year = None
+
+        req_type = req.get("type", "Movie")
+        is_tv = req_type in ("TV Show", "Anime")
+        req_season = req.get("season")
+        req_episode = req.get("episode")
+        try:
+            req_season = int(req_season) if req_season is not None and str(req_season).strip() != "" else None
+        except (ValueError, TypeError):
+            req_season = None
+        try:
+            req_episode = int(req_episode) if req_episode is not None and str(req_episode).strip() != "" else None
+        except (ValueError, TypeError):
+            req_episode = None
+
+        for cand in candidates:
+            score = 0.0
+            cand_norm = cand["norm_title"]
+            cand_year = cand["year"]
+            cand_season = cand["season"]
+            cand_episode = cand["episode"]
+
+            # Season / Episode filtering for TV series
+            if is_tv:
+                if req_season is not None and cand_season is not None and req_season != cand_season:
+                    continue  # Different season, discard candidate
+                if req_episode is not None and cand_episode is not None and req_episode != cand_episode:
+                    continue  # Different episode, discard candidate
+
+            # Title matching
+            sim = difflib.SequenceMatcher(None, cand_norm, norm_req_title).ratio()
+            exact = (cand_norm == norm_req_title) or (cand_norm.replace(" ", "") == norm_req_title.replace(" ", ""))
+            substring = (norm_req_title in cand_norm) or (cand_norm in norm_req_title)
+
+            if exact:
+                score += 0.8
+            elif substring and len(norm_req_title) >= 4:
+                score += 0.65
+            elif sim >= 0.80:
+                score += sim * 0.7
+            else:
+                continue
+
+            # Year matching bonus / penalty
+            if req_year is not None and cand_year is not None:
+                if abs(req_year - cand_year) <= 1:
+                    score += 0.2
+                else:
+                    score -= 0.3
+            elif req_year is not None and cand_year is None:
+                score += 0.05  # neutral
+
+            # Season/episode matching bonus
+            if is_tv and req_season is not None and cand_season is not None and req_season == cand_season:
+                score += 0.1
+                if req_episode is not None and cand_episode is not None and req_episode == cand_episode:
+                    score += 0.1
+
+            # Active request preference (pending or in_progress get priority over completed)
+            if req.get("status") in ("pending", "in_progress"):
+                score += 0.1
+
+            if score > best_score and score >= 0.70:
+                best_score = score
+                best_match = req
+                best_reason = f"Candidate '{cand['raw']}' matched '{req_title}' (score: {round(score, 2)})"
+
+    return best_match, best_reason, best_score
+
+
+def load_requests():
+    """Load requests from data/requests.json safely."""
+    if not os.path.isfile(REQUESTS_FILE):
+        return []
+    try:
+        with open(REQUESTS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception as e:
+        logger.error(f"Failed to read requests file: {e}")
+        return []
+
+
+def save_requests(items):
+    """Atomically save requests to data/requests.json."""
+    os.makedirs(os.path.dirname(REQUESTS_FILE), exist_ok=True)
+    tmp_file = REQUESTS_FILE + ".tmp"
+    with open(tmp_file, "w", encoding="utf-8") as f:
+        json.dump(items, f, indent=2, ensure_ascii=False)
+    os.replace(tmp_file, REQUESTS_FILE)
+
+
+SERVER_PORT = 8700
+
+
+def trigger_server_sync(port: int = SERVER_PORT):
+    """If CapsStream server is running locally on port 8700, notify it to re-scan and sync."""
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        import urllib.request
+        import urllib.error
+        import ssl
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        sync_url = f"{base_url}/api/requests/sync-library"
+        req = urllib.request.Request(
+            sync_url,
+            data=b"{}",
+            headers={"Content-Type": "application/json", "User-Agent": "CapsStream-uTorrentHook"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=2.5, context=ctx) as res:
+            logger.info(f"Triggered live CapsStream library sync on port {port} (HTTP {res.status})")
+    except Exception as e:
+        logger.debug(f"CapsStream server notification on port {port} skipped or offline: {e}")
+
+
+def show_windows_notification(title: str, message: str):
+    """Display a native Windows Toast notification without flashing any terminal or console window."""
+    if sys.platform != "win32":
+        return
+
+    try:
+        import base64
+        import subprocess
+
+        clean_title = (title or "CapsStream").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', '&quot;')
+        clean_msg = (message or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', '&quot;')
+
+        xml = f"<toast><visual><binding template='ToastGeneric'><text>{clean_title}</text><text>{clean_msg}</text></binding></visual></toast>"
+        ps_code = (
+            "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null\n"
+            "$x = [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]::new()\n"
+            f"$x.LoadXml(\"{xml}\")\n"
+            "$t = [Windows.UI.Notifications.ToastNotification, Windows.UI.Notifications, ContentType = WindowsRuntime]::new($x)\n"
+            "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show($t)\n"
+        )
+        enc = base64.b64encode(ps_code.encode("utf-16le")).decode("utf-8")
+        subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", enc],
+            creationflags=0x08000000  # CREATE_NO_WINDOW
+        )
+    except Exception as e:
+        logger.debug(f"Failed to display native Windows notification: {e}")
+
+
+def process_utorrent_event(
+    torrent_name: str,
+    state: int = None,
+    dir_path: str = "",
+    filename: str = "",
+    is_finish: bool = False,
+    dry_run: bool = False,
+    port: int = SERVER_PORT,
+    no_notify: bool = False
+):
+    """
+    Process incoming uTorrent event and update matching request.
+    """
+    logger.info(f"Event received: name='{torrent_name}', state={state}, finish={is_finish}, dir='{dir_path}', file='{filename}'")
+
+    if not torrent_name and not filename and not dir_path:
+        logger.warning("No torrent name, filename, or directory provided. Aborting.")
+        return {"ok": False, "error": "No media identifier provided"}
+
+    # Determine desired new status
+    new_status = None
+    status_label = ""
+
+    if is_finish or (state is not None and state in FINISHED_STATES):
+        new_status = "completed"
+        status_label = "completed"
+    elif state is not None and state in DOWNLOADING_STATES:
+        new_status = "in_progress"
+        status_label = "in progress"
+    elif state is not None and state in ERROR_STATES:
+        logger.warning(f"Torrent '{torrent_name}' is in error state ({state}). No status transition performed.")
+        return {"ok": True, "message": "Torrent error state noted, status preserved"}
+
+    if not new_status:
+        logger.info(f"State {state} does not require a request status transition.")
+        return {"ok": True, "message": f"State {state} requires no change"}
+
+    items = load_requests()
+    if not items:
+        logger.info("No media requests found in data/requests.json.")
+        return {"ok": True, "message": "No media requests found"}
+
+    matched_req, reason, score = match_torrent_to_request(torrent_name, filename, dir_path, items)
+    if not matched_req:
+        logger.info(f"No matching request found for torrent '{torrent_name}'.")
+        return {"ok": True, "message": "No matching request found"}
+
+    req_id = matched_req.get("id")
+    req_title = matched_req.get("title")
+    curr_status = matched_req.get("status")
+
+    logger.info(f"Matched: '{req_title}' (id: {req_id}, current status: '{curr_status}') - {reason}")
+
+    # Prevent downgrading already completed requests to in_progress
+    if curr_status == "completed" and new_status == "in_progress":
+        logger.info(f"Request '{req_title}' is already completed. Skipping downgrade to in_progress.")
+        return {"ok": True, "message": "Request already completed"}
+
+    if curr_status == new_status:
+        logger.info(f"Request '{req_title}' is already '{new_status}'. No update needed.")
+        return {"ok": True, "message": f"Request already {new_status}"}
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Update fields
+    matched_req["status"] = new_status
+    matched_req["updated_at"] = now_str
+    if new_status == "completed" and not matched_req.get("completed_at"):
+        matched_req["completed_at"] = now_str
+
+    # Try local database check to see if media file exists in library
+    try:
+        from backend.routes.requests import detect_media_in_library
+        matched_lib = detect_media_in_library(matched_req)
+        if matched_lib:
+            matched_req["detected_media_id"] = matched_lib.get("id")
+            matched_req["detected_media_type"] = matched_lib.get("type")
+            matched_req["detected_tmdb_id"] = matched_lib.get("tmdb_id")
+            matched_req["auto_detected"] = True
+    except Exception as e:
+        logger.debug(f"Library detection check skipped: {e}")
+
+    if dry_run:
+        logger.info(f"[DRY RUN] Would update request '{req_title}' ({req_id}) -> '{new_status}'")
+        return {"ok": True, "dry_run": True, "request": matched_req}
+
+    # 1. Save locally to data/requests.json (even when CapsStream is NOT open)
+    save_requests(items)
+    logger.info(f"Successfully saved updated request '{req_title}' ({req_id}) -> '{new_status}' to data/requests.json")
+
+    # 2. Push update to Supabase cloud (even when CapsStream server is NOT open)
+    if is_supabase_configured():
+        try:
+            patch_data = {
+                "status": new_status,
+                "admin_note": matched_req.get("admin_note"),
+                "updated_at": now_str
+            }
+            if new_status == "completed":
+                patch_data["completed_at"] = now_str
+            if matched_req.get("detected_media_id"):
+                patch_data["detected_media_id"] = matched_req["detected_media_id"]
+                patch_data["detected_media_type"] = matched_req.get("detected_media_type")
+                patch_data["detected_tmdb_id"] = matched_req.get("detected_tmdb_id")
+
+            res = update_online_request(req_id, patch_data)
+            if res:
+                logger.info(f"Successfully pushed status update to Supabase for request '{req_id}'")
+            else:
+                logger.warning(f"Supabase update returned empty response for request '{req_id}'")
+        except Exception as e:
+            logger.error(f"Failed to push update to Supabase: {e}")
+
+    # 3. If CapsStream server is active on port 8700, notify it
+    trigger_server_sync(port=port)
+
+    # 4. Native Windows notification on state change or completion
+    if not no_notify and not dry_run:
+        if new_status == "completed":
+            year_str = f" ({matched_req.get('year')})" if matched_req.get('year') else ""
+            show_windows_notification("CapsStream Media Request", f"Download Completed: {req_title}{year_str} • Ready in Library")
+        elif new_status == "in_progress":
+            show_windows_notification("CapsStream Media Request", f"Downloading: {req_title} • Status: In Progress")
+
+    return {"ok": True, "updated": True, "request": matched_req}
+
+
+def main():
+    """Command line parser supporting both flag-based and positional arguments from uTorrent."""
+    parser = argparse.ArgumentParser(
+        description="CapsStream uTorrent Automation Hook — Updates Media Requests standalone on finish or state change."
+    )
+    # Flag arguments
+    parser.add_argument("--name", "-n", dest="name", default="", help="Torrent Title (%N)")
+    parser.add_argument("--state", "-s", dest="state", type=int, default=None, help="Current State code (%S)")
+    parser.add_argument("--prev-state", "-p", dest="prev_state", type=int, default=None, help="Previous State code (%P)")
+    parser.add_argument("--dir", "-d", dest="dir", default="", help="Directory where files are saved (%D)")
+    parser.add_argument("--file", "-f", dest="file", default="", help="Downloaded file name (%F)")
+    parser.add_argument("--kind", "-k", dest="kind", default="", help="Kind of torrent: single or multi (%K)")
+    parser.add_argument("--finish", "--completed", dest="finish", action="store_true", help="Explicit finished/completed event")
+    parser.add_argument("--port", dest="port", type=int, default=SERVER_PORT, help="Port of CapsStream server (default: 8700)")
+    parser.add_argument("--no-notify", dest="no_notify", action="store_true", help="Disable Windows desktop notification")
+    parser.add_argument("--dry-run", dest="dry_run", action="store_true", help="Perform match without modifying files")
+
+    # Positional arguments fallback (for uTorrent simple execution like: hook.bat "%N" "%S" "%D" "%F")
+    parser.add_argument("positional_args", nargs="*", help="Positional arguments from uTorrent: [name, state, dir, file]")
+
+    args = parser.parse_args()
+
+    name = args.name
+    state = args.state
+    dir_path = args.dir
+    file_name = args.file
+    is_finish = args.finish
+    no_notify = args.no_notify
+
+    # Map positional arguments if flags weren't provided
+    pos = args.positional_args
+    if pos:
+        # Check if first positional is a keyword flag
+        clean_pos = []
+        for p in pos:
+            if p in ("--finish", "-finish", "/finish"):
+                is_finish = True
+            elif p in ("--dry-run", "-dry-run"):
+                args.dry_run = True
+            elif p in ("--no-notify", "-no-notify"):
+                no_notify = True
+            else:
+                clean_pos.append(p)
+
+        if len(clean_pos) >= 1 and not name:
+            name = clean_pos[0]
+        if len(clean_pos) >= 2 and state is None:
+            try:
+                state = int(clean_pos[1])
+            except (ValueError, TypeError):
+                state = None
+        if len(clean_pos) >= 3 and not dir_path:
+            dir_path = clean_pos[2]
+        if len(clean_pos) >= 4 and not file_name:
+            file_name = clean_pos[3]
+
+    result = process_utorrent_event(
+        torrent_name=name,
+        state=state,
+        dir_path=dir_path,
+        filename=file_name,
+        is_finish=is_finish,
+        dry_run=args.dry_run,
+        port=args.port,
+        no_notify=no_notify
+    )
+
+    if not result.get("ok"):
+        sys.exit(1)
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
