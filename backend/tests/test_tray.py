@@ -94,6 +94,61 @@ class TestTrayUtils(unittest.TestCase):
         self.assertTrue(is_capsstream_title("http://127.0.0.1:8000 - Brave", "brave.exe"))
         self.assertTrue(is_capsstream_title("localhost:8000 - Opera", "opera.exe"))
 
+    @patch("subprocess.Popen")
+    @patch("os.name", "nt")
+    def test_send_toast_action_buttons_and_silent_execution(self, mock_popen):
+        """Verify silent_launcher.send_toast generates action buttons and executes 100% silently."""
+        from silent_launcher import send_toast
+        import base64
+        import subprocess
+
+        actions = [
+            {"content": "Open CapsStream", "arguments": "http://127.0.0.1:8000", "activationType": "protocol"},
+            {"content": "Open LAN Stream", "arguments": "http://192.168.1.50:8000", "activationType": "protocol"},
+            {"content": "Dismiss", "arguments": "dismiss", "activationType": "system"},
+        ]
+        send_toast(
+            "CapsStream is running",
+            "Serving on LAN: http://192.168.1.50:8000",
+            actions=actions,
+            launch_url="http://127.0.0.1:8000",
+        )
+
+        self.assertTrue(mock_popen.called)
+        args, kwargs = mock_popen.call_args
+        cmd = args[0]
+
+        # Verify command contains hidden and non-interactive switches
+        self.assertIn("powershell.exe", cmd[0])
+        self.assertIn("-WindowStyle", cmd)
+        self.assertIn("Hidden", cmd)
+        self.assertIn("-NonInteractive", cmd)
+        self.assertIn("-NoProfile", cmd)
+        self.assertIn("-EncodedCommand", cmd)
+
+        # Verify creationflags has CREATE_NO_WINDOW (0x08000000)
+        self.assertEqual(kwargs.get("creationflags"), 0x08000000)
+
+        # Verify startupinfo is configured with SW_HIDE
+        si = kwargs.get("startupinfo")
+        self.assertIsNotNone(si)
+        self.assertEqual(si.dwFlags & subprocess.STARTF_USESHOWWINDOW, subprocess.STARTF_USESHOWWINDOW)
+        self.assertEqual(si.wShowWindow, 0)
+
+        # Decode base64 powershell script
+        enc_idx = cmd.index("-EncodedCommand") + 1
+        decoded_ps = base64.b64decode(cmd[enc_idx]).decode("utf-16le")
+
+        # Verify toast XML elements
+        self.assertIn("Open CapsStream", decoded_ps)
+        self.assertIn("Open LAN Stream", decoded_ps)
+        self.assertIn("Dismiss", decoded_ps)
+        self.assertIn("activationType=\"protocol\"", decoded_ps)
+        self.assertIn("activationType=\"system\"", decoded_ps)
+        self.assertIn("launch=\"http://127.0.0.1:8000\"", decoded_ps)
+        self.assertIn("$ProgressPreference = 'SilentlyContinue'", decoded_ps)
+
 
 if __name__ == "__main__":
     unittest.main()
+

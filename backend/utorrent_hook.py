@@ -342,8 +342,18 @@ def save_requests(items):
 SERVER_PORT = 8700
 
 
-def trigger_server_sync(port: int = SERVER_PORT):
-    """If CapsStream server is running locally on port 8700, notify it to re-scan and sync."""
+def is_server_live(port: int = SERVER_PORT, timeout: float = 0.8) -> bool:
+    """Return True if the CapsStream web server is currently running and listening on 127.0.0.1:port."""
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except (OSError, socket.error):
+        return False
+
+
+def trigger_server_sync(port: int = SERVER_PORT) -> bool:
+    """If CapsStream server is running locally on port 8700, notify it to re-scan and sync. Returns True if server is live and responded."""
     base_url = f"http://127.0.0.1:{port}"
     try:
         import urllib.request
@@ -363,8 +373,13 @@ def trigger_server_sync(port: int = SERVER_PORT):
         )
         with urllib.request.urlopen(req, timeout=2.5, context=ctx) as res:
             logger.info(f"Triggered live CapsStream library sync on port {port} (HTTP {res.status})")
+            return True
+    except urllib.error.HTTPError as e:
+        logger.info(f"CapsStream server responded on port {port} (HTTP {e.code})")
+        return True
     except Exception as e:
         logger.debug(f"CapsStream server notification on port {port} skipped or offline: {e}")
+        return False
 
 
 def register_app_identity():
@@ -383,8 +398,8 @@ def register_app_identity():
         pass
 
 
-def show_windows_notification(title: str, message: str):
-    """Display a native Windows Toast notification with CapsStream logo without flashing any terminal or console window."""
+def show_windows_notification(title: str, message: str, actions: list = None, launch_url: str = None):
+    """Display a native Windows Toast notification with CapsStream logo and action buttons without flashing any terminal or console window."""
     if sys.platform != "win32":
         return
 
@@ -397,17 +412,36 @@ def show_windows_notification(title: str, message: str):
 
         icon = os.path.join(BASE_DIR, "static", "img", "favicon.png")
         image_el = ""
+        def _clean_xml(s: str) -> str:
+            return (str(s or "").replace("&", "&amp;").replace("<", "&lt;")
+                    .replace(">", "&gt;").replace('"', "&quot;"))
+
         if os.path.isfile(icon):
             icon_uri = pathlib.Path(icon).as_uri()
-            clean_icon_uri = icon_uri.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', '&quot;')
-            image_el = f'<image placement="appLogoOverride" src="{clean_icon_uri}" />'
+            image_el = f'<image placement="appLogoOverride" src="{_clean_xml(icon_uri)}" />'
 
-        clean_title = (title or "CapsStream").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', '&quot;')
-        clean_msg = (message or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', '&quot;')
+        clean_title = _clean_xml(title or "CapsStream")
+        clean_msg = _clean_xml(message or "")
+        launch_attr = f' activationType="protocol" launch="{_clean_xml(launch_url)}"' if launch_url else ''
 
-        xml = f'<toast><visual><binding template="ToastGeneric">{image_el}<text>{clean_title}</text><text>{clean_msg}</text></binding></visual></toast>'
+        actions_xml = ""
+        if actions:
+            action_tags = []
+            for act in actions:
+                content = _clean_xml(act.get("content") or act.get("title", ""))
+                args = _clean_xml(act.get("arguments") or act.get("arg", ""))
+                act_type = _clean_xml(act.get("activationType") or act.get("type", "protocol"))
+                if content:
+                    action_tags.append(
+                        f'<action content="{content}" arguments="{args}" activationType="{act_type}" />'
+                    )
+            if action_tags:
+                actions_xml = f"<actions>{''.join(action_tags)}</actions>"
+
+        xml = f'<toast{launch_attr}><visual><binding template="ToastGeneric">{image_el}<text>{clean_title}</text><text>{clean_msg}</text></binding></visual>{actions_xml}</toast>'
         xml_ps = xml.replace("'", "''")
         ps_code = (
+            "$ProgressPreference = 'SilentlyContinue'\n"
             "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null\n"
             "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null\n"
             "$x = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
@@ -416,15 +450,24 @@ def show_windows_notification(title: str, message: str):
             "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('CapsStream').Show($t)\n"
         )
         enc = base64.b64encode(ps_code.encode("utf-16le")).decode("ascii")
+
+        si = None
+        if os.name == "nt":
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 0  # SW_HIDE
+
         subprocess.Popen(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", enc],
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-EncodedCommand", enc],
             creationflags=0x08000000,  # CREATE_NO_WINDOW
+            startupinfo=si,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
         )
     except Exception as e:
         logger.debug(f"Failed to display native Windows notification: {e}")
+
 
 
 def process_utorrent_event(
@@ -493,10 +536,23 @@ def process_utorrent_event(
                 except Exception as e:
                     logger.debug(f"Library detection check skipped: {e}")
 
-                trigger_server_sync(port=port)
+                server_live = bool(trigger_server_sync(port=port))
                 if not no_notify and not dry_run and not _should_suppress_notification(req_id, "completed"):
                     year_str = f" ({matched_req.get('year')})" if matched_req.get('year') else ""
-                    show_windows_notification("CapsStream Media Request", f"Download Completed: {req_title}{year_str} • Ready in Library")
+                    watch_url = f"http://127.0.0.1:{port}/" if server_live else None
+                    actions = None
+                    if server_live:
+                        actions = [
+                            {"content": "Watch Now", "arguments": watch_url, "activationType": "protocol"},
+                            {"content": "Dismiss", "arguments": "dismiss", "activationType": "system"},
+                        ]
+                    msg_ready = " • Ready in Library" if server_live else ""
+                    show_windows_notification(
+                        "CapsStream Media Request",
+                        f"Download Completed: {req_title}{year_str}{msg_ready}",
+                        actions=actions,
+                        launch_url=watch_url,
+                    )
                 logger.info(f"Request '{req_title}' is already completed (sync & notification refreshed).")
                 return {"ok": True, "message": "Request already completed, sync refreshed", "request": matched_req}
 
@@ -555,15 +611,39 @@ def process_utorrent_event(
             logger.error(f"Failed to push update to Supabase: {e}")
 
     # 3. If CapsStream server is active on port 8700, notify it
-    trigger_server_sync(port=port)
+    server_live = bool(trigger_server_sync(port=port))
 
     # 4. Native Windows notification on state change or completion (debounced)
     if not no_notify and not dry_run and not _should_suppress_notification(req_id, new_status):
+        watch_url = f"http://127.0.0.1:{port}/" if server_live else None
         if new_status == "completed":
             year_str = f" ({matched_req.get('year')})" if matched_req.get('year') else ""
-            show_windows_notification("CapsStream Media Request", f"Download Completed: {req_title}{year_str} • Ready in Library")
+            actions = None
+            if server_live:
+                actions = [
+                    {"content": "Watch Now", "arguments": watch_url, "activationType": "protocol"},
+                    {"content": "Dismiss", "arguments": "dismiss", "activationType": "system"},
+                ]
+            msg_ready = " • Ready in Library" if server_live else ""
+            show_windows_notification(
+                "CapsStream Media Request",
+                f"Download Completed: {req_title}{year_str}{msg_ready}",
+                actions=actions,
+                launch_url=watch_url,
+            )
         elif new_status == "in_progress":
-            show_windows_notification("CapsStream Media Request", f"Downloading: {req_title} • Status: In Progress")
+            actions = None
+            if server_live:
+                actions = [
+                    {"content": "View Library", "arguments": watch_url, "activationType": "protocol"},
+                    {"content": "Dismiss", "arguments": "dismiss", "activationType": "system"},
+                ]
+            show_windows_notification(
+                "CapsStream Media Request",
+                f"Downloading: {req_title} • Status: In Progress",
+                actions=actions,
+                launch_url=watch_url,
+            )
 
     return {"ok": True, "updated": True, "request": matched_req}
 

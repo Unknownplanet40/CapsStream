@@ -32,6 +32,17 @@ from datetime import datetime
 
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
+
+def silent_startupinfo():
+    """Return STARTUPINFO configured with SW_HIDE on Windows to guarantee 0 terminal popups."""
+    if os.name != "nt":
+        return None
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0  # SW_HIDE
+    return si
+
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PYTHON = os.path.join(ROOT, "winpython", "python", "python.exe")
 PYTHONW = os.path.join(ROOT, "winpython", "python", "pythonw.exe")
@@ -56,7 +67,13 @@ def log(msg):
 def fail(message):
     """Log + show a visible error dialog (the only window we ever raise)."""
     log("FATAL: " + message)
-    send_toast("CapsStream failed to start", message.splitlines()[0][:120])
+    log_file = os.path.join(LOG_DIR, f"capsstream_{datetime.now():%Y%m%d}.log")
+    log_uri = pathlib.Path(log_file if os.path.isfile(log_file) else LOG_DIR).as_uri()
+    actions = [
+        {"content": "View Logs", "arguments": log_uri, "activationType": "protocol"},
+        {"content": "Dismiss", "arguments": "dismiss", "activationType": "system"},
+    ]
+    send_toast("CapsStream failed to start", message.splitlines()[0][:120], actions=actions, launch_url=log_uri)
     try:
         ctypes.windll.user32.MessageBoxW(
             None, message + "\n\nDetails were written to logs/ (see the newest capsstream_*.log).",
@@ -91,16 +108,20 @@ def register_app_identity():
 
 
 def _xml_escape(s):
-    return (s.replace("&", "&amp;").replace("<", "&lt;")
-             .replace(">", "&gt;").replace('"', "&quot;"))
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
 
 
-def send_toast(title, message):
+def send_toast(title, message, actions=None, launch_url=None):
     """
     Show a native Windows toast notification as 'CapsStream' using the
     built-in WinRT toast API via PowerShell — no BurntToast/module install.
     The app icon is embedded in the toast itself (appLogoOverride = the
     image slot on the left side of the notification).
+    Supports interactive Action Buttons (e.g. 'Open CapsStream', 'Open LAN Stream',
+    'View Logs', 'Dismiss') and protocol launch on click.
+    Completely silent: runs with CREATE_NO_WINDOW, SW_HIDE startupinfo, and -WindowStyle Hidden.
+    Dispatched asynchronously via non-blocking Popen so the launcher never freezes.
     Failures are logged but never fatal.
     """
     if os.name != "nt":
@@ -112,16 +133,34 @@ def send_toast(title, message):
         if os.path.isfile(icon):
             icon_uri = pathlib.Path(icon).as_uri()
             image_el = f'<image placement="appLogoOverride" src="{_xml_escape(icon_uri)}" />'
+
+        launch_attr = f' activationType="protocol" launch="{_xml_escape(launch_url)}"' if launch_url else ''
+
+        actions_xml = ""
+        if actions:
+            action_tags = []
+            for act in actions:
+                content = act.get("content") or act.get("title", "")
+                args = act.get("arguments") or act.get("arg", "")
+                act_type = act.get("activationType") or act.get("type", "protocol")
+                if content:
+                    action_tags.append(
+                        f'<action content="{_xml_escape(content)}" arguments="{_xml_escape(args)}" activationType="{_xml_escape(act_type)}" />'
+                    )
+            if action_tags:
+                actions_xml = f"<actions>{''.join(action_tags)}</actions>"
+
         xml = (
-            '<toast><visual><binding template="ToastGeneric">'
+            f'<toast{launch_attr}><visual><binding template="ToastGeneric">'
             f'{image_el}'
             f'<text>{_xml_escape(title)}</text>'
             f'<text>{_xml_escape(message)}</text>'
-            '</binding></visual></toast>'
+            f'</binding></visual>{actions_xml}</toast>'
         )
         # Single-quote literal in PS: escape embedded quotes by doubling
         xml_ps = xml.replace("'", "''")
         ps = (
+            "$ProgressPreference = 'SilentlyContinue'\n"
             "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null\n"
             "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null\n"
             f"$xml = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
@@ -130,14 +169,26 @@ def send_toast(title, message):
             f"[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{APP_ID}').Show($toast)\n"
         )
         b64 = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
-        subprocess.run(
-            ["powershell", "-NoProfile", "-EncodedCommand", b64],
-            creationflags=CREATE_NO_WINDOW, timeout=15,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        si = silent_startupinfo()
+        subprocess.Popen(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle", "Hidden",
+                "-ExecutionPolicy", "Bypass",
+                "-EncodedCommand", b64,
+            ],
+            creationflags=CREATE_NO_WINDOW,
+            startupinfo=si,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
         )
-        log(f"Toast sent: {title}")
+        log(f"Toast dispatched: {title}")
     except Exception as e:
         log(f"Toast notification failed: {e}")
+
 
 
 def read_config():
@@ -196,7 +247,7 @@ def pre_flight():
     except Exception as e:
         log(f"System file hiding step skipped: {e}")
 
-    if os.path.isfile(PYTHON):
+    if os.path.isfile(PYTHONW) or os.path.isfile(PYTHON):
         req_file = os.path.join(ROOT, "requirements.txt")
         stamp_file = os.path.join(ROOT, "data", "pip_stamp")
         _run_pip = True
@@ -215,11 +266,13 @@ def pre_flight():
                 log(f"pip stamp check failed ({_e}) — running pip to be safe")
         if _run_pip:
             try:
+                pip_exe = PYTHONW if os.path.isfile(PYTHONW) else PYTHON
                 subprocess.run(
-                    [PYTHON, "-m", "pip", "install", "-q", "-r", req_file],
+                    [pip_exe, "-m", "pip", "install", "-q", "-r", req_file],
                     cwd=ROOT, timeout=600,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    creationflags=0x08000000 if os.name == "nt" else 0,
+                    creationflags=CREATE_NO_WINDOW,
+                    startupinfo=silent_startupinfo(),
                 )
                 # Write the stamp so subsequent launches can skip this step
                 try:
@@ -238,7 +291,7 @@ def pre_flight():
 def start_server(cfg):
     """Spawn the Flask server under pythonw (no window). Returns the Popen."""
     log_file = os.path.join(LOG_DIR, f"capsstream_{datetime.now():%Y%m%d}.log")
-    creationflags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+    creationflags = CREATE_NO_WINDOW
     log_handle = open(log_file, "a", encoding="utf-8", buffering=1)
     log("Spawning server process (pythonw app.py)")
     env = dict(os.environ)
@@ -253,6 +306,7 @@ def start_server(cfg):
         stdout=log_handle,
         stderr=subprocess.STDOUT,
         creationflags=creationflags,
+        startupinfo=silent_startupinfo(),
     )
     return proc
 
@@ -457,6 +511,7 @@ def launch_app_window(cfg, url):
                         [exe, f"--profile-directory={pwa.get('profile', 'Default')}",
                          f"--app-id={pwa['app_id']}", "--start-maximized"],
                         creationflags=creationflags,
+                        startupinfo=silent_startupinfo(),
                     )
         if pwa:
             return None
@@ -472,13 +527,14 @@ def launch_app_window(cfg, url):
 
     os.makedirs(APP_PROFILE_DIR, exist_ok=True)
     log(f"Launching standalone app window for {url} ({os.path.basename(exe)})")
-    creationflags = 0x08000000 if os.name == "nt" else 0
+    creationflags = CREATE_NO_WINDOW
     return subprocess.Popen(
         [exe, f"--app={url}", "--user-data-dir=" + APP_PROFILE_DIR,
          "--no-first-run", "--no-default-browser-check", "--disable-extensions",
          "--autoplay-policy=no-user-gesture-required",
          "--start-maximized"],
         creationflags=creationflags,
+        startupinfo=silent_startupinfo(),
     )
 
 
@@ -488,6 +544,8 @@ def kill_tree(pid):
         subprocess.run(
             ["taskkill", "/PID", str(pid), "/T", "/F"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=CREATE_NO_WINDOW,
+            startupinfo=silent_startupinfo(),
         )
         log(f"Killed process tree for PID {pid}")
     except Exception as e:
@@ -624,10 +682,20 @@ def main():
             is_lan = raw_host in ("0.0.0.0", "::")
             restart_label = f"Serving on LAN: {lan_url} (Local: {url})" if is_lan else f"Serving at {url}"
             log(f"Server restarted successfully — {restart_label}")
-            send_toast("CapsStream Ready", f"Server restarted: {restart_label}")
+            actions = [
+                {"content": "Open CapsStream", "arguments": url, "activationType": "protocol"},
+            ]
+            if is_lan and lan_url and lan_url != url:
+                actions.append({"content": "Open LAN Stream", "arguments": lan_url, "activationType": "protocol"})
+            actions.append({"content": "Dismiss", "arguments": "dismiss", "activationType": "system"})
+            send_toast("CapsStream Ready", f"Server restarted: {restart_label}", actions=actions, launch_url=url)
         else:
             log("Server failed to respond after restart")
-            send_toast("CapsStream Error", "Server failed to respond after restart")
+            actions = [
+                {"content": "View Logs", "arguments": pathlib.Path(LOG_DIR).as_uri(), "activationType": "protocol"},
+                {"content": "Dismiss", "arguments": "dismiss", "activationType": "system"},
+            ]
+            send_toast("CapsStream Error", "Server failed to respond after restart", actions=actions)
 
     def do_exit():
         log("Clean exit requested via tray")
@@ -657,9 +725,17 @@ def main():
     is_lan = raw_host in ("0.0.0.0", "::")
     serving_label = f"Serving on LAN: {lan_url} (Local: {url})" if is_lan else f"Serving at {url}"
 
+    std_actions = [
+        {"content": "Open CapsStream", "arguments": url, "activationType": "protocol"},
+    ]
+    if is_lan and lan_url and lan_url != url:
+        std_actions.append({"content": "Open LAN Stream", "arguments": lan_url, "activationType": "protocol"})
+    std_actions.append({"content": "Dismiss", "arguments": "dismiss", "activationType": "system"})
+
     if not cfg.get("launch_browser_on_start", True):
         log("launch_browser_on_start is disabled — server left running headless")
-        send_toast("CapsStream is running", f"{serving_label} (headless mode)")
+        # Temporarily disabled per user preference:
+        # send_toast("CapsStream is running", f"{serving_label} (headless mode)", actions=std_actions, launch_url=url)
         log("Launcher running in background tray mode (stop it via tray icon or Task Manager)")
 
     window_already_open = is_capsstream_window_visible(url)
@@ -671,7 +747,8 @@ def main():
             bring_window_to_foreground(find_capsstream_window(url))
         else:
             browser_state["proc"] = launch_app_window(cfg, url)
-            send_toast("CapsStream is running", serving_label)
+            # Temporarily disabled per user preference:
+            # send_toast("CapsStream is running", serving_label, actions=std_actions, launch_url=url)
             log(f"CapsStream window launched for {url} (LAN URL: {lan_url})")
 
     # Initial grace period for window to render / reload and be visible
@@ -705,7 +782,16 @@ def main():
 
             if not is_visible and not notified_background:
                 log("CapsStream window closed — continuing in background system tray mode")
-                send_toast("CapsStream Running in Tray", "CapsStream is still running. Right-click the tray icon to reopen or exit.")
+                tray_actions = [
+                    {"content": "Open CapsStream", "arguments": url, "activationType": "protocol"},
+                    {"content": "Dismiss", "arguments": "dismiss", "activationType": "system"},
+                ]
+                send_toast(
+                    "CapsStream Running in Tray",
+                    "CapsStream is still running. Right-click the tray icon to reopen or exit.",
+                    actions=tray_actions,
+                    launch_url=url,
+                )
                 notified_background = True
             elif is_visible:
                 notified_background = False
@@ -728,7 +814,10 @@ def main():
             tray.stop()
         if server is not None and server.poll() is None:
             kill_tree(server.pid)
-            send_toast("CapsStream stopped", "Server shut down cleanly")
+            stop_actions = [
+                {"content": "Dismiss", "arguments": "dismiss", "activationType": "system"},
+            ]
+            send_toast("CapsStream stopped", "Server shut down cleanly", actions=stop_actions)
         log("Launcher exiting")
 
 

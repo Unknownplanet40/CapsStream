@@ -311,6 +311,43 @@ class TestUtorrentHook(unittest.TestCase):
         self.assertIn("CapsStream Request", decoded_ps)
         self.assertIn("Movie completed", decoded_ps)
 
+    @patch("backend.utorrent_hook._should_suppress_notification", return_value=False)
+    @patch("backend.utorrent_hook.load_requests")
+    @patch("backend.utorrent_hook.save_requests")
+    @patch("backend.utorrent_hook.show_windows_notification")
+    @patch("backend.utorrent_hook.trigger_server_sync", return_value=True)
+    def test_notification_actions_shown_when_server_live(self, mock_sync, mock_notify, mock_save, mock_load, mock_suppress):
+        mock_load.return_value = [dict(r) for r in self.sample_requests]
+        res = process_utorrent_event(
+            torrent_name="Runner.2026.1080p.WEBRip.x264-GRP",
+            state=11  # Finished
+        )
+        self.assertTrue(res["ok"])
+        mock_notify.assert_called_once()
+        _, kwargs = mock_notify.call_args
+        self.assertIsNotNone(kwargs.get("actions"))
+        action_names = [a.get("content") for a in kwargs["actions"]]
+        self.assertIn("Watch Now", action_names)
+        self.assertIn("Dismiss", action_names)
+        self.assertEqual(kwargs.get("launch_url"), "http://127.0.0.1:8700/")
+
+    @patch("backend.utorrent_hook._should_suppress_notification", return_value=False)
+    @patch("backend.utorrent_hook.load_requests")
+    @patch("backend.utorrent_hook.save_requests")
+    @patch("backend.utorrent_hook.show_windows_notification")
+    @patch("backend.utorrent_hook.trigger_server_sync", return_value=False)
+    def test_notification_actions_hidden_when_server_closed(self, mock_sync, mock_notify, mock_save, mock_load, mock_suppress):
+        mock_load.return_value = [dict(r) for r in self.sample_requests]
+        res = process_utorrent_event(
+            torrent_name="Runner.2026.1080p.WEBRip.x264-GRP",
+            state=11  # Finished
+        )
+        self.assertTrue(res["ok"])
+        mock_notify.assert_called_once()
+        _, kwargs = mock_notify.call_args
+        self.assertIsNone(kwargs.get("actions"))
+        self.assertIsNone(kwargs.get("launch_url"))
+
 
 if __name__ == "__main__":
     unittest.main()

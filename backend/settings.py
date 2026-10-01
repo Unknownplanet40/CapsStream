@@ -7,7 +7,7 @@ import subprocess
 
 from dotenv import load_dotenv
 
-from backend.proc_utils import CREATE_NO_WINDOW
+from backend.proc_utils import CREATE_NO_WINDOW, silent_startupinfo, silent_kwargs
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
 ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
@@ -191,14 +191,21 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def set_file_hidden(path, hide=True):
-    """Set (+h +s) or remove (-h -s) Windows hidden and system attributes on a file/directory."""
+    """Set (+h +s) or remove (-h -s) Windows hidden and system attributes on a file/directory natively using Win32 API."""
     if not os.path.exists(path):
         return
     try:
         if os.name == "nt":
-            cmd = f'attrib {"+h +s" if hide else "-h -s"} "{path}"'
-            subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           creationflags=CREATE_NO_WINDOW)
+            FILE_ATTRIBUTE_HIDDEN = 0x02
+            FILE_ATTRIBUTE_SYSTEM = 0x04
+            abs_p = os.path.abspath(path)
+            attrs = ctypes.windll.kernel32.GetFileAttributesW(abs_p)
+            if attrs != -1 and attrs != 0xFFFFFFFF:
+                if hide:
+                    attrs |= (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)
+                else:
+                    attrs &= ~(FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)
+                ctypes.windll.kernel32.SetFileAttributesW(abs_p, attrs)
     except Exception as e:
         print(f"[Settings] Error setting hidden attribute on {path}: {e}")
 
@@ -214,17 +221,14 @@ def apply_system_file_hiding():
             for entry in os.listdir(ROOT_DIR):
                 full_path = os.path.join(ROOT_DIR, entry)
                 if should_hide and entry.lower() not in exempt_names:
-                    subprocess.run(f'attrib +h +s "{full_path}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   creationflags=CREATE_NO_WINDOW)
+                    set_file_hidden(full_path, hide=True)
                 else:
-                    subprocess.run(f'attrib -h -s "{full_path}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   creationflags=CREATE_NO_WINDOW)
+                    set_file_hidden(full_path, hide=False)
 
             # Ensure start.bat is explicitly unhidden (-h -s)
             start_bat = os.path.join(ROOT_DIR, "start.bat")
             if os.path.exists(start_bat):
-                subprocess.run(f'attrib -h -s "{start_bat}"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                               creationflags=CREATE_NO_WINDOW)
+                set_file_hidden(start_bat, hide=False)
 
         print(f"[Settings] System file hiding updated (hide_system_files={should_hide})")
     except Exception as e:
@@ -351,8 +355,11 @@ def browse_folder_dialog():
                 '$dialog.Description = "Select Media Folder"; '
                 'if ($dialog.ShowDialog() -eq "OK") { Write-Output $dialog.SelectedPath }'
             )
-            res = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-                                 creationflags=CREATE_NO_WINDOW)
+            res = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps_cmd],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+                **silent_kwargs(),
+            )
             out = res.stdout.strip()
             if out:
                 selected_path = out
@@ -690,25 +697,29 @@ def launch_browser():
     if browser_choice == "edge":
         for path in edge_paths:
             if os.path.exists(path):
-                subprocess.Popen([path, f"--app={url}", "--start-maximized"])
+                subprocess.Popen([path, f"--app={url}", "--start-maximized"], **silent_kwargs())
                 print(f"[Launcher] Opened Microsoft Edge in standalone app mode ({url})")
                 return
         if os.name == "nt":
-            subprocess.Popen(f'start msedge --app={url} --start-maximized', shell=True,
-                             creationflags=CREATE_NO_WINDOW)
-            print(f"[Launcher] Launched msedge ({url})")
+            try:
+                os.startfile(url)
+            except Exception:
+                webbrowser.open(url)
+            print(f"[Launcher] Launched Edge / default browser ({url})")
             return
 
     elif browser_choice == "chrome":
         for path in chrome_paths:
             if os.path.exists(path):
-                subprocess.Popen([path, f"--app={url}", "--start-maximized"])
+                subprocess.Popen([path, f"--app={url}", "--start-maximized"], **silent_kwargs())
                 print(f"[Launcher] Opened Google Chrome in standalone app mode ({url})")
                 return
         if os.name == "nt":
-            subprocess.Popen(f'start chrome --app={url} --start-maximized', shell=True,
-                             creationflags=CREATE_NO_WINDOW)
-            print(f"[Launcher] Launched chrome ({url})")
+            try:
+                os.startfile(url)
+            except Exception:
+                webbrowser.open(url)
+            print(f"[Launcher] Launched Chrome / default browser ({url})")
             return
 
     # Fallback to system default browser

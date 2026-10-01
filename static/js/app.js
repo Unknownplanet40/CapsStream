@@ -20300,6 +20300,15 @@ const RequestsPage = {
 
             <div class="requests-tab-actions">
               <button
+                class="btn-tab-action refresh-requests-btn"
+                @click="refreshRequests"
+                :disabled="isRefreshing"
+                title="Refresh requests to see updated status from automation"
+              >
+                <i :class="isRefreshing ? 'ph-bold ph-spinner ph-spin' : 'ph-bold ph-arrows-clockwise'"></i>
+                <span>{{ isRefreshing ? 'Refreshing...' : 'Refresh' }}</span>
+              </button>
+              <button
                 class="btn-tab-action sync-online-btn"
                 @click="syncOnline"
                 :disabled="isSyncingOnline"
@@ -20314,7 +20323,7 @@ const RequestsPage = {
                 :disabled="isSyncing"
                 title="Scan library to auto-detect if requested media has been added"
               >
-                <i :class="isSyncing ? 'ph-bold ph-spinner ph-spin' : 'ph-bold ph-arrows-clockwise'"></i>
+                <i :class="isSyncing ? 'ph-bold ph-spinner ph-spin' : 'ph-bold ph-magnifying-glass'"></i>
                 <span>Check Library</span>
               </button>
               <button
@@ -20510,7 +20519,7 @@ const RequestsPage = {
                       </span>
 
                       <!-- Movie Source Redirect Chip (Admin / Dev Mode - Movies only) -->
-                      <template v-if="(devMode || store.isAdmin) && (req.type === 'Movie' || (!req.type && !req.season))">
+                      <template v-if="(devMode || store.isAdmin) && (req.type === 'Movie' || (!req.type && !req.season)) && isDigitalReleased(req)">
                         <span class="req-meta-dot">•</span>
                         <button
                           type="button"
@@ -20707,7 +20716,7 @@ const RequestsPage = {
                 <div class="req-episode-utility-row">
                   <!-- Movie Source Redirect Button (Admin / Dev Mode - Movies only) -->
                   <button
-                    v-if="(devMode || store.isAdmin) && (req.type === 'Movie' || (!req.type && !req.season))"
+                    v-if="(devMode || store.isAdmin) && (req.type === 'Movie' || (!req.type && !req.season)) && isDigitalReleased(req)"
                     class="req-action-icon-btn req-btn-icon req-btn-movie-source"
                     :class="{ 'is-loading': loadingMovieSourceId === req.id }"
                     :disabled="loadingMovieSourceId === req.id"
@@ -21510,6 +21519,36 @@ const RequestsPage = {
       });
     }
 
+    function isDigitalReleased(req) {
+      if (!req) return false;
+      if (req.has_digital_release === false) return false;
+      if (req.has_digital_release === true) return true;
+      if (req.digital_status_label) {
+        const label = req.digital_status_label.toLowerCase();
+        if (label.includes("available")) return true;
+        if (
+          label.includes("theatrical") ||
+          label.includes("theaters") ||
+          label.includes("unreleased") ||
+          label.includes("no digital") ||
+          label.includes("digital:") ||
+          label.includes("unaired")
+        ) {
+          return false;
+        }
+      }
+      if (req.digital_release_date) {
+        try {
+          const relDate = new Date(req.digital_release_date.slice(0, 10));
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (relDate > today) return false;
+          return true;
+        } catch (e) {}
+      }
+      return true;
+    }
+
     function getCleanAdminNote(note) {
       if (!note || typeof note !== "string") return "";
       let clean = note.replace(/\[\s*uTorrent:[^\]]*\]/gi, "");
@@ -21541,6 +21580,27 @@ const RequestsPage = {
 
     const isSyncing = ref(false);
     const isSyncingOnline = ref(false);
+    const isRefreshing = ref(false);
+
+    async function refreshRequests() {
+      if (isRefreshing.value) return;
+      isRefreshing.value = true;
+      try {
+        const res = await API.get("/api/requests");
+        items.value = res.requests || [];
+        devMode.value = !!res.dev_mode;
+        onlineSynced.value = !!res.online_synced;
+        clientId.value = res.client_id || "";
+        if (typeof checkGlobalReadyOnDriveAlerts === "function") {
+          checkGlobalReadyOnDriveAlerts(items.value);
+        }
+        addToast("Requests refreshed", "info");
+      } catch (err) {
+        addToast(err.message || "Failed to refresh requests", "error");
+      } finally {
+        isRefreshing.value = false;
+      }
+    }
 
     async function syncOnline() {
       isSyncingOnline.value = true;
@@ -21668,7 +21728,7 @@ const RequestsPage = {
     const loadingMovieSourceId = ref(null);
 
     async function openMovieSource(req) {
-      if (!req || loadingMovieSourceId.value === req.id || (!devMode.value && !store.isAdmin)) return;
+      if (!req || !isDigitalReleased(req) || loadingMovieSourceId.value === req.id || (!devMode.value && !store.isAdmin)) return;
       loadingMovieSourceId.value = req.id;
       try {
         const params = new URLSearchParams();
@@ -21730,6 +21790,8 @@ const RequestsPage = {
       clientId,
       isSyncing,
       isSyncingOnline,
+      isRefreshing,
+      refreshRequests,
       syncOnline,
       syncLibrary,
       goToLibraryMedia,
@@ -21764,6 +21826,7 @@ const RequestsPage = {
       isProfileJoined,
       toggleMeToo,
       formatDigitalChip,
+      isDigitalReleased,
       getCleanAdminNote,
     };
   },

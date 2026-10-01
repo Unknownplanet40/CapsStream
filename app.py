@@ -571,10 +571,12 @@ def _port_owner_pid(port):
 
 def _process_cmdline(pid):
     try:
+        from backend.proc_utils import silent_startupinfo
         out = subprocess.run(
-            ["powershell", "-NoProfile", f"(Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\").CommandLine"],
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", f"(Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\").CommandLine"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+            startupinfo=silent_startupinfo(),
         ).stdout.strip()
         return out
     except Exception:

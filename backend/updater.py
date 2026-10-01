@@ -547,7 +547,20 @@ if launcher_pid and pid_alive(launcher_pid):
         if waited_l > 15:
             log(f"old launcher pid {launcher_pid} did not exit after 15s - terminating")
             try:
-                subprocess.run(["taskkill", "/PID", str(launcher_pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                si_kill = None
+                flags_kill = 0
+                if os.name == "nt":
+                    flags_kill = 0x08000000
+                    si_kill = subprocess.STARTUPINFO()
+                    si_kill.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    si_kill.wShowWindow = 0
+                subprocess.run(
+                    ["taskkill", "/PID", str(launcher_pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=flags_kill,
+                    startupinfo=si_kill,
+                )
             except Exception:
                 pass
             break
@@ -586,11 +599,21 @@ if not os.path.isfile(python_exe):
 launcher_script = os.path.join(root, "silent_launcher.py")
 
 try:
+    si_launch = None
+    flags_launch = 0
+    if os.name == "nt":
+        flags_launch = 0x08000000
+        si_launch = subprocess.STARTUPINFO()
+        si_launch.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si_launch.wShowWindow = 0
+
     if os.path.isfile(launcher_script):
         subprocess.Popen(
             [python_exe, launcher_script, "--restarted"],
             cwd=root,
             stdin=subprocess.DEVNULL,
+            creationflags=flags_launch,
+            startupinfo=si_launch,
             close_fds=True,
         )
         log("silent_launcher relaunched with --restarted (monitoring existing window and active log)")
@@ -607,6 +630,8 @@ try:
             stdout=out,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
+            creationflags=flags_launch,
+            startupinfo=si_launch,
         )
         log("server relaunched (startup output captured in " + today_log_name + ")")
 except Exception as e:
@@ -651,10 +676,17 @@ def spawn_restart_helper():
     if launcher_pid and launcher_pid.isdigit():
         cmd.append(str(launcher_pid))
 
+    si = None
+    if os.name == "nt":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0
+
     subprocess.Popen(
         cmd,
         cwd=BASE_DIR,
         creationflags=flags,
+        startupinfo=si,
         close_fds=True,
         stdin=subprocess.DEVNULL,
     )
