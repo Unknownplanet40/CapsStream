@@ -331,45 +331,66 @@ def test_api_key(provider, api_key="", url=None):
     return False, "Unknown provider"
 
 
+import threading
+
+_folder_dialog_lock = threading.Lock()
+
+
 def browse_folder_dialog():
     """
     Opens a native OS folder selection dialog using tkinter / PowerShell fallback.
     Returns the selected folder path string or None if cancelled.
     """
-    selected_path = None
+    if not _folder_dialog_lock.acquire(blocking=False):
+        # A folder dialog is already open — prevent stacking multiple dialogs
+        return None
+
     try:
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        selected_path = filedialog.askdirectory(title="Select Media Folder")
-        root.destroy()
-    except Exception as e:
-        print(f"[Settings] Tkinter folder dialog error: {e}")
-
-    if not selected_path and os.name == "nt":
+        selected_path = None
+        tkinter_succeeded = False
         try:
-            ps_cmd = (
-                'Add-Type -AssemblyName System.Windows.Forms; '
-                '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; '
-                '$dialog.Description = "Select Media Folder"; '
-                'if ($dialog.ShowDialog() -eq "OK") { Write-Output $dialog.SelectedPath }'
-            )
-            res = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps_cmd],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-                **silent_kwargs(),
-            )
-            out = res.stdout.strip()
-            if out:
-                selected_path = out
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            res = filedialog.askdirectory(title="Select Media Folder")
+            try:
+                root.destroy()
+            except Exception:
+                pass
+            tkinter_succeeded = True
+            if res:
+                selected_path = res
         except Exception as e:
-            print(f"[Settings] PowerShell folder dialog error: {e}")
+            print(f"[Settings] Tkinter folder dialog error: {e}")
 
-    if selected_path:
-        selected_path = os.path.normpath(selected_path).replace("\\", "/")
-    return selected_path
+        # Fallback to PowerShell ONLY if Tkinter crashed or failed to initialize
+        if not tkinter_succeeded and os.name == "nt":
+            try:
+                ps_cmd = (
+                    'Add-Type -AssemblyName System.Windows.Forms; '
+                    '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; '
+                    '$dialog.Description = "Select Media Folder"; '
+                    'if ($dialog.ShowDialog() -eq "OK") { Write-Output $dialog.SelectedPath }'
+                )
+                res = subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps_cmd],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+                    **silent_kwargs(),
+                )
+                out = res.stdout.strip()
+                if out:
+                    selected_path = out
+            except Exception as e:
+                print(f"[Settings] PowerShell folder dialog error: {e}")
+
+        if selected_path:
+            selected_path = os.path.normpath(selected_path).replace("\\", "/")
+        return selected_path
+    finally:
+        _folder_dialog_lock.release()
+
 
 
 def validate_media_paths(paths_list):

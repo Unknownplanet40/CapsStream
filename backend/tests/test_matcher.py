@@ -133,5 +133,20 @@ class TestMediaMatcher(unittest.TestCase):
             self.assertEqual(results[0]["tmdb_id"], 1396)
 
 
+    def test_backdrops_cache_capacity_bounding(self):
+        """Verify _BACKDROPS_CACHE is bounded by _BACKDROPS_CACHE_MAX and evicts cleanly."""
+        from backend.matcher import _BACKDROPS_CACHE, _put_backdrops_cache, _BACKDROPS_CACHE_MAX
+        _BACKDROPS_CACHE.clear()
+        try:
+            for i in range(_BACKDROPS_CACHE_MAX + 50):
+                _put_backdrops_cache((i, "movie"), [f"/path/{i}.jpg"])
+            self.assertLessEqual(len(_BACKDROPS_CACHE), _BACKDROPS_CACHE_MAX)
+            # The most recently inserted item should definitely be in cache
+            self.assertIn((_BACKDROPS_CACHE_MAX + 49, "movie"), _BACKDROPS_CACHE)
+        finally:
+            _BACKDROPS_CACHE.clear()
+
+
 if __name__ == "__main__":
     unittest.main()
+

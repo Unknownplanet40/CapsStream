@@ -184,6 +184,7 @@ def get_or_generate_segment(
             return seg_file
         return None
 
+    temp_file = None
     try:
         cfg = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["720p"])
         start_t = seg_index * SEGMENT_DURATION
@@ -320,6 +321,7 @@ def get_or_generate_segment(
 
         if os.path.isfile(temp_file) and os.path.getsize(temp_file) > 512:
             os.replace(temp_file, seg_file)
+            prune_hls_cache_if_needed()
             return seg_file
         else:
             if os.path.isfile(temp_file):
@@ -330,6 +332,11 @@ def get_or_generate_segment(
         print(f"[HLSTranscoder] Failed to generate segment {seg_index} ({quality}) for media {media_id}: {e}")
         return None
     finally:
+        if temp_file and os.path.isfile(temp_file):
+            try:
+                os.remove(temp_file)
+            except OSError:
+                pass
         with _GEN_LOCK:
             _ACTIVE_GENS.pop(gen_key, None)
             event.set()
@@ -345,34 +352,48 @@ def cleanup_hls_session(media_id: int):
             print(f"[HLSTranscoder] Cleanup error for media {media_id}: {e}")
 
 
-def prune_hls_cache_if_needed():
+_LAST_HLS_PRUNE_TIME = 0.0
+_HLS_PRUNE_LOCK = threading.Lock()
+
+
+def prune_hls_cache_if_needed(force: bool = False):
     """Ensure total HLS cache directory size stays within MAX_CACHE_BYTES."""
+    global _LAST_HLS_PRUNE_TIME
     if not os.path.isdir(HLS_CACHE_DIR):
         return
 
-    try:
-        entries = []
-        total_size = 0
-        for root, dirs, files in os.walk(HLS_CACHE_DIR):
-            for f in files:
-                fp = os.path.join(root, f)
-                try:
-                    sz = os.path.getsize(fp)
-                    mtime = os.path.getmtime(fp)
-                    total_size += sz
-                    entries.append((mtime, sz, fp))
-                except OSError:
-                    pass
+    now = time.time()
+    if not force and (now - _LAST_HLS_PRUNE_TIME < 60):
+        return
 
-        if total_size > MAX_CACHE_BYTES:
-            entries.sort(key=lambda x: x[0])  # Oldest first
-            for _, sz, fp in entries:
-                try:
-                    os.remove(fp)
-                    total_size -= sz
-                except OSError:
-                    pass
-                if total_size < (MAX_CACHE_BYTES * 0.7):
-                    break
-    except Exception as e:
-        print(f"[HLSTranscoder] Prune cache error: {e}")
+    with _HLS_PRUNE_LOCK:
+        if not force and (time.time() - _LAST_HLS_PRUNE_TIME < 60):
+            return
+        _LAST_HLS_PRUNE_TIME = time.time()
+
+        try:
+            entries = []
+            total_size = 0
+            for root, dirs, files in os.walk(HLS_CACHE_DIR):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    try:
+                        sz = os.path.getsize(fp)
+                        mtime = os.path.getmtime(fp)
+                        total_size += sz
+                        entries.append((mtime, sz, fp))
+                    except OSError:
+                        pass
+
+            if total_size > MAX_CACHE_BYTES:
+                entries.sort(key=lambda x: x[0])  # Oldest first
+                for _, sz, fp in entries:
+                    try:
+                        os.remove(fp)
+                        total_size -= sz
+                    except OSError:
+                        pass
+                    if total_size < (MAX_CACHE_BYTES * 0.7):
+                        break
+        except Exception as e:
+            print(f"[HLSTranscoder] Prune cache error: {e}")

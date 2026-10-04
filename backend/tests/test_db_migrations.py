@@ -9,6 +9,7 @@ import sys
 import sqlite3
 import unittest
 import tempfile
+from unittest.mock import MagicMock
 
 from backend.tests import create_isolated_test_db
 from backend.db.connection import get_conn, release_conn
@@ -170,6 +171,44 @@ class TestDatabaseMigrations(unittest.TestCase):
         prof = get_all_profiles()
         p = next(x for x in prof if x["id"] == pid)
         self.assertEqual(p["default_speed"], 1.5)
+
+    def test_release_conn_rolls_back_on_error(self):
+        """Verify release_conn rolls back the transaction when exc is not None."""
+        from flask import Flask, g
+        from backend.db.connection import release_conn
+
+        app = Flask(__name__)
+        with app.app_context():
+            mock_raw = MagicMock()
+            mock_proxy = MagicMock()
+            object.__setattr__(mock_proxy, "_conn", mock_raw)
+            g._db_conn = mock_proxy
+
+            release_conn(exc=RuntimeError("something went wrong"))
+
+            mock_raw.rollback.assert_called_once()
+            mock_raw.commit.assert_not_called()
+            mock_raw.close.assert_called_once()
+            self.assertIsNone(getattr(g, "_db_conn", None))
+
+    def test_release_conn_commits_on_success(self):
+        """Verify release_conn commits the transaction when exc is None."""
+        from flask import Flask, g
+        from backend.db.connection import release_conn
+
+        app = Flask(__name__)
+        with app.app_context():
+            mock_raw = MagicMock()
+            mock_proxy = MagicMock()
+            object.__setattr__(mock_proxy, "_conn", mock_raw)
+            g._db_conn = mock_proxy
+
+            release_conn(exc=None)
+
+            mock_raw.commit.assert_called_once()
+            mock_raw.rollback.assert_not_called()
+            mock_raw.close.assert_called_once()
+            self.assertIsNone(getattr(g, "_db_conn", None))
 
 
 if __name__ == "__main__":

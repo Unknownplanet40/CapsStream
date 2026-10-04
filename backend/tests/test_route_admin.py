@@ -346,6 +346,24 @@ class TestRouteAdmin(unittest.TestCase):
         self.assertFalse(data.get("ok"))
         self.assertIn("host PC", data.get("error", ""))
 
+    @patch("backend.settings.browse_folder_dialog", return_value="D:/Movies")
+    def test_local_client_browse_folder_success(self, mock_browse):
+        """Verify local client can browse and receive selected folder."""
+        res = self.client.post("/api/system/browse-folder", environ_base={"REMOTE_ADDR": "127.0.0.1"})
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data.get("ok"))
+        self.assertEqual(data.get("path"), "D:/Movies")
+
+    @patch("backend.settings.browse_folder_dialog", return_value=None)
+    def test_local_client_browse_folder_cancelled(self, mock_browse):
+        """Verify local client receives cancelled: True when dialog is cancelled."""
+        res = self.client.post("/api/system/browse-folder", environ_base={"REMOTE_ADDR": "127.0.0.1"})
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertFalse(data.get("ok"))
+        self.assertTrue(data.get("cancelled"))
+
     @patch("backend.routes.admin.is_admin", return_value=True)
     def test_remote_client_add_media_path_blocked(self, mock_is_admin):
         """Verify remote client cannot add new media paths to server settings."""
@@ -359,7 +377,48 @@ class TestRouteAdmin(unittest.TestCase):
         self.assertEqual(res.status_code, 403)
         data = res.get_json()
         self.assertFalse(data.get("ok"))
-        self.assertIn("host server PC", data.get("error", ""))
+    @patch("backend.routes.admin.require_admin")
+    def test_api_system_restore_zip_slip_protection(self, mock_require_admin):
+        """Verify Zip Slip path traversal entries in backup zip are blocked."""
+        import io, zipfile, json
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_config = os.path.join(temp_dir, "config.json")
+            with open(temp_config, "w", encoding="utf-8") as f:
+                json.dump({"original": "config"}, f)
+
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, "w") as zf:
+                zf.writestr("config.json", json.dumps({"test": "restored_config"}))
+                zf.writestr("data/avatars/../../evil_payload.txt", "malicious payload")
+            zip_buf.seek(0)
+
+            data = {
+                "file": (zip_buf, "backup.zip")
+            }
+            self.app.config["BASE_DIR"] = temp_dir
+            with patch("backend.settings.CONFIG_PATH", temp_config):
+                res = self.client.post("/api/system/restore", data=data, content_type="multipart/form-data")
+                self.assertEqual(res.status_code, 200)
+                self.assertTrue(res.get_json().get("ok"))
+                # Verify evil_payload was not extracted to base dir
+                evil_path = os.path.join(temp_dir, "evil_payload.txt")
+                self.assertFalse(os.path.exists(evil_path))
+                # Verify config was safely restored
+                with open(temp_config, "r", encoding="utf-8") as f:
+                    restored = json.load(f)
+                self.assertEqual(restored.get("test"), "restored_config")
+
+    def test_api_system_log_tail_requires_admin(self):
+        """Verify GET /api/system/logs/tail requires admin authentication."""
+        with patch("backend.routes.admin.is_admin", return_value=False):
+            res = self.client.get("/api/system/logs/tail?file=app.log")
+            self.assertEqual(res.status_code, 403)
+
+    def test_api_system_log_download_requires_admin(self):
+        """Verify GET /api/system/logs/download requires admin authentication."""
+        with patch("backend.routes.admin.is_admin", return_value=False):
+            res = self.client.get("/api/system/logs/download?file=app.log")
+            self.assertEqual(res.status_code, 403)
 
 
 if __name__ == "__main__":

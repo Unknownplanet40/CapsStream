@@ -386,6 +386,7 @@ def api_system_logs():
 
 @admin_bp.route("/api/system/logs/tail", methods=["GET"])
 def api_system_log_tail():
+    require_admin()
     log_dir = _get_log_dir()
     fp = _safe_log_path(request.args.get("file") or "", log_dir)
     if not fp:
@@ -433,6 +434,7 @@ def api_system_log_tail():
 
 @admin_bp.route("/api/system/logs/download", methods=["GET"])
 def api_system_log_download():
+    require_admin()
     log_dir = _get_log_dir()
     fp = _safe_log_path(request.args.get("file") or "", log_dir)
     if not fp or not os.path.isfile(fp):
@@ -548,7 +550,9 @@ def api_system_backup():
 def api_system_restore():
     require_admin()
     import zipfile
-    from backend.settings import CONFIG_PATH
+    import tempfile
+    from backend import settings
+    config_path = getattr(settings, "CONFIG_PATH", os.path.join(current_app.config["BASE_DIR"], "config.json"))
     BASE_DIR = current_app.config["BASE_DIR"]
 
     file = request.files.get("file")
@@ -559,19 +563,29 @@ def api_system_restore():
     restore_db = False
     staged_db = None
 
+    tmp_fd, tmp_zip = tempfile.mkstemp(suffix=".zip")
+    os.close(tmp_fd)
     try:
-        file.save(file.filename and os.path.join(BASE_DIR, "_restore_tmp.zip"))
-        tmp_zip = os.path.join(BASE_DIR, "_restore_tmp.zip")
+        file.save(tmp_zip)
         with zipfile.ZipFile(tmp_zip, "r") as zf:
             names = zf.namelist()
             for n in names:
-                base = os.path.basename(n)
+                clean_n = n.replace("\\", "/")
+                # Reject path traversal, absolute paths, and drive specs
+                if clean_n.startswith("/") or ":" in clean_n or ".." in clean_n.split("/"):
+                    continue
+
+                base = os.path.basename(clean_n)
+                if not base:
+                    continue
+
                 if base == "config.json" and not restore_cfg:
                     pre_dir = os.path.join(BASE_DIR, "data", "pre_restore")
                     os.makedirs(pre_dir, exist_ok=True)
-                    if os.path.isfile(CONFIG_PATH):
-                        shutil.copy2(CONFIG_PATH, os.path.join(pre_dir, f"config.{time.strftime('%Y%m%d-%H%M%S')}.json"))
-                    zf.extract(n, BASE_DIR)
+                    if os.path.isfile(config_path):
+                        shutil.copy2(config_path, os.path.join(pre_dir, f"config.{time.strftime('%Y%m%d-%H%M%S')}.json"))
+                    with zf.open(n) as src, open(config_path, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
                     restore_cfg = True
                 elif base == "capsstream.db" and not restore_db:
                     from backend.updater import PENDING_DIR, _write_pending_manifest
@@ -582,13 +596,22 @@ def api_system_restore():
                         shutil.copyfileobj(src, dst)
                     staged_db = rel
                     restore_db = True
-                elif n.startswith("data/avatars/") and not n.endswith("/"):
-                    zf.extract(n, BASE_DIR)
-        os.remove(tmp_zip)
+                elif clean_n.startswith("data/avatars/") and not clean_n.endswith("/"):
+                    # Confine avatar extraction strictly to data/avatars using sanitized basename
+                    safe_avatar_dst = os.path.join(BASE_DIR, "data", "avatars", base)
+                    os.makedirs(os.path.dirname(safe_avatar_dst), exist_ok=True)
+                    with zf.open(n) as src, open(safe_avatar_dst, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
     except zipfile.BadZipFile:
         return jsonify({"error": "That file is not a valid backup zip"}), 400
     except Exception as e:
         return jsonify({"error": f"Restore failed: {e}"}), 500
+    finally:
+        try:
+            if os.path.isfile(tmp_zip):
+                os.remove(tmp_zip)
+        except OSError:
+            pass
 
     if staged_db:
         from backend.updater import _write_pending_manifest

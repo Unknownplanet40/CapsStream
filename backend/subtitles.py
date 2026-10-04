@@ -8,9 +8,13 @@ import urllib.parse
 import base64
 import zipfile
 import io
+import shutil
+import logging
 
 from backend.proc_utils import CREATE_NO_WINDOW
 from backend.utils.paths import BASE_DIR, FFPROBE_BIN, FFMPEG_BIN
+
+logger = logging.getLogger("subtitles")
 
 SUB_CACHE_DIR = os.path.join(BASE_DIR, "data", "metadata", "subtitles")
 
@@ -76,12 +80,183 @@ def _dir_has_other_videos(dir_path, current_video_path, video_extensions):
     return False
 
 
+
+def promote_subs_to_media_folder(video_path: str, max_subs: int = 5):
+    """
+    If no subtitle file exists directly beside the media file in its folder,
+    inspect any Subs/ or Subtitles/ subfolder, extract prioritized companion
+    subtitles (English standard -> HI English -> other languages), and copy them
+    directly into the movie folder beside the media file using standard naming.
+
+    Returns the list of created subtitle file paths.
+    """
+    if not video_path or not os.path.isfile(video_path):
+        return []
+
+    video_dir = os.path.dirname(os.path.abspath(video_path))
+    if not os.path.isdir(video_dir):
+        return []
+
+    video_file = os.path.basename(video_path)
+    video_stem, video_ext = os.path.splitext(video_file)
+    video_stem_lower = video_stem.lower()
+    subtitle_exts = {".srt", ".vtt", ".ass", ".sub"}
+
+    try:
+        dir_entries = os.listdir(video_dir)
+    except OSError:
+        return []
+
+    # Detect other video files in directory
+    video_extensions = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv", ".m4v", ".ts"}
+    video_files_in_dir = [
+        f for f in dir_entries
+        if os.path.splitext(f)[1].lower() in video_extensions
+        and not f.lower().endswith(("-sample", "_sample", ".sample"))
+        and "sample" not in f.lower()
+    ]
+    has_multiple_videos = len(video_files_in_dir) > 1
+
+    ep_match = re.search(r"(s\d+e\d+|\d+x\d+|e\d+)", video_stem_lower)
+    ep_token = ep_match.group(0) if ep_match else None
+
+    # 1. Check if a subtitle file already exists directly beside the media
+    has_sub_beside = False
+    for fname in dir_entries:
+        f_path = os.path.join(video_dir, fname)
+        if not os.path.isfile(f_path):
+            continue
+        f_stem, f_ext = os.path.splitext(fname)
+        if f_ext.lower() in subtitle_exts:
+            f_stem_lower = f_stem.lower()
+            if f_stem_lower.startswith(video_stem_lower) or video_stem_lower.startswith(f_stem_lower):
+                has_sub_beside = True
+                break
+            if not has_multiple_videos:
+                has_sub_beside = True
+                break
+            if ep_token and ep_token in f_stem_lower:
+                has_sub_beside = True
+                break
+
+    if has_sub_beside:
+        return []
+
+    # 2. Check for Subs / Subtitles subfolders
+    sub_dir_names = ["subs", "subtitles", "sub", "eng", "english"]
+    candidate_sub_dirs = []
+    for d in dir_entries:
+        dp = os.path.join(video_dir, d)
+        if os.path.isdir(dp) and d.lower() in sub_dir_names:
+            candidate_sub_dirs.append(dp)
+
+    # If none found in video_dir, check parent directory if video is in a nested folder (like CD1)
+    if not candidate_sub_dirs:
+        parent_dir = os.path.dirname(video_dir)
+        if parent_dir and parent_dir != video_dir and os.path.isdir(parent_dir):
+            try:
+                for d in os.listdir(parent_dir):
+                    dp = os.path.join(parent_dir, d)
+                    if os.path.isdir(dp) and d.lower() in sub_dir_names:
+                        candidate_sub_dirs.append(dp)
+            except OSError:
+                pass
+
+    if not candidate_sub_dirs:
+        return []
+
+    # 3. Collect subtitle files from candidate subfolders
+    found_sub_paths = []
+    for s_dir in candidate_sub_dirs:
+        try:
+            for root, _, files in os.walk(s_dir):
+                for f in files:
+                    _, f_ext = os.path.splitext(f)
+                    if f_ext.lower() in subtitle_exts:
+                        full_sub = os.path.join(root, f)
+                        try:
+                            if os.path.getsize(full_sub) < 10:
+                                continue
+                        except OSError:
+                            continue
+                        f_lower = f.lower()
+                        if not has_multiple_videos:
+                            found_sub_paths.append(full_sub)
+                        elif ep_token and ep_token in f_lower:
+                            found_sub_paths.append(full_sub)
+                        elif f_lower.startswith(video_stem_lower):
+                            found_sub_paths.append(full_sub)
+        except OSError:
+            pass
+
+    if not found_sub_paths:
+        return []
+
+    # 4. Sort and prioritize subtitles
+    from backend.organizer import parse_subtitle_details, build_subtitle_destination_path
+
+    parsed_subs = []
+    for sp in found_sub_paths:
+        details = parse_subtitle_details(sp, media_basename=video_stem)
+        parsed_subs.append((details["priority"], sp, details))
+
+    parsed_subs.sort(key=lambda x: (x[0], os.path.basename(x[1]).lower()))
+
+    # 5. Select unique language variants to copy
+    chosen_subs = []
+    seen_keys = set()
+
+    for priority, sp, details in parsed_subs:
+        lang = details.get("lang", "und")
+        is_hi = details.get("is_hi", False)
+        is_forced = details.get("is_forced", False)
+        key = (lang, is_hi, is_forced)
+
+        if key not in seen_keys:
+            seen_keys.add(key)
+            chosen_subs.append(sp)
+            if len(chosen_subs) >= max_subs:
+                break
+
+    if not chosen_subs and parsed_subs:
+        chosen_subs.append(parsed_subs[0][1])
+
+    # 6. Copy chosen subtitles beside the media file
+    promoted_paths = []
+    existing_destinations = set()
+
+    for sub_src in chosen_subs:
+        dest_path = build_subtitle_destination_path(sub_src, video_path, existing_destinations=existing_destinations)
+        if dest_path and not os.path.exists(dest_path):
+            try:
+                shutil.copy2(sub_src, dest_path)
+                promoted_paths.append(dest_path)
+                if sub_src.lower().endswith(".sub"):
+                    idx_src = os.path.splitext(sub_src)[0] + ".idx"
+                    idx_dst = os.path.splitext(dest_path)[0] + ".idx"
+                    if os.path.exists(idx_src) and not os.path.exists(idx_dst):
+                        shutil.copy2(idx_src, idx_dst)
+            except OSError as e:
+                logger.warning(f"Failed to copy subtitle {sub_src} to {dest_path}: {e}")
+
+    if promoted_paths:
+        print(f"[Subtitles] Promoted {len(promoted_paths)} subtitle(s) from Subs folder to movie folder {video_dir}: {[os.path.basename(p) for p in promoted_paths]}")
+
+    return promoted_paths
+
+
 def get_all_subtitles(video_path, media_id):
     """
     Returns unified list of external subtitles (strictly matched to video) and embedded subtitles.
     """
     if not os.path.isfile(video_path):
         return []
+
+    # Ensure companion subtitles from Subs/ subfolder are promoted to movie folder if none exist beside media
+    try:
+        promote_subs_to_media_folder(video_path)
+    except Exception as e:
+        print(f"[Subtitles] Note: Error promoting subs for {video_path}: {e}")
 
     sub_list = []
     video_dir = os.path.dirname(video_path)
@@ -482,9 +657,40 @@ def search_online_subtitles(title, imdb_id=None, season=None, episode=None, lang
     return results[:15]
 
 
+def _is_safe_subtitle_download_url(url: str) -> bool:
+    """Validate external download URL to prevent SSRF against loopback or private networks."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        host = (parsed.hostname or "").lower()
+        if not host:
+            return False
+        if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".local") or host.endswith(".internal"):
+            return False
+        import socket
+        import ipaddress
+        for res in socket.getaddrinfo(host, None):
+            ip = ipaddress.ip_address(res[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def download_online_subtitle(slug, media_id):
+    safe_slug = re.sub(r"[^a-zA-Z0-9_\-]", "", str(slug or "")).strip()
+    if not safe_slug:
+        return None
+
+    try:
+        clean_mid = int(media_id)
+    except (TypeError, ValueError):
+        return None
+
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    url = f"https://yts-subs.com/subtitles/{slug}"
+    url = f"https://yts-subs.com/subtitles/{safe_slug}"
     try:
         r = requests.get(url, headers=headers, timeout=10)
         if r.status_code != 200:
@@ -497,13 +703,20 @@ def download_online_subtitle(slug, media_id):
         b64_url = m.group(1)
         dl_url = base64.b64decode(b64_url).decode("utf-8")
 
+        if not _is_safe_subtitle_download_url(dl_url):
+            logger.warning(f"[Subtitles] Blocked unsafe subtitle download URL: {dl_url}")
+            return None
+
         zip_resp = requests.get(dl_url, headers=headers, timeout=10)
         if zip_resp.status_code != 200:
             return None
 
-        os.makedirs(SUB_CACHE_DIR, exist_ok=True)
-        out_vtt_filename = f"online_{media_id}_{slug}.vtt"
-        out_vtt_path = os.path.join(SUB_CACHE_DIR, out_vtt_filename)
+        cache_dir = os.path.abspath(SUB_CACHE_DIR)
+        os.makedirs(cache_dir, exist_ok=True)
+        out_vtt_filename = f"online_{clean_mid}_{safe_slug}.vtt"
+        out_vtt_path = os.path.abspath(os.path.join(cache_dir, out_vtt_filename))
+        if os.path.commonpath([cache_dir, out_vtt_path]) != cache_dir:
+            return None
 
         with zipfile.ZipFile(io.BytesIO(zip_resp.content)) as z:
             for filename in z.namelist():
@@ -529,8 +742,8 @@ def download_online_subtitle(slug, media_id):
                         f.writelines(vtt_lines)
 
                     return {
-                        "label": f"{slug.replace('-', ' ').title()[:30]} (Online)",
-                        "url": f"/api/subtitles/{media_id}/{out_vtt_filename}",
+                        "label": f"{safe_slug.replace('-', ' ').title()[:30]} (Online)",
+                        "url": f"/api/subtitles/{clean_mid}/{out_vtt_filename}",
                         "language": "en",
                         "is_online": True
                     }

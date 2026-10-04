@@ -733,20 +733,20 @@ const PlayerPage = {
                       </div>
                     </div>
 
-                    <!-- 9. Play in Default Player (Desktop only) -->
+                    <!-- 9. Play in VLC / Default Player (Local Desktop only) -->
                     <div
-                      v-if="isDesktopDevice()"
+                      v-if="canUseExternalPlayer"
                       class="player-menu-nav-row"
                       @click="launchDefaultPlayer(); showQualityMenu = false"
                       id="player-menu-default-player"
-                      title="Open and play this media in your system's default media player (e.g. VLC, Windows Media Player)"
+                      :title="externalPlayerTooltip"
                     >
                       <div class="player-nav-row-left">
-                        <i class="ph-bold ph-arrow-square-out"></i>
-                        <span>Default Media Player</span>
+                        <i :class="hasVLC ? 'ph-bold ph-traffic-cone' : 'ph-bold ph-arrow-square-out'" :style="hasVLC ? 'color:#ff8800' : ''"></i>
+                        <span>{{ externalPlayerLabel }}</span>
                       </div>
                       <div class="player-nav-row-right">
-                        <span class="player-nav-value">VLC / Native</span>
+                        <span class="player-nav-value">{{ hasVLC ? 'Live Sync' : 'Native' }}</span>
                         <i class="ph ph-caret-right"></i>
                       </div>
                     </div>
@@ -4982,30 +4982,60 @@ const PlayerPage = {
       const targetId = selectedQualityMediaId.value || media.value?.id || route.params.id;
       if (!targetId) return;
       try {
-        if (typeof addToast === "function") addToast("Opening in default device player...", "info");
+        if (typeof addToast === "function") addToast("Opening in external player...", "info");
         if (videoRef.value && !videoRef.value.paused) {
           videoRef.value.pause();
         }
-        const res = await API.post(`/api/media/${targetId}/open-default`, {});
+        const isSeries = media.value?.type === "series" || media.value?.type === "anime" || !!media.value?.season;
+        const payload = isSeries ? { mode: "resume", start_media_id: targetId, season: media.value?.season } : {};
+        const res = await API.post(`/api/media/${targetId}/open-default`, payload);
         if (res && res.ok) {
-          if (res.method === "system") {
+          if (res.method === "vlc") {
+            const count = res.items_count || 1;
+            const countStr = count > 1 ? ` (${count} episodes queued)` : "";
+            if (typeof addToast === "function") addToast(`Playing in VLC with live progress sync${countStr}`, "success");
+            if (typeof window.startVlcStatusPolling === "function") {
+              window.startVlcStatusPolling(true);
+            }
+          } else if (res.method === "system") {
             if (typeof addToast === "function") addToast(`Playing in default device player (${res.file || 'video'})`, "success");
           } else if (res.stream_url) {
             if (typeof addToast === "function") addToast("Launching stream in your device player...", "success");
             const a = document.createElement("a");
             a.href = res.stream_url;
-            a.download = res.filename || "stream.m3u";
+            a.download = res.filename || "stream.m3u8";
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
           }
         } else {
-          if (typeof addToast === "function") addToast((res && res.error) || "Could not launch default player", "warning");
+          if (typeof addToast === "function") addToast((res && res.error) || "Could not launch external player", "warning");
         }
       } catch (err) {
-        if (typeof addToast === "function") addToast(err.message || "Failed to open default player", "error");
+        if (typeof addToast === "function") addToast(err.message || "Failed to open external player", "error");
       }
     }
+
+    const canUseExternalPlayer = computed(() => {
+      if (!isDesktopDevice()) return false;
+      const ext = media.value?.external_player || window.externalPlayerStatus;
+      return ext ? !!ext.is_local : false;
+    });
+
+    const hasVLC = computed(() => {
+      const ext = media.value?.external_player || window.externalPlayerStatus;
+      return ext ? !!ext.has_vlc : false;
+    });
+
+    const externalPlayerLabel = computed(() => {
+      return hasVLC.value ? "Play in VLC" : "Default Media Player";
+    });
+
+    const externalPlayerTooltip = computed(() => {
+      return hasVLC.value
+        ? "Open and play in VLC Media Player (Note: Progress tracking is periodic and may be approximate)"
+        : "Open and play in system default player";
+    });
 
     const sleepTimerDisplayStatus = computed(() => {
       if (!sleepTimer.active) return "Off";
@@ -7453,6 +7483,10 @@ const PlayerPage = {
       showDriveOfflineScreen,
       launchDefaultPlayer,
       isDesktopDevice,
+      canUseExternalPlayer,
+      hasVLC,
+      externalPlayerLabel,
+      externalPlayerTooltip,
       // Watch Together
       wtRoom,
       wtShowModal,

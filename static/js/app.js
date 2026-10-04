@@ -1571,50 +1571,393 @@ function isDesktopClient() {
   return !/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
 }
 
-async function openInDefaultPlayer(itemOrId) {
+function _escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+window.externalPlayerStatus = {
+  is_local: false,
+  has_vlc: false,
+  player_name: "Default Player",
+  button_label: "Play in Default Player",
+  tooltip: "Play using default device player"
+};
+
+async function initExternalPlayerStatus() {
+  try {
+    if (typeof API !== "undefined" && API.get) {
+      const res = await API.get("/api/media/external-player-status");
+      if (res && res.ok) {
+        window.externalPlayerStatus = res;
+      }
+    }
+  } catch (e) {}
+}
+initExternalPlayerStatus();
+
+function _formatVlcTime(sec) {
+  if (!sec || sec < 0) return "0:00";
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+const vlcSyncState = {
+  active: false,
+  media_id: null,
+  title: "",
+  time: 0,
+  duration: 0,
+  percent: 0,
+  state: "idle",
+  wasActive: false,
+  timer: null,
+};
+
+function renderVlcSyncPill() {
+  let pill = document.getElementById("vlc-live-sync-pill");
+  if (!vlcSyncState.active) {
+    if (pill) {
+      pill.classList.add("fade-out");
+      setTimeout(() => { if (pill && pill.parentNode) pill.remove(); }, 300);
+    }
+    return;
+  }
+
+  if (!pill) {
+    pill = document.createElement("div");
+    pill.id = "vlc-live-sync-pill";
+    pill.className = "vlc-live-sync-pill";
+    pill.innerHTML = `
+      <div class="vlc-pill-inner">
+        <div class="vlc-pill-left">
+          <div class="vlc-live-pulse-dot"></div>
+          <i class="ph-bold ph-traffic-cone vlc-pill-traffic-cone"></i>
+        </div>
+        <div class="vlc-pill-content">
+          <div class="vlc-pill-top">
+            <span class="vlc-pill-title"></span>
+            <span class="vlc-pill-tag">Live Syncing</span>
+          </div>
+          <div class="vlc-pill-bottom">
+            <span class="vlc-pill-time"></span>
+            <span class="vlc-pill-pct"></span>
+          </div>
+          <div class="vlc-pill-progress-bg">
+            <div class="vlc-pill-progress-bar"></div>
+          </div>
+          <div class="vlc-pill-note">
+            <i class="ph-bold ph-info"></i> Tracking may be approximate
+          </div>
+        </div>
+      </div>
+    `;
+    pill.title = "VLC progress is synced periodically in the background and may be approximate";
+    document.body.appendChild(pill);
+  }
+
+  const timeStr = _formatVlcTime(vlcSyncState.time);
+  const durStr = _formatVlcTime(vlcSyncState.duration);
+  const isPaused = vlcSyncState.state === "paused";
+
+  const titleEl = pill.querySelector(".vlc-pill-title");
+  const tagEl = pill.querySelector(".vlc-pill-tag");
+  const timeEl = pill.querySelector(".vlc-pill-time");
+  const pctEl = pill.querySelector(".vlc-pill-pct");
+  const barEl = pill.querySelector(".vlc-pill-progress-bar");
+  const dotEl = pill.querySelector(".vlc-live-pulse-dot");
+
+  if (titleEl) {
+    const t = vlcSyncState.title || "Playing in VLC";
+    titleEl.textContent = t;
+    titleEl.title = t;
+  }
+  if (tagEl) tagEl.textContent = isPaused ? "Paused" : "Live Syncing";
+  if (timeEl) timeEl.textContent = `${timeStr} / ${durStr}`;
+  if (pctEl) pctEl.textContent = `${vlcSyncState.percent}%`;
+  if (barEl) barEl.style.width = `${vlcSyncState.percent}%`;
+  if (dotEl) {
+    if (isPaused) {
+      dotEl.classList.add("paused");
+    } else {
+      dotEl.classList.remove("paused");
+    }
+  }
+}
+
+async function pollVlcTrackerStatus() {
+  if (typeof API === "undefined" || !API.get) return;
+  try {
+    const res = await API.get("/api/media/vlc-tracker-status");
+    if (res && res.active) {
+      vlcSyncState.active = true;
+      vlcSyncState.wasActive = true;
+      vlcSyncState.media_id = res.media_id;
+      vlcSyncState.title = res.title || "Playing in VLC";
+      vlcSyncState.time = res.time || 0;
+      vlcSyncState.duration = res.duration || 0;
+      vlcSyncState.percent = res.percent || 0;
+      vlcSyncState.state = res.state || "playing";
+      vlcSyncState.pollCount = (vlcSyncState.pollCount || 0) + 1;
+      renderVlcSyncPill();
+
+      // Refresh Continue Watching in UI every ~7.5 seconds during active playback once past 5s
+      if (vlcSyncState.pollCount % 3 === 0 && vlcSyncState.time > 5) {
+        if (typeof window.refreshHomeRows === "function") {
+          window.refreshHomeRows(true);
+        }
+      }
+    } else {
+      if (vlcSyncState.wasActive) {
+        vlcSyncState.active = false;
+        vlcSyncState.wasActive = false;
+        vlcSyncState.pollCount = 0;
+        renderVlcSyncPill();
+        if (typeof addToast === "function") {
+          addToast(`✓ VLC playback recorded • Progress saved to your profile`, "success");
+        }
+        // Immediately refresh Continue Watching row on home page
+        if (typeof window.refreshHomeRows === "function") {
+          window.refreshHomeRows(true);
+        }
+      } else {
+        vlcSyncState.active = false;
+        renderVlcSyncPill();
+      }
+    }
+  } catch (err) {}
+}
+
+function startVlcStatusPolling(immediate = true) {
+  if (vlcSyncState.timer) clearInterval(vlcSyncState.timer);
+  if (immediate) pollVlcTrackerStatus();
+  vlcSyncState.timer = setInterval(pollVlcTrackerStatus, 2500);
+}
+window.startVlcStatusPolling = startVlcStatusPolling;
+window.pollVlcTrackerStatus = pollVlcTrackerStatus;
+
+// Initial check on page load in case VLC is already running
+setTimeout(() => pollVlcTrackerStatus(), 1500);
+
+function promptSeriesExternalPlayback(item, onSelect) {
+  const existing = document.getElementById("series-external-player-modal");
+  if (existing) existing.remove();
+
+  const title = item.title || "Series";
+  const sKeys = Object.keys(item.seasons || {});
+  const sNum = item.activeSeason || (sKeys.length ? sKeys[0] : 1);
+  const seasonEps = (item.seasons && item.seasons[sNum]) ? item.seasons[sNum].filter(e => e.is_local !== false && e.is_mounted !== false) : [];
+
+  const extStatus = item.external_player || window.externalPlayerStatus || {};
+  const hasVLC = extStatus.has_vlc || false;
+  const playerLabel = hasVLC ? "VLC" : "External Player";
+
+  let resumeEp = seasonEps.find(e => e.progress && !e.progress.completed && e.progress.position > 0);
+  if (!resumeEp) {
+    resumeEp = seasonEps.find(e => !e.progress || !e.progress.completed);
+  }
+  if (!resumeEp && seasonEps.length) {
+    resumeEp = seasonEps[0];
+  }
+
+  const resumeEpNum = resumeEp ? (resumeEp.episode || 1) : 1;
+  const resumeEpTitle = resumeEp ? (resumeEp.ep_title || `Episode ${resumeEpNum}`) : `Episode ${resumeEpNum}`;
+  const totalInSeason = seasonEps.length;
+  const hasMultipleSeasons = sKeys.length > 1;
+
+  let totalAllEps = 0;
+  if (hasMultipleSeasons && item.seasons) {
+    for (const k of sKeys) {
+      totalAllEps += (item.seasons[k] || []).filter(e => e.is_local !== false && e.is_mounted !== false).length;
+    }
+  }
+
+  const modal = document.createElement("div");
+  modal.id = "series-external-player-modal";
+  modal.className = "modal-backdrop series-external-player-backdrop";
+  modal.innerHTML = `
+    <div class="series-external-player-card">
+      <div class="series-external-player-header">
+        <div class="series-external-player-title-box">
+          <div class="series-external-player-icon ${hasVLC ? 'vlc' : ''}">
+            <i class="${hasVLC ? 'ph-bold ph-traffic-cone' : 'ph-bold ph-monitor-play'}"></i>
+          </div>
+          <div>
+            <h3>Play in ${playerLabel}</h3>
+            <span class="series-external-player-subtitle">${_escapeHtml(title)}${hasVLC ? ' • Live Progress Sync' : ''}</span>
+          </div>
+        </div>
+        <button class="series-external-player-close" aria-label="Close">
+          <i class="ph-bold ph-x"></i>
+        </button>
+      </div>
+
+      <div class="series-external-player-body">
+        <p class="series-external-player-hint">
+          ${hasVLC ? 'Choose how you would like to queue this series in VLC Media Player:' : 'Choose how you would like to queue this series in your media player:'}
+        </p>
+
+        <div class="series-external-player-options">
+          ${resumeEp ? `
+          <button class="series-player-opt-btn primary ${hasVLC ? 'vlc' : ''}" data-mode="resume" data-season="${sNum}" data-start-id="${resumeEp.id || ''}">
+            <div class="opt-icon"><i class="${hasVLC ? 'ph-bold ph-traffic-cone' : 'ph-bold ph-play-circle'}"></i></div>
+            <div class="opt-content">
+              <div class="opt-label">Resume from S${String(sNum).padStart(2, '0')}E${String(resumeEpNum).padStart(2, '0')} ${hasVLC ? 'in VLC' : ''}</div>
+              <div class="opt-title">${_escapeHtml(resumeEpTitle)}</div>
+              <div class="opt-sub">Queues from this episode to the end of Season ${sNum}</div>
+            </div>
+            <div class="opt-badge ${hasVLC ? 'vlc' : ''}">${hasVLC ? 'VLC Sync' : 'Resume'}</div>
+          </button>
+          ` : ''}
+
+          <button class="series-player-opt-btn" data-mode="season" data-season="${sNum}">
+            <div class="opt-icon"><i class="ph-bold ph-playlist"></i></div>
+            <div class="opt-content">
+              <div class="opt-label">Play Season ${sNum} in Full ${hasVLC ? 'in VLC' : ''}</div>
+              <div class="opt-title">All ${totalInSeason} Episodes (from Ep 1)</div>
+              <div class="opt-sub">Queues every episode of Season ${sNum} in order</div>
+            </div>
+          </button>
+
+          ${hasMultipleSeasons ? `
+          <button class="series-player-opt-btn" data-mode="all">
+            <div class="opt-icon"><i class="ph-bold ph-stack"></i></div>
+            <div class="opt-content">
+              <div class="opt-label">Play Entire Series ${hasVLC ? 'in VLC' : ''}</div>
+              <div class="opt-title">All Seasons (${totalAllEps} Episodes)</div>
+              <div class="opt-sub">Queues every season and episode from the beginning</div>
+            </div>
+          </button>
+          ` : ''}
+        </div>
+
+        <div class="series-player-notice">
+          <i class="ph-bold ph-info"></i>
+          <span><strong>Note:</strong> External player progress is synced periodically in the background. Recorded timestamps and Continue Watching positions may be approximate.</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  function cleanup() {
+    modal.classList.add("fade-out");
+    setTimeout(() => modal.remove(), 200);
+    document.removeEventListener("keydown", onKeyDown);
+  }
+
+  function onKeyDown(e) {
+    if (e.key === "Escape") cleanup();
+  }
+
+  modal.querySelector(".series-external-player-close").addEventListener("click", cleanup);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) cleanup();
+  });
+  document.addEventListener("keydown", onKeyDown);
+
+  modal.querySelectorAll(".series-player-opt-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.mode;
+      const season = btn.dataset.season ? parseInt(btn.dataset.season, 10) : undefined;
+      const startMediaId = btn.dataset.startId ? parseInt(btn.dataset.startId, 10) : undefined;
+      cleanup();
+      onSelect({ mode, season, start_media_id: startMediaId });
+    });
+  });
+
+  document.body.appendChild(modal);
+}
+
+async function openInDefaultPlayer(itemOrId, options = {}) {
   let targetId = null;
   let title = "Media";
+  let isSeriesObject = false;
+
   if (itemOrId && typeof itemOrId === "object") {
-    if (itemOrId.type === "movie" || itemOrId.file_path) {
+    title = itemOrId.title || itemOrId.ep_title || title;
+    // Check if it's an episode or a movie with direct file
+    if (itemOrId.season !== undefined && itemOrId.episode !== undefined && itemOrId.file_path) {
       targetId = itemOrId.id;
-    } else if (itemOrId.seasons) {
-      const sKeys = Object.keys(itemOrId.seasons || {});
-      const sNum = itemOrId.activeSeason || (sKeys.length ? sKeys[0] : 1);
-      const seasonEps = itemOrId.seasons[sNum] || [];
-      const ep = seasonEps.find(e => e.is_local !== false && e.is_mounted !== false);
-      if (ep) targetId = ep.id;
-      else if (itemOrId.id) targetId = itemOrId.id;
+    } else if (itemOrId.type === "movie" || (!itemOrId.seasons && itemOrId.file_path)) {
+      targetId = itemOrId.id;
+    } else if (itemOrId.seasons && Object.keys(itemOrId.seasons).length > 0) {
+      isSeriesObject = true;
+      targetId = itemOrId.id;
+      if (!targetId) {
+        const sKeys = Object.keys(itemOrId.seasons);
+        const sNum = itemOrId.activeSeason || (sKeys.length ? sKeys[0] : 1);
+        const seasonEps = itemOrId.seasons[sNum] || [];
+        const ep = seasonEps.find(e => e.is_local !== false && e.is_mounted !== false);
+        if (ep) targetId = ep.id;
+      }
     } else {
       targetId = itemOrId.id || itemOrId.media_id;
     }
-    title = itemOrId.title || itemOrId.ep_title || title;
   } else {
     targetId = itemOrId;
   }
+
   if (!targetId) {
     if (typeof addToast === "function") addToast("Could not find playable file for this title", "warning");
     return;
   }
+
+  // If this is a series object and caller did not specify mode, prompt user for resume vs season
+  if (isSeriesObject && !options.mode && typeof window !== "undefined") {
+    promptSeriesExternalPlayback(itemOrId, (selectedOptions) => {
+      openInDefaultPlayer(itemOrId, selectedOptions);
+    });
+    return;
+  }
+
   try {
-    if (typeof addToast === "function") addToast("Opening in default device player...", "info");
-    const res = await API.post(`/api/media/${targetId}/open-default`, {});
+    if (typeof addToast === "function") addToast("Opening in external player...", "info");
+    const payload = {};
+    if (options.mode) payload.mode = options.mode;
+    if (options.season) payload.season = options.season;
+    if (options.start_media_id) payload.start_media_id = options.start_media_id;
+
+    const res = await API.post(`/api/media/${targetId}/open-default`, payload);
     if (res && res.ok) {
-      if (res.method === "system") {
-        if (typeof addToast === "function") addToast(`Playing in default device player (${res.file || title})`, "success");
+      if (res.method === "vlc") {
+        const count = res.items_count || 1;
+        const countStr = count > 1 ? ` (${count} episodes queued)` : "";
+        if (typeof addToast === "function") {
+          addToast(`Playing in VLC with live progress sync${countStr}`, "success");
+        }
+        if (typeof startVlcStatusPolling === "function") {
+          startVlcStatusPolling(true);
+        }
+      } else if (res.method === "system") {
+        if (typeof addToast === "function") {
+          addToast(`Playing in default player (${res.file || title})`, "success");
+        }
       } else if (res.stream_url) {
-        if (typeof addToast === "function") addToast("Downloading stream playlist for your device player...", "success");
+        if (typeof addToast === "function") {
+          addToast("Downloading stream playlist for your device player...", "success");
+        }
         const a = document.createElement("a");
         a.href = res.stream_url;
-        a.download = res.filename || "stream.m3u";
+        a.download = res.filename || "stream.m3u8";
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
       }
     } else {
-      if (typeof addToast === "function") addToast((res && res.error) || "Could not launch default player", "warning");
+      if (typeof addToast === "function") addToast((res && res.error) || "Could not launch external player", "warning");
     }
   } catch (err) {
-    if (typeof addToast === "function") addToast(err.message || "Failed to open default player", "error");
+    if (typeof addToast === "function") addToast(err.message || "Failed to open external player", "error");
   }
 }
 
@@ -4080,9 +4423,9 @@ const HomePage = {
       }
     }
 
-    async function loadHome() {
+    async function loadHome(silent = false) {
       try {
-        loading.value = true;
+        if (!silent) loading.value = true;
         const data = await API.get("/api/home");
         if (store.profile?.is_kids) {
           const allRaw = [];
@@ -4114,9 +4457,9 @@ const HomePage = {
           })).filter(row => row.items && row.items.length > 0);
         }
       } catch (e) {
-        addToast("Failed to load home page", "error");
+        if (!silent) addToast("Failed to load home page", "error");
       } finally {
-        loading.value = false;
+        if (!silent) loading.value = false;
       }
     }
 
@@ -4140,6 +4483,13 @@ const HomePage = {
     onMounted(() => {
       loadHome();
       checkOnboardingTrigger();
+      window.refreshHomeRows = (silent = true) => loadHome(silent);
+    });
+
+    onUnmounted(() => {
+      if (window.refreshHomeRows) {
+        window.refreshHomeRows = null;
+      }
     });
 
     const route = VueRouter.useRoute();
@@ -4440,17 +4790,18 @@ const DetailPage = {
               <span>{{ media.is_mounted !== false ? resumeLabel : ('Drive Disconnected (' + (media.drive_letter || 'External') + ')') }}</span>
             </button>
             <button
-              v-if="isDesktop"
+              v-if="isDesktop && canUseExternalPlayer"
               class="detail-default-player-btn"
+              :class="{ 'vlc-btn': hasVLC }"
               @click="openInDefaultPlayer(media)"
               :disabled="media.is_mounted === false"
-              title="Play using default device player (e.g. VLC, Windows Media Player)"
+              :title="externalPlayerTooltip"
               id="detail-default-player-btn"
             >
-              <div class="detail-default-player-icon-wrapper">
-                <i class="ph-bold ph-monitor-play"></i>
+              <div class="detail-default-player-icon-wrapper" :class="{ 'vlc-icon': hasVLC }">
+                <i :class="hasVLC ? 'ph-bold ph-traffic-cone' : 'ph-bold ph-monitor-play'"></i>
               </div>
-              <span>Default Player</span>
+              <span>{{ externalPlayerLabel }}</span>
             </button>
             <div v-if="media.is_mounted === false" class="detail-offline-banner">
               <i class="ph-bold ph-warning" style="color:var(--warning);font-size:1.1rem"></i>
@@ -4653,8 +5004,8 @@ const DetailPage = {
                     <div class="file-path-text" :title="media.file_path">{{ media.file_path }}</div>
                   </div>
                   <div style="display:flex;gap:6px">
-                    <button v-if="isDesktop" class="btn btn-secondary btn-sm" @click="openInDefaultPlayer(media)" :disabled="media.is_mounted === false" title="Open in default desktop video player" id="btn-open-default-player">
-                      <i class="ph-bold ph-arrow-square-out" style="font-size:0.95rem;color:var(--accent)"></i> Open in Player
+                    <button v-if="isDesktop && canUseExternalPlayer" class="btn btn-secondary btn-sm" :class="{ 'vlc-sub-btn': hasVLC }" @click="openInDefaultPlayer(media)" :disabled="media.is_mounted === false" :title="externalPlayerTooltip" id="btn-open-default-player">
+                      <i :class="hasVLC ? 'ph-bold ph-traffic-cone' : 'ph-bold ph-arrow-square-out'" :style="hasVLC ? 'font-size:0.95rem;color:#ff8800' : 'font-size:0.95rem;color:var(--accent)'"></i> {{ hasVLC ? 'Open in VLC' : 'Open in Player' }}
                     </button>
                     <button class="btn btn-secondary btn-sm" @click="copyFilePath" title="Copy file path to clipboard" id="btn-copy-filepath">
                       <i class="ph ph-copy" style="font-size:0.95rem"></i> Copy Path
@@ -4848,15 +5199,16 @@ const DetailPage = {
                           <span>Request</span>
                         </button>
 
-                        <!-- Play in default device player button -->
+                        <!-- Play in VLC / default device player button -->
                         <button
-                          v-if="ep.id && isDesktop && ep.is_local !== false"
+                          v-if="ep.id && isDesktop && canUseExternalPlayer && ep.is_local !== false"
                           class="episode-skip-btn"
+                          :class="{ 'vlc-ep-btn': hasVLC }"
                           @click.stop="openInDefaultPlayer(ep)"
                           :disabled="ep.is_mounted === false"
-                          :title="'Play S' + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0') + ' in default player (e.g. VLC)'"
+                          :title="(hasVLC ? 'Play in VLC: S' : 'Play in Default Player: S') + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0')"
                         >
-                          <i class="ph-bold ph-arrow-square-out"></i>
+                          <i :class="hasVLC ? 'ph-bold ph-traffic-cone' : 'ph-bold ph-arrow-square-out'"></i>
                         </button>
 
                         <!-- Per-episode skip marker editor -->
@@ -5111,6 +5463,27 @@ const DetailPage = {
     const codecInfo = computed(() => {
       const path = media.value?.file_path || media.value?.seasons?.[sortedSeasons.value[0]]?.[0]?.file_path;
       return getCodecInfo(path);
+    });
+
+    const canUseExternalPlayer = computed(() => {
+      if (!isDesktopClient()) return false;
+      const ext = media.value?.external_player || window.externalPlayerStatus;
+      return ext ? !!ext.is_local : false;
+    });
+
+    const hasVLC = computed(() => {
+      const ext = media.value?.external_player || window.externalPlayerStatus;
+      return ext ? !!ext.has_vlc : false;
+    });
+
+    const externalPlayerLabel = computed(() => {
+      return hasVLC.value ? "Play in VLC" : "Default Player";
+    });
+
+    const externalPlayerTooltip = computed(() => {
+      return hasVLC.value
+        ? "Play in VLC Media Player (Note: Progress tracking is periodic and may be approximate)"
+        : "Play using default device player (e.g. Windows Media Player)";
     });
 
     const backdropFailed = ref(false);
@@ -5839,6 +6212,10 @@ const DetailPage = {
       requestMissingEpisode,
       openInDefaultPlayer,
       isDesktop: isDesktopClient(),
+      canUseExternalPlayer,
+      hasVLC,
+      externalPlayerLabel,
+      externalPlayerTooltip,
       showWtModal,
       wtModalTab,
       wtJoinCode,
@@ -6213,6 +6590,41 @@ const SETTINGS_INDEX = [
     icon: "ph ph-magic-wand",
     desc: "Reclassify Japanese animation from Series to the Anime library.",
     keywords: ["detect anime", "reclassify", "move anime", "animation", "japanese"],
+    adminOnly: true,
+    desktopOnly: true,
+  },
+
+  // Media Renamer & File Organizer
+  {
+    id: "settings-organizer-section",
+    targetId: "settings-organizer-section",
+    title: "Media Renamer & File Organizer",
+    section: "Organizer",
+    icon: "ph ph-folder-notch-open",
+    desc: "Clean release tags, standardize media names, and organize downloads into library using zero-cost hardlinks.",
+    keywords: ["organizer", "renamer", "auto rename", "clean tags", "hardlink", "incoming", "downloads", "scene"],
+    adminOnly: true,
+    desktopOnly: true,
+  },
+  {
+    id: "setting-organizer-folder",
+    targetId: "setting-organizer-folder",
+    title: "Organizer Incoming Folder",
+    section: "Organizer",
+    icon: "ph ph-folder",
+    desc: "Source directory where completed downloads arrive.",
+    keywords: ["incoming", "downloads folder", "drop folder", "torrent folder"],
+    adminOnly: true,
+    desktopOnly: true,
+  },
+  {
+    id: "setting-organizer-autowatch",
+    targetId: "setting-organizer-autowatch",
+    title: "Organizer Background Watcher",
+    section: "Organizer",
+    icon: "ph ph-eye",
+    desc: "Automatically organize settled downloads in background.",
+    keywords: ["watcher", "auto organize", "background watcher", "auto move"],
     adminOnly: true,
     desktopOnly: true,
   },
@@ -7690,10 +8102,10 @@ const SettingsPage = {
                       @keyup.enter="onAddPathAttempt(cat)"
                       :readonly="isRemoteClient"
                     />
-                    <button class="path-add-btn" @click.stop="handleBrowseFolder(cat)" :disabled="browsingFolder === cat" :id="'btn-browse-' + cat" :title="isRemoteClient ? 'Browse is disabled on remote devices' : 'Browse folders'">
+                    <button type="button" class="path-add-btn" @click.stop="handleBrowseFolder(cat)" :disabled="!!browsingFolder" :id="'btn-browse-' + cat" :title="isRemoteClient ? 'Browse is disabled on remote devices' : 'Browse folders'">
                       <i :class="browsingFolder === cat ? 'ph ph-circle-notch' : 'ph ph-folder-open'" :style="browsingFolder === cat ? 'animation:spin 1s linear infinite' : ''"></i>
                     </button>
-                    <button class="path-add-btn primary" @click.stop="onAddPathAttempt(cat)" :title="isRemoteClient ? 'Media paths can only be added on host PC' : 'Add Path'">
+                    <button type="button" class="path-add-btn primary" @click.stop="onAddPathAttempt(cat)" :title="isRemoteClient ? 'Media paths can only be added on host PC' : 'Add Path'">
                       <i :class="isRemoteClient ? 'ph-bold ph-lock-simple' : 'ph ph-plus'"></i>
                     </button>
                   </div>
@@ -7918,82 +8330,84 @@ const SettingsPage = {
                 </div>
               </div>
 
-              <!-- ══════ Media Requests Feature ══════ -->
-              <div class="settings-divider" style="margin: 16px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
-              <div class="settings-row" id="setting-media-requests">
-                <div class="settings-label-container">
-                  <div class="settings-label" style="display:flex;align-items:center;gap:8px">
-                    <i class="ph-bold ph-paper-plane-tilt" style="color:#38bdf8"></i>
-                    <span>Enable Media Requests</span>
-                  </div>
-                  <div class="settings-desc">Allow users to submit requests for missing movies, TV shows, and anime. Requests are saved to data/requests.json and tracked in the Request Media dashboard.</div>
-                </div>
-                <label class="toggle-switch">
-                  <input type="checkbox" v-model="form.features.requests" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-
-              <!-- ══════ Supabase Cloud Relay for Online Requests ══════ -->
-              <template v-if="form.features?.requests">
-                <div class="settings-divider" style="margin: 16px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
-                <div class="settings-row" id="setting-supabase-relay">
+              <!-- ══════ Media Requests & Online Sync Grouped Container ══════ -->
+              <div class="media-requests-grouped-card">
+                <div class="settings-row" id="setting-media-requests" style="margin-bottom:0">
                   <div class="settings-label-container">
                     <div class="settings-label" style="display:flex;align-items:center;gap:8px">
-                      <i class="ph-bold ph-cloud" style="color:#38bdf8"></i>
-                      <span>Online Request Sync (Supabase Cloud Relay)</span>
+                      <i class="ph-bold ph-paper-plane-tilt" style="color:#38bdf8"></i>
+                      <span>Enable Media Requests</span>
                     </div>
-                    <div class="settings-desc">Sync requests across client instances over the internet via Supabase REST API without opening ports or VPNs.</div>
+                    <div class="settings-desc">Allow users to submit requests for missing movies, TV shows, and anime. Requests are saved to data/requests.json and tracked in the Request Media dashboard.</div>
                   </div>
                   <label class="toggle-switch">
-                    <input type="checkbox" v-model="form.features.online_requests" />
+                    <input type="checkbox" v-model="form.features.requests" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
 
-                <div v-if="form.features?.online_requests" class="settings-row" style="flex-direction:column;align-items:flex-start">
-                  <div class="settings-label-container">
-                    <div class="settings-label">Supabase Credentials</div>
-                    <div class="settings-desc">Enter your Supabase project URL and anon public API key.</div>
-                  </div>
-                  <div style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:10px">
-                    <input type="text" v-model="form.supabase_url" class="form-input" placeholder="Supabase Project URL (https://xyz.supabase.co)..." style="width:100%" />
-                    <div style="display:flex;gap:8px;width:100%">
-                      <input type="password" v-model="form.supabase_anon_key" class="form-input" placeholder="Supabase Anon Public API Key..." style="flex:1" />
-                      <button class="btn btn-secondary" @click="testApi('supabase', form.supabase_anon_key)" :disabled="testingApi === 'supabase'">
-                        {{ testingApi === 'supabase' ? 'Testing...' : 'Test Connection' }}
-                      </button>
+                <!-- ══════ Supabase Cloud Relay for Online Requests (Grouped & Disabled if Requests Off) ══════ -->
+                <div class="media-requests-child-section" :class="{ disabled: !form.features?.requests }" :style="!form.features?.requests ? 'pointer-events:none;opacity:0.45;filter:grayscale(0.5);' : ''">
+                  <div class="settings-row" id="setting-supabase-relay" style="margin-bottom:0">
+                    <div class="settings-label-container">
+                      <div class="settings-label" style="display:flex;align-items:center;gap:8px">
+                        <i class="ph-bold ph-cloud" style="color:#38bdf8"></i>
+                        <span>Online Request Sync (Supabase Cloud Relay)</span>
+                        <span v-if="!form.features?.requests" style="font-size:0.75rem;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,0.15);color:#f87171;font-weight:600">Requires Requests Enabled</span>
+                      </div>
+                      <div class="settings-desc">Sync requests across client instances over the internet via Supabase REST API without opening ports or VPNs.</div>
                     </div>
+                    <label class="toggle-switch" :style="!form.features?.requests ? 'cursor:not-allowed;' : ''">
+                      <input type="checkbox" v-model="form.features.online_requests" :disabled="!form.features?.requests" />
+                      <span class="toggle-slider"></span>
+                    </label>
                   </div>
-                </div>
 
-                <!-- ══════ Movie Source Site & API Integration ══════ -->
-                <div class="settings-divider" style="margin: 16px 0; border-top: 1px solid rgba(255,255,255,0.08)"></div>
-                <div class="settings-row" id="setting-movie-source" style="flex-direction:column;align-items:flex-start">
-                  <div class="settings-label-container">
-                    <div class="settings-label" style="display:flex;align-items:center;gap:8px">
-                      <i class="ph-bold ph-film-slate" style="color:#a855f7"></i>
-                      <span>Movie Source Redirection & API</span>
+                  <div v-if="form.features?.online_requests" class="settings-row" style="flex-direction:column;align-items:flex-start;margin-top:8px">
+                    <div class="settings-label-container">
+                      <div class="settings-label">Supabase Credentials</div>
+                      <div class="settings-desc">Enter your Supabase project URL and anon public API key.</div>
                     </div>
-                    <div class="settings-desc">Specify destination website and API endpoint used for movie request lookup and external redirection buttons.</div>
-                  </div>
-                  <div style="display:flex;flex-direction:column;gap:10px;width:100%;margin-top:10px">
-                    <div style="display:flex;flex-direction:column;gap:4px;width:100%">
-                      <label style="font-size:0.78rem;font-weight:600;color:var(--text-secondary)">Movie Destination Website Base URL</label>
-                      <input type="text" v-model="form.movie_source.site_url" class="form-input" placeholder="e.g. https://siteformovies.com" style="width:100%" />
-                    </div>
-                    <div style="display:flex;flex-direction:column;gap:4px;width:100%">
-                      <label style="font-size:0.78rem;font-weight:600;color:var(--text-secondary)">Movies API Endpoint Base URL</label>
+                    <div style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:10px">
+                      <input type="text" v-model="form.supabase_url" class="form-input" placeholder="Supabase Project URL (https://xyz.supabase.co)..." style="width:100%" :disabled="!form.features?.requests" />
                       <div style="display:flex;gap:8px;width:100%">
-                        <input type="text" v-model="form.movie_source.api_url" class="form-input" placeholder="e.g. https://movies-api.accel.li/api/v2" style="flex:1" />
-                        <button class="btn btn-secondary" @click="testApi('movie_source', form.movie_source.api_url)" :disabled="testingApi === 'movie_source'">
-                          {{ testingApi === 'movie_source' ? 'Testing...' : 'Test Movie API' }}
+                        <input type="password" v-model="form.supabase_anon_key" class="form-input" placeholder="Supabase Anon Public API Key..." style="flex:1" :disabled="!form.features?.requests" />
+                        <button class="btn btn-secondary" @click="testApi('supabase', form.supabase_anon_key)" :disabled="testingApi === 'supabase' || !form.features?.requests">
+                          {{ testingApi === 'supabase' ? 'Testing...' : 'Test Connection' }}
                         </button>
                       </div>
                     </div>
                   </div>
                 </div>
-              </template>
+
+                <!-- ══════ Movie Source Site & API Integration ══════ -->
+                <div v-if="form.features?.requests" class="media-requests-child-section" style="margin-top:4px">
+                  <div class="settings-row" id="setting-movie-source" style="flex-direction:column;align-items:flex-start;margin-bottom:0">
+                    <div class="settings-label-container">
+                      <div class="settings-label" style="display:flex;align-items:center;gap:8px">
+                        <i class="ph-bold ph-film-slate" style="color:#a855f7"></i>
+                        <span>Movie Source Redirection & API</span>
+                      </div>
+                      <div class="settings-desc">Specify destination website and API endpoint used for movie request lookup and external redirection buttons.</div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:10px;width:100%;margin-top:10px">
+                      <div style="display:flex;flex-direction:column;gap:4px;width:100%">
+                        <label style="font-size:0.78rem;font-weight:600;color:var(--text-secondary)">Movie Destination Website Base URL</label>
+                        <input type="text" v-model="form.movie_source.site_url" class="form-input" placeholder="e.g. https://siteformovies.com" style="width:100%" />
+                      </div>
+                      <div style="display:flex;flex-direction:column;gap:4px;width:100%">
+                        <label style="font-size:0.78rem;font-weight:600;color:var(--text-secondary)">Movies API Endpoint Base URL</label>
+                        <div style="display:flex;gap:8px;width:100%">
+                          <input type="text" v-model="form.movie_source.api_url" class="form-input" placeholder="e.g. https://movies-api.accel.li/api/v2" style="flex:1" />
+                          <button class="btn btn-secondary" @click="testApi('movie_source', form.movie_source.api_url)" :disabled="testingApi === 'movie_source'">
+                            {{ testingApi === 'movie_source' ? 'Testing...' : 'Test Movie API' }}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -8199,25 +8613,368 @@ const SettingsPage = {
           </div>
         </div>
 
-        <!-- ══════ Side-by-Side: Web Browser & System Config and Server Config ══════ -->
-        <div class="settings-grid-row settings-desktop-only" v-if="isAdmin && !isMobileScreen">
-          <!-- Web Browser & System Config Card -->
-          <div class="settings-section settings-desktop-only" id="settings-browser-section" v-if="isAdmin && !isMobileScreen">
-            <div class="settings-section-title">
-              <i class="ph ph-globe-hemisphere-west" style="color:var(--accent)"></i>
-              <span>Web Browser & System Configuration</span>
+        <!-- ══════ Media Renamer & Organizer Section ══════ -->
+        <div class="settings-section settings-desktop-only" id="settings-organizer-section" v-if="isAdmin && !isMobileScreen">
+          <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
+              <span>Automated Media Renamer &amp; File Organizer</span>
             </div>
-            <div class="settings-group">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-secondary btn-sm" @click="openOrganizerHistory" :disabled="organizerHistoryLoading" id="btn-organizer-history">
+                <i class="ph ph-clock-counter-clockwise" style="margin-right:4px"></i> History &amp; Rollback
+              </button>
+              <button class="btn btn-primary btn-sm" @click="runOrganizerPreview" :disabled="organizerScanning || organizerExecuting" id="btn-organizer-preview">
+                <i :class="organizerScanning ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="organizerScanning ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                {{ organizerScanning ? 'Scanning Incoming...' : 'Scan &amp; Preview Incoming' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-desc" style="margin-bottom:1rem">
+              Automatically cleans release scene clutter, normalizes titles to standard Plex/CapsStream formats (<code>Movies/Title (Year)</code> and <code>TV Shows/Title/Season SS/Title - SxxExx</code>), and organizes files into your library using zero-cost NTFS hardlinks.
+            </div>
+
+            <!-- Configuration Rows -->
+            <div class="settings-row" id="setting-organizer-folder">
+              <div class="settings-label-container">
+                <div class="settings-label">Incoming / Downloads Drop Folder</div>
+                <div class="settings-desc">Source directory where completed downloads, torrents, or unorganized media arrive.</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
+                <input type="text" v-model="organizerConfig.incoming_dir" class="form-input" placeholder="e.g. D:/Downloads or data/incoming" style="flex:1" />
+                <button class="btn btn-secondary btn-sm" @click="saveOrganizerConfig" :disabled="organizerSaving">
+                  {{ organizerSaving ? 'Saving...' : 'Save' }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Destination Target Folders -->
+            <div class="settings-row" id="setting-organizer-target-movies">
+              <div class="settings-label-container">
+                <div class="settings-label">Target Movies Folder</div>
+                <div class="settings-desc">Destination library folder for organized Movies. Selected from configured Media Scanner paths.</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
+                <select v-if="(form.media_paths?.movies || organizerConfig.available_paths?.movies || []).length" v-model="organizerConfig.target_movies_path" @change="saveOrganizerConfig" class="form-input" style="flex:1">
+                  <option v-for="p in (form.media_paths?.movies || organizerConfig.available_paths?.movies || [])" :key="p" :value="p">{{ p }}</option>
+                  <option v-if="organizerConfig.target_movies_path && !(form.media_paths?.movies || organizerConfig.available_paths?.movies || []).includes(organizerConfig.target_movies_path)" :value="organizerConfig.target_movies_path">{{ organizerConfig.target_movies_path }}</option>
+                </select>
+                <input v-else type="text" v-model="organizerConfig.target_movies_path" class="form-input" placeholder="e.g. data/media/Movies" style="flex:1" @change="saveOrganizerConfig" />
+              </div>
+            </div>
+
+            <div class="settings-row" id="setting-organizer-target-series">
+              <div class="settings-label-container">
+                <div class="settings-label">Target TV Series Folder</div>
+                <div class="settings-desc">Destination library folder for organized TV Shows. Selected from configured Media Scanner paths.</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
+                <select v-if="(form.media_paths?.series || organizerConfig.available_paths?.series || []).length" v-model="organizerConfig.target_series_path" @change="saveOrganizerConfig" class="form-input" style="flex:1">
+                  <option v-for="p in (form.media_paths?.series || organizerConfig.available_paths?.series || [])" :key="p" :value="p">{{ p }}</option>
+                  <option v-if="organizerConfig.target_series_path && !(form.media_paths?.series || organizerConfig.available_paths?.series || []).includes(organizerConfig.target_series_path)" :value="organizerConfig.target_series_path">{{ organizerConfig.target_series_path }}</option>
+                </select>
+                <input v-else type="text" v-model="organizerConfig.target_series_path" class="form-input" placeholder="e.g. data/media/TV Shows" style="flex:1" @change="saveOrganizerConfig" />
+              </div>
+            </div>
+
+            <div class="settings-row" id="setting-organizer-target-anime">
+              <div class="settings-label-container">
+                <div class="settings-label">Target Anime Folder</div>
+                <div class="settings-desc">Destination library folder for organized Anime series and films.</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
+                <select v-if="(form.media_paths?.anime || organizerConfig.available_paths?.anime || []).length" v-model="organizerConfig.target_anime_path" @change="saveOrganizerConfig" class="form-input" style="flex:1">
+                  <option v-for="p in (form.media_paths?.anime || organizerConfig.available_paths?.anime || [])" :key="p" :value="p">{{ p }}</option>
+                  <option v-if="organizerConfig.target_anime_path && !(form.media_paths?.anime || organizerConfig.available_paths?.anime || []).includes(organizerConfig.target_anime_path)" :value="organizerConfig.target_anime_path">{{ organizerConfig.target_anime_path }}</option>
+                </select>
+                <input v-else type="text" v-model="organizerConfig.target_anime_path" class="form-input" placeholder="e.g. data/media/Anime" style="flex:1" @change="saveOrganizerConfig" />
+              </div>
+            </div>
+
+            <div class="settings-row" id="setting-organizer-mode">
+              <div class="settings-label-container">
+                <div class="settings-label">File Organization Mode</div>
+                <div class="settings-desc">Smart Mode creates NTFS hardlinks on the same drive (preserves torrent seeding with 0 extra disk space), falling back to Move across drives.</div>
+              </div>
+              <select v-model="organizerConfig.mode" @change="saveOrganizerConfig" class="form-input" style="width:260px">
+                <option value="smart">Smart Mode (Hardlink / Move)</option>
+                <option value="move">Move Only (Relocates files)</option>
+                <option value="copy">Copy Only (Duplicates files)</option>
+              </select>
+            </div>
+
+            <div class="settings-row" id="setting-organizer-autowatch">
+              <div class="settings-label-container">
+                <div class="settings-label">Background Folder Watcher</div>
+                <div class="settings-desc">Periodically checks the incoming folder in the background. Complete, settled downloads without locks are organized automatically.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="organizerConfig.auto_watch" @change="saveOrganizerConfig" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <!-- Preview Items Area -->
+            <div v-if="organizerPreviewItems.length > 0" style="margin-top:1.5rem">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+                <div style="font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px">
+                  <span class="unmatched-count-badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;border-color:rgba(56,189,248,0.3)">
+                    {{ organizerPreviewItems.length }} Ready to Organize
+                  </span>
+                  <button class="btn btn-ghost btn-sm" @click="toggleSelectAllOrganizer" style="font-size:0.78rem">
+                    {{ organizerSelectedIndices.size === organizerPreviewItems.length ? 'Deselect All' : 'Select All' }}
+                  </button>
+                </div>
+                <div style="display:flex;gap:8px">
+                  <button class="btn btn-secondary btn-sm" @click="organizerPreviewItems = []; organizerSelectedIndices.clear();">
+                    Dismiss
+                  </button>
+                  <button class="btn btn-primary btn-sm" @click="executeOrganizer" :disabled="organizerExecuting || organizerSelectedIndices.size === 0">
+                    <i :class="organizerExecuting ? 'ph ph-circle-notch' : 'ph ph-check-circle'" :style="organizerExecuting ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                    {{ organizerExecuting ? 'Organizing Files...' : 'Organize Selected (' + organizerSelectedIndices.size + ')' }}
+                  </button>
+                </div>
+              </div>
+
+              <!-- Interactive Review Table -->
+              <div class="unmatched-container recache-table-scrollable" style="max-height:420px;overflow-y:auto;margin-bottom:1.5rem">
+                <table class="unmatched-table">
+                  <thead>
+                    <tr>
+                      <th style="width:40px;text-align:center">
+                        <input type="checkbox" :checked="organizerSelectedIndices.size > 0 && organizerSelectedIndices.size === organizerPreviewItems.length" @change="toggleSelectAllOrganizer" />
+                      </th>
+                      <th>Original File &amp; Size</th>
+                      <th>Media Type</th>
+                      <th>Parsed Title &amp; Year</th>
+                      <th>Destination Path Preview</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(item, idx) in organizerPreviewItems" :key="item.source_path">
+                      <td style="text-align:center">
+                        <input type="checkbox" :checked="organizerSelectedIndices.has(idx)" @change="toggleOrganizerItem(idx)" />
+                      </td>
+                      <td class="unmatched-title-cell" style="max-width:260px" :title="item.filename">
+                        <div style="font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ item.filename }}</div>
+                        <div style="font-size:0.75rem;color:var(--text-muted)">{{ formatFileSize(item.file_size || 0) }}</div>
+                      </td>
+                      <td>
+                        <button class="btn btn-ghost btn-sm" @click="item.editType = (item.editType === 'movie' ? 'tv' : (item.editType === 'tv' ? 'anime' : 'movie'))" style="font-size:0.75rem;padding:2px 8px;border-radius:6px" :style="item.editType === 'movie' ? 'background:rgba(56,189,248,0.15);color:#38bdf8' : (item.editType === 'anime' ? 'background:rgba(236,72,153,0.15);color:#f472b6' : 'background:rgba(168,85,247,0.15);color:#c084fc')">
+                          <i :class="item.editType === 'movie' ? 'ph ph-film-strip' : (item.editType === 'anime' ? 'ph ph-sparkle' : 'ph ph-television')" style="margin-right:4px"></i>
+                          {{ item.editType === 'movie' ? 'Movie' : (item.editType === 'anime' ? 'Anime' : 'TV Show') }}
+                        </button>
+                      </td>
+                      <td>
+                        <div style="display:flex;gap:6px;align-items:center">
+                          <input type="text" v-model="item.editTitle" class="form-input" style="font-size:0.8rem;padding:4px 8px;width:150px" />
+                          <input type="text" v-model="item.editYear" class="form-input" placeholder="Year" style="font-size:0.8rem;padding:4px 8px;width:60px" />
+                        </div>
+                      </td>
+                      <td style="font-size:0.78rem;color:var(--text-secondary);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="item.destination_path">
+                        {{ item.destination_path }}
+                        <span v-if="item.subtitles?.length" class="tag" style="margin-left:4px;font-size:0.68rem;padding:1px 5px;background:rgba(34,197,94,0.15);color:#4ade80">
+                          +{{ item.subtitles.length }} Sub
+                        </span>
+                      </td>
+                      <td>
+                        <span v-if="item.confidence === 'low'" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 6px" title="Low confidence — please review before organizing">Unrecognized</span>
+                        <span v-else-if="item.is_locked" class="server-status-pill error" style="font-size:0.7rem;padding:2px 6px">Locked</span>
+                        <span v-else-if="item.destination_exists" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 6px">Exists (Upgrade)</span>
+                        <span v-else class="server-status-pill success" style="font-size:0.7rem;padding:2px 6px">Ready</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Organizer Detecting & Processing Status Modal (In-Container Overlay) -->
+          <div class="organizer-progress-modal-backdrop" v-if="organizerProgressModal.show" @click.self="organizerProgressModal.type === 'success' ? (organizerProgressModal.show = false) : null">
+            <div class="organizer-progress-modal-card" @click.stop>
+              <div class="organizer-progress-icon-wrap" :class="organizerProgressModal.type">
+                <i v-if="organizerProgressModal.type === 'detecting'" class="ph ph-magnifying-glass" style="animation:spin 1.8s linear infinite"></i>
+                <i v-else-if="organizerProgressModal.type === 'processing'" class="ph ph-arrows-clockwise" style="animation:spin 1.2s linear infinite"></i>
+                <i v-else-if="organizerProgressModal.type === 'success'" class="ph-bold ph-check"></i>
+              </div>
+
+              <div class="organizer-progress-badge" :class="organizerProgressModal.type">
+                <span v-if="organizerProgressModal.type === 'detecting'">Detecting &amp; Matching</span>
+                <span v-else-if="organizerProgressModal.type === 'processing'">Processing {{ organizerProgressModal.count }} Item{{ organizerProgressModal.count === 1 ? '' : 's' }}</span>
+                <span v-else-if="organizerProgressModal.type === 'success'">Finished</span>
+              </div>
+
+              <h3 class="organizer-progress-title">{{ organizerProgressModal.title }}</h3>
+              <p class="organizer-progress-subtitle">{{ organizerProgressModal.subtitle }}</p>
+
+              <div class="organizer-progress-details" v-if="organizerProgressModal.detail">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <i class="ph ph-info" style="color:var(--accent)"></i>
+                  <span style="font-weight:600;color:var(--text-primary)">{{ organizerProgressModal.type === 'detecting' ? 'Target Folder:' : 'Operation Status:' }}</span>
+                </div>
+                <div style="word-break:break-all;color:var(--text-secondary)">{{ organizerProgressModal.detail }}</div>
+              </div>
+
+              <div v-if="organizerProgressModal.type === 'detecting'" style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin-top:2px">
+                <i class="ph ph-shield-check" style="color:#4ade80"></i>
+                <span>Read-only inspection. Files remain untouched until confirmed.</span>
+              </div>
+
+              <div v-else-if="organizerProgressModal.type === 'processing'" style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin-top:2px">
+                <i class="ph ph-warning-circle" style="color:#fbbf24"></i>
+                <span>Please keep server running while links/moves are executed.</span>
+              </div>
+
+              <button v-if="organizerProgressModal.type === 'success'" class="btn btn-primary btn-sm" @click="organizerProgressModal.show = false" style="margin-top:6px;width:100%">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- History & Rollback Modal -->
+        <div class="organizer-history-modal-backdrop" v-if="organizerHistoryOpen" @click.self="organizerHistoryOpen = false">
+          <div class="organizer-history-modal-card" @click.stop>
+            <div class="organizer-history-header">
+              <div class="organizer-history-header-left">
+                <div class="organizer-history-icon-badge">
+                  <i class="ph ph-clock-counter-clockwise"></i>
+                </div>
+                <div class="organizer-history-title-wrap">
+                  <h3>Organizer History &amp; Rollback</h3>
+                  <div class="organizer-history-subtitle">Review past runs or revert organized files to their original state</div>
+                </div>
+              </div>
+              <button class="modal-close-btn" @click="organizerHistoryOpen = false" title="Close">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+
+            <div class="organizer-history-body">
+              <div v-if="organizerHistoryLoading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3rem 1.5rem;gap:12px">
+                <div class="loading-spinner"></div>
+                <span style="font-size:0.85rem;color:var(--text-muted)">Loading organization history...</span>
+              </div>
+
+              <div v-else-if="organizerHistory.length === 0" class="organizer-history-empty">
+                <div class="organizer-history-empty-icon">
+                  <i class="ph ph-tray"></i>
+                </div>
+                <div style="font-weight:700;font-size:0.95rem;color:var(--text-primary);margin-bottom:4px">No Past Batches Recorded</div>
+                <div style="font-size:0.8rem;color:var(--text-muted);max-width:380px;margin:0 auto">
+                  Files processed automatically or organized from preview will appear here with one-click rollback.
+                </div>
+              </div>
+
+              <div v-else style="display:flex;flex-direction:column;gap:12px">
+                <div v-for="batch in organizerHistory" :key="batch.batch_id" class="organizer-batch-card">
+                  <div class="organizer-batch-top">
+                    <div class="organizer-batch-meta">
+                      <span class="organizer-batch-id-pill" :title="batch.batch_id">{{ batch.batch_id }}</span>
+                      <span class="organizer-batch-date">
+                        <i class="ph ph-calendar-blank"></i>
+                        {{ new Date(batch.timestamp).toLocaleString() }}
+                      </span>
+                      <span class="organizer-batch-count">
+                        <i class="ph ph-files" style="margin-right:2px"></i>
+                        {{ batch.count }} file{{ batch.count === 1 ? '' : 's' }}
+                      </span>
+                    </div>
+
+                    <button class="organizer-batch-btn-revert" @click="undoOrganizerBatch(batch.batch_id)" :disabled="organizerRevertingBatch === batch.batch_id" title="Revert files in this batch">
+                      <i :class="organizerRevertingBatch === batch.batch_id ? 'ph ph-circle-notch' : 'ph ph-arrow-u-up-left'" :style="organizerRevertingBatch === batch.batch_id ? 'animation:spin 1s linear infinite' : ''"></i>
+                      <span>{{ organizerRevertingBatch === batch.batch_id ? 'Reverting...' : 'Revert Batch' }}</span>
+                    </button>
+                  </div>
+
+                  <!-- Operation details -->
+                  <div v-if="batch.operations && batch.operations.length > 0" class="organizer-batch-ops">
+                    <div v-for="(op, opIdx) in batch.operations.slice(0, organizerExpandedBatches.has(batch.batch_id) ? undefined : 3)" :key="opIdx" class="organizer-op-row">
+                      <div class="organizer-op-file-flow">
+                        <span class="organizer-op-src" :title="op.source">
+                          <i class="ph ph-file-arrow-up" style="margin-right:3px"></i>
+                          {{ getFileBasename(op.source) }}
+                        </span>
+                        <i class="ph ph-arrow-right organizer-op-arrow"></i>
+                        <span class="organizer-op-dst" :title="op.destination">
+                          <i class="ph ph-folder" style="margin-right:3px;color:var(--accent)"></i>
+                          {{ op.destination }}
+                        </span>
+                      </div>
+                      <span class="organizer-op-badge" :class="op.action || 'smart'">
+                        {{ op.action || 'smart' }}
+                      </span>
+                    </div>
+
+                    <button v-if="batch.operations.length > 3" class="btn btn-ghost btn-sm" @click="toggleExpandBatch(batch.batch_id)" style="font-size:0.72rem;padding:2px 8px;margin-top:2px;align-self:flex-start">
+                      {{ organizerExpandedBatches.has(batch.batch_id) ? 'Show Less' : ('+ Show ' + (batch.operations.length - 3) + ' more file(s)') }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="organizer-history-footer">
+              <div class="organizer-history-note">
+                <i class="ph ph-info" style="color:var(--accent)"></i>
+                <span>Hardlinks delete created links without touching downloads. Moves restore files to Incoming.</span>
+              </div>
+              <button class="btn btn-secondary btn-sm" @click="organizerHistoryOpen = false">Close</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══════ Unified Web Browser & Server Configuration ══════ -->
+        <div class="settings-section settings-desktop-only" id="settings-system-server-section" v-if="isAdmin && !isMobileScreen">
+          <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <i class="ph ph-sliders" style="color:var(--accent)"></i>
+              <span>Web Browser & Server Configuration</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px" id="setting-server-logs">
+              <button class="btn btn-secondary btn-sm" @click="$router.push('/logs')" title="View live server log">
+                <i class="ph ph-scroll" style="margin-right:4px"></i> View Live Logs
+              </button>
+              <button class="btn btn-primary btn-sm" @click="saveSettings" :disabled="saving" id="btn-save-server-config" title="Save host, port, and system preferences">
+                <i :class="saving ? 'ph ph-circle-notch' : 'ph ph-floppy-disk'" :style="saving ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                {{ saving ? 'Saving...' : 'Save Configuration' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-dual-grid">
+            <!-- Left Subpanel: Web Browser & System Preferences -->
+            <div class="settings-subpanel" id="settings-browser-section">
+              <div class="settings-subpanel-title">
+                <i class="ph ph-globe-hemisphere-west" style="color:var(--accent)"></i>
+                <span>Browser & System Preferences</span>
+              </div>
+
               <div class="settings-row" id="setting-default-browser">
                 <div class="settings-label-container">
                   <div class="settings-label">Default Web Browser</div>
                   <div class="settings-desc">Choose preferred browser for launching media streaming. Microsoft Edge is recommended for native 4K HEVC and Dolby AC-3 decoding.</div>
                 </div>
-                <select v-model="form.browser" class="form-input" style="width:280px" id="setting-browser-select">
+                <select v-model="form.browser" class="form-input" style="width:240px" id="setting-browser-select">
                   <option value="edge">Microsoft Edge (Recommended)</option>
                   <option value="chrome">Google Chrome</option>
                   <option value="system">System Default Browser</option>
                 </select>
+              </div>
+
+              <div class="settings-row" id="setting-browser-launch">
+                <div class="settings-label-container">
+                  <div class="settings-label">Open Browser on Launch</div>
+                  <div class="settings-desc">Automatically open CapsStream in your browser when start.bat runs.</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="form.launch_browser_on_start" />
+                  <span class="toggle-slider"></span>
+                </label>
               </div>
 
               <div class="settings-row" id="setting-hide-system-files">
@@ -8242,22 +8999,21 @@ const SettingsPage = {
                 </label>
               </div>
             </div>
-          </div>
 
-          <!-- Server Configuration Card -->
-          <div class="settings-section settings-desktop-only" id="settings-server-section" v-if="isAdmin && !isMobileScreen">
-            <div class="settings-section-title">
-              <i class="ph ph-hard-drives" style="color:var(--accent)"></i>
-              <span>Server Configuration</span>
-            </div>
-            <div class="settings-group">
+            <!-- Right Subpanel: Server & Network Configuration -->
+            <div class="settings-subpanel" id="settings-server-section">
+              <div class="settings-subpanel-title">
+                <i class="ph ph-hard-drives" style="color:var(--accent)"></i>
+                <span>Server & Network Configuration</span>
+              </div>
+
               <div class="settings-row" id="setting-server-host" :style="(isHostZero && deviceIp) ? 'align-items: flex-start;' : ''">
                 <div class="settings-label-container">
                   <div class="settings-label">Host Address</div>
                   <div class="settings-desc">Network interface the server binds to. Use 127.0.0.1 for this PC only, or 0.0.0.0 to allow other devices on your network.</div>
 
                   <!-- Device IP Address Display Card (Visible when 0.0.0.0 is configured or active) -->
-                  <div v-if="isHostZero && deviceIp" class="host-ip-card" id="host-ip-container">
+                  <div v-if="isHostZero && deviceIp" class="host-ip-card" id="host-ip-container" style="margin-top:10px">
                     <div class="host-ip-header">
                       <div class="host-ip-title">
                         <i class="ph ph-broadcast" style="color:#22c55e"></i>
@@ -8334,30 +9090,9 @@ const SettingsPage = {
                 <input type="number" v-model.number="form.port" min="1" max="65535" class="form-input" style="width:120px" />
               </div>
 
-              <div class="settings-row" id="setting-browser-launch">
-                <div class="settings-label-container">
-                  <div class="settings-label">Open Browser on Launch</div>
-                  <div class="settings-desc">Automatically open CapsStream in your browser when start.bat runs.</div>
-                </div>
-                <label class="toggle-switch">
-                  <input type="checkbox" v-model="form.launch_browser_on_start" />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-
-              <div class="settings-desc" style="color:#f59e0b">
+              <div class="settings-desc" style="color:#f59e0b;margin-top:auto;padding-top:8px">
                 <i class="ph ph-warning" style="margin-right:4px"></i>
                 Host and Port changes take effect after restarting CapsStream (close the server and run start.bat again).
-              </div>
-
-              <div id="setting-server-logs" style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-                <button class="btn btn-secondary btn-sm" @click="$router.push('/logs')" title="View live server log">
-                  <i class="ph ph-scroll" style="margin-right:4px"></i> View Live Logs
-                </button>
-                <button class="btn btn-primary btn-sm" @click="saveSettings" :disabled="saving" id="btn-save-server-config" title="Save host, port, and launch preferences">
-                  <i :class="saving ? 'ph ph-circle-notch' : 'ph ph-floppy-disk'" :style="saving ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
-                  {{ saving ? 'Saving...' : 'Save Configuration' }}
-                </button>
               </div>
             </div>
           </div>
@@ -9527,6 +10262,7 @@ const SettingsPage = {
     }
 
     async function handleBrowseFolder(cat) {
+      if (browsingFolder.value) return;
       if (isRemoteClient.value) {
         showRemotePathModal.value = true;
         return;
@@ -10111,6 +10847,258 @@ const SettingsPage = {
       }
     }
 
+    // ─── Automated Media Renamer & Organizer ──────────────────────
+    const organizerConfig = ref({
+      enabled: true,
+      incoming_dir: "",
+      mode: "smart",
+      auto_watch: false,
+      watch_interval_seconds: 60,
+      target_movies_path: "",
+      target_series_path: "",
+      target_anime_path: "",
+      available_paths: { movies: [], series: [], anime: [] },
+      library_roots: { movies: "", tv: "", anime: "" }
+    });
+    const organizerLoading = ref(false);
+    const organizerSaving = ref(false);
+    const organizerScanning = ref(false);
+    const organizerExecuting = ref(false);
+    const organizerPreviewItems = ref([]);
+    const organizerSelectedIndices = ref(new Set());
+    const organizerHistory = ref([]);
+    const organizerHistoryOpen = ref(false);
+    const organizerHistoryLoading = ref(false);
+    const organizerRevertingBatch = ref(null);
+    const organizerExpandedBatches = ref(new Set());
+    const organizerProgressModal = ref({
+      show: false,
+      type: "detecting", // "detecting" | "processing" | "success"
+      title: "",
+      subtitle: "",
+      count: 0,
+      detail: ""
+    });
+
+    function toggleExpandBatch(batchId) {
+      if (organizerExpandedBatches.value.has(batchId)) {
+        organizerExpandedBatches.value.delete(batchId);
+      } else {
+        organizerExpandedBatches.value.add(batchId);
+      }
+    }
+
+    function getFileBasename(path) {
+      if (!path) return "";
+      return path.split(/[/\\]/).pop();
+    }
+
+    async function loadOrganizerConfig() {
+      organizerLoading.value = true;
+      try {
+        const res = await fetch("/api/admin/organizer/config");
+        if (res.ok) {
+          organizerConfig.value = await res.json();
+        }
+      } catch (e) {
+        console.warn("[Organizer] Failed to load config:", e);
+      } finally {
+        organizerLoading.value = false;
+      }
+    }
+
+    async function saveOrganizerConfig() {
+      organizerSaving.value = true;
+      try {
+        const res = await fetch("/api/admin/organizer/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(organizerConfig.value)
+        });
+        if (res.ok) {
+          addToast("Organizer settings saved", "success");
+        } else {
+          addToast("Failed to save organizer settings", "error");
+        }
+      } catch (e) {
+        addToast("Network error saving settings", "error");
+      } finally {
+        organizerSaving.value = false;
+      }
+    }
+
+    async function runOrganizerPreview() {
+      organizerScanning.value = true;
+      organizerProgressModal.value = {
+        show: true,
+        type: "detecting",
+        title: "Detecting Media in Drop Folder...",
+        subtitle: "Scanning incoming files, inspecting media formats, and identifying titles with TMDb...",
+        count: 0,
+        detail: organizerConfig.value.incoming_dir || "Incoming folder"
+      };
+      try {
+        const res = await fetch("/api/admin/organizer/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ incoming_dir: organizerConfig.value.incoming_dir })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          organizerPreviewItems.value = (data.items || []).map(item => ({
+            ...item,
+            editTitle: item.canonical_title,
+            editYear: item.year || "",
+            editType: item.media_type
+          }));
+          organizerSelectedIndices.value = new Set(organizerPreviewItems.value.map((_, i) => i));
+          if (organizerPreviewItems.value.length === 0) {
+            if (data.cleaned_folders && data.cleaned_folders.length > 0) {
+              addToast(`No new media found. Cleaned ${data.cleaned_folders.length} empty subfolder(s) in Incoming.`, "info");
+            } else {
+              addToast("No new media found in incoming folder", "info");
+            }
+          } else {
+            let msg = `Identified ${organizerPreviewItems.value.length} media item(s)`;
+            if (data.cleaned_folders && data.cleaned_folders.length > 0) {
+              msg += ` (Cleaned ${data.cleaned_folders.length} empty folder(s))`;
+            }
+            addToast(msg, "success");
+          }
+        } else {
+          addToast(data.error || "Failed to scan incoming folder", "error");
+        }
+      } catch (e) {
+        addToast("Error scanning incoming folder", "error");
+      } finally {
+        organizerScanning.value = false;
+        organizerProgressModal.value.show = false;
+      }
+    }
+
+    function toggleSelectAllOrganizer() {
+      if (organizerSelectedIndices.value.size === organizerPreviewItems.value.length) {
+        organizerSelectedIndices.value.clear();
+      } else {
+        organizerSelectedIndices.value = new Set(organizerPreviewItems.value.map((_, i) => i));
+      }
+    }
+
+    function toggleOrganizerItem(idx) {
+      if (organizerSelectedIndices.value.has(idx)) {
+        organizerSelectedIndices.value.delete(idx);
+      } else {
+        organizerSelectedIndices.value.add(idx);
+      }
+    }
+
+    async function executeOrganizer() {
+      const selectedItems = organizerPreviewItems.value
+        .filter((_, idx) => organizerSelectedIndices.value.has(idx))
+        .map(it => ({
+          ...it,
+          canonical_title: it.editTitle || it.canonical_title,
+          year: it.editYear ? parseInt(it.editYear, 10) : it.year,
+          media_type: it.editType || it.media_type
+        }));
+
+      if (!selectedItems.length) {
+        addToast("Please select at least one item to organize", "warning");
+        return;
+      }
+
+      organizerExecuting.value = true;
+      organizerProgressModal.value = {
+        show: true,
+        type: "processing",
+        title: "Processing & Organizing Media...",
+        subtitle: "Creating zero-cost hardlinks or relocating files into your media library...",
+        count: selectedItems.length,
+        detail: `Mode: ${organizerConfig.value.mode === 'smart' ? 'Smart Mode (Hardlink / Move)' : (organizerConfig.value.mode === 'move' ? 'Move Only' : 'Copy Only')}`
+      };
+      try {
+        const res = await fetch("/api/admin/organizer/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: selectedItems,
+            mode: organizerConfig.value.mode
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          let detailMsg = `${data.operations?.length || 0} file operations recorded with 1-click rollback support`;
+          if (data.cleaned_folders && data.cleaned_folders.length > 0) {
+            detailMsg += ` • Cleaned ${data.cleaned_folders.length} empty subfolder(s)`;
+            addToast(`Cleaned ${data.cleaned_folders.length} empty subfolder(s) in Incoming`, "info");
+          }
+          organizerProgressModal.value = {
+            show: true,
+            type: "success",
+            title: "Organization Complete!",
+            subtitle: `Successfully organized ${data.success_count} item(s) into your library folders.`,
+            count: data.success_count || 0,
+            detail: detailMsg
+          };
+          addToast(`Organized ${data.success_count} item(s) successfully!`, "success");
+          organizerPreviewItems.value = organizerPreviewItems.value.filter((_, idx) => !organizerSelectedIndices.value.has(idx));
+          organizerSelectedIndices.value.clear();
+          setTimeout(() => {
+            if (organizerProgressModal.value.type === "success") {
+              organizerProgressModal.value.show = false;
+            }
+          }, 1800);
+        } else {
+          addToast(data.error || "Failed to execute organization", "error");
+          organizerProgressModal.value.show = false;
+        }
+      } catch (e) {
+        addToast("Error executing organization", "error");
+        organizerProgressModal.value.show = false;
+      } finally {
+        organizerExecuting.value = false;
+      }
+    }
+
+    async function openOrganizerHistory() {
+      organizerHistoryOpen.value = true;
+      organizerHistoryLoading.value = true;
+      try {
+        const res = await fetch("/api/admin/organizer/history");
+        if (res.ok) {
+          const data = await res.json();
+          organizerHistory.value = data.batches || [];
+        }
+      } catch (e) {
+        console.warn("Failed to load organizer history:", e);
+      } finally {
+        organizerHistoryLoading.value = false;
+      }
+    }
+
+    async function undoOrganizerBatch(batchId) {
+      if (!confirm(`Are you sure you want to undo and revert batch ${batchId}?`)) return;
+      organizerRevertingBatch.value = batchId;
+      try {
+        const res = await fetch("/api/admin/organizer/undo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ batch_id: batchId })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          addToast(`Batch reverted (${data.reverted_count} items restored)`, "success");
+          await openOrganizerHistory();
+        } else {
+          addToast(data.error || "Failed to undo batch", "error");
+        }
+      } catch (e) {
+        addToast("Error during batch undo", "error");
+      } finally {
+        organizerRevertingBatch.value = null;
+      }
+    }
+
     onMounted(() => {
       if (store.profile?.is_kids) {
         addToast("Settings is locked in Kids Mode", "warning");
@@ -10119,8 +11107,12 @@ const SettingsPage = {
       }
       loadSettings();
       loadCacheInfo();
-      if (isAdmin.value) refreshHealthCenter();
-      else loadSystemInfo();
+      if (isAdmin.value) {
+        refreshHealthCenter();
+        loadOrganizerConfig();
+      } else {
+        loadSystemInfo();
+      }
       loadAllProfiles();
       loadUnmatched();
       loadNeedsRecache();
@@ -11305,6 +12297,29 @@ const SettingsPage = {
       isRemoteClient,
       clientRemoteHost,
       onAddPathAttempt,
+      organizerConfig,
+      organizerLoading,
+      organizerSaving,
+      organizerScanning,
+      organizerExecuting,
+      organizerPreviewItems,
+      organizerSelectedIndices,
+      organizerHistory,
+      organizerHistoryOpen,
+      organizerHistoryLoading,
+      organizerRevertingBatch,
+      organizerExpandedBatches,
+      toggleExpandBatch,
+      getFileBasename,
+      loadOrganizerConfig,
+      saveOrganizerConfig,
+      runOrganizerPreview,
+      toggleSelectAllOrganizer,
+      toggleOrganizerItem,
+      executeOrganizer,
+      openOrganizerHistory,
+      undoOrganizerBatch,
+      organizerProgressModal,
     };
   },
 };
@@ -23620,14 +24635,14 @@ const App = {
                   <span>Convert to 1080p (Recommended)</span>
                 </button>
                 <button
-                  v-if="isDesktopClient()"
+                  v-if="isDesktopClient() && (window.externalPlayerStatus?.is_local ?? false)"
                   class="btn btn-secondary"
                   style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);border-radius:12px;padding:11px 18px;display:flex;align-items:center;justify-content:center;gap:8px"
                   @click="handle4KModalDefaultPlayer"
                   id="fourk-default-player-btn"
                 >
-                  <i class="ph-bold ph-arrow-square-out" style="color:var(--accent)"></i>
-                  <span>Play in Default Device Player (VLC / Native)</span>
+                  <i :class="window.externalPlayerStatus?.has_vlc ? 'ph-bold ph-traffic-cone' : 'ph-bold ph-arrow-square-out'" :style="window.externalPlayerStatus?.has_vlc ? 'color:#ff8800' : 'color:var(--accent)'"></i>
+                  <span>{{ window.externalPlayerStatus?.has_vlc ? 'Play in VLC (Direct 4K, No Transcoding)' : 'Play in Default Device Player (Native)' }}</span>
                 </button>
                 <button class="btn btn-secondary" style="border-radius:12px;padding:10px 16px;display:flex;align-items:center;justify-content:center;gap:8px" @click="handle4KModalDirect" id="fourk-direct-btn">
                   <i class="ph-bold ph-play"></i>

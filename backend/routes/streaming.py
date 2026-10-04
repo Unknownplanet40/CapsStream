@@ -21,6 +21,9 @@ from backend import streamer
 
 streaming_bp = Blueprint("streaming", __name__)
 
+_ACTIVE_THUMB_GENS = set()
+_ACTIVE_THUMB_LOCK = threading.Lock()
+
 
 def _media_duration_seconds(file_path):
     """Best-effort stream duration via ffprobe (0 if unavailable)."""
@@ -31,7 +34,7 @@ def _media_duration_seconds(file_path):
     try:
         from backend.proc_utils import CREATE_NO_WINDOW
         out = subprocess.run(
-            [ffprobe, "-v", "quiet", "-print_format", "json", "-show_format", file_path],
+            [FFPROBE_BIN, "-v", "quiet", "-print_format", "json", "-show_format", file_path],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
             creationflags=CREATE_NO_WINDOW,
         )
@@ -329,6 +332,15 @@ def api_download_subtitles(media_id):
 
 @streaming_bp.route("/api/subtitles/<int:media_id>/<path:filename>")
 def api_subtitles(media_id, filename):
+    # Check for cached online subtitles in SUB_CACHE_DIR first
+    safe_fn = os.path.basename(filename)
+    if filename == safe_fn and safe_fn.startswith(f"online_{media_id}_") and safe_fn.endswith(".vtt"):
+        from backend.subtitles import SUB_CACHE_DIR
+        cache_dir = os.path.abspath(SUB_CACHE_DIR)
+        cache_file = os.path.abspath(os.path.join(cache_dir, safe_fn))
+        if os.path.commonpath([cache_dir, cache_file]) == cache_dir and os.path.isfile(cache_file):
+            return send_file(cache_file, mimetype="text/vtt")
+
     media = get_best_media_source(media_id)
     if not media:
         abort(404)
@@ -407,11 +419,19 @@ def api_media_thumbnails(media_id):
     if not duration or not os.path.isfile(file_path):
         return jsonify({"ready": False})
 
+    with _ACTIVE_THUMB_LOCK:
+        if media_id in _ACTIVE_THUMB_GENS:
+            return jsonify({"ready": False})
+        _ACTIVE_THUMB_GENS.add(media_id)
+
     def _gen():
         try:
             thumbs.generate_sheet(media_id, file_path, duration)
         except Exception as e:
             print(f"[Thumbs] Generation failed for media {media_id}: {e}")
+        finally:
+            with _ACTIVE_THUMB_LOCK:
+                _ACTIVE_THUMB_GENS.discard(media_id)
 
     threading.Thread(target=_gen, daemon=True).start()
     return jsonify({"ready": False})

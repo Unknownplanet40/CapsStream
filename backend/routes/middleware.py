@@ -10,7 +10,7 @@ import json
 import time
 import threading
 
-from flask import session, request, abort, jsonify
+from flask import session, request, abort, jsonify, has_request_context
 from functools import wraps
 
 # ─── PIN Brute-Force Protection ───────────────────────────────────────────────
@@ -126,12 +126,18 @@ def verify_admin_pin(pin):
     """
     from backend.db import verify_pin_raw
     admins = get_admin_profiles()
-    if not admins:
-        return True, "", 200
+    client_ip = request.remote_addr or "" if has_request_context() else ""
+    is_local = client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith("127.")
 
-    # If any admin profile has no PIN set, permission is granted directly
+    if not admins:
+        if is_local:
+            return True, "", 200
+        return False, "Admin PIN is required", 401
+
+    # If any admin profile has no PIN set, only local loopback clients are granted access without a PIN
     if any(not a.get("has_pin") for a in admins):
-        return True, "", 200
+        if is_local:
+            return True, "", 200
 
     pin_str = str(pin).strip() if pin is not None else ""
     if not pin_str:
@@ -168,17 +174,23 @@ def is_admin():
         if ok:
             return True
 
-    # If there are no admin profiles with a PIN set, open access is allowed when no profile is active
-    admins = get_admin_profiles()
-    if not admins or any(not a.get("has_pin") for a in admins):
-        if not current_profile():
-            return True
+    client_ip = request.remote_addr or "" if has_request_context() else ""
+    is_local = client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith("127.")
 
     pid = current_profile()
     if not pid:
         from backend.db import get_all_profiles
         all_profs = get_all_profiles()
-        return len(all_profs) == 0
+        if len(all_profs) == 0:
+            return True
+
+        # Only local loopback clients are granted passwordless admin when no profile is active
+        # and at least one admin profile lacks a PIN (or no admins exist)
+        if is_local:
+            admins = get_admin_profiles()
+            if not admins or any(not a.get("has_pin") for a in admins):
+                return True
+        return False
 
     try:
         from backend.db import get_profile

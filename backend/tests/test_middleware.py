@@ -90,6 +90,26 @@ class TestMiddleware(unittest.TestCase):
                 require_admin()
             self.assertEqual(ctx.exception.code, 403)
 
+    @patch("backend.db.get_all_profiles")
+    @patch("backend.routes.middleware.get_admin_profiles")
+    def test_is_admin_remote_client_blocked_when_admin_has_no_pin(self, mock_get_admins, mock_all_profs):
+        """Verify remote client without active profile cannot bypass admin when an admin lacks PIN."""
+        mock_all_profs.return_value = [{"id": 1, "name": "Admin", "is_admin": 1, "has_pin": False}]
+        mock_get_admins.return_value = [{"id": 1, "name": "Admin", "is_admin": 1, "has_pin": False}]
+        with self.app.test_request_context(environ_base={"REMOTE_ADDR": "192.168.1.150"}):
+            session.clear()
+            self.assertFalse(is_admin())
+
+    @patch("backend.db.get_all_profiles")
+    @patch("backend.routes.middleware.get_admin_profiles")
+    def test_is_admin_local_client_allowed_when_admin_has_no_pin(self, mock_get_admins, mock_all_profs):
+        """Verify local loopback client can access admin when admin lacks PIN and no profile is active."""
+        mock_all_profs.return_value = [{"id": 1, "name": "Admin", "is_admin": 1, "has_pin": False}]
+        mock_get_admins.return_value = [{"id": 1, "name": "Admin", "is_admin": 1, "has_pin": False}]
+        with self.app.test_request_context(environ_base={"REMOTE_ADDR": "127.0.0.1"}):
+            session.clear()
+            self.assertTrue(is_admin())
+
 
 if __name__ == "__main__":
     unittest.main()

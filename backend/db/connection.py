@@ -98,6 +98,7 @@ def get_conn():
 def release_conn(exc=None):
     """
     Commit and close the per-request connection stored in Flask g, if any.
+    Rolls back transaction if an unhandled exception occurred during request handling.
     Called automatically by the teardown hook registered in app.py.
     """
     try:
@@ -106,7 +107,10 @@ def release_conn(exc=None):
         if proxy is not None:
             raw = object.__getattribute__(proxy, "_conn")
             try:
-                raw.commit()
+                if exc is not None:
+                    raw.rollback()
+                else:
+                    raw.commit()
             except Exception:
                 pass
             raw.close()

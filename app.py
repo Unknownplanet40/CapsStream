@@ -50,9 +50,22 @@ from flask import (
     Flask, jsonify, request, send_file,
     send_from_directory, render_template, session, abort, Response, make_response
 )
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from limits.storage import MemoryStorage
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    from limits.storage import MemoryStorage
+except ImportError:
+    class Limiter:
+        def __init__(self, *args, **kwargs):
+            pass
+        def limit(self, *args, **kwargs):
+            return lambda f: f
+        def exempt(self, f):
+            return f
+    def get_remote_address():
+        return "127.0.0.1"
+    class MemoryStorage:
+        pass
 
 from backend.db import init_db, get_all_profiles
 from backend.settings import load_config, save_config, apply_system_file_hiding
@@ -310,12 +323,16 @@ _IMAGE_DOWNLOAD_SEM = threading.BoundedSemaphore(4)
 
 def _download_image_background(size, tmdb_file, filename, img_dir, img_path):
     try:
+        norm_dir = os.path.abspath(img_dir)
+        norm_path = os.path.abspath(img_path)
+        if os.path.commonpath([norm_dir, norm_path]) != norm_dir:
+            return
         with _IMAGE_DOWNLOAD_SEM:
             url = f"https://image.tmdb.org/t/p/{size}/{tmdb_file}"
             r = _requests.get(url, timeout=10)
             if r.status_code == 200:
-                os.makedirs(img_dir, exist_ok=True)
-                with open(img_path, "wb") as f:
+                os.makedirs(norm_dir, exist_ok=True)
+                with open(norm_path, "wb") as f:
                     f.write(r.content)
     except Exception as e:
         print(f"[Image Server] Background download failed for {filename}: {e}")
@@ -327,28 +344,32 @@ def _download_image_background(size, tmdb_file, filename, img_dir, img_path):
 @app.route("/metadata/images/<path:filename>")
 @limiter.exempt
 def serve_metadata_image(filename):
-    img_dir = os.path.join(BASE_DIR, "data", "metadata", "images")
-    img_path = os.path.join(img_dir, filename)
+    img_dir = os.path.abspath(os.path.join(BASE_DIR, "data", "metadata", "images"))
+    norm_path = os.path.abspath(os.path.join(img_dir, filename))
+    if os.path.commonpath([img_dir, norm_path]) != img_dir:
+        abort(403)
 
-    if os.path.isfile(img_path):
-        resp = send_file(img_path, conditional=True)
+    if os.path.isfile(norm_path):
+        resp = send_from_directory(img_dir, os.path.relpath(norm_path, img_dir), conditional=True)
         resp.headers["Cache-Control"] = "public, max-age=604800"
         return resp
 
     parts = filename.split("_", 1)
     if len(parts) == 2:
         size, tmdb_file = parts[0], parts[1]
-        should_spawn = False
-        with _IMAGE_INFLIGHT_LOCK:
-            if filename not in _IMAGE_INFLIGHT:
-                _IMAGE_INFLIGHT.add(filename)
-                should_spawn = True
-        if should_spawn:
-            threading.Thread(
-                target=_download_image_background,
-                args=(size, tmdb_file, filename, img_dir, img_path),
-                daemon=True, name=f"img-dl-{filename[:20]}"
-            ).start()
+        # Only allow recognized TMDb dimension prefixes and safe image filenames
+        if re.match(r"^w\d+$|^original$", size) and re.match(r"^[a-zA-Z0-9_\-\.]+\.(jpg|jpeg|png|webp|svg)$", tmdb_file, re.IGNORECASE):
+            should_spawn = False
+            with _IMAGE_INFLIGHT_LOCK:
+                if filename not in _IMAGE_INFLIGHT:
+                    _IMAGE_INFLIGHT.add(filename)
+                    should_spawn = True
+            if should_spawn:
+                threading.Thread(
+                    target=_download_image_background,
+                    args=(size, tmdb_file, filename, img_dir, norm_path),
+                    daemon=True, name=f"img-dl-{filename[:20]}"
+                ).start()
 
     svg = """<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">
       <rect width="300" height="450" fill="#181824"/>
@@ -363,17 +384,19 @@ def serve_metadata_image(filename):
 @app.route("/metadata/avatars/<path:filename>")
 @limiter.exempt
 def serve_avatar_image(filename):
-    avatars_dir = os.path.join(BASE_DIR, "data", "avatars")
+    avatars_dir = os.path.abspath(os.path.join(BASE_DIR, "data", "avatars"))
     os.makedirs(avatars_dir, exist_ok=True)
-    img_path = os.path.join(avatars_dir, filename)
-    if not os.path.isfile(img_path):
+    norm_path = os.path.abspath(os.path.join(avatars_dir, filename))
+    if os.path.commonpath([avatars_dir, norm_path]) != avatars_dir:
+        abort(403)
+    if not os.path.isfile(norm_path):
         svg = """<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 24 24" fill="none">
           <rect width="24" height="24" fill="#1f1f2e"/>
           <circle cx="12" cy="8" r="4" fill="#666"/>
           <path d="M4 20c0-4 4-6 8-6s8 2 8 6" fill="#666"/>
         </svg>"""
         return Response(svg, mimetype="image/svg+xml", headers={"Cache-Control": "public, max-age=60"})
-    resp = send_from_directory(avatars_dir, filename)
+    resp = send_from_directory(avatars_dir, os.path.relpath(norm_path, avatars_dir))
     resp.headers["Cache-Control"] = "public, max-age=604800"
     return resp
 

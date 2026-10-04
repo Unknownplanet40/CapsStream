@@ -450,6 +450,50 @@ class TestStreamingRouteIntegration(unittest.TestCase):
         opt_1080 = next(o for o in transcode_opts if o["target_height"] == 1080)
         self.assertEqual(opt_1080["display_label"], "Convert to 1080p (Full HD)")
 
+    @patch("backend.routes.streaming.get_best_media_source")
+    @patch("backend.thumbs.is_ready", return_value=False)
+    @patch("backend.thumbs.generate_sheet")
+    def test_api_media_thumbnails_deduplicates_in_flight_generation(self, mock_gen, mock_ready, mock_get_source):
+        """Verify rapid thumbnail polling does not spawn duplicate generation threads."""
+        from backend.routes.streaming import _ACTIVE_THUMB_GENS, _ACTIVE_THUMB_LOCK
+        mock_get_source.return_value = {"id": 999, "file_path": __file__, "duration": 100}
+
+        try:
+            with _ACTIVE_THUMB_LOCK:
+                _ACTIVE_THUMB_GENS.add(999)
+
+            resp = self.client.get("/api/media/999/thumbnails")
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.get_json(), {"ready": False})
+            mock_gen.assert_not_called()
+        finally:
+            with _ACTIVE_THUMB_LOCK:
+                _ACTIVE_THUMB_GENS.discard(999)
+
+    def test_prune_hls_cache_if_needed(self):
+        """Verify HLS cache pruner removes oldest files when cache exceeds MAX_CACHE_BYTES."""
+        import tempfile, time
+        from backend.hls_transcoder import prune_hls_cache_if_needed
+
+        with tempfile.TemporaryDirectory() as temp_hls_dir:
+            file1 = os.path.join(temp_hls_dir, "seg1.ts")
+            file2 = os.path.join(temp_hls_dir, "seg2.ts")
+            with open(file1, "wb") as f:
+                f.write(b"0" * 2000)
+            with open(file2, "wb") as f:
+                f.write(b"0" * 2000)
+
+            # Set file1 to older timestamp
+            os.utime(file1, (time.time() - 100, time.time() - 100))
+            os.utime(file2, (time.time(), time.time()))
+
+            with patch("backend.hls_transcoder.HLS_CACHE_DIR", temp_hls_dir), \
+                 patch("backend.hls_transcoder.MAX_CACHE_BYTES", 3000):
+                prune_hls_cache_if_needed(force=True)
+                # Oldest file (file1) should have been pruned
+                self.assertFalse(os.path.exists(file1))
+                self.assertTrue(os.path.exists(file2))
+
 
 if __name__ == "__main__":
     unittest.main()

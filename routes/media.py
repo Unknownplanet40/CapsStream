@@ -417,7 +417,53 @@ def api_media_detail(media_id):
     except Exception:
         media["similar_items"] = []
 
+    client_ip = request.remote_addr or ""
+    is_local_client = client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith("127.")
+    has_vlc = False
+    if is_local_client:
+        try:
+            from backend.external_player import find_vlc_binary
+            has_vlc = bool(find_vlc_binary())
+        except Exception:
+            has_vlc = False
+
+    media["external_player"] = {
+        "is_local": is_local_client,
+        "has_vlc": has_vlc,
+        "player_name": "VLC" if has_vlc else "Default Player",
+        "button_label": "Play in VLC" if has_vlc else "Default Player",
+        "tooltip": "Play in VLC Media Player with live progress tracking" if has_vlc else "Play using default device player"
+    }
+
     return jsonify(media)
+
+
+@media_bp.route("/api/media/external-player-status", methods=["GET"])
+def api_external_player_status():
+    client_ip = request.remote_addr or ""
+    is_local_client = client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith("127.")
+    has_vlc = False
+    if is_local_client:
+        try:
+            from backend.external_player import find_vlc_binary
+            has_vlc = bool(find_vlc_binary())
+        except Exception:
+            has_vlc = False
+
+    return jsonify({
+        "ok": True,
+        "is_local": is_local_client,
+        "has_vlc": has_vlc,
+        "player_name": "VLC" if has_vlc else "Default Player",
+        "button_label": "Play in VLC" if has_vlc else "Default Player",
+        "tooltip": "Play in VLC Media Player with live progress tracking" if has_vlc else "Play using default device player"
+    })
+
+
+@media_bp.route("/api/media/vlc-tracker-status", methods=["GET"])
+def api_vlc_tracker_status():
+    from backend.external_player import get_vlc_tracker_status
+    return jsonify(get_vlc_tracker_status())
 
 
 @media_bp.route("/api/media/<int:media_id>/franchise", methods=["GET"])
@@ -823,6 +869,83 @@ def api_recache_media():
     })
 
 
+def _resolve_playback_items(media, mode="resume", season=None, start_media_id=None, pid=None):
+    """
+    Given a media item (movie or episode or series), resolve the ordered list of items
+    to play based on mode ('resume', 'season', 'all', 'single').
+    """
+    import os
+    media_type = media.get("type", "movie")
+    tmdb_id = media.get("tmdb_id")
+
+    if media_type not in ("series", "anime") and not tmdb_id and not media.get("season"):
+        return [media] if media.get("file_path") else []
+
+    from backend.db.media import get_media_by_tmdb
+
+    all_eps = []
+    if tmdb_id:
+        all_eps = get_media_by_tmdb(tmdb_id, media_type)
+
+    if not all_eps:
+        if media.get("file_path"):
+            return [media]
+        return []
+
+    mounted_eps = [
+        ep for ep in all_eps
+        if ep.get("file_path") and ep.get("is_mounted", True) and os.path.isfile(ep["file_path"])
+    ]
+    if not mounted_eps:
+        mounted_eps = [ep for ep in all_eps if ep.get("file_path")]
+
+    if not mounted_eps:
+        return [media] if media.get("file_path") else []
+
+    if mode == "single":
+        for ep in mounted_eps:
+            if ep["id"] == media["id"]:
+                return [ep]
+        return [media]
+
+    target_season = season
+    if target_season is None:
+        target_season = media.get("season") or 1
+    try:
+        target_season = int(target_season)
+    except (ValueError, TypeError):
+        target_season = 1
+
+    if mode == "all":
+        return mounted_eps
+
+    season_eps = [ep for ep in mounted_eps if int(ep.get("season") or 1) == target_season]
+    if not season_eps:
+        season_eps = mounted_eps
+
+    if mode == "season":
+        return season_eps
+
+    # mode == "resume"
+    if start_media_id:
+        for idx, ep in enumerate(season_eps):
+            if ep["id"] == start_media_id:
+                return season_eps[idx:]
+        for idx, ep in enumerate(mounted_eps):
+            if ep["id"] == start_media_id:
+                return mounted_eps[idx:]
+
+    if pid:
+        from backend.db import get_progress_for_media_items
+        progress_map = get_progress_for_media_items(pid, season_eps)
+        for idx, ep in enumerate(season_eps):
+            prog = progress_map.get(ep["id"])
+            if not prog or not prog.get("completed"):
+                return season_eps[idx:]
+
+    return season_eps
+
+
 @media_bp.route("/api/media/<int:media_id>/open-default", methods=["POST"])
 def api_open_in_default_player(media_id):
     media = get_media_by_id(media_id)
@@ -831,57 +954,46 @@ def api_open_in_default_player(media_id):
     if not media:
         return jsonify({"ok": False, "error": "Media not found"}), 404
 
-    file_path = media.get("file_path")
-    if not file_path and media.get("tmdb_id"):
-        from backend.db.media import get_media_by_tmdb
-        eps = get_media_by_tmdb(media.get("tmdb_id"), media.get("type", "series"))
-        if eps:
-            for ep in eps:
-                if ep.get("file_path") and ep.get("is_mounted", True):
-                    media = ep
-                    file_path = ep.get("file_path")
-                    break
-    if not file_path:
-        return jsonify({"ok": False, "error": "Media file path not found"}), 404
+    data = request.json if (request.is_json and request.json) else {}
+    mode = data.get("mode") or request.args.get("mode") or "resume"
+    season = data.get("season") or request.args.get("season")
+    start_media_id = data.get("start_media_id") or request.args.get("start_media_id")
+    if start_media_id:
+        try:
+            start_media_id = int(start_media_id)
+        except (ValueError, TypeError):
+            start_media_id = None
 
-    import os
-    import sys
-    import subprocess
-
-    norm_path = os.path.normpath(os.path.abspath(file_path))
-    if not os.path.isfile(norm_path):
-        return jsonify({"ok": False, "error": f"File does not exist or drive is disconnected: {os.path.basename(norm_path)}"}), 404
+    pid = current_profile() or 1
+    items = _resolve_playback_items(media, mode=mode, season=season, start_media_id=start_media_id, pid=pid)
+    if not items:
+        return jsonify({"ok": False, "error": "No playable files found"}), 404
 
     client_ip = request.remote_addr or ""
     is_local_client = client_ip in ("127.0.0.1", "::1", "localhost") or client_ip.startswith("127.")
-    force_playlist = request.args.get("playlist") == "1" or (request.is_json and request.json and request.json.get("playlist"))
+    force_playlist = request.args.get("playlist") == "1" or data.get("playlist")
 
-    if is_local_client and not force_playlist:
+    from backend.external_player import launch_external_player
+
+    title_hint = media.get("title") or "media"
+    if media.get("type") in ("series", "anime") and season:
         try:
-            if hasattr(os, "startfile"):
-                os.startfile(norm_path)
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", norm_path])
-            else:
-                subprocess.Popen(["xdg-open", norm_path])
-            return jsonify({
-                "ok": True,
-                "launched": True,
-                "method": "system",
-                "file": os.path.basename(norm_path),
-                "title": media.get("title") or os.path.basename(norm_path)
-            })
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Failed to launch default player: {e}"}), 500
-    else:
-        stream_url = f"/api/media/{media['id']}/playlist.m3u"
-        return jsonify({
-            "ok": True,
-            "launched": False,
-            "method": "playlist",
-            "stream_url": stream_url,
-            "filename": f"{media.get('title', 'video')}.m3u"
-        })
+            title_hint = f"{title_hint} - S{int(season):02d}"
+        except Exception:
+            pass
+
+    host_url = request.host_url.rstrip("/")
+    result = launch_external_player(
+        items=items,
+        profile_id=pid,
+        is_local_client=is_local_client and not force_playlist,
+        host_url=host_url,
+        title_hint=title_hint
+    )
+    if not result.get("ok"):
+        return jsonify(result), 500
+
+    return jsonify(result)
 
 
 @media_bp.route("/api/media/<int:media_id>/playlist.m3u", methods=["GET"])
@@ -892,20 +1004,32 @@ def api_media_playlist_m3u(media_id):
     if not media:
         return "Media not found", 404
 
-    title = media.get("ep_title") or media.get("title") or "Video"
-    host_url = request.host_url.rstrip("/")
-    stream_url = f"{host_url}/api/stream/{media['id']}"
+    mode = request.args.get("mode", "resume")
+    season = request.args.get("season")
+    pid = current_profile() or 1
 
-    duration = int(media.get("duration") or -1)
-    content = f"#EXTM3U\n#EXTINF:{duration},{title}\n{stream_url}\n"
+    items = _resolve_playback_items(media, mode=mode, season=season, pid=pid)
+    if not items:
+        items = [media]
+
+    from backend.external_player import build_playlist_content
+    host_url = request.host_url.rstrip("/")
+    content = build_playlist_content(items, is_local_client=False, host_url=host_url)
+
+    title = media.get("title") or "playlist"
+    if season:
+        try:
+            title = f"{title}_S{int(season):02d}"
+        except Exception:
+            pass
+    safe_title = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip() or "playlist"
 
     from flask import Response
-    safe_title = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip() or "video"
     return Response(
         content,
         mimetype="application/x-mpegurl",
         headers={
-            "Content-Disposition": f'attachment; filename="{safe_title}.m3u"',
+            "Content-Disposition": f'attachment; filename="{safe_title}.m3u8"',
             "Cache-Control": "no-cache"
         }
     )

@@ -115,10 +115,11 @@ class TestOnlineRequests(unittest.TestCase):
         self.assertEqual(len(reqs), 2)
         self.assertTrue(data["dev_mode"])
 
+    @patch("backend.routes.requests.detect_media_in_library", return_value=None)
     @patch("backend.routes.requests.is_dev_mode", return_value=True)
     @patch("backend.routes.requests.is_supabase_configured", return_value=True)
     @patch("backend.routes.requests.update_online_request")
-    def test_dev_mode_status_lifecycle_and_admin_notes(self, mock_update_online, mock_sb_cfg, mock_dev):
+    def test_dev_mode_status_lifecycle_and_admin_notes(self, mock_update_online, mock_sb_cfg, mock_dev, mock_detect):
         """Desktop 1 (DEV mode) can set in_progress, rejected, completed, and add admin notes."""
         with open(self.test_file, "w", encoding="utf-8") as f:
             json.dump([{

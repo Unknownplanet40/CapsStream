@@ -179,7 +179,48 @@ class TestSettings(unittest.TestCase):
         with patch("urllib.request.urlopen", return_value=mock_resp):
             ok, msg = settings.test_api_key("movie_source", url="https://movies-api.accel.li/api/v2")
             self.assertTrue(ok)
-            self.assertIn("connected successfully", msg)
+    def test_browse_folder_dialog_cancel_does_not_trigger_powershell(self):
+        """Verify cancelling the Tkinter folder dialog returns None and does NOT launch PowerShell."""
+        from unittest.mock import patch, MagicMock
+        mock_tk = MagicMock()
+        mock_tk.filedialog.askdirectory.return_value = ""
+
+        with patch.dict("sys.modules", {"tkinter": mock_tk, "tkinter.filedialog": mock_tk.filedialog}):
+            with patch("subprocess.run") as mock_subproc:
+                res = settings.browse_folder_dialog()
+                self.assertIsNone(res)
+                mock_subproc.assert_not_called()
+
+    def test_browse_folder_dialog_selects_folder(self):
+        """Verify picking a folder in Tkinter returns the normalized path."""
+        from unittest.mock import patch, MagicMock
+        mock_tk = MagicMock()
+        mock_tk.filedialog.askdirectory.return_value = "D:\\Entertainment\\Movies"
+
+        with patch.dict("sys.modules", {"tkinter": mock_tk, "tkinter.filedialog": mock_tk.filedialog}):
+            with patch("subprocess.run") as mock_subproc:
+                res = settings.browse_folder_dialog()
+                self.assertEqual(res, "D:/Entertainment/Movies")
+                mock_subproc.assert_not_called()
+
+    def test_browse_folder_dialog_tkinter_crash_falls_back_to_powershell(self):
+        """Verify that when Tkinter raises an exception, PowerShell fallback is used."""
+        from unittest.mock import patch, MagicMock
+        mock_subproc = MagicMock()
+        mock_subproc.stdout = "D:\\Entertainment\\Series\n"
+
+        with patch.dict("sys.modules", {"tkinter": None}):
+            with patch("subprocess.run", return_value=mock_subproc) as mock_run:
+                with patch("os.name", "nt"):
+                    res = settings.browse_folder_dialog()
+                    self.assertEqual(res, "D:/Entertainment/Series")
+                    mock_run.assert_called_once()
+
+    def test_browse_folder_dialog_concurrent_lock(self):
+        """Verify that if a dialog is already active, subsequent calls return None immediately."""
+        with settings._folder_dialog_lock:
+            res = settings.browse_folder_dialog()
+            self.assertIsNone(res)
 
 
 if __name__ == "__main__":

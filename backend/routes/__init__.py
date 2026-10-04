@@ -28,6 +28,7 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
         from .social import social_bp
         from .admin import admin_bp
         from .requests import requests_bp
+        from .organizer import organizer_bp
     except ImportError:
         from routes.profiles import profiles_bp
         from routes.media import media_bp
@@ -36,6 +37,7 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
         from routes.social import social_bp
         from routes.admin import admin_bp
         from routes.requests import requests_bp
+        from routes.organizer import organizer_bp
 
     # ── Register Blueprints ─────────────────────────────────────────────────
     app.register_blueprint(profiles_bp)
@@ -45,6 +47,7 @@ def register_blueprints(app: Flask, limiter: Limiter) -> None:
     app.register_blueprint(social_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(requests_bp)
+    app.register_blueprint(organizer_bp)
 
     # ── Auth / PIN — 5 per minute ───────────────────────────────────────────
     for view_func_name in [

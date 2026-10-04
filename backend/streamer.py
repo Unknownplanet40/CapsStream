@@ -456,6 +456,19 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
                     except Exception:
                         pass
                     print(f"[Streamer] Initial stream failed: {err_msg[:200].strip()}. Falling back to CPU libx264...")
+                    try:
+                        if current_proc.stdout:
+                            current_proc.stdout.close()
+                        if current_proc.stderr:
+                            current_proc.stderr.close()
+                    except Exception:
+                        pass
+                    try:
+                        if current_proc.poll() is None:
+                            current_proc.kill()
+                        current_proc.wait(timeout=2)
+                    except Exception:
+                        pass
 
                     fallback_cmd = _build_convert_cmd(
                         file_path=file_path,
@@ -487,9 +500,16 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
                 pass
             finally:
                 try:
+                    if current_proc.stdout:
+                        current_proc.stdout.close()
+                    if current_proc.stderr:
+                        current_proc.stderr.close()
+                except Exception:
+                    pass
+                try:
                     if current_proc.poll() is None:
                         current_proc.kill()
-                        current_proc.wait(timeout=2)
+                    current_proc.wait(timeout=2)
                 except Exception:
                     pass
                 with _STREAM_LOCK:
@@ -506,6 +526,21 @@ def stream_video_convert(file_path, audio_track_index=0, start_time=0.0, max_hei
         })
     except Exception as e:
         print(f"[Streamer] Convert stream launch error: {e}")
+        try:
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
+        except Exception:
+            pass
+        try:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=2)
+        except Exception:
+            pass
+        with _STREAM_LOCK:
+            _ACTIVE_STREAMS.pop(stream_id, None)
         return stream_file(file_path)
 
 

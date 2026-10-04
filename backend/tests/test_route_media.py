@@ -4,7 +4,7 @@ Tests for Media Route Endpoints (backend/routes/media.py)
 Covers media item detail, genres listing, search endpoints, home cache busting, and episode merging.
 """
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from flask import Flask
 
 from backend.routes.media import media_bp, bust_home_cache, _merge_season_episodes
@@ -361,21 +361,75 @@ class TestRouteMedia(unittest.TestCase):
 
     @patch("os.path.isfile", return_value=True)
     @patch("backend.routes.media.get_media_by_id")
-    def test_open_default_player_local(self, mock_get_media, mock_isfile):
-        """Verify local client triggers system default player launch."""
+    def test_open_default_player_local_vlc(self, mock_get_media, mock_isfile):
+        """Verify local client launches VLC with tracking when VLC is available."""
         mock_get_media.return_value = {
             "id": 42,
             "title": "Inception",
             "file_path": r"C:\Movies\Inception (2010).mkv"
         }
-        with patch("os.startfile", create=True) as mock_startfile:
+        with patch("backend.external_player.find_vlc_binary", return_value=r"C:\Program Files\VideoLAN\VLC\vlc.exe"), \
+             patch("subprocess.Popen") as mock_popen:
+            mock_proc = MagicMock()
+            mock_proc.poll.return_value = None
+            mock_popen.return_value = mock_proc
+
+            resp = self.client.post("/api/media/42/open-default", json={})
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data.get("ok"))
+            self.assertTrue(data.get("launched"))
+            self.assertEqual(data.get("method"), "vlc")
+            self.assertTrue(data.get("tracked"))
+
+    @patch("os.path.isfile", return_value=True)
+    @patch("backend.routes.media.get_media_by_id")
+    def test_open_default_player_local_system_fallback(self, mock_get_media, mock_isfile):
+        """Verify local client triggers system default player launch when VLC is absent."""
+        mock_get_media.return_value = {
+            "id": 42,
+            "title": "Inception",
+            "file_path": r"C:\Movies\Inception (2010).mkv"
+        }
+        with patch("backend.external_player.find_vlc_binary", return_value=None), \
+             patch("os.startfile", create=True) as mock_startfile:
             resp = self.client.post("/api/media/42/open-default", json={})
             self.assertEqual(resp.status_code, 200)
             data = resp.get_json()
             self.assertTrue(data.get("ok"))
             self.assertTrue(data.get("launched"))
             self.assertEqual(data.get("method"), "system")
+            self.assertFalse(data.get("tracked"))
             mock_startfile.assert_called_once()
+
+    @patch("os.path.isfile", return_value=True)
+    @patch("backend.routes.media.get_media_by_id")
+    @patch("backend.db.media.get_media_by_tmdb")
+    def test_open_default_player_series(self, mock_tmdb, mock_get_media, mock_isfile):
+        """Verify series playback queues season episodes."""
+        mock_get_media.return_value = {
+            "id": 100,
+            "title": "Frieren",
+            "type": "anime",
+            "tmdb_id": 9999,
+            "season": 1,
+            "file_path": r"C:\Anime\Frieren\S01E01.mkv"
+        }
+        mock_tmdb.return_value = [
+            {"id": 101, "season": 1, "episode": 1, "file_path": r"C:\Anime\Frieren\S01E01.mkv", "is_mounted": True},
+            {"id": 102, "season": 1, "episode": 2, "file_path": r"C:\Anime\Frieren\S01E02.mkv", "is_mounted": True},
+        ]
+        with patch("backend.external_player.find_vlc_binary", return_value=r"C:\Program Files\VideoLAN\VLC\vlc.exe"), \
+             patch("subprocess.Popen") as mock_popen:
+            mock_proc = MagicMock()
+            mock_proc.poll.return_value = None
+            mock_popen.return_value = mock_proc
+
+            resp = self.client.post("/api/media/100/open-default", json={"mode": "season", "season": 1})
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data.get("ok"))
+            self.assertEqual(data.get("items_count"), 2)
 
     @patch("os.path.isfile", return_value=True)
     @patch("backend.routes.media.get_media_by_id")
@@ -413,6 +467,26 @@ class TestRouteMedia(unittest.TestCase):
         self.assertTrue(body.startswith("#EXTM3U"))
         self.assertIn("#EXTINF:8880,Inception", body)
         self.assertIn("/api/stream/42", body)
+
+    def test_external_player_status_local_vlc(self):
+        """Verify local client detects VLC and sets button_label to 'Play in VLC'."""
+        with patch("backend.external_player.find_vlc_binary", return_value=r"C:\Program Files\VideoLAN\VLC\vlc.exe"):
+            resp = self.client.get("/api/media/external-player-status", environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data.get("ok"))
+            self.assertTrue(data.get("is_local"))
+            self.assertTrue(data.get("has_vlc"))
+            self.assertEqual(data.get("button_label"), "Play in VLC")
+
+    def test_external_player_status_remote(self):
+        """Verify remote client reports is_local=False."""
+        resp = self.client.get("/api/media/external-player-status", environ_overrides={"REMOTE_ADDR": "192.168.1.100"})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("ok"))
+        self.assertFalse(data.get("is_local"))
+        self.assertFalse(data.get("has_vlc"))
 
 
 if __name__ == "__main__":

@@ -268,6 +268,11 @@ def _scan_movies(path_list, existing_paths, on_progress=None):
         if not _safe_is_dir(entry):
             # Also handle flat file directly in movies folder
             if _safe_is_file(entry) and _is_video(entry.name):
+                try:
+                    from backend.subtitles import promote_subs_to_media_folder
+                    promote_subs_to_media_folder(entry.path)
+                except Exception:
+                    pass
                 if entry.path not in existing_paths:
                     results.append({
                         "file_path":   entry.path,
@@ -283,6 +288,11 @@ def _scan_movies(path_list, existing_paths, on_progress=None):
                 for fname in sorted(files):
                     if _is_video(fname) and not _should_skip(fname):
                         fpath = os.path.join(root, fname)
+                        try:
+                            from backend.subtitles import promote_subs_to_media_folder
+                            promote_subs_to_media_folder(fpath)
+                        except Exception:
+                            pass
                         if fpath not in existing_paths:
                             results.append({
                                 "file_path":   fpath,

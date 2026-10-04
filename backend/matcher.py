@@ -73,8 +73,8 @@ def _clean_name(name):
     # Strip bracketed metadata like [Multi-audio] or [TGx]
     clean = re.sub(r'\[.*?\]', '', clean)
 
-    # Strip S01, S02, S1, S2, Season 1, Season.01, Complete series indicators from folder names
-    clean = re.sub(r'[\.\[\(\s_\-](?:[Ss]eason[\. _\-]?(?:\d{1,2}|[Cc]omplete)|[Ss]\d{1,2}|[Cc]omplete(?:\.?[Ss]eries)?).*$', '', clean, flags=re.IGNORECASE)
+    # Strip S01, S02, S1, S2, Season 1, Season.01, 1x02, Complete series indicators from folder/filenames
+    clean = re.sub(r'[\.\[\(\s_\-](?:[Ss]eason[\. _\-]?(?:\d{1,2}|[Cc]omplete)|[Ss]\d{1,2}(?:[\s._-]*[Ee]\d{1,3})?|\d{1,2}[xX]\d{1,3}|[Ee][Pp]?\d{1,3}|[Cc]omplete(?:\.?[Ss]eries)?).*$', '', clean, flags=re.IGNORECASE)
 
     # Strip year and everything after
     clean = re.sub(r'[\.\[\(\s_\-](19|20)\d{2}.*$', '', clean, flags=re.IGNORECASE)
@@ -669,6 +669,21 @@ def fetch_imdb_id(tmdb_id, media_type="movie"):
 # across restarts, but this avoids even the JSON file read on repeat detail views.
 _BACKDROPS_CACHE: dict = {}  # (tmdb_id, media_type) → (list, fetched_at)
 _BACKDROPS_CACHE_TTL = 3600  # 1 hour
+_BACKDROPS_CACHE_MAX = 500
+
+
+def _put_backdrops_cache(key, paths):
+    """Store entry in backdrops cache with capacity bounding and expiration pruning."""
+    import time as _time
+    now = _time.time()
+    if len(_BACKDROPS_CACHE) >= _BACKDROPS_CACHE_MAX:
+        # Prune expired entries first
+        expired = [k for k, (_, t) in _BACKDROPS_CACHE.items() if now - t > _BACKDROPS_CACHE_TTL]
+        for k in expired:
+            _BACKDROPS_CACHE.pop(k, None)
+        while len(_BACKDROPS_CACHE) >= _BACKDROPS_CACHE_MAX:
+            _BACKDROPS_CACHE.pop(next(iter(_BACKDROPS_CACHE)), None)
+    _BACKDROPS_CACHE[key] = (paths, now)
 
 
 def fetch_media_backdrops(tmdb_id, media_type="movie"):
@@ -694,7 +709,7 @@ def fetch_media_backdrops(tmdb_id, media_type="movie"):
         try:
             with open(cache_file, encoding="utf-8") as f:
                 paths = json.load(f)
-            _BACKDROPS_CACHE[key] = (paths, _time.time())
+            _put_backdrops_cache(key, paths)
             return paths
         except Exception:
             pass
@@ -714,7 +729,7 @@ def fetch_media_backdrops(tmdb_id, media_type="movie"):
                     paths.append(local_img or fp)
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(paths, f)
-            _BACKDROPS_CACHE[key] = (paths, _time.time())
+            _put_backdrops_cache(key, paths)
             return paths
     except Exception as e:
         print(f"[Matcher] Error fetching backdrops for {tmdb_id}: {e}")
