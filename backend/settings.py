@@ -214,7 +214,7 @@ def apply_system_file_hiding():
     """Hide (+h +s) or unhide (-h -s) system files/folders in the project root directory based on config.json setting."""
     config = load_config()
     should_hide = bool(config.get("hide_system_files", False))
-    exempt_names = {"start.bat", "media"}
+    exempt_names = {"start.bat", "start capsstream silent.vbs", "media"}
 
     try:
         if os.name == "nt":
@@ -256,11 +256,12 @@ def save_config(new_data):
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
 
+        # Bust the in-process config cache so the next read picks up new values
+        # (must happen before re-applying hiding, which reads the config)
+        _CONFIG_CACHE["ts"] = 0.0
+
         # Apply system file hiding rules live
         apply_system_file_hiding()
-
-        # Bust the in-process config cache so the next read picks up new values
-        _CONFIG_CACHE["ts"] = 0.0
 
         return True, config
     except Exception as e:

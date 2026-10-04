@@ -653,6 +653,13 @@ def spawn_restart_helper():
     Returns (helper_path, log_path).
     """
     helper_path = os.path.join(BASE_DIR, RESTART_HELPER_FILE)
+    # A stale helper may have been hidden by hide_system_files; Windows
+    # refuses open("w") on hidden/system files, so clear the attributes first.
+    try:
+        from backend.settings import set_file_hidden
+        set_file_hidden(helper_path, hide=False)
+    except Exception:
+        pass
     with open(helper_path, "w", encoding="utf-8") as f:
         f.write(_RESTART_HELPER_SRC)
 
