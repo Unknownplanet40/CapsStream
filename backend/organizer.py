@@ -756,11 +756,86 @@ def disambiguate_video_path(dest_path: str, existing_set: Optional[set] = None) 
         idx += 1
 
 
+def detect_subtitle_language(sub_path: str) -> Optional[str]:
+    """
+    Inspect the text content of a subtitle file to detect its ISO 639-1 language code.
+    Reads up to 120 lines and checks character scripts and high-frequency stopwords.
+    Returns ISO 639-1 code if confidently detected, else None.
+    """
+    if not os.path.isfile(sub_path):
+        return None
+    try:
+        with open(sub_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = []
+            for _ in range(120):
+                line = f.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if not line or line.isdigit() or "-->" in line:
+                    continue
+                clean = re.sub(r"<[^>]+>", "", line).lower()
+                clean = re.sub(r"\[.*?\]|\(.*?\)", "", clean).strip()
+                if clean:
+                    lines.append(clean)
+
+            if not lines:
+                return None
+
+            full_text = " ".join(lines)
+
+            # Non-Latin script checks
+            if len(re.findall(r"[\u0400-\u04FF]", full_text)) >= 10:
+                if any(w in full_text for w in ("і", "ї", "є")):
+                    return "uk"
+                return "ru"
+            if len(re.findall(r"[\u0600-\u06FF]", full_text)) >= 10:
+                return "ar"
+            if len(re.findall(r"[\u3040-\u30FF]", full_text)) >= 5:
+                return "ja"
+            if len(re.findall(r"[\u4E00-\u9FFF]", full_text)) >= 10:
+                return "zh"
+            if len(re.findall(r"[\uAC00-\uD7AF]", full_text)) >= 5:
+                return "ko"
+            if len(re.findall(r"[\u0370-\u03FF]", full_text)) >= 10:
+                return "el"
+            if len(re.findall(r"[\u0590-\u05FF]", full_text)) >= 10:
+                return "he"
+            if len(re.findall(r"[\u0E00-\u0E7F]", full_text)) >= 10:
+                return "th"
+
+            # Latin stopwords
+            words = set(re.findall(r"\b[a-zA-Z]{2,}\b", full_text.lower()))
+            en_stop = {"the", "you", "to", "and", "that", "it", "is", "what", "of", "in", "we", "he", "she", "for", "on", "with", "this", "have", "from", "be", "my", "all", "do", "no", "are", "not", "your"}
+            fr_stop = {"vous", "nous", "avec", "pour", "dans", "cette", "sont", "pas", "une", "les", "des", "est", "que", "qui"}
+            es_stop = {"que", "para", "por", "con", "una", "uno", "los", "las", "este", "esta", "como", "pero", "mas", "del"}
+            de_stop = {"nicht", "eine", "einer", "einem", "einen", "oder", "aber", "sind", "das", "ist", "und", "mit"}
+            tl_stop = {"ang", "mga", "ng", "sa", "hindi", "para", "dahil", "ako", "ikaw", "siya", "kami", "tayo"}
+            it_stop = {"non", "che", "per", "con", "una", "sono", "cosa", "questo", "della", "delle"}
+            pt_stop = {"nao", "que", "para", "com", "uma", "voce", "esta", "isso", "esse"}
+
+            scores = [
+                ("en", len(words & en_stop)),
+                ("fr", len(words & fr_stop)),
+                ("es", len(words & es_stop)),
+                ("de", len(words & de_stop)),
+                ("tl", len(words & tl_stop)),
+                ("it", len(words & it_stop)),
+                ("pt", len(words & pt_stop)),
+            ]
+            scores.sort(key=lambda x: x[1], reverse=True)
+            if scores[0][1] >= 2 and scores[0][1] > scores[1][1]:
+                return scores[0][0]
+    except Exception:
+        pass
+    return None
+
+
 def parse_subtitle_details(sub_path: str, media_basename: str = "") -> Dict[str, Any]:
     """
     Extract language code, hearing-impaired (HI/SDH) status, forced status,
     and priority rank from a subtitle filename and its directory tree.
-    Reimplemented on top of backend.sub_naming.
+    Reimplemented on top of backend.sub_naming with content-aware fallback.
 
     Priority ranking (lower = higher priority):
       0: English standard (eng / en)
@@ -771,28 +846,57 @@ def parse_subtitle_details(sub_path: str, media_basename: str = "") -> Dict[str,
       5: Unknown / undetermined
     """
     p = parse_filename(sub_path, parent_folder=os.path.basename(os.path.dirname(sub_path)))
-    is_eng = p.lang == "en"
+    lang = p.lang
+    is_hi = p.is_hi
+    is_forced = p.is_forced
     stem = os.path.splitext(os.path.basename(sub_path))[0].lower()
+    parent = os.path.basename(os.path.dirname(sub_path)).lower()
 
-    # Priority Rank: English standard (0) -> HI English (1) -> Forced (2)
-    if is_eng and not p.is_hi and not p.is_forced:
+    # 1. Content inspection if language is undetermined
+    if lang == "und" and os.path.isfile(sub_path):
+        detected = detect_subtitle_language(sub_path)
+        if detected:
+            lang = detected
+
+    # 2. Check if this is a companion subtitle belonging to the media file
+    is_companion = False
+    if media_basename:
+        m_res = _clean_name(media_basename)
+        m_clean = (m_res[0] if isinstance(m_res, tuple) else str(m_res)).strip().lower()
+        s_res = _clean_name(stem)
+        s_clean = (s_res[0] if isinstance(s_res, tuple) else str(s_res)).strip().lower()
+        if (m_clean and s_clean and (s_clean.startswith(m_clean) or m_clean.startswith(s_clean))) or stem.startswith(media_basename.lower()):
+            is_companion = True
+    if parent in ("subs", "subtitles", "sub", "eng", "english") or is_forced or is_hi:
+        is_companion = True
+
+    # 3. Companion subtitle defaulting: if it's a companion without an explicit language code,
+    # default to English ("en")
+    if lang == "und" and is_companion:
+        lang = "en"
+
+    is_eng = (lang == "en")
+
+    # Priority Rank: English standard (0) -> HI English (1) -> Forced (2) -> Generic (3) -> Other (4) -> Unknown (5)
+    if is_eng and not is_hi and not is_forced:
         priority = 0
-    elif is_eng and p.is_hi:
+    elif is_eng and is_hi:
         priority = 1
-    elif is_eng and p.is_forced:
+    elif is_eng and is_forced:
         priority = 2
-    elif media_basename and stem.startswith(media_basename.lower()) and p.lang == "und":
+    elif is_companion and lang == "und":
         priority = 3
-    elif p.lang != "und":
+    elif lang != "und":
         priority = 4
     else:
         priority = 5
 
     return {
-        "lang": p.lang,
-        "is_hi": p.is_hi,
-        "is_forced": p.is_forced,
+        "lang": lang,
+        "is_hi": is_hi,
+        "is_forced": is_forced,
         "is_eng": is_eng,
+        "is_companion": is_companion,
         "priority": priority,
     }
 
@@ -805,7 +909,8 @@ def build_subtitle_destination_path(
     """
     Build a standard Plex/CapsStream-compliant destination path for a companion subtitle.
     Pattern: <Media Name>.<lang>[.<flag>][.<num>].<ext>
-    If language is unknown, the subtitle moves with the video but keeps its original filename.
+    If language is unknown and not a companion subtitle (e.g. Director_Commentary_Track),
+    the subtitle keeps its original filename.
     """
     if existing_destinations is None:
         existing_destinations = set()
@@ -814,13 +919,13 @@ def build_subtitle_destination_path(
     dst_dir = os.path.dirname(media_dst)
     dst_base = os.path.splitext(media_dst)[0]
 
-    info = parse_subtitle_details(sub_src)
+    info = parse_subtitle_details(sub_src, media_basename=os.path.basename(dst_base))
     lang = info["lang"]
     is_hi = info["is_hi"]
     is_forced = info["is_forced"]
 
-    # Unknown language: keep original filename inside destination directory
-    if lang == "und":
+    # Unknown language and not a companion track: keep original filename inside destination directory
+    if lang == "und" and not is_hi and not is_forced:
         logger.info(f"Unknown language for subtitle '{os.path.basename(sub_src)}'; keeping original filename.")
         orig_fname = os.path.basename(sub_src)
         candidate = os.path.join(dst_dir, orig_fname)
@@ -837,8 +942,8 @@ def build_subtitle_destination_path(
                 return disambiguated
             idx += 1
 
-    # Recognized language: <Media Name>.<lang>[.<flag>][.<num>].<ext>
-    tag = f".{lang}"
+    # Standard Plex/CapsStream-compliant companion subtitle naming
+    tag = f".{lang}" if lang != "und" else ""
     if is_hi:
         tag += ".hi"
     elif is_forced:
@@ -896,30 +1001,56 @@ def find_companion_subtitles(media_file_path: str) -> List[str]:
         pass
 
     # 2. Search in allowed subfolders: Subs, Subtitles, sub, subs, eng, english
-    # Only if no companion subtitle file was found directly beside the media
-    if not found_subs:
-        for sub_dir_name in ["subs", "subtitles", "sub", "eng", "english"]:
-            sub_folder = os.path.join(parent_dir, sub_dir_name)
-            if os.path.isdir(sub_folder):
-                try:
-                    for root, _, files in os.walk(sub_folder):
-                        for f in files:
-                            _, f_ext = os.path.splitext(f)
-                            if f_ext.lower() in SUBTITLE_EXTS:
-                                fp = os.path.join(root, f)
-                                f_lower = f.lower()
-                                if not has_multiple_videos:
-                                    found_subs.add(fp)
-                                elif ep_token and ep_token in f_lower:
-                                    found_subs.add(fp)
-                                elif f_lower.startswith(base_name):
-                                    found_subs.add(fp)
-                except OSError:
-                    pass
+    for sub_dir_name in ["subs", "subtitles", "sub", "eng", "english"]:
+        sub_folder = os.path.join(parent_dir, sub_dir_name)
+        if os.path.isdir(sub_folder):
+            try:
+                for root, _, files in os.walk(sub_folder):
+                    for f in files:
+                        _, f_ext = os.path.splitext(f)
+                        if f_ext.lower() in SUBTITLE_EXTS:
+                            fp = os.path.join(root, f)
+                            f_lower = f.lower()
+                            if not has_multiple_videos:
+                                found_subs.add(fp)
+                            elif ep_token and ep_token in f_lower:
+                                found_subs.add(fp)
+                            elif f_lower.startswith(base_name):
+                                found_subs.add(fp)
+            except OSError:
+                pass
 
-    # 3. Sort subtitles strictly by priority: English (0) -> HI English (1) -> Forced (2) -> Generic (3) -> Other (4)
+    # 3. Deduplicate exact duplicate files (e.g. YTS root subtitle duplicate of Subs/Forced.eng.srt)
+    subs_folder_fingerprints = {}
+    for p in found_subs:
+        rel_parent = os.path.basename(os.path.dirname(p)).lower()
+        if rel_parent in ("subs", "subtitles", "sub", "eng", "english"):
+            try:
+                sz = os.path.getsize(p)
+                with open(p, "rb") as fp:
+                    head = fp.read(1024)
+                subs_folder_fingerprints[(sz, head)] = p
+            except OSError:
+                pass
+
+    unique_subs = []
+    for p in found_subs:
+        rel_parent = os.path.basename(os.path.dirname(p)).lower()
+        # If this subtitle is beside media in parent directory and is an exact duplicate of a file in Subs/, skip root copy
+        if rel_parent not in ("subs", "subtitles", "sub", "eng", "english") and subs_folder_fingerprints:
+            try:
+                sz = os.path.getsize(p)
+                with open(p, "rb") as fp:
+                    head = fp.read(1024)
+                if (sz, head) in subs_folder_fingerprints:
+                    continue
+            except OSError:
+                pass
+        unique_subs.append(p)
+
+    # 4. Sort subtitles strictly by priority: English (0) -> HI English (1) -> Forced (2) -> Generic (3) -> Other (4)
     sorted_subs = sorted(
-        list(found_subs),
+        unique_subs,
         key=lambda p: (
             parse_subtitle_details(p, base_name)["priority"],
             os.path.basename(p).lower()
@@ -1084,17 +1215,17 @@ def scan_incoming_for_preview(
             subtitle_plan = []
             for sub_src in companions:
                 sub_dst = build_subtitle_destination_path(sub_src, dest_path, existing_preview_subs)
-                p_sub = parse_filename(sub_src, parent_folder=os.path.basename(os.path.dirname(sub_src)))
+                details = parse_subtitle_details(sub_src, media_basename=os.path.basename(os.path.splitext(dest_path)[0]))
                 flags = []
-                if p_sub.is_forced:
+                if details.get("is_forced"):
                     flags.append("forced")
-                if p_sub.is_hi:
+                if details.get("is_hi"):
                     flags.append("hi")
                 action = "rename" if os.path.basename(sub_dst) != os.path.basename(sub_src) else "keep_name"
                 subtitle_plan.append({
                     "source": sub_src,
                     "destination": sub_dst,
-                    "lang": p_sub.lang,
+                    "lang": details.get("lang"),
                     "flags": flags,
                     "action": action,
                     "skipped_reason": None,

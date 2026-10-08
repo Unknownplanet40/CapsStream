@@ -46,6 +46,16 @@ LANG_MAP: Dict[str, str] = {
     "hu": "Hungarian",
     "ro": "Romanian",
     "uk": "Ukrainian",
+    "bg": "Bulgarian",
+    "hr": "Croatian",
+    "is": "Icelandic",
+    "lv": "Latvian",
+    "lt": "Lithuanian",
+    "sk": "Slovak",
+    "sl": "Slovenian",
+    "sr": "Serbian",
+    "et": "Estonian",
+    "fa": "Persian",
 }
 
 # Alias mapping: ISO 639-2/B/T codes and english terms -> ISO 639-1 standard code
@@ -93,7 +103,7 @@ LANG_ALIASES: Dict[str, str] = {
     # Swedish
     "sv": "sv", "swe": "sv", "swedish": "sv",
     # Norwegian
-    "no": "no", "nor": "no", "norwegian": "no",
+    "no": "no", "nor": "no", "norwegian": "no", "nob": "no", "nno": "no",
     # Danish
     "da": "da", "dan": "da", "danish": "da",
     # Finnish
@@ -109,7 +119,27 @@ LANG_ALIASES: Dict[str, str] = {
     # Romanian
     "ro": "ro", "ron": "ro", "rum": "ro", "romanian": "ro",
     # Ukrainian
-    "uk": "uk", "ukr": "uk", "ukrainian": "uk",
+    "uk": "uk", "ukr": "uk", "ukrainian": "uk", "ukraine": "uk",
+    # Bulgarian
+    "bg": "bg", "bul": "bg", "bulgarian": "bg",
+    # Croatian
+    "hr": "hr", "hrv": "hr", "croatian": "hr",
+    # Icelandic
+    "is": "is", "ice": "is", "isl": "is", "icelandic": "is",
+    # Latvian
+    "lv": "lv", "lav": "lv", "latvian": "lv",
+    # Lithuanian
+    "lt": "lt", "lit": "lt", "lithuanian": "lt",
+    # Slovak
+    "sk": "sk", "slo": "sk", "slk": "sk", "slovak": "sk",
+    # Slovenian
+    "sl": "sl", "slv": "sl", "slovenian": "sl", "slovenia": "sl",
+    # Serbian
+    "sr": "sr", "srp": "sr", "serbian": "sr", "serbia": "sr",
+    # Estonian
+    "et": "et", "est": "et", "estonian": "et", "estonia": "et",
+    # Persian / Farsi
+    "fa": "fa", "per": "fa", "fas": "fa", "persian": "fa", "farsi": "fa",
 }
 
 # Backward compatibility map: maps both 2-letter and 3-letter codes to English name
@@ -159,14 +189,14 @@ def parse_filename(name: str, parent_folder: str = "") -> ParsedSub:
     )
 
     # 2. Detect Forced
-    is_forced = bool(re.search(r"(?:^|[._\-\s\[\(])forced(?:[._\-\s\]\)]|$)", text_to_search))
+    is_forced = bool(re.search(r"(?:^|[._\-\s\[\(])(forced?|foreign)(?:[._\-\s\]\)]|$)", text_to_search))
 
     # 3. Detect duplicate/numeric suffix index (e.g. "movie.en.2.srt", "movie.en.forced.3.srt")
     suffix_index: Optional[int] = None
     num_match = re.search(r"(?:^|[._\-\s])(\d{1,3})(?:[._\-\s]|$)", stem_lower)
     if num_match:
         # Check if the number is at the tail of the stem (or before hi/forced)
-        tail_num_match = re.search(r"\.(\d{1,3})(?:\.(?:hi|sdh|forced))?$", stem_lower)
+        tail_num_match = re.search(r"\.(\d{1,3})(?:\.(?:hi|sdh|forced?|foreign))?$", stem_lower)
         if tail_num_match:
             try:
                 suffix_index = int(tail_num_match.group(1))
@@ -190,7 +220,7 @@ def parse_filename(name: str, parent_folder: str = "") -> ParsedSub:
 
     tokens = [t.strip() for t in re.split(r"[._\-\s\[\]\(\)]+", stem_lower) if t.strip()]
     for token in reversed(tokens):
-        if token in ("sdh", "cc", "forced"):
+        if token in ("sdh", "cc", "forced", "force", "foreign"):
             continue
         if token == "hi" and is_hi:
             continue
@@ -203,7 +233,7 @@ def parse_filename(name: str, parent_folder: str = "") -> ParsedSub:
     if not detected_lang and parent_lower:
         parent_tokens = [t.strip() for t in re.split(r"[._\-\s\[\]\(\)]+", parent_lower) if t.strip()]
         for token in parent_tokens:
-            if token in ("sdh", "cc", "forced"):
+            if token in ("sdh", "cc", "forced", "force", "foreign"):
                 continue
             if token == "hi" and is_hi:
                 continue
@@ -234,10 +264,8 @@ def format_filename_tag(parsed: ParsedSub) -> str:
       .en.2
       .en.forced.2
     """
-    if not parsed.is_recognized or parsed.lang == "und":
-        return ""
-
-    parts = [parsed.lang]
+    lang = parsed.lang if (parsed.is_recognized and parsed.lang != "und") else ""
+    parts = [lang] if lang else []
     if parsed.is_hi:
         parts.append("hi")
     elif parsed.is_forced:
@@ -246,6 +274,8 @@ def format_filename_tag(parsed: ParsedSub) -> str:
     if parsed.suffix_index and parsed.suffix_index > 1:
         parts.append(str(parsed.suffix_index))
 
+    if not parts:
+        return ""
     return "." + ".".join(parts)
 
 

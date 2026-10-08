@@ -577,6 +577,98 @@ class TestOrganizer(unittest.TestCase):
         self.assertEqual(os.path.basename(sub_dst), "Director_Commentary_Track.srt")
         self.assertEqual(os.path.dirname(sub_dst), os.path.dirname(dst_movie))
 
+    def test_scene_subtitle_without_lang_tag_renamed_to_media_en(self):
+        """Verify raw scene-named subtitles (e.g. YTS) matching the media are renamed to media.en.srt."""
+        scene_name = "Backrooms.2026.1080p.WEBRip.x264.AAC5.1-[YTS.GG - YTS.BZ]"
+        movie_file = os.path.join(self.incoming_dir, f"{scene_name}.mp4")
+        sub_file = os.path.join(self.incoming_dir, f"{scene_name}.srt")
+        with open(movie_file, "w") as f:
+            f.write("movie data")
+        with open(sub_file, "w") as f:
+            f.write("1\n00:00:01,000 --> 00:00:04,000\nHello, you are in the backrooms now.\n")
+
+        dst_movie = os.path.join(self.movies_dir, "Backrooms (2026)", "Backrooms (2026).mp4")
+        sub_dst = build_subtitle_destination_path(sub_file, dst_movie)
+
+        # Must be renamed to Plex/CapsStream-compliant Backrooms (2026).en.srt
+        self.assertEqual(os.path.basename(sub_dst), "Backrooms (2026).en.srt")
+        self.assertEqual(os.path.dirname(sub_dst), os.path.dirname(dst_movie))
+
+    def test_scene_forced_subtitle_renamed_to_media_en_forced(self):
+        """Verify .force and .forced subtitles are accurately renamed to .en.forced.srt."""
+        scene_name = "Backrooms.2026.1080p.WEBRip.x264.AAC5.1-[YTS.GG - YTS.BZ]"
+        sub_force = os.path.join(self.incoming_dir, f"{scene_name}.force.srt")
+        sub_forced = os.path.join(self.incoming_dir, f"{scene_name}.forced.srt")
+        for s in [sub_force, sub_forced]:
+            with open(s, "w") as f:
+                f.write("1\n00:00:01,000 --> 00:00:04,000\n[Foreign Dialogue Translated]\n")
+
+        dst_movie = os.path.join(self.movies_dir, "Backrooms (2026)", "Backrooms (2026).mp4")
+        dst_force = build_subtitle_destination_path(sub_force, dst_movie)
+        dst_forced = build_subtitle_destination_path(sub_forced, dst_movie)
+
+        self.assertEqual(os.path.basename(dst_force), "Backrooms (2026).en.forced.srt")
+        self.assertEqual(os.path.basename(dst_forced), "Backrooms (2026).en.forced.srt")
+
+    def test_subs_folder_companion_discovery_and_deduplication(self):
+        """Verify Subs/ folder subtitles are discovered even if root subtitle exists, and duplicates are pruned."""
+        movie_dir = os.path.join(self.incoming_dir, "Backrooms (2026) [1080p] [WEBRip] [YTS.GG]")
+        subs_dir = os.path.join(movie_dir, "Subs")
+        os.makedirs(subs_dir, exist_ok=True)
+
+        scene_base = "Backrooms.2026.1080p.WEBRip.x264.AAC5.1-[YTS.GG - YTS.BZ]"
+        movie_path = os.path.join(movie_dir, f"{scene_base}.mp4")
+        root_sub = os.path.join(movie_dir, f"{scene_base}.srt")
+
+        # Root sub is a duplicate of Forced.eng.srt
+        forced_payload = "1\n00:00:02,000 --> 00:00:05,000\nDownloaded from YTS.BZ\n2\n00:01:00,000 --> 00:01:03,000\nRun!"
+        with open(movie_path, "w") as f:
+            f.write("movie")
+        with open(root_sub, "w") as f:
+            f.write(forced_payload)
+
+        # Subs/ folder contains full English, Forced, and SDH
+        sub_en = os.path.join(subs_dir, "English.srt")
+        sub_forced = os.path.join(subs_dir, "Forced.eng.srt")
+        sub_sdh = os.path.join(subs_dir, "SDH.eng.srt")
+
+        with open(sub_en, "w") as f:
+            f.write("1\n00:00:01,000 --> 00:00:03,000\nFull dialogue\n")
+        with open(sub_forced, "w") as f:
+            f.write(forced_payload)
+        with open(sub_sdh, "w") as f:
+            f.write("1\n00:00:01,000 --> 00:00:03,000\n[music playing]\n")
+
+        companions = find_companion_subtitles(movie_path)
+        # Should have 3 unique subtitles (English, SDH, Forced) - duplicate root sub pruned
+        self.assertEqual(len(companions), 3)
+
+        # Verify priority sorting: English (0) -> SDH (1) -> Forced (2)
+        base_names = [os.path.basename(c) for c in companions]
+        self.assertEqual(base_names[0], "English.srt")
+        self.assertEqual(base_names[1], "SDH.eng.srt")
+        self.assertEqual(base_names[2], "Forced.eng.srt")
+
+        # Execute organization plan
+        dst_movie = os.path.join(self.movies_dir, "Backrooms (2026)", "Backrooms (2026).mp4")
+        plan = [{
+            "source_path": movie_path,
+            "destination_path": dst_movie,
+            "media_type": "movie",
+            "subtitles": companions,
+        }]
+        res = execute_organization_plan(plan, mode="move", incoming_dir=self.incoming_dir)
+        self.assertEqual(res["success_count"], 1)
+
+        # Verify destination files
+        expected_en = os.path.join(self.movies_dir, "Backrooms (2026)", "Backrooms (2026).en.srt")
+        expected_hi = os.path.join(self.movies_dir, "Backrooms (2026)", "Backrooms (2026).en.hi.srt")
+        expected_forced = os.path.join(self.movies_dir, "Backrooms (2026)", "Backrooms (2026).en.forced.srt")
+
+        self.assertTrue(os.path.exists(expected_en))
+        self.assertTrue(os.path.exists(expected_hi))
+        self.assertTrue(os.path.exists(expected_forced))
+
 
 if __name__ == "__main__":
     unittest.main()
