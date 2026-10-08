@@ -488,6 +488,51 @@ class TestRouteMedia(unittest.TestCase):
         self.assertFalse(data.get("is_local"))
         self.assertFalse(data.get("has_vlc"))
 
+    @patch("backend.routes.media.get_best_media_source")
+    @patch("backend.routes.media.kids_guard_media", return_value=None)
+    @patch("backend.routes.media.safe_logo_path")
+    def test_media_detail_logo_path_sanitized(self, mock_safe_logo, mock_kids, mock_media):
+        """Verify GET /api/media/<id> invokes safe_logo_path to sanitize logo_path."""
+        mock_media.return_value = {
+            "id": 42,
+            "title": "Test Title",
+            "type": "movie",
+            "logo_path": "images/test_logo.png",
+            "file_path": "",
+            "duration": 120,
+            "tmdb_id": 999,
+            "backdrop_path": None,
+        }
+        mock_safe_logo.return_value = "images/test_logo.png"
+
+        resp = self.client.get("/api/media/42")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        mock_safe_logo.assert_called_with("images/test_logo.png")
+        self.assertEqual(data.get("logo_path"), "images/test_logo.png")
+
+    @patch("backend.routes.media.get_best_media_source")
+    @patch("backend.routes.media.kids_guard_media", return_value=None)
+    @patch("backend.routes.media.safe_logo_path")
+    def test_media_detail_invalid_logo_path_nullified(self, mock_safe_logo, mock_kids, mock_media):
+        """Verify GET /api/media/<id> returns null when safe_logo_path rejects the path."""
+        mock_media.return_value = {
+            "id": 43,
+            "title": "Test Title 2",
+            "type": "movie",
+            "logo_path": "images/../../evil.png",
+            "file_path": "",
+            "duration": 120,
+            "tmdb_id": 1000,
+            "backdrop_path": None,
+        }
+        mock_safe_logo.return_value = None
+
+        resp = self.client.get("/api/media/43")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIsNone(data.get("logo_path"))
+
 
 if __name__ == "__main__":
     unittest.main()

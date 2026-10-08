@@ -18,49 +18,23 @@ logger = logging.getLogger("subtitles")
 
 SUB_CACHE_DIR = os.path.join(BASE_DIR, "data", "metadata", "subtitles")
 
-LANG_NAMES = {
-    "eng": "English", "en": "English", "jpn": "Japanese", "ja": "Japanese",
-    "spa": "Spanish", "es": "Spanish", "fre": "French", "fra": "French", "fr": "French",
-    "ger": "German", "deu": "German", "de": "German", "ita": "Italian", "it": "Italian",
-    "zho": "Chinese", "chi": "Chinese", "zh": "Chinese", "kor": "Korean", "ko": "Korean",
-    "rus": "Russian", "ru": "Russian", "por": "Portuguese", "pt": "Portuguese",
-    "tag": "Tagalog", "tgl": "Tagalog", "tl": "Tagalog"
-}
+from backend.sub_naming import (
+    LANG_NAMES,
+    LANG_MAP,
+    parse_filename,
+    display_label,
+    normalize_lang,
+)
+
 
 def _parse_sub_label(file_name):
     """
-    Parses display label, language code, and SDH tag from filename.
+    Parses display label, language code (ISO 639-1), SDH/HI flag, and forced flag.
+    Reimplemented on top of backend.sub_naming.
     """
-    fn_lower = file_name.lower()
-    is_sdh = any(tag in fn_lower for tag in ["sdh", "cc", "hearing", "hi.", "_hi_", "-hi-"])
-
-    # Extract language code if present
-    lang = "und"
-    for code, name in LANG_NAMES.items():
-        pattern = r"(?:^|[._\-\s])" + re.escape(code) + r"(?:[._\-\s]|$)"
-        if re.search(pattern, fn_lower):
-            lang = code
-            break
-
-    lang_disp = LANG_NAMES.get(lang)
-    
-    # Clean base name without extension
-    clean_name = os.path.splitext(file_name)[0]
-    clean_name = clean_name.replace("_", " ").replace(".", " ").strip()
-
-    if lang_disp:
-        if clean_name.lower() != lang_disp.lower() and clean_name.lower() != lang.lower():
-            label = f"{lang_disp} ({clean_name})"
-        else:
-            label = lang_disp
-        if is_sdh and "[SDH]" not in label:
-            label += " [SDH]"
-    else:
-        label = clean_name
-        if is_sdh and "[sdh]" not in label.lower():
-            label += " [SDH]"
-
-    return label, lang, is_sdh, file_name
+    parsed = parse_filename(file_name)
+    label = display_label(parsed, file_name)
+    return label, parsed.lang, parsed.is_hi, file_name
 
 
 def _dir_has_other_videos(dir_path, current_video_path, video_extensions):
@@ -380,20 +354,24 @@ def get_all_subtitles(video_path, media_id):
 
                 # Get path relative to video directory for URL serving
                 rel_path = os.path.relpath(full_sub_path, video_dir).replace("\\", "/")
-                label, lang, is_sdh, raw_fn = _parse_sub_label(f)
+                parent_folder_name = os.path.basename(root)
+                parsed = parse_filename(f, parent_folder=parent_folder_name)
+                label = display_label(parsed, f)
 
                 # Clean display label
-                parent_folder_name = os.path.basename(root)
                 if parent_folder_name.lower() in ["subs", "subtitles", "eng", "english"] and parent_folder_name.lower() != os.path.basename(video_dir).lower():
-                    label = f"{label} ({parent_folder_name})"
+                    if parent_folder_name.lower() not in label.lower():
+                        label = f"{label} ({parent_folder_name})"
 
                 sub_list.append({
                     "type": "external",
                     "label": label,
-                    "language": lang,
-                    "is_sdh": is_sdh,
+                    "language": parsed.lang,
+                    "forced": parsed.is_forced,
+                    "hi": parsed.is_hi,
+                    "is_sdh": parsed.is_hi,
                     "filename": f,
-                    "raw_filename": raw_fn,
+                    "raw_filename": f,
                     "url": f"/api/subtitles/{media_id}/{rel_path}"
                 })
 

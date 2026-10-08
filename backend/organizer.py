@@ -41,6 +41,67 @@ if PROJECT_ROOT not in sys.path:
 from backend.utils.paths import BASE_DIR
 from backend.matcher import _clean_name
 from backend.scanner import _parse_episode, VIDEO_EXTS
+from backend.sub_naming import parse_filename, format_filename_tag, normalize_lang
+
+# Supported Local Regions mapping ISO 3166-1 alpha-2 -> English Name
+REGIONS: Dict[str, str] = {
+    "PH": "Philippines",
+    "US": "United States",
+    "GB": "United Kingdom",
+    "KR": "South Korea",
+    "JP": "Japan",
+    "ES": "Spain",
+    "FR": "France",
+    "DE": "Germany",
+    "CA": "Canada",
+    "AU": "Australia",
+    "IN": "India",
+    "IT": "Italy",
+    "MX": "Mexico",
+    "BR": "Brazil",
+    "TH": "Thailand",
+}
+
+
+def get_organizer_library_roots(cfg: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Build the canonical library roots dictionary from server config.
+    Synchronizes roots across REST API, background watcher, and CLI.
+    """
+    org_cfg = cfg.get("organizer", {})
+    media_paths = cfg.get("media_paths", {})
+
+    def _first_or(val, default):
+        if isinstance(val, list):
+            return val[0] if val else default
+        return val or default
+
+    target_movies = org_cfg.get("target_movies_path") or _first_or(
+        media_paths.get("movies"), os.path.join(BASE_DIR, "data", "media", "Movies")
+    )
+    target_series = org_cfg.get("target_series_path") or _first_or(
+        media_paths.get("series") or media_paths.get("tv"), os.path.join(BASE_DIR, "data", "media", "TV Shows")
+    )
+    target_anime = org_cfg.get("target_anime_path") or _first_or(
+        media_paths.get("anime"), os.path.join(BASE_DIR, "data", "media", "Anime")
+    )
+
+    roots: Dict[str, str] = {
+        "movies": target_movies,
+        "tv": target_series,
+        "anime": target_anime,
+    }
+
+    target_local_movies = org_cfg.get("target_local_movies_path")
+    if target_local_movies and str(target_local_movies).strip():
+        roots["local_movies"] = str(target_local_movies).strip()
+
+    target_local_series = org_cfg.get("target_local_series_path")
+    if target_local_series and str(target_local_series).strip():
+        roots["local_tv"] = str(target_local_series).strip()
+
+    return roots
+
 
 # Constants
 SUBTITLE_EXTS = {".srt", ".ass", ".vtt", ".sub", ".idx"}
@@ -399,12 +460,18 @@ def resolve_with_requests(item: Dict[str, Any], requests_file: str = REQUESTS_FI
     return None
 
 
-def resolve_canonical_item(item: Dict[str, Any], tmdb_api_key: Optional[str] = None) -> Dict[str, Any]:
+def resolve_canonical_item(
+    item: Dict[str, Any],
+    tmdb_api_key: Optional[str] = None,
+    local_region: str = ""
+) -> Dict[str, Any]:
     """
     Resolve canonical title and year using requests.json first,
     optionally TMDb API lookup, with local parsing as fallback.
+    Also detects origin countries and route reason for local region routing.
     """
     resolved = dict(item)
+    origin_countries: List[str] = []
 
     # 1. Check data/requests.json
     req_match = resolve_with_requests(item)
@@ -416,6 +483,14 @@ def resolve_canonical_item(item: Dict[str, Any], tmdb_api_key: Optional[str] = N
             resolved["media_type"] = req_match["media_type"]
         resolved["match_source"] = "requests.json"
         resolved["request_id"] = req_match.get("request_id")
+        resolved["origin_countries"] = []
+        if local_region and local_region.strip():
+            resolved["is_local"] = False
+            resolved["route_reason"] = "origin-unknown"
+            logger.info(f"Origin unknown for '{resolved['canonical_title']}'; routed normally.")
+        else:
+            resolved["is_local"] = False
+            resolved["route_reason"] = "region-off"
         return resolved
 
     # 2. Check TMDb API if key is supplied (uses search/multi for cross-type disambiguation)
@@ -459,6 +534,29 @@ def resolve_canonical_item(item: Dict[str, Any], tmdb_api_key: Optional[str] = N
                         resolved["tmdb_id"] = best.get("id")
                         resolved["match_source"] = "tmdb"
 
+                        # Extract origin countries
+                        if tmdb_type == "tv":
+                            origin_countries = [
+                                str(c).strip().upper() for c in best.get("origin_country", []) if c
+                            ]
+                        elif tmdb_type == "movie":
+                            # Movie search results omit production countries; call movie details only when local_region is set
+                            if local_region and local_region.strip() and resolved.get("tmdb_id"):
+                                try:
+                                    m_resp = requests.get(
+                                        f"https://api.themoviedb.org/3/movie/{resolved['tmdb_id']}",
+                                        params={"api_key": tmdb_api_key},
+                                        timeout=5
+                                    )
+                                    if m_resp.status_code == 200:
+                                        prod_countries = m_resp.json().get("production_countries", [])
+                                        origin_countries = [
+                                            str(c.get("iso_3166_1", "")).strip().upper()
+                                            for c in prod_countries if c.get("iso_3166_1")
+                                        ]
+                                except Exception as e:
+                                    logger.debug(f"TMDb movie details origin country lookup skipped: {e}")
+
                         # Detect Japanese animation as Anime
                         is_japanese = best.get("original_language") == "ja"
                         is_animation = 16 in best.get("genre_ids", [])
@@ -475,14 +573,39 @@ def resolve_canonical_item(item: Dict[str, Any], tmdb_api_key: Optional[str] = N
                                 resolved["season"] = resolved.get("season") or 1
                                 resolved["episode"] = resolved.get("episode") or 1
 
+                        resolved["origin_countries"] = origin_countries
+                        if local_region and local_region.strip():
+                            reg_code = local_region.strip().upper()
+                            if origin_countries:
+                                if reg_code in origin_countries:
+                                    resolved["is_local"] = True
+                                    resolved["route_reason"] = "local"
+                                else:
+                                    resolved["is_local"] = False
+                                    resolved["route_reason"] = "non-local"
+                            else:
+                                resolved["is_local"] = False
+                                resolved["route_reason"] = "origin-unknown"
+                                logger.info(f"Origin unknown for '{resolved['canonical_title']}'; routed normally.")
+                        else:
+                            resolved["is_local"] = False
+                            resolved["route_reason"] = "region-off"
+
                         return resolved
         except Exception as e:
             logger.debug(f"TMDb query skipped or failed: {e}")
 
-
     # 3. Fallback to clean parsed title
     resolved["canonical_title"] = sanitize_filename(item["title"])
     resolved["match_source"] = "parsed"
+    resolved["origin_countries"] = []
+    if local_region and local_region.strip():
+        resolved["is_local"] = False
+        resolved["route_reason"] = "origin-unknown"
+        logger.info(f"Origin unknown for '{resolved['canonical_title']}'; routed normally.")
+    else:
+        resolved["is_local"] = False
+        resolved["route_reason"] = "region-off"
     return resolved
 
 
@@ -494,22 +617,33 @@ def build_destination_path(resolved_item: Dict[str, Any], library_roots: Dict[st
       Movies:    {movies_root}/{Title} ({Year})/{Title} ({Year}).ext
       TV Series: {tv_root}/{Title}/Season {SS:02d}/{Title} - S{SS:02d}E{EE:02d}.ext
       Anime:     {anime_root}/{Title}/Season {SS:02d}/{Title} - S{SS:02d}E{EE:02d}.ext
+
+    Supports local region destination routing for Movies and TV (Anime is always untouched).
     """
     media_type = resolved_item["media_type"]
     title = resolved_item["canonical_title"]
     year = resolved_item.get("year")
     ext = resolved_item["extension"]
+    is_local = bool(resolved_item.get("is_local"))
 
     year_str = f" ({year})" if year else ""
 
     if media_type == "movie":
-        raw_root = library_roots.get("movies")
+        if is_local and library_roots.get("local_movies"):
+            raw_root = library_roots.get("local_movies")
+        else:
+            raw_root = library_roots.get("movies")
         default_dir = os.path.join(BASE_DIR, "data", "media", "Movies")
     elif media_type == "anime":
+        # Anime is untouched and always uses anime root
         raw_root = library_roots.get("anime")
         default_dir = os.path.join(BASE_DIR, "data", "media", "Anime")
     else:
-        raw_root = library_roots.get("tv") or library_roots.get("series")
+        # TV / series
+        if is_local and library_roots.get("local_tv"):
+            raw_root = library_roots.get("local_tv")
+        else:
+            raw_root = library_roots.get("tv") or library_roots.get("series")
         default_dir = os.path.join(BASE_DIR, "data", "media", "TV Shows")
 
     if isinstance(raw_root, list):
@@ -602,10 +736,31 @@ def execute_file_operation(src: str, dst: str, mode: str = "smart") -> Tuple[boo
     return False, "none", f"Unknown mode: {mode}"
 
 
+def disambiguate_video_path(dest_path: str, existing_set: Optional[set] = None) -> str:
+    """
+    Append numeric suffix ' (2)', ' (3)' to a video destination path until non-colliding.
+    """
+    if (existing_set is None or dest_path not in existing_set) and not os.path.exists(dest_path):
+        if existing_set is not None:
+            existing_set.add(dest_path)
+        return dest_path
+
+    base, ext = os.path.splitext(dest_path)
+    idx = 2
+    while True:
+        candidate = f"{base} ({idx}){ext}"
+        if (existing_set is None or candidate not in existing_set) and not os.path.exists(candidate):
+            if existing_set is not None:
+                existing_set.add(candidate)
+            return candidate
+        idx += 1
+
+
 def parse_subtitle_details(sub_path: str, media_basename: str = "") -> Dict[str, Any]:
     """
     Extract language code, hearing-impaired (HI/SDH) status, forced status,
     and priority rank from a subtitle filename and its directory tree.
+    Reimplemented on top of backend.sub_naming.
 
     Priority ranking (lower = higher priority):
       0: English standard (eng / en)
@@ -615,67 +770,28 @@ def parse_subtitle_details(sub_path: str, media_basename: str = "") -> Dict[str,
       4: Other recognized language (es, fr, de, ja, etc.)
       5: Unknown / undetermined
     """
-    fn = os.path.basename(sub_path).lower()
-    parent_name = os.path.basename(os.path.dirname(sub_path)).lower()
-    stem = os.path.splitext(fn)[0]
+    p = parse_filename(sub_path, parent_folder=os.path.basename(os.path.dirname(sub_path)))
+    is_eng = p.lang == "en"
+    stem = os.path.splitext(os.path.basename(sub_path))[0].lower()
 
-    tokens_text = f"{parent_name} {stem}"
-
-    # 1. Detect Hearing Impaired (HI / SDH / CC)
-    is_hi = bool(
-        re.search(r"(?:^|[._\-\s\[\(])(sdh|cc|hearing(?:[._\-\s]impaired)?)(?:[._\-\s\]\)]|$)", tokens_text) or
-        re.search(r"(?:^|[._\-\s\[\(])hi(?:[._\-\s\]\)]|$)", fn)
-    )
-
-    # 2. Detect Forced
-    is_forced = bool(re.search(r"(?:^|[._\-\s\[\(])forced(?:[._\-\s\]\)]|$)", tokens_text))
-
-    # 3. Detect Language
-    is_eng = bool(
-        re.search(r"(?:^|[._\-\s\[\(])(eng|english|en)(?:[._\-\s\]\)]|$)", tokens_text) or
-        parent_name in ("eng", "english", "en")
-    )
-
-    lang = "und"
-    if is_eng:
-        lang = "en"
-    elif is_hi and not any(other in tokens_text for other in ("spanish", "french", "german", "italian", "japanese", "korean")):
-        is_eng = True
-        lang = "en"
-    else:
-        for term, code in (
-            ("spanish", "es"), ("spa", "es"), ("es", "es"),
-            ("french", "fr"), ("fre", "fr"), ("fra", "fr"), ("fr", "fr"),
-            ("german", "de"), ("ger", "de"), ("deu", "de"), ("de", "de"),
-            ("italian", "it"), ("ita", "it"), ("it", "it"),
-            ("japanese", "ja"), ("jpn", "ja"), ("ja", "ja"),
-            ("korean", "ko"), ("kor", "ko"), ("ko", "ko"),
-            ("chinese", "zh"), ("zho", "zh"), ("chi", "zh"), ("zh", "zh"),
-            ("russian", "ru"), ("rus", "ru"), ("ru", "ru"),
-            ("portuguese", "pt"), ("por", "pt"), ("pt", "pt"),
-        ):
-            if re.search(r"(?:^|[._\-\s\[\(])" + re.escape(term) + r"(?:[._\-\s\]\)]|$)", tokens_text):
-                lang = code
-                break
-
-    # 4. Compute Priority Rank: English standard (0) -> HI English (1) -> Forced (2)
-    if is_eng and not is_hi and not is_forced:
+    # Priority Rank: English standard (0) -> HI English (1) -> Forced (2)
+    if is_eng and not p.is_hi and not p.is_forced:
         priority = 0
-    elif is_eng and is_hi:
+    elif is_eng and p.is_hi:
         priority = 1
-    elif is_eng and is_forced:
+    elif is_eng and p.is_forced:
         priority = 2
-    elif media_basename and stem.startswith(media_basename.lower()) and lang == "und":
+    elif media_basename and stem.startswith(media_basename.lower()) and p.lang == "und":
         priority = 3
-    elif lang != "und":
+    elif p.lang != "und":
         priority = 4
     else:
         priority = 5
 
     return {
-        "lang": lang,
-        "is_hi": is_hi,
-        "is_forced": is_forced,
+        "lang": p.lang,
+        "is_hi": p.is_hi,
+        "is_forced": p.is_forced,
         "is_eng": is_eng,
         "priority": priority,
     }
@@ -688,12 +804,14 @@ def build_subtitle_destination_path(
 ) -> str:
     """
     Build a standard Plex/CapsStream-compliant destination path for a companion subtitle.
-    Prioritizes .en.srt and .en.hi.srt / .en.sdh.srt naming.
+    Pattern: <Media Name>.<lang>[.<flag>][.<num>].<ext>
+    If language is unknown, the subtitle moves with the video but keeps its original filename.
     """
     if existing_destinations is None:
         existing_destinations = set()
 
     sub_ext = os.path.splitext(sub_src)[1].lower()
+    dst_dir = os.path.dirname(media_dst)
     dst_base = os.path.splitext(media_dst)[0]
 
     info = parse_subtitle_details(sub_src)
@@ -701,27 +819,30 @@ def build_subtitle_destination_path(
     is_hi = info["is_hi"]
     is_forced = info["is_forced"]
 
-    if lang == "en":
-        if is_hi:
-            tag = ".en.hi"
-        elif is_forced:
-            tag = ".en.forced"
-        else:
-            tag = ".en"
-    elif lang != "und":
-        tag = f".{lang}"
-        if is_hi:
-            tag += ".hi"
-        elif is_forced:
-            tag += ".forced"
-    else:
-        sub_fn_base = os.path.splitext(os.path.basename(sub_src))[0]
-        media_dst_base = os.path.splitext(os.path.basename(media_dst))[0]
-        if sub_fn_base.lower().startswith(media_dst_base.lower()):
-            clean_sfx = sub_fn_base[len(media_dst_base):].lstrip("._- ")
-            tag = f".{clean_sfx}" if clean_sfx else ""
-        else:
-            tag = ""
+    # Unknown language: keep original filename inside destination directory
+    if lang == "und":
+        logger.info(f"Unknown language for subtitle '{os.path.basename(sub_src)}'; keeping original filename.")
+        orig_fname = os.path.basename(sub_src)
+        candidate = os.path.join(dst_dir, orig_fname)
+        if candidate not in existing_destinations and not os.path.exists(candidate):
+            existing_destinations.add(candidate)
+            return candidate
+
+        orig_stem, orig_ext = os.path.splitext(orig_fname)
+        idx = 2
+        while True:
+            disambiguated = os.path.join(dst_dir, f"{orig_stem}.{idx}{orig_ext}")
+            if disambiguated not in existing_destinations and not os.path.exists(disambiguated):
+                existing_destinations.add(disambiguated)
+                return disambiguated
+            idx += 1
+
+    # Recognized language: <Media Name>.<lang>[.<flag>][.<num>].<ext>
+    tag = f".{lang}"
+    if is_hi:
+        tag += ".hi"
+    elif is_forced:
+        tag += ".forced"
 
     candidate = f"{dst_base}{tag}{sub_ext}"
     if candidate not in existing_destinations and not os.path.exists(candidate):
@@ -916,9 +1037,11 @@ def undo_batch(batch_id: str, history_file: Optional[str] = None) -> Dict[str, A
 
 def scan_incoming_for_preview(
     incoming_dir: str,
-    library_roots: Dict[str, str],
+    library_roots: Dict[str, Any],
     tmdb_api_key: Optional[str] = None,
-    clean_empty: bool = True
+    clean_empty: bool = True,
+    local_region: str = "",
+    collision_policy: str = "skip",
 ) -> List[Dict[str, Any]]:
     """
     Perform a dry-run scan of an incoming directory.
@@ -929,6 +1052,8 @@ def scan_incoming_for_preview(
         return []
 
     results = []
+    existing_preview_destinations = set()
+    existing_preview_subs = set()
 
     for root, dirs, files in os.walk(incoming_dir):
         # Skip hidden/temporary directories
@@ -942,12 +1067,38 @@ def scan_incoming_for_preview(
                 continue
 
             classified = classify_media_file(fpath)
-            resolved = resolve_canonical_item(classified, tmdb_api_key=tmdb_api_key)
+            resolved = resolve_canonical_item(classified, tmdb_api_key=tmdb_api_key, local_region=local_region)
             dest_path = build_destination_path(resolved, library_roots)
+
+            dest_exists = os.path.exists(dest_path)
+            if dest_exists and collision_policy == "suffix":
+                dest_path = disambiguate_video_path(dest_path, existing_preview_destinations)
+            else:
+                existing_preview_destinations.add(dest_path)
 
             is_locked = is_file_locked(fpath)
             is_settled = is_file_settled(fpath)
             companions = find_companion_subtitles(fpath)
+
+            # Build companion subtitle plan
+            subtitle_plan = []
+            for sub_src in companions:
+                sub_dst = build_subtitle_destination_path(sub_src, dest_path, existing_preview_subs)
+                p_sub = parse_filename(sub_src, parent_folder=os.path.basename(os.path.dirname(sub_src)))
+                flags = []
+                if p_sub.is_forced:
+                    flags.append("forced")
+                if p_sub.is_hi:
+                    flags.append("hi")
+                action = "rename" if os.path.basename(sub_dst) != os.path.basename(sub_src) else "keep_name"
+                subtitle_plan.append({
+                    "source": sub_src,
+                    "destination": sub_dst,
+                    "lang": p_sub.lang,
+                    "flags": flags,
+                    "action": action,
+                    "skipped_reason": None,
+                })
 
             results.append({
                 "source_path": fpath,
@@ -965,7 +1116,11 @@ def scan_incoming_for_preview(
                 "is_locked": is_locked,
                 "is_settled": is_settled,
                 "subtitles": companions,
-                "destination_exists": os.path.exists(dest_path),
+                "subtitle_plan": subtitle_plan,
+                "destination_exists": dest_exists,
+                "route_reason": resolved.get("route_reason", "region-off"),
+                "origin_countries": resolved.get("origin_countries", []),
+                "collision_policy": collision_policy,
             })
 
     if clean_empty and os.path.isdir(incoming_dir):
@@ -979,7 +1134,8 @@ def execute_organization_plan(
     mode: str = "smart",
     prune_empty_dirs: bool = True,
     incoming_dir: Optional[str] = None,
-    history_file: Optional[str] = None
+    history_file: Optional[str] = None,
+    collision_policy: str = "skip",
 ) -> Dict[str, Any]:
     """
     Execute a batch of approved organization items.
@@ -999,6 +1155,17 @@ def execute_organization_plan(
             failed_items.append({"source": src, "error": "File is currently locked or downloading"})
             continue
 
+        item_policy = item.get("collision_policy") or collision_policy
+        if os.path.exists(dst) and not os.path.samefile(src, dst):
+            if item_policy == "suffix":
+                dst = disambiguate_video_path(dst)
+                item["destination_path"] = dst
+            else:
+                msg = f"Destination file already exists: {dst}"
+                logger.info(f"Skipping {src} (collision): {msg}")
+                failed_items.append({"source": src, "error": msg})
+                continue
+
         ok, action_taken, err = execute_file_operation(src, dst, mode=mode)
         if ok:
             op_record = {
@@ -1016,7 +1183,7 @@ def execute_organization_plan(
             for sub_src in item.get("subtitles", []):
                 sub_dst = build_subtitle_destination_path(sub_src, dst, existing_sub_dsts)
 
-                s_ok, s_action, _ = execute_file_operation(sub_src, sub_dst, mode=mode)
+                s_ok, s_action, s_err = execute_file_operation(sub_src, sub_dst, mode=mode)
                 if s_ok:
                     operations.append({
                         "source": sub_src,
@@ -1024,6 +1191,8 @@ def execute_organization_plan(
                         "action": s_action,
                         "type": "subtitle"
                     })
+                else:
+                    logger.warning(f"Could not organize companion subtitle {sub_src} -> {sub_dst}: {s_err}")
 
         else:
             failed_items.append({"source": src, "error": err or "Operation failed"})
@@ -1060,7 +1229,9 @@ def execute_organization_plan(
     return {
         "batch_id": batch_id,
         "total": len(plan_items),
+        "success": len(failed_items) == 0,
         "success_count": len(successful_items),
+        "organized_count": len(successful_items),
         "failed_count": len(failed_items),
         "operations": operations,
         "failures": failed_items,
@@ -1230,27 +1401,24 @@ def _organizer_watcher_loop():
             if org_cfg.get("enabled", True) and org_cfg.get("auto_watch", False):
                 incoming = org_cfg.get("incoming_dir") or os.path.join(BASE_DIR, "data", "incoming")
                 if os.path.isdir(incoming):
-                    media_paths = cfg.get("media_paths", {})
-
-                    def _first_or(val, default):
-                        if isinstance(val, list):
-                            return val[0] if val else default
-                        return val or default
-
-                    lib_roots = {
-                        "movies": org_cfg.get("target_movies_path") or _first_or(media_paths.get("movies"), os.path.join(BASE_DIR, "data", "media", "Movies")),
-                        "tv": org_cfg.get("target_series_path") or _first_or(media_paths.get("series") or media_paths.get("tv"), os.path.join(BASE_DIR, "data", "media", "TV Shows")),
-                        "anime": org_cfg.get("target_anime_path") or _first_or(media_paths.get("anime"), os.path.join(BASE_DIR, "data", "media", "Anime")),
-                    }
+                    lib_roots = get_organizer_library_roots(cfg)
+                    local_reg = org_cfg.get("local_region", "")
+                    col_policy = org_cfg.get("collision_policy", "skip")
                     mode = org_cfg.get("mode", "smart")
-                    preview = scan_incoming_for_preview(incoming, lib_roots, tmdb_api_key=cfg.get("tmdb_api_key"))
+                    preview = scan_incoming_for_preview(
+                        incoming,
+                        lib_roots,
+                        tmdb_api_key=cfg.get("tmdb_api_key"),
+                        local_region=local_reg,
+                        collision_policy=col_policy,
+                    )
                     ready = [
                         item for item in preview
                         if item.get("is_settled") and not item.get("is_locked") and item.get("confidence") != "low"
                     ]
                     if ready:
                         logger.info(f"[Watcher] Auto-organizing {len(ready)} settled media item(s) from {incoming}")
-                        res = execute_organization_plan(ready, mode=mode)
+                        res = execute_organization_plan(ready, mode=mode, collision_policy=col_policy)
                         trigger_post_processing(res)
         except Exception as e:
             logger.debug(f"[Watcher] Watcher loop check: {e}")
@@ -1272,6 +1440,8 @@ def _organizer_watcher_loop():
 
 def main():
     import argparse
+    from backend.settings import load_config
+
     parser = argparse.ArgumentParser(description="CapsStream Automated Media Renamer & File Organizer")
     parser.add_argument("--path", "-p", help="Path to downloaded file or directory", default=None)
     parser.add_argument("--name", "-n", help="Optional torrent/media title hint", default=None)
@@ -1295,38 +1465,54 @@ def main():
         logger.error(f"Target path does not exist: {target_path}")
         sys.exit(1)
 
-    # Defaults for library paths
-    media_root = os.path.join(BASE_DIR, "data", "media")
-    lib_roots = {
-        "movies": os.path.join(media_root, "Movies"),
-        "tv": os.path.join(media_root, "TV Shows")
-    }
+    cfg = load_config()
+    lib_roots = get_organizer_library_roots(cfg)
+    org_cfg = cfg.get("organizer", {})
+    local_reg = org_cfg.get("local_region", "")
+    col_policy = org_cfg.get("collision_policy", "skip")
 
     if os.path.isfile(target_path):
         classified = classify_media_file(target_path, hint_title=args.name)
-        resolved = resolve_canonical_item(classified)
+        resolved = resolve_canonical_item(classified, tmdb_api_key=cfg.get("tmdb_api_key"), local_region=local_reg)
         dest = build_destination_path(resolved, lib_roots)
+        if os.path.exists(dest) and col_policy == "suffix":
+            dest = disambiguate_video_path(dest)
         plan = [{
             "source_path": target_path,
             "destination_path": dest,
             "media_type": resolved["media_type"],
             "request_id": resolved.get("request_id"),
-            "subtitles": find_companion_subtitles(target_path)
+            "subtitles": find_companion_subtitles(target_path),
+            "route_reason": resolved.get("route_reason", "region-off"),
+            "origin_countries": resolved.get("origin_countries", []),
+            "collision_policy": col_policy,
         }]
     else:
-        plan_raw = scan_incoming_for_preview(target_path, lib_roots)
-        plan = plan_raw
+        plan = scan_incoming_for_preview(
+            target_path,
+            lib_roots,
+            tmdb_api_key=cfg.get("tmdb_api_key"),
+            local_region=local_reg,
+            collision_policy=col_policy,
+        )
 
     if args.dry_run:
         print(f"--- Dry Run Preview ({len(plan)} item(s)) ---")
         for p in plan:
-            print(f"Source:      {p['source_path']}")
-            print(f"Destination: {p['destination_path']}")
-            print(f"Type:        {p.get('media_type')}")
+            print(f"Source:       {p['source_path']}")
+            print(f"Destination:  {p['destination_path']}")
+            print(f"Type:         {p.get('media_type')}")
+            print(f"Route Reason: {p.get('route_reason', 'n/a')}")
+            if p.get("origin_countries"):
+                print(f"Countries:    {', '.join(p['origin_countries'])}")
+            if p.get("subtitle_plan"):
+                print("Subtitles:")
+                for s in p["subtitle_plan"]:
+                    print(f"  - [{s.get('action')}] {os.path.basename(s['source'])} -> {os.path.basename(s['destination'])} ({s.get('lang')})")
             print("-" * 50)
         sys.exit(0)
 
-    res = execute_organization_plan(plan, mode=args.mode)
+    res = execute_organization_plan(plan, mode=args.mode, collision_policy=col_policy)
     print(json.dumps(res, indent=2))
     trigger_post_processing(res)
 

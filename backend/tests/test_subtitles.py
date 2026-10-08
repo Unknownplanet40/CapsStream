@@ -49,7 +49,20 @@ class TestSubtitles(unittest.TestCase):
         for fname in sdh_files:
             label, lang, is_sdh, _ = _parse_sub_label(fname)
             self.assertTrue(is_sdh, f"Expected SDH tag for {fname}")
-            self.assertIn("[SDH]", label, f"Expected [SDH] in label for {fname}")
+            self.assertIn("(HI)", label, f"Expected (HI) in label for {fname}")
+
+    def test_parse_sub_label_forced_and_duplicates(self):
+        """Verify forced tags and duplicate index suffixes in external subtitle labels."""
+        label, lang, is_sdh, _ = _parse_sub_label("Movie.en.forced.srt")
+        self.assertEqual(label, "English (Forced)")
+        self.assertEqual(lang, "en")
+        self.assertFalse(is_sdh)
+
+        label_dup, _, _, _ = _parse_sub_label("Movie.en.2.srt")
+        self.assertEqual(label_dup, "English (2)")
+
+        label_forced_dup, _, _, _ = _parse_sub_label("Movie.en.forced.3.srt")
+        self.assertEqual(label_forced_dup, "English (Forced) (3)")
 
     def test_external_subtitle_matching(self):
         """Verify external subtitle files in the same directory matching the video stem are discovered."""

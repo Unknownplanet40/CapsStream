@@ -29,10 +29,22 @@ from backend.organizer import (
     resolve_canonical_item,
     build_destination_path,
     find_companion_subtitles,
+    get_organizer_library_roots,
+    REGIONS,
 )
 
 organizer_bp = Blueprint("organizer", __name__)
 logger = logging.getLogger("media_organizer_api")
+
+
+def _is_safe_abs_path(path_str: str) -> bool:
+    """Validate that path is absolute and free of traversal segments."""
+    if not path_str or not path_str.strip():
+        return True
+    cleaned = path_str.strip()
+    if ".." in cleaned:
+        return False
+    return os.path.isabs(cleaned)
 
 
 def _get_organizer_config() -> dict:
@@ -61,6 +73,11 @@ def _get_organizer_config() -> dict:
     target_series = org_cfg.get("target_series_path") or _first_path(media_paths.get("series") or media_paths.get("tv"), os.path.join(BASE_DIR, "data", "media", "TV Shows"))
     target_anime = org_cfg.get("target_anime_path") or _first_path(media_paths.get("anime"), os.path.join(BASE_DIR, "data", "media", "Anime"))
 
+    target_local_movies = org_cfg.get("target_local_movies_path") or ""
+    target_local_series = org_cfg.get("target_local_series_path") or ""
+
+    library_roots = get_organizer_library_roots(cfg)
+
     return {
         "enabled": org_cfg.get("enabled", True),
         "incoming_dir": default_incoming,
@@ -70,16 +87,17 @@ def _get_organizer_config() -> dict:
         "target_movies_path": target_movies,
         "target_series_path": target_series,
         "target_anime_path": target_anime,
+        "local_region": org_cfg.get("local_region", ""),
+        "target_local_movies_path": target_local_movies,
+        "target_local_series_path": target_local_series,
+        "collision_policy": org_cfg.get("collision_policy", "skip"),
+        "regions": REGIONS,
         "available_paths": {
             "movies": movies_available,
             "series": series_available,
             "anime": anime_available,
         },
-        "library_roots": {
-            "movies": target_movies,
-            "tv": target_series,
-            "anime": target_anime,
-        }
+        "library_roots": library_roots,
     }
 
 
@@ -96,8 +114,32 @@ def api_save_organizer_config():
     cfg = load_config()
     org_cfg = cfg.get("organizer", {})
 
-    if "incoming_dir" in data:
-        org_cfg["incoming_dir"] = str(data["incoming_dir"]).strip()
+    # Validation: local_region
+    if "local_region" in data:
+        reg_val = str(data["local_region"]).strip().upper()
+        if reg_val and reg_val not in REGIONS:
+            return jsonify({"error": f"Invalid local_region code '{reg_val}'. Must be in supported regions or empty."}), 400
+        org_cfg["local_region"] = reg_val
+
+    # Validation: collision_policy
+    if "collision_policy" in data:
+        pol_val = str(data["collision_policy"]).strip().lower()
+        if pol_val not in ("skip", "suffix"):
+            return jsonify({"error": f"Invalid collision_policy '{pol_val}'. Allowed: 'skip', 'suffix'."}), 400
+        org_cfg["collision_policy"] = pol_val
+
+    # Path traversal and absolute path validation
+    path_keys = [
+        "incoming_dir", "target_movies_path", "target_series_path",
+        "target_anime_path", "target_local_movies_path", "target_local_series_path"
+    ]
+    for pk in path_keys:
+        if pk in data:
+            raw_path = str(data[pk]).strip()
+            if raw_path and not _is_safe_abs_path(raw_path):
+                return jsonify({"error": f"Invalid path for '{pk}'. Path must be absolute and contain no traversal ('..')."}), 400
+            org_cfg[pk] = raw_path
+
     if "mode" in data and data["mode"] in ("smart", "move", "copy"):
         org_cfg["mode"] = data["mode"]
     if "auto_watch" in data:
@@ -107,12 +149,6 @@ def api_save_organizer_config():
             org_cfg["watch_interval_seconds"] = max(15, int(data["watch_interval_seconds"]))
         except ValueError:
             pass
-    if "target_movies_path" in data:
-        org_cfg["target_movies_path"] = str(data["target_movies_path"]).strip()
-    if "target_series_path" in data:
-        org_cfg["target_series_path"] = str(data["target_series_path"]).strip()
-    if "target_anime_path" in data:
-        org_cfg["target_anime_path"] = str(data["target_anime_path"]).strip()
 
     cfg["organizer"] = org_cfg
     ok, err = save_config(cfg)
@@ -136,8 +172,17 @@ def api_organizer_preview():
     lib_roots = org_cfg["library_roots"]
     cfg = load_config()
     tmdb_key = cfg.get("tmdb_api_key")
+    local_reg = org_cfg.get("local_region", "")
+    col_policy = org_cfg.get("collision_policy", "skip")
 
-    items = scan_incoming_for_preview(incoming_dir, lib_roots, tmdb_api_key=tmdb_key, clean_empty=True)
+    items = scan_incoming_for_preview(
+        incoming_dir,
+        lib_roots,
+        tmdb_api_key=tmdb_key,
+        clean_empty=True,
+        local_region=local_reg,
+        collision_policy=col_policy,
+    )
     cleaned = clean_empty_subfolders(incoming_dir, delete_root_if_empty=False)
     return jsonify({
         "incoming_dir": incoming_dir,
@@ -160,6 +205,7 @@ def api_organizer_execute():
     mode = body.get("mode") or org_cfg.get("mode", "smart")
     lib_roots = org_cfg["library_roots"]
     incoming_dir = org_cfg.get("incoming_dir")
+    col_policy = org_cfg.get("collision_policy", "skip")
 
     for item in items:
         if item.get("canonical_title") or item.get("media_type"):
@@ -167,7 +213,7 @@ def api_organizer_execute():
                 item["extension"] = os.path.splitext(item["source_path"])[1].lower()
             item["destination_path"] = build_destination_path(item, lib_roots)
 
-    res = execute_organization_plan(items, mode=mode, incoming_dir=incoming_dir)
+    res = execute_organization_plan(items, mode=mode, incoming_dir=incoming_dir, collision_policy=col_policy)
     trigger_post_processing(res)
 
     return jsonify(res)

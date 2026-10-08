@@ -88,7 +88,8 @@ DEFAULT_CONFIG = {
         "site_url": "https://siteformovies.com",
         "api_url": "https://movies-api.accel.li/api/v2"
     },
-    "auto_sync_host": False
+    "auto_sync_host": False,
+    "setup_completed": False
 }
 
 

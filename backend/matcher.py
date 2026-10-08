@@ -193,6 +193,43 @@ def ensure_media_logo(media_dict):
     return logo
 
 
+def safe_logo_path(path):
+    """Validate that logo_path is safe, non-traversing, with an allowed extension,
+    and exists in IMAGES_DIR.
+    Returns canonical relative path 'images/<filename>' if valid, else None.
+    """
+    if not path or not isinstance(path, str):
+        return None
+    cleaned = path.strip()
+    if not cleaned.startswith("images/"):
+        print(f"[Matcher] Invalid logo_path rejected (missing 'images/' prefix): {path}")
+        return None
+    if "\\" in cleaned or ".." in cleaned or ":" in cleaned:
+        print(f"[Matcher] Invalid logo_path rejected (suspicious characters): {path}")
+        return None
+    rel_name = cleaned[len("images/"):].strip()
+    if not rel_name or "/" in rel_name:
+        print(f"[Matcher] Invalid logo_path rejected (nested or empty filename): {path}")
+        return None
+    _, ext = os.path.splitext(rel_name)
+    if ext.lower() not in {".png", ".svg", ".webp"}:
+        print(f"[Matcher] Invalid logo_path rejected (unsupported extension '{ext}'): {path}")
+        return None
+    images_dir_abs = os.path.abspath(IMAGES_DIR)
+    full_path = os.path.abspath(os.path.join(images_dir_abs, rel_name))
+    try:
+        if os.path.commonpath([images_dir_abs, full_path]) != images_dir_abs:
+            print(f"[Matcher] Invalid logo_path rejected (path traversal): {path}")
+            return None
+    except Exception:
+        print(f"[Matcher] Invalid logo_path rejected (path resolution error): {path}")
+        return None
+    if not os.path.isfile(full_path):
+        print(f"[Matcher] Logo file not found on disk: {full_path}")
+        return None
+    return f"images/{rel_name}"
+
+
 def _fetch_movie_detail(tmdb_id, default_title="", year=None):
     cached = _load_cache("movie", tmdb_id)
     if cached:

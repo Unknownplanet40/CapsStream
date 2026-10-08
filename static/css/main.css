@@ -30938,6 +30938,73 @@ body:has(.navbar-tv) .hero-backdrop-container::before,
   color: #fff;
 }
 
+/* ── Player Logo Loading Screen (Initial Playback Load) ── */
+.player-loading-logo-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 40vw;
+  max-height: 30vh;
+  user-select: none;
+  pointer-events: none;
+  contain: layout paint;
+}
+
+.player-loading-logo {
+  max-width: 100%;
+  max-height: 30vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 6px 20px rgba(0, 0, 0, 0.45));
+}
+
+.player-loading-logo-glint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  -webkit-mask-image: var(--logo-mask);
+  mask-image: var(--logo-mask);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  background: linear-gradient(
+    110deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.28) 46%,
+    rgba(255, 255, 255, 0.65) 50%,
+    rgba(255, 255, 255, 0.28) 54%,
+    transparent 80%
+  );
+  background-size: 250% 100%;
+  background-position: 200% 0;
+  animation: logo-glint-sweep 3.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes logo-glint-sweep {
+  0% {
+    background-position: 200% 0;
+  }
+  55% {
+    background-position: -100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-loading-logo-glint {
+    display: none !important;
+    animation: none !important;
+  }
+}
+
 /* ── Converted Media Buffering & Status Overlay ── */
 .player-buffering-overlay {
   position: absolute;

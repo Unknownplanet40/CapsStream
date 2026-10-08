@@ -20,6 +20,7 @@ from backend.db import (
     delete_media_by_id, delete_media_by_tmdb, delete_media_by_title_and_type,
     get_all_sources_for_media, format_file_size_bytes,
 )
+from backend.matcher import safe_logo_path
 
 media_bp = Blueprint("media", __name__)
 
@@ -386,6 +387,7 @@ def api_media_detail(media_id):
     if not media.get("logo_path"):
         from backend.matcher import ensure_media_logo
         ensure_media_logo(media)
+    media["logo_path"] = safe_logo_path(media.get("logo_path"))
 
     # Ensure duration is populated from container metadata if missing in DB
     if not media.get("duration") or media["duration"] <= 0:
@@ -665,6 +667,9 @@ def api_show_detail(tmdb_id):
     if not show.get("status") and show_tmdb_id:
         from backend.matcher import get_show_status
         show["status"] = get_show_status(show_tmdb_id, show.get("type", media_type))
+
+    if show.get("logo_path"):
+        show["logo_path"] = safe_logo_path(show.get("logo_path"))
 
     if show.get("cast_json"):
         try:

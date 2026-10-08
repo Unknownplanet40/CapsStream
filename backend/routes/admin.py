@@ -272,6 +272,83 @@ def api_system_diagnostics():
     return jsonify(get_system_diagnostics())
 
 
+# ─── Setup Wizard Endpoints ───────────────────────────────────────────────────
+
+@admin_bp.route("/api/setup/status", methods=["GET"])
+def api_setup_status():
+    """Return whether initial setup is completed and if any profiles exist."""
+    from backend.settings import load_config
+    from backend.db.profiles import get_all_profiles
+    cfg = load_config()
+    setup_completed = bool(cfg.get("setup_completed", False))
+    try:
+        profiles = get_all_profiles()
+        has_profiles = len(profiles) > 0
+    except Exception:
+        has_profiles = False
+    return jsonify({
+        "ok": True,
+        "setup_completed": setup_completed,
+        "has_profiles": has_profiles,
+    })
+
+
+@admin_bp.route("/api/setup/system-check", methods=["GET"])
+def api_setup_system_check():
+    """Return server hardware diagnostics and media capabilities for first-run setup."""
+    from backend.utils.diagnostics import get_system_diagnostics
+    from backend.streamer import describe_hw_encoder
+    from backend.utils.paths import has_ffmpeg, has_ffprobe
+
+    diag = get_system_diagnostics()
+    cpu_cores = os.cpu_count() or 1
+    ram_total_gb = diag.get("ram_total_gb", 0.0)
+    ram_used_gb = diag.get("ram_used_gb", 0.0)
+    ram_avail_gb = round(max(0.0, ram_total_gb - ram_used_gb), 2)
+
+    base_dir = current_app.config.get("BASE_DIR", os.getcwd())
+    try:
+        disk_usage = shutil.disk_usage(base_dir)
+        disk_free_gb = round(disk_usage.free / (1024 ** 3), 2)
+        disk_total_gb = round(disk_usage.total / (1024 ** 3), 2)
+    except Exception:
+        disk_free_gb = 0.0
+        disk_total_gb = 0.0
+
+    try:
+        hw_info = describe_hw_encoder()
+    except Exception:
+        hw_info = {"available": False, "encoder": None, "hardware": False}
+
+    ffmpeg_ok = has_ffmpeg()
+    ffprobe_ok = has_ffprobe()
+
+    return jsonify({
+        "ok": True,
+        "cpu_cores": cpu_cores,
+        "ram_total_gb": ram_total_gb,
+        "ram_avail_gb": ram_avail_gb,
+        "disk_free_gb": disk_free_gb,
+        "disk_total_gb": disk_total_gb,
+        "ffmpeg_available": ffmpeg_ok,
+        "ffprobe_available": ffprobe_ok,
+        "hw_accel": hw_info,
+    })
+
+
+@admin_bp.route("/api/setup/complete", methods=["POST"])
+def api_setup_complete():
+    """Mark initial setup as completed in server configuration."""
+    from backend.settings import load_config, save_config
+    cfg = load_config()
+    cfg["setup_completed"] = True
+    ok, err_or_cfg = save_config(cfg)
+    if not ok:
+        return jsonify({"ok": False, "error": str(err_or_cfg)}), 500
+    return jsonify({"ok": True, "setup_completed": True})
+
+
+
 @admin_bp.route("/api/system/supabase-status", methods=["GET"])
 def api_system_supabase_status():
     """Check Supabase request-table connectivity without exposing credentials."""
@@ -450,6 +527,7 @@ _SCAN_SCHEDULE_FILE = None
 
 
 @admin_bp.route("/api/scan", methods=["POST"])
+@admin_bp.route("/api/admin/scan", methods=["POST"])
 def api_scan():
     from .media import bust_home_cache
     # Scans can be triggered by an admin or any authenticated profile session.

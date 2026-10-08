@@ -20,6 +20,7 @@ from backend.organizer import (
     sanitize_filename,
     clean_empty_subfolders,
     parse_subtitle_details,
+    build_subtitle_destination_path,
 )
 
 
@@ -457,6 +458,124 @@ class TestOrganizer(unittest.TestCase):
             with open(fake_default_hist, "r", encoding="utf-8") as f:
                 saved = json.load(f)
             self.assertEqual(len(saved), 0)
+
+
+    def test_local_region_routing(self):
+        """Verify local region routing for Movies, TV, and isolation of Anime."""
+        lib_roots = {
+            "movies": self.movies_dir,
+            "tv": self.tv_dir,
+            "anime": self.anime_dir,
+            "local_movies": os.path.join(self.temp_dir, "Local_Movies"),
+            "local_tv": os.path.join(self.temp_dir, "Local_TV"),
+        }
+
+        # 1. Local Movie (PH) with local_region='PH'
+        item_local_movie = {
+            "media_type": "movie",
+            "canonical_title": "Hello Love Goodbye",
+            "year": 2019,
+            "extension": ".mkv",
+            "is_local": True,
+            "route_reason": "local",
+            "origin_countries": ["PH"],
+        }
+        dst_local_mov = build_destination_path(item_local_movie, lib_roots)
+        self.assertTrue(dst_local_mov.startswith(lib_roots["local_movies"]))
+        self.assertIn("Hello Love Goodbye (2019)", dst_local_mov)
+
+        # 2. Non-local Movie (US) with local_region='PH'
+        item_nonlocal_movie = {
+            "media_type": "movie",
+            "canonical_title": "Inception",
+            "year": 2010,
+            "extension": ".mkv",
+            "is_local": False,
+            "route_reason": "non-local",
+            "origin_countries": ["US"],
+        }
+        dst_nonlocal_mov = build_destination_path(item_nonlocal_movie, lib_roots)
+        self.assertTrue(dst_nonlocal_mov.startswith(lib_roots["movies"]))
+
+        # 3. Local TV Show (PH) with local_region='PH'
+        item_local_tv = {
+            "media_type": "tv",
+            "canonical_title": "Tresea",
+            "year": 2021,
+            "season": 1,
+            "episode": 1,
+            "extension": ".mkv",
+            "is_local": True,
+            "route_reason": "local",
+            "origin_countries": ["PH"],
+        }
+        dst_local_tv = build_destination_path(item_local_tv, lib_roots)
+        self.assertTrue(dst_local_tv.startswith(lib_roots["local_tv"]))
+        self.assertIn("Season 01", dst_local_tv)
+
+        # 4. Anime is strictly untouched even if country is PH or JP
+        item_anime = {
+            "media_type": "anime",
+            "canonical_title": "Frieren",
+            "year": 2023,
+            "season": 1,
+            "episode": 1,
+            "extension": ".mkv",
+            "is_local": True,
+            "route_reason": "local",
+            "origin_countries": ["JP"],
+        }
+        dst_anime = build_destination_path(item_anime, lib_roots)
+        self.assertTrue(dst_anime.startswith(lib_roots["anime"]))
+        self.assertFalse(dst_anime.startswith(lib_roots["local_tv"]))
+
+    def test_video_collision_policies(self):
+        """Verify video collision handling under 'skip' vs 'suffix'."""
+        movie_src = os.path.join(self.incoming_dir, "CollisionTest.mkv")
+        with open(movie_src, "w") as f:
+            f.write("source")
+
+        dst_movie = os.path.join(self.movies_dir, "CollisionTest", "CollisionTest.mkv")
+        os.makedirs(os.path.dirname(dst_movie), exist_ok=True)
+        with open(dst_movie, "w") as f:
+            f.write("existing")
+
+        # Policy 1: 'skip' (default) -> skips with error
+        plan_skip = [{
+            "source_path": movie_src,
+            "destination_path": dst_movie,
+            "media_type": "movie",
+            "subtitles": []
+        }]
+        res_skip = execute_organization_plan(plan_skip, mode="copy", collision_policy="skip")
+        self.assertEqual(res_skip["failed_count"], 1)
+        self.assertIn("Destination file already exists", res_skip["failures"][0]["error"])
+
+        # Policy 2: 'suffix' -> auto-suffixes ' (2)'
+        res_suffix = execute_organization_plan(plan_skip, mode="copy", collision_policy="suffix")
+        self.assertEqual(res_suffix["organized_count"], 1)
+        expected_suffixed = os.path.join(self.movies_dir, "CollisionTest", "CollisionTest (2).mkv")
+        self.assertTrue(os.path.exists(expected_suffixed))
+
+    def test_unknown_language_subtitle_preserves_original_filename(self):
+        """Verify unknown-language subtitles keep their original filename rather than renaming."""
+        movie_dir = os.path.join(self.incoming_dir, "IndieMovie.2023")
+        os.makedirs(movie_dir, exist_ok=True)
+        movie_file = os.path.join(movie_dir, "IndieMovie.2023.mkv")
+        with open(movie_file, "w") as f:
+            f.write("movie")
+
+        # Subtitle with non-standard name and unknown language
+        sub_unknown = os.path.join(movie_dir, "Director_Commentary_Track.srt")
+        with open(sub_unknown, "w") as f:
+            f.write("1\n00:00:01,000 --> 00:00:02,000\nCommentary")
+
+        dst_movie = os.path.join(self.movies_dir, "Indie Movie (2023)", "Indie Movie (2023).mkv")
+        sub_dst = build_subtitle_destination_path(sub_unknown, dst_movie)
+
+        # Must keep original filename in destination folder
+        self.assertEqual(os.path.basename(sub_dst), "Director_Commentary_Track.srt")
+        self.assertEqual(os.path.dirname(sub_dst), os.path.dirname(dst_movie))
 
 
 if __name__ == "__main__":

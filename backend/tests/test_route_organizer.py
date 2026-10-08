@@ -143,6 +143,38 @@ class TestRouteOrganizer(unittest.TestCase):
                 self.assertEqual(hook_resp.status_code, 403)
                 self.assertIn("Administrator privileges or localhost access required", hook_resp.get_json()["error"])
 
+    @patch("backend.routes.organizer.require_admin")
+    def test_config_validation(self, mock_require_admin):
+        with patch("backend.routes.organizer.load_config", return_value=dict(self.test_cfg)):
+            # 1. Invalid local_region
+            resp = self.client.post("/api/admin/organizer/config", json={"local_region": "INVALID_XYZ"})
+            self.assertEqual(resp.status_code, 400)
+            self.assertIn("Invalid local_region code", resp.get_json()["error"])
+
+            # 2. Path traversal attempt
+            resp = self.client.post("/api/admin/organizer/config", json={"target_local_movies_path": "/var/media/../sensitive"})
+            self.assertEqual(resp.status_code, 400)
+            self.assertIn("Invalid path", resp.get_json()["error"])
+
+            # 3. Invalid collision_policy
+            resp = self.client.post("/api/admin/organizer/config", json={"collision_policy": "overwrite"})
+            self.assertEqual(resp.status_code, 400)
+            self.assertIn("Invalid collision_policy", resp.get_json()["error"])
+
+            # 4. Valid configuration
+            with patch("backend.routes.organizer.save_config", return_value=(True, None)):
+                resp = self.client.post("/api/admin/organizer/config", json={
+                    "local_region": "PH",
+                    "collision_policy": "suffix",
+                    "target_local_movies_path": os.path.abspath(os.path.join(self.temp_dir, "Local_Movies")),
+                })
+                self.assertEqual(resp.status_code, 200)
+                data = resp.get_json()
+                self.assertTrue(data.get("success"))
+                cfg_data = data.get("config", {})
+                self.assertEqual(cfg_data.get("local_region"), "PH")
+                self.assertEqual(cfg_data.get("collision_policy"), "suffix")
+
 
 if __name__ == "__main__":
     unittest.main()

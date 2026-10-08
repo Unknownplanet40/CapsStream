@@ -7532,6 +7532,16 @@ const SettingsPage = {
               </button>
             </div>
 
+            <div class="settings-row" id="setting-replay-wizard">
+              <div class="settings-label-container">
+                <div class="settings-label">First-Run Setup Wizard</div>
+                <div class="settings-desc">Revisit the initial setup wizard to review system diagnostics, media paths, or configuration.</div>
+              </div>
+              <button class="btn btn-secondary btn-sm" @click="replaySetupWizard" id="btn-replay-wizard">
+                <i class="ph ph-sliders" style="margin-right:6px"></i> Run Setup Wizard
+              </button>
+            </div>
+
             <!-- Keyboard Shortcuts & Navigation -->
             <div class="settings-row" id="setting-app-hotkeys" style="border-top:1px solid rgba(255,255,255,0.07);margin-top:6px;padding-top:12px;align-items:flex-start">
               <div class="settings-label-container">
@@ -8693,6 +8703,49 @@ const SettingsPage = {
               </div>
             </div>
 
+            <div class="settings-row" id="setting-organizer-local-region">
+              <div class="settings-label-container">
+                <div class="settings-label">Local Region Routing</div>
+                <div class="settings-desc">Route media originating from a specific country to designated local library folders instead of standard roots. Anime always uses the anime root.</div>
+              </div>
+              <select v-model="organizerConfig.local_region" @change="saveOrganizerConfig" class="form-input" style="width:260px">
+                <option value="">Disabled (None)</option>
+                <option v-for="(name, code) in (organizerConfig.regions || {})" :key="code" :value="code">{{ name }} ({{ code }})</option>
+              </select>
+            </div>
+
+            <!-- Target Local Folders (Visible when Local Region is enabled) -->
+            <div v-if="organizerConfig.local_region" class="settings-row" id="setting-organizer-target-local-movies">
+              <div class="settings-label-container">
+                <div class="settings-label">Target Local Movies Folder</div>
+                <div class="settings-desc">Destination library folder for localized Movies (e.g. T:/Local/Movie).</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
+                <input type="text" v-model="organizerConfig.target_local_movies_path" class="form-input" placeholder="e.g. T:/Local/Movie" style="flex:1" @change="saveOrganizerConfig" />
+              </div>
+            </div>
+
+            <div v-if="organizerConfig.local_region" class="settings-row" id="setting-organizer-target-local-series">
+              <div class="settings-label-container">
+                <div class="settings-label">Target Local TV Series Folder</div>
+                <div class="settings-desc">Destination library folder for localized TV Shows (e.g. T:/Local/Series).</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
+                <input type="text" v-model="organizerConfig.target_local_series_path" class="form-input" placeholder="e.g. T:/Local/Series" style="flex:1" @change="saveOrganizerConfig" />
+              </div>
+            </div>
+
+            <div class="settings-row" id="setting-organizer-collision-policy">
+              <div class="settings-label-container">
+                <div class="settings-label">Video Collision Policy</div>
+                <div class="settings-desc">Action when destination media file already exists. Subtitles always disambiguate with numeric suffixes without overwriting.</div>
+              </div>
+              <select v-model="organizerConfig.collision_policy" @change="saveOrganizerConfig" class="form-input" style="width:260px">
+                <option value="skip">Skip Existing (Do not overwrite)</option>
+                <option value="suffix">Auto-Suffix Duplicates (2, 3)</option>
+              </select>
+            </div>
+
             <div class="settings-row" id="setting-organizer-mode">
               <div class="settings-label-container">
                 <div class="settings-label">File Organization Mode</div>
@@ -8776,7 +8829,10 @@ const SettingsPage = {
                       </td>
                       <td style="font-size:0.78rem;color:var(--text-secondary);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="item.destination_path">
                         {{ item.destination_path }}
-                        <span v-if="item.subtitles?.length" class="tag" style="margin-left:4px;font-size:0.68rem;padding:1px 5px;background:rgba(34,197,94,0.15);color:#4ade80">
+                        <span v-if="item.route_reason === 'local'" class="tag" style="margin-left:4px;font-size:0.68rem;padding:1px 5px;background:rgba(234,179,8,0.15);color:#eab308;border-color:rgba(234,179,8,0.3)" title="Routed to Local Region library">
+                          Local
+                        </span>
+                        <span v-if="item.subtitles?.length" class="tag" style="margin-left:4px;font-size:0.68rem;padding:1px 5px;background:rgba(34,197,94,0.15);color:#4ade80" :title="formatSubtitlePlanTooltip(item.subtitle_plan)">
                           +{{ item.subtitles.length }} Sub
                         </span>
                       </td>
@@ -10857,6 +10913,11 @@ const SettingsPage = {
       target_movies_path: "",
       target_series_path: "",
       target_anime_path: "",
+      local_region: "",
+      target_local_movies_path: "",
+      target_local_series_path: "",
+      collision_policy: "skip",
+      regions: {},
       available_paths: { movies: [], series: [], anime: [] },
       library_roots: { movies: "", tv: "", anime: "" }
     });
@@ -10891,6 +10952,16 @@ const SettingsPage = {
     function getFileBasename(path) {
       if (!path) return "";
       return path.split(/[/\\]/).pop();
+    }
+
+    function formatSubtitlePlanTooltip(plan) {
+      if (!Array.isArray(plan) || !plan.length) return "";
+      return plan.map((s) => {
+        const action = s.action || "move";
+        const src = getFileBasename(s.source);
+        const dest = getFileBasename(s.destination);
+        return `${action}: ${src} -> ${dest}`;
+      }).join("\n");
     }
 
     async function loadOrganizerConfig() {
@@ -11903,6 +11974,11 @@ const SettingsPage = {
       }, 350);
     }
 
+    function replaySetupWizard() {
+      try { sessionStorage.setItem("cs_setup_step", "1"); } catch (e) {}
+      router.push("/setup");
+    }
+
     function openShortcutsGuide() {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }));
     }
@@ -12159,6 +12235,7 @@ const SettingsPage = {
       setPerfLiteMode,
       clientDeviceSpecs,
       replayTour,
+      replaySetupWizard,
       openShortcutsGuide,
       kidsProfiles,
       kidsOverrides,
@@ -12311,6 +12388,7 @@ const SettingsPage = {
       organizerExpandedBatches,
       toggleExpandBatch,
       getFileBasename,
+      formatSubtitlePlanTooltip,
       loadOrganizerConfig,
       saveOrganizerConfig,
       runOrganizerPreview,
@@ -16910,121 +16988,460 @@ const ProfilesPage = {
 
 const SetupPage = {
   template: `
-    <div class="setup-container">
-      <div class="setup-card" style="max-width:540px">
-        <div class="setup-header">
+    <div class="setup-container" style="padding: 2rem 1rem">
+      <div class="setup-card" style="max-width: 680px; width: 100%; transition: all var(--transition-normal)">
+        <div class="setup-header" style="margin-bottom: 1.5rem">
           <div class="setup-logo" style="display:flex;align-items:center;justify-content:center;gap:10px">
             <img src="/static/img/favicon.png" alt="CapsStream" style="height:36px;width:36px;display:inline-block">
             <span>CapsStream</span>
           </div>
-          <h1 class="setup-title">Welcome to CapsStream</h1>
-          <p class="setup-subtitle">Create your primary administrator profile to set up your personal media streaming server.</p>
-        </div>
+          <h1 class="setup-title" style="margin-top: 6px">First-Run Setup Wizard</h1>
+          <p class="setup-subtitle">{{ stepSubtitles[currentStep - 1] }}</p>
 
-        <!-- Live Profile Preview Card -->
-        <div style="display:flex;flex-direction:column;align-items:center;margin-bottom:1.75rem;padding:1.25rem;background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);border-radius:var(--radius-lg)">
-          <div
-            style="width:96px;height:96px;border-radius:var(--radius-lg);display:flex;align-items:center;justify-content:center;transition:all var(--transition-normal);box-shadow:0 8px 24px rgba(0,0,0,0.4)"
-            :style="{
-              background: color ? color + '33' : 'rgba(229,9,20,0.2)',
-              border: '3px solid ' + (color || 'var(--accent)')
-            }"
-          >
-            <i v-if="avatar && avatar.startsWith('ph-')" :class="'ph-bold ' + avatar" :style="{ color: color || 'var(--accent)', fontSize: '3rem' }"></i>
-            <span v-else style="font-size:3rem">{{ avatar || '🎬' }}</span>
-          </div>
-          <div style="margin-top:10px;font-size:1.15rem;font-weight:700;color:var(--text-primary)">
-            {{ name.trim() || 'Admin' }}
-          </div>
-          <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
-            <span style="font-size:0.7rem;font-weight:800;letter-spacing:0.05em;background:rgba(229,9,20,0.2);color:var(--accent);border:1px solid rgba(229,9,20,0.4);padding:2px 8px;border-radius:12px;text-transform:uppercase">
-              Primary Administrator
-            </span>
-          </div>
-        </div>
-
-        <form @submit.prevent="submitSetup" class="setup-form">
-          <div class="form-group" style="margin-bottom:1.25rem">
-            <label class="form-label">Profile Name</label>
-            <input
-              type="text"
-              v-model="name"
-              class="form-input"
-              placeholder="e.g. Primary User"
-              required
-              maxlength="30"
-              id="setup-name-input"
-            />
-          </div>
-
-          <div class="form-group" style="margin-bottom:1.25rem">
-            <label class="form-label">Choose Icon</label>
-            <div class="avatar-picker-grid" style="grid-template-columns:repeat(6, 1fr);gap:8px">
-              <div
-                v-for="av in avatars"
-                :key="av"
-                class="avatar-picker-item"
-                :class="{ active: avatar === av }"
-                @click="avatar = av"
-                style="font-size:1.4rem;padding:6px"
+          <!-- Step Indicator Breadcrumbs -->
+          <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:1.25rem" role="tablist" aria-label="Setup Steps">
+            <div v-for="stepNum in [1, 2, 3, 4]" :key="stepNum" style="display:flex;align-items:center;gap:8px">
+              <button
+                type="button"
+                :style="{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.85rem',
+                  fontWeight: '700',
+                  cursor: stepNum < currentStep || (stepNum === 2 && profileCreated) || (stepNum === 3 && profileCreated) ? 'pointer' : 'default',
+                  background: stepNum === currentStep ? 'var(--accent)' : (stepNum < currentStep ? 'rgba(46, 204, 113, 0.2)' : 'rgba(255,255,255,0.08)'),
+                  color: stepNum === currentStep ? '#fff' : (stepNum < currentStep ? '#2ecc71' : 'var(--text-muted)'),
+                  border: stepNum === currentStep ? '2px solid var(--accent)' : (stepNum < currentStep ? '2px solid #2ecc71' : '1px solid var(--border-subtle)')
+                }"
+                :aria-current="stepNum === currentStep ? 'step' : null"
+                @click="goToStep(stepNum)"
+                :title="'Step ' + stepNum + ': ' + stepTitles[stepNum - 1]"
               >
-                <i :class="'ph-bold ' + av" :style="{ color: avatar === av ? (color || 'var(--accent)') : 'var(--text-secondary)' }"></i>
+                <i v-if="stepNum < currentStep" class="ph-bold ph-check" style="font-size:1rem"></i>
+                <span v-else>{{ stepNum }}</span>
+              </button>
+              <div v-if="stepNum < 4" style="width: 24px; height: 2px" :style="{ background: stepNum < currentStep ? '#2ecc71' : 'rgba(255,255,255,0.1)' }"></div>
+            </div>
+          </div>
+          <div style="margin-top: 10px; font-size: 0.85rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em">
+            Step {{ currentStep }} of 4: {{ stepTitles[currentStep - 1] }}
+          </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <!-- STEP 1: Primary Administrator Profile                          -->
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <div v-if="currentStep === 1">
+          <!-- Live Profile Preview Card -->
+          <div style="display:flex;flex-direction:column;align-items:center;margin-bottom:1.5rem;padding:1.25rem;background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);border-radius:var(--radius-lg)">
+            <div
+              style="width:84px;height:84px;border-radius:var(--radius-lg);display:flex;align-items:center;justify-content:center;transition:all var(--transition-normal);box-shadow:0 8px 24px rgba(0,0,0,0.4)"
+              :style="{
+                background: color ? color + '33' : 'rgba(229,9,20,0.2)',
+                border: '3px solid ' + (color || 'var(--accent)')
+              }"
+            >
+              <i v-if="avatar && avatar.startsWith('ph-')" :class="'ph-bold ' + avatar" :style="{ color: color || 'var(--accent)', fontSize: '2.5rem' }"></i>
+              <span v-else style="font-size:2.5rem">{{ avatar || '🎬' }}</span>
+            </div>
+            <div style="margin-top:10px;font-size:1.15rem;font-weight:700;color:var(--text-primary)">
+              {{ name.trim() || 'Admin' }}
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+              <span style="font-size:0.7rem;font-weight:800;letter-spacing:0.05em;background:rgba(229,9,20,0.2);color:var(--accent);border:1px solid rgba(229,9,20,0.4);padding:2px 8px;border-radius:12px;text-transform:uppercase">
+                Primary Administrator
+              </span>
+            </div>
+          </div>
+
+          <form @submit.prevent="submitStep1" class="setup-form">
+            <div class="form-group" style="margin-bottom:1.25rem">
+              <label class="form-label">Profile Name</label>
+              <input
+                type="text"
+                v-model="name"
+                class="form-input"
+                placeholder="e.g. Primary User"
+                required
+                maxlength="30"
+                id="setup-name-input"
+              />
+            </div>
+
+            <div class="form-group" style="margin-bottom:1.25rem">
+              <label class="form-label">Choose Icon</label>
+              <div class="avatar-picker-grid" style="grid-template-columns:repeat(6, 1fr);gap:8px">
+                <div
+                  v-for="av in avatars"
+                  :key="av"
+                  class="avatar-picker-item"
+                  :class="{ active: avatar === av }"
+                  @click="avatar = av"
+                  style="font-size:1.4rem;padding:6px"
+                >
+                  <i :class="'ph-bold ' + av" :style="{ color: avatar === av ? (color || 'var(--accent)') : 'var(--text-secondary)' }"></i>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1.25rem">
+              <label class="form-label">Profile Accent Color</label>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
+                <div
+                  v-for="c in colors"
+                  :key="c"
+                  class="color-swatch"
+                  :class="{ selected: color === c }"
+                  :style="{ background: c }"
+                  @click="color = c"
+                  style="width:32px;height:32px;border-radius:50%;cursor:pointer;transition:transform 0.15s"
+                ></div>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1.75rem">
+              <label class="form-label">4-Digit Security PIN (Optional)</label>
+              <input
+                type="password"
+                v-model="pin"
+                maxlength="4"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                class="form-input"
+                placeholder="Leave blank for instant access"
+                id="setup-pin-input"
+              />
+              <span style="font-size:0.75rem;color:var(--text-muted);margin-top:5px;display:block">
+                Lock your profile with a PIN or leave it empty for single-click access.
+              </span>
+            </div>
+
+            <button
+              type="submit"
+              class="btn btn-primary btn-full btn-lg"
+              :disabled="creating || !name.trim()"
+              id="setup-submit-btn"
+            >
+              <span v-if="creating" class="loading-spinner-sm"></span>
+              <span v-else>Continue to System Check →</span>
+            </button>
+          </form>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <!-- STEP 2: System Requirements Check (Hybrid Model)               -->
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <div v-else-if="currentStep === 2">
+          <div style="margin-bottom: 1.25rem; font-size: 0.85rem; color: var(--text-secondary); background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); padding: 0.85rem 1rem; border-radius: var(--radius-md)">
+            <i class="ph-bold ph-info" style="color:var(--accent);margin-right:6px"></i>
+            Checks are <strong>advisory</strong>. CapsStream dynamically adjusts video playback and transcoding based on detected host and client capabilities.
+          </div>
+
+          <div v-if="checkingSystem" style="text-align:center;padding:2.5rem 0">
+            <div class="loading-spinner" style="margin:0 auto 1rem"></div>
+            <div style="font-weight:600;color:var(--text-secondary)">Querying Server & Client Capabilities...</div>
+          </div>
+
+          <div v-else style="display:flex;flex-direction:column;gap:12px;margin-bottom:1.5rem">
+            <!-- Server Hardware Diagnostic Group -->
+            <div style="background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);border-radius:var(--radius-md);overflow:hidden">
+              <div style="padding:8px 12px;background:rgba(255,255,255,0.03);font-size:0.75rem;font-weight:800;letter-spacing:0.05em;color:var(--text-muted);text-transform:uppercase">
+                Server Specifications
+              </div>
+              <div style="display:flex;flex-direction:column">
+                <!-- CPU Cores -->
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border-subtle)">
+                  <div>
+                    <div style="font-weight:600;font-size:0.9rem;color:var(--text-primary)">CPU Processing Cores</div>
+                    <div style="font-size:0.75rem;color:var(--text-muted)">Recommended: 4+ Cores</div>
+                  </div>
+                  <div style="text-align:right">
+                    <span :style="getBadgeStyle(serverCheck?.cpuStatus)">{{ serverCheck?.cpu_cores }} Cores</span>
+                  </div>
+                </div>
+                <!-- RAM -->
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border-subtle)">
+                  <div>
+                    <div style="font-weight:600;font-size:0.9rem;color:var(--text-primary)">Server Memory (RAM)</div>
+                    <div style="font-size:0.75rem;color:var(--text-muted)">Recommended: 4+ GB</div>
+                  </div>
+                  <div style="text-align:right">
+                    <span :style="getBadgeStyle(serverCheck?.ramStatus)">{{ serverCheck?.ram_total_gb }} GB ({{ serverCheck?.ram_avail_gb }} GB Free)</span>
+                  </div>
+                </div>
+                <!-- Disk Storage Free -->
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border-subtle)">
+                  <div>
+                    <div style="font-weight:600;font-size:0.9rem;color:var(--text-primary)">App & Cache Disk Space</div>
+                    <div style="font-size:0.75rem;color:var(--text-muted)">Recommended: 20+ GB Free</div>
+                  </div>
+                  <div style="text-align:right">
+                    <span :style="getBadgeStyle(serverCheck?.diskStatus)">{{ serverCheck?.disk_free_gb }} GB Free</span>
+                  </div>
+                </div>
+                <!-- Hardware Acceleration -->
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px">
+                  <div>
+                    <div style="font-weight:600;font-size:0.9rem;color:var(--text-primary)">FFmpeg Hardware Acceleration</div>
+                    <div style="font-size:0.75rem;color:var(--text-muted)">NVENC / QuickSync / VAAPI</div>
+                  </div>
+                  <div style="text-align:right">
+                    <span :style="getBadgeStyle(serverCheck?.hwStatus)">
+                      {{ serverCheck?.hw_accel?.hardware ? (serverCheck?.hw_accel?.encoder?.toUpperCase() || 'Hardware Active') : (serverCheck?.ffmpeg_available ? 'Software (x264)' : 'FFmpeg Missing') }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Client Playback & Codec Capability Group -->
+            <div style="background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);border-radius:var(--radius-md);overflow:hidden">
+              <div style="padding:8px 12px;background:rgba(255,255,255,0.03);font-size:0.75rem;font-weight:800;letter-spacing:0.05em;color:var(--text-muted);text-transform:uppercase">
+                Client Device & Browser Codecs
+              </div>
+              <div style="display:flex;flex-direction:column">
+                <!-- Display -->
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border-subtle)">
+                  <div>
+                    <div style="font-weight:600;font-size:0.9rem;color:var(--text-primary)">Display Resolution</div>
+                    <div style="font-size:0.75rem;color:var(--text-muted)">Client monitor / screen</div>
+                  </div>
+                  <div style="text-align:right">
+                    <span :style="getBadgeStyle('pass')">{{ clientCheck?.resolution }}</span>
+                  </div>
+                </div>
+                <!-- Codecs Probing List -->
+                <div style="padding:10px 14px">
+                  <div style="font-weight:600;font-size:0.9rem;color:var(--text-primary);margin-bottom:6px">Video & Audio Decoding</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:6px">
+                    <div
+                      v-for="codec in codecList"
+                      :key="codec.name"
+                      style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;font-size:0.78rem"
+                    >
+                      <span style="font-weight:600">{{ codec.name }}</span>
+                      <span :style="codec.supported ? 'color:#2ecc71;font-weight:700' : 'color:#f39c12'">
+                        {{ codec.supported ? (codec.powerEfficient ? '✓ HW' : '✓ SW') : '✕ Direct' }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          <div class="form-group" style="margin-bottom:1.25rem">
-            <label class="form-label">Profile Accent Color</label>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
-              <div
-                v-for="c in colors"
-                :key="c"
-                class="color-swatch"
-                :class="{ selected: color === c }"
-                :style="{ background: c }"
-                @click="color = c"
-                style="width:32px;height:32px;border-radius:50%;cursor:pointer;transition:transform 0.15s"
-              ></div>
+          <div style="display:flex;gap:10px;justify-content:space-between;margin-top:1.5rem">
+            <button type="button" class="btn btn-secondary" @click="goToStep(1)">
+              ← Back
+            </button>
+            <div style="display:flex;gap:10px">
+              <button type="button" class="btn btn-secondary" @click="runSystemCheck" :disabled="checkingSystem">
+                <i class="ph ph-arrows-clockwise" :style="{ animation: checkingSystem ? 'spin 1s linear infinite' : 'none' }" style="margin-right:4px"></i>
+                Re-check
+              </button>
+              <button type="button" class="btn btn-primary" @click="goToStep(3)" id="setup-step2-next">
+                Continue to Media Setup →
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <!-- STEP 3: Media Setup & Library Scan                             -->
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <div v-else-if="currentStep === 3">
+          <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.25rem">
+            Specify the directories where your media is stored. CapsStream organizes and indexes Movies, TV Series, and Anime separately.
+          </p>
+
+          <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:1.5rem">
+            <!-- Movies Folder -->
+            <div class="form-group">
+              <label class="form-label" style="display:flex;justify-content:space-between;align-items:center">
+                <span><i class="ph-bold ph-film-strip" style="color:var(--accent);margin-right:6px"></i> Movies Folder</span>
+                <span v-if="pathStatus.movies" :style="pathStatus.movies.accessible ? 'font-size:0.75rem;color:#2ecc71;font-weight:600' : 'font-size:0.75rem;color:#ef4444;font-weight:600'">
+                  {{ pathStatus.movies.text }}
+                </span>
+              </label>
+              <div style="display:flex;gap:8px">
+                <input
+                  type="text"
+                  v-model="mediaPaths.movies"
+                  class="form-input"
+                  placeholder="e.g. C:\\Media\\Movies or D:\\Movies"
+                  @blur="validatePath('movies')"
+                />
+                <button type="button" class="btn btn-secondary" @click="browseFolder('movies')" title="Browse Folder on Host PC">
+                  Browse...
+                </button>
+              </div>
+            </div>
+
+            <!-- Series Folder -->
+            <div class="form-group">
+              <label class="form-label" style="display:flex;justify-content:space-between;align-items:center">
+                <span><i class="ph-bold ph-television" style="color:#3b82f6;margin-right:6px"></i> TV Series Folder</span>
+                <span v-if="pathStatus.series" :style="pathStatus.series.accessible ? 'font-size:0.75rem;color:#2ecc71;font-weight:600' : 'font-size:0.75rem;color:#ef4444;font-weight:600'">
+                  {{ pathStatus.series.text }}
+                </span>
+              </label>
+              <div style="display:flex;gap:8px">
+                <input
+                  type="text"
+                  v-model="mediaPaths.series"
+                  class="form-input"
+                  placeholder="e.g. C:\\Media\\TV Shows or D:\\Series"
+                  @blur="validatePath('series')"
+                />
+                <button type="button" class="btn btn-secondary" @click="browseFolder('series')" title="Browse Folder on Host PC">
+                  Browse...
+                </button>
+              </div>
+            </div>
+
+            <!-- Anime Folder -->
+            <div class="form-group">
+              <label class="form-label" style="display:flex;justify-content:space-between;align-items:center">
+                <span><i class="ph-bold ph-sparkle" style="color:#a855f7;margin-right:6px"></i> Anime Folder</span>
+                <span v-if="pathStatus.anime" :style="pathStatus.anime.accessible ? 'font-size:0.75rem;color:#2ecc71;font-weight:600' : 'font-size:0.75rem;color:#ef4444;font-weight:600'">
+                  {{ pathStatus.anime.text }}
+                </span>
+              </label>
+              <div style="display:flex;gap:8px">
+                <input
+                  type="text"
+                  v-model="mediaPaths.anime"
+                  class="form-input"
+                  placeholder="e.g. C:\\Media\\Anime or D:\\Anime"
+                  @blur="validatePath('anime')"
+                />
+                <button type="button" class="btn btn-secondary" @click="browseFolder('anime')" title="Browse Folder on Host PC">
+                  Browse...
+                </button>
+              </div>
             </div>
           </div>
 
-          <div class="form-group" style="margin-bottom:1.75rem">
-            <label class="form-label">4-Digit Security PIN (Optional)</label>
-            <input
-              type="password"
-              v-model="pin"
-              maxlength="4"
-              inputmode="numeric"
-              pattern="[0-9]*"
-              class="form-input"
-              placeholder="Leave blank for instant access"
-              id="setup-pin-input"
-            />
-            <span style="font-size:0.75rem;color:var(--text-muted);margin-top:5px;display:block">
-              Lock your profile with a PIN or leave it empty for single-click access.
-            </span>
+          <!-- Scanner Feedback Card -->
+          <div style="background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:1rem;margin-bottom:1.5rem">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <div style="font-weight:700;font-size:0.9rem;display:flex;align-items:center;gap:6px">
+                <i :class="store.scanRunning ? 'ph-bold ph-arrows-clockwise' : (scanTriggered ? 'ph-bold ph-check-circle' : 'ph-bold ph-magnifying-glass')" :style="{ color: store.scanRunning ? 'var(--accent)' : '#2ecc71', animation: store.scanRunning ? 'spin 1s linear infinite' : 'none' }"></i>
+                <span>{{ store.scanRunning ? 'Scanning Media Libraries...' : (scanTriggered ? 'Initial Scan Active' : 'Library Indexer') }}</span>
+              </div>
+              <button
+                type="button"
+                class="btn btn-sm btn-primary"
+                @click="triggerInitialScan"
+                :disabled="store.scanRunning || savingPaths"
+              >
+                {{ store.scanRunning ? 'Scanning...' : 'Start Library Scan' }}
+              </button>
+            </div>
+            <div style="font-size:0.8rem;color:var(--text-secondary)">
+              {{ store.scanProgress || 'Folders can be scanned now or automatically indexed in the background.' }}
+            </div>
           </div>
 
-          <button
-            type="submit"
-            class="btn btn-primary btn-full btn-lg"
-            :disabled="creating || !name.trim()"
-            id="setup-submit-btn"
-          >
-            <span v-if="creating" class="loading-spinner-sm"></span>
-            <span v-else>Complete Setup & Start Streaming</span>
-          </button>
-        </form>
+          <div style="display:flex;gap:10px;justify-content:space-between">
+            <button type="button" class="btn btn-secondary" @click="goToStep(2)">
+              ← Back
+            </button>
+            <div style="display:flex;gap:10px">
+              <button type="button" class="btn btn-secondary" @click="goToStep(4)">
+                Skip Scan for Now
+              </button>
+              <button type="button" class="btn btn-primary" @click="savePathsAndProceed" :disabled="savingPaths" id="setup-step3-next">
+                Save & Continue →
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <!-- STEP 4: Home Transition & Guided Tour                          -->
+        <!-- ══════════════════════════════════════════════════════════════ -->
+        <div v-else-if="currentStep === 4">
+          <div style="text-align:center;padding:1.5rem 0 2rem">
+            <div style="width:72px;height:72px;border-radius:50%;background:rgba(46,204,113,0.15);border:2px solid #2ecc71;display:flex;align-items:center;justify-content:center;margin:0 auto 1.25rem;color:#2ecc71;font-size:2.2rem">
+              <i class="ph-bold ph-check"></i>
+            </div>
+            <h2 style="font-size:1.4rem;font-weight:800;color:var(--text-primary);margin-bottom:0.5rem">
+              Setup Complete!
+            </h2>
+            <p style="font-size:0.9rem;color:var(--text-secondary);max-width:480px;margin:0 auto 1.5rem;line-height:1.5">
+              CapsStream is configured and ready. When you launch, an interactive tour will guide you through the search bar, scanner controls, player settings, and profiles.
+            </p>
+
+            <!-- Configuration Summary Snapshot -->
+            <div style="background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:1.25rem;text-align:left;margin-bottom:1.75rem">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border-subtle)">
+                <span style="font-size:0.85rem;color:var(--text-secondary)">Primary Admin</span>
+                <span style="font-size:0.9rem;font-weight:700;color:var(--text-primary)">{{ store.profile?.name || name || 'Administrator' }}</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border-subtle)">
+                <span style="font-size:0.85rem;color:var(--text-secondary)">Configured Folders</span>
+                <span style="font-size:0.9rem;font-weight:700;color:var(--text-primary)">
+                  {{ configuredFolderCount }} {{ configuredFolderCount === 1 ? 'directory' : 'directories' }}
+                </span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <span style="font-size:0.85rem;color:var(--text-secondary)">Transcoding Engine</span>
+                <span style="font-size:0.9rem;font-weight:700;color:#2ecc71">
+                  {{ serverCheck?.hw_accel?.hardware ? 'Hardware Accelerated' : 'Software x264' }}
+                </span>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:10px;justify-content:space-between">
+              <button type="button" class="btn btn-secondary" @click="goToStep(3)">
+                ← Back
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary btn-lg"
+                @click="completeWizardAndLaunch"
+                :disabled="completing"
+                id="setup-complete-launch-btn"
+                style="flex:1;max-width:320px"
+              >
+                <span v-if="completing" class="loading-spinner-sm"></span>
+                <span v-else>Launch & Start Tour 🚀</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   `,
   setup() {
     const router = VueRouter.useRouter();
-    const name = ref("");
-    const avatar = ref("ph-film-strip");
-    const color = ref("#e50914");
+    const currentStep = ref(parseInt(sessionStorage.getItem("cs_setup_step") || "1", 10));
+    const stepTitles = [
+      "Administrator Profile",
+      "System Requirements Check",
+      "Media Setup & Library Scan",
+      "All Set & Guided Tour"
+    ];
+    const stepSubtitles = [
+      "Create your primary administrator profile to manage your personal streaming server.",
+      "Evaluating server resources, transcoding hardware, and client decoding capabilities.",
+      "Configure your Movies, TV Series, and Anime media directories.",
+      "Setup is complete. Launch CapsStream and start streaming."
+    ];
+
+    // Step 1 State
+    const name = ref(store.profile?.name || "");
+    const avatar = ref(store.profile?.avatar || "ph-film-strip");
+    const color = ref(store.profile?.color || "#e50914");
     const pin = ref("");
     const creating = ref(false);
+    const profileCreated = ref(!!store.profile?.id);
 
     const avatars = [
       "ph-film-strip", "ph-popcorn", "ph-sparkle", "ph-rocket",
@@ -17037,7 +17454,44 @@ const SetupPage = {
       "#f59e0b", "#ec4899", "#06b6d4", "#6366f1"
     ];
 
-    async function submitSetup() {
+    // Step 2 State
+    const checkingSystem = ref(false);
+    const serverCheck = ref(null);
+    const clientCheck = ref(null);
+    const codecList = ref([]);
+
+    // Step 3 State
+    const mediaPaths = ref({ movies: "", series: "", anime: "" });
+    const pathStatus = ref({ movies: null, series: null, anime: null });
+    const savingPaths = ref(false);
+    const scanTriggered = ref(false);
+
+    // Step 4 State
+    const completing = ref(false);
+
+    const configuredFolderCount = computed(() => {
+      let cnt = 0;
+      if (mediaPaths.value.movies?.trim()) cnt++;
+      if (mediaPaths.value.series?.trim()) cnt++;
+      if (mediaPaths.value.anime?.trim()) cnt++;
+      return cnt;
+    });
+
+    function goToStep(step) {
+      if (step > 1 && !profileCreated.value && !store.profile?.id) {
+        addToast("Please create an administrator profile first", "warning");
+        return;
+      }
+      currentStep.value = step;
+      try { sessionStorage.setItem("cs_setup_step", String(step)); } catch (e) {}
+      if (step === 2 && !serverCheck.value) {
+        runSystemCheck();
+      } else if (step === 3) {
+        loadExistingPaths();
+      }
+    }
+
+    async function submitStep1() {
       const cleanName = name.value.trim();
       if (!cleanName || creating.value) return;
 
@@ -17049,29 +17503,29 @@ const SetupPage = {
 
       creating.value = true;
       try {
-        const created = await API.post("/api/profiles", {
-          name: cleanName,
-          avatar: avatar.value,
-          color: color.value,
-          pin: cleanPin || null,
-          is_admin: true,
-        });
+        if (!store.profile?.id) {
+          const created = await API.post("/api/profiles", {
+            name: cleanName,
+            avatar: avatar.value,
+            color: color.value,
+            pin: cleanPin || null,
+            is_admin: true,
+          });
 
-        // Authenticate into the created profile session
-        const authRes = await API.post("/api/profiles/auth", {
-          profile_id: created.id,
-          pin: cleanPin || null,
-        });
+          const authRes = await API.post("/api/profiles/auth", {
+            profile_id: created.id,
+            pin: cleanPin || null,
+          });
 
-        store.profile = authRes.profile || created;
-        try { sessionStorage.setItem("cs_active_profile_id", String(created.id)); } catch (e) {}
-        try { localStorage.removeItem("capsstream_profile_id"); } catch (e) {}
-        try { localStorage.removeItem("cs_session_id"); } catch (e) {}
-        sessionStorage.setItem("cs_pending_onboarding", "true");
-        addToast(`Welcome, ${created.name}!`, "success");
+          store.profile = authRes.profile || created;
+          try { sessionStorage.setItem("cs_active_profile_id", String(created.id)); } catch (e) {}
+          profileCreated.value = true;
+          addToast(`Welcome, ${created.name}! Profile initialized.`, "success");
+        } else {
+          profileCreated.value = true;
+        }
 
-        // Navigate to home
-        router.push("/");
+        goToStep(2);
       } catch (e) {
         addToast(e.message || "Failed to create profile", "error");
       } finally {
@@ -17079,8 +17533,274 @@ const SetupPage = {
       }
     }
 
-    return { store, name, avatar, color, pin, avatars, colors, creating, submitSetup };
-  },
+    async function runSystemCheck() {
+      checkingSystem.value = true;
+      try {
+        const sys = await API.get("/api/setup/system-check").catch(() => null);
+        if (sys && sys.ok) {
+          const cpuStatus = sys.cpu_cores >= 4 ? "pass" : (sys.cpu_cores >= 2 ? "warn" : "fail");
+          const ramStatus = sys.ram_total_gb >= 4 ? "pass" : (sys.ram_total_gb >= 2 ? "warn" : "fail");
+          const diskStatus = sys.disk_free_gb >= 20 ? "pass" : (sys.disk_free_gb >= 5 ? "warn" : "fail");
+          const hwStatus = sys.hw_accel?.hardware ? "pass" : (sys.ffmpeg_available ? "warn" : "fail");
+
+          serverCheck.value = {
+            ...sys,
+            cpuStatus,
+            ramStatus,
+            diskStatus,
+            hwStatus
+          };
+        } else {
+          serverCheck.value = {
+            cpu_cores: 4,
+            ram_total_gb: 8,
+            ram_avail_gb: 4,
+            disk_free_gb: 25,
+            ffmpeg_available: true,
+            hw_accel: { hardware: false, encoder: "libx264" },
+            cpuStatus: "pass",
+            ramStatus: "pass",
+            diskStatus: "pass",
+            hwStatus: "warn"
+          };
+        }
+
+        // Client device probe
+        const w = typeof window !== "undefined" && window.screen ? window.screen.width : 1920;
+        const h = typeof window !== "undefined" && window.screen ? window.screen.height : 1080;
+        clientCheck.value = {
+          resolution: `${w} × ${h}`,
+          resStatus: w >= 1920 ? "pass" : (w >= 1280 ? "warn" : "fail")
+        };
+
+        // Codec capability probe
+        await probeCodecs();
+      } catch (e) {
+        console.warn("System check error:", e);
+      } finally {
+        checkingSystem.value = false;
+      }
+    }
+
+    async function probeCodecs() {
+      const candidates = [
+        { name: "H.264 (AVC)", type: "video/mp4; codecs=\"avc1.42E01E\"" },
+        { name: "H.265 (HEVC)", type: "video/mp4; codecs=\"hvc1.1.6.L93.B0\"" },
+        { name: "VP9", type: "video/webm; codecs=\"vp9\"" },
+        { name: "AV1", type: "video/mp4; codecs=\"av01.0.05M.08\"" },
+        { name: "AAC Audio", type: "audio/mp4; codecs=\"mp4a.40.2\"", isAudio: true }
+      ];
+
+      const results = [];
+      for (const item of candidates) {
+        let supported = false;
+        let powerEfficient = false;
+        try {
+          if (navigator.mediaCapabilities && navigator.mediaCapabilities.decodingInfo) {
+            const probeConfig = item.isAudio
+              ? { type: "file", audio: { contentType: item.type, bitrate: 128000, samplerate: 44100 } }
+              : { type: "file", video: { contentType: item.type, width: 1920, height: 1080, bitrate: 5000000, framerate: 30 } };
+            const info = await navigator.mediaCapabilities.decodingInfo(probeConfig);
+            supported = !!info.supported;
+            powerEfficient = !!info.powerEfficient;
+          } else {
+            const v = document.createElement("video");
+            supported = !!v.canPlayType(item.type);
+          }
+        } catch (err) {
+          supported = item.name.includes("H.264") || item.name.includes("AAC");
+        }
+        results.push({ name: item.name, supported, powerEfficient });
+      }
+      codecList.value = results;
+    }
+
+    function getBadgeStyle(status) {
+      if (status === "pass") {
+        return "display:inline-block;padding:2px 8px;border-radius:12px;font-size:0.75rem;font-weight:700;background:rgba(46,204,113,0.15);color:#2ecc71;border:1px solid rgba(46,204,113,0.3)";
+      }
+      if (status === "warn") {
+        return "display:inline-block;padding:2px 8px;border-radius:12px;font-size:0.75rem;font-weight:700;background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3)";
+      }
+      return "display:inline-block;padding:2px 8px;border-radius:12px;font-size:0.75rem;font-weight:700;background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3)";
+    }
+
+    async function loadExistingPaths() {
+      try {
+        const cfg = await API.get("/api/settings");
+        if (cfg && cfg.media_paths) {
+          mediaPaths.value.movies = (cfg.media_paths.movies && cfg.media_paths.movies[0]) || "";
+          mediaPaths.value.series = (cfg.media_paths.series && cfg.media_paths.series[0]) || "";
+          mediaPaths.value.anime = (cfg.media_paths.anime && cfg.media_paths.anime[0]) || "";
+          validateAllPaths();
+        }
+      } catch (e) {}
+    }
+
+    async function browseFolder(category) {
+      try {
+        const res = await API.post("/api/system/browse-folder", {});
+        if (res && res.ok && res.path) {
+          mediaPaths.value[category] = res.path;
+          validatePath(category);
+        } else if (res && res.error) {
+          addToast(res.error, "info");
+        }
+      } catch (e) {
+        addToast("Type path manually or access CapsStream from host machine to use folder picker", "info");
+      }
+    }
+
+    function extractPathInfo(info) {
+      if (!info) return null;
+      if (typeof info === "number") {
+        return { accessible: true, count: info, text: `✓ ${info} video files found` };
+      }
+      if (typeof info === "object") {
+        if (!info.accessible) {
+          return { accessible: false, count: 0, text: "✕ Directory not found or inaccessible" };
+        }
+        const cnt = typeof info.video_count === "number" ? info.video_count : 0;
+        return {
+          accessible: true,
+          count: cnt,
+          text: cnt > 0 ? `✓ ${cnt} video files found` : "0 video files detected"
+        };
+      }
+      return null;
+    }
+
+    async function validatePath(category) {
+      const p = mediaPaths.value[category]?.trim();
+      if (!p) {
+        pathStatus.value[category] = null;
+        return;
+      }
+      try {
+        const res = await API.post("/api/system/validate-paths", { paths: [p] });
+        if (res && res[p]) {
+          pathStatus.value[category] = extractPathInfo(res[p]);
+        } else {
+          pathStatus.value[category] = { accessible: false, count: 0, text: "✕ Directory not found" };
+        }
+      } catch (e) {
+        pathStatus.value[category] = null;
+      }
+    }
+
+    async function validateAllPaths() {
+      const all = [
+        mediaPaths.value.movies?.trim(),
+        mediaPaths.value.series?.trim(),
+        mediaPaths.value.anime?.trim()
+      ].filter(Boolean);
+      if (!all.length) return;
+      try {
+        const res = await API.post("/api/system/validate-paths", { paths: all });
+        if (res) {
+          if (mediaPaths.value.movies) pathStatus.value.movies = extractPathInfo(res[mediaPaths.value.movies]);
+          if (mediaPaths.value.series) pathStatus.value.series = extractPathInfo(res[mediaPaths.value.series]);
+          if (mediaPaths.value.anime) pathStatus.value.anime = extractPathInfo(res[mediaPaths.value.anime]);
+        }
+      } catch (e) {}
+    }
+
+    async function triggerInitialScan() {
+      scanTriggered.value = true;
+      try {
+        await saveMediaPaths();
+        await startLibraryScan(true);
+        addToast("Library scanner launched in background", "success");
+      } catch (e) {
+        addToast("Scan start error: " + (e.message || e), "error");
+      }
+    }
+
+    async function saveMediaPaths() {
+      const payload = {
+        media_paths: {
+          movies: mediaPaths.value.movies?.trim() ? [mediaPaths.value.movies.trim()] : [],
+          series: mediaPaths.value.series?.trim() ? [mediaPaths.value.series.trim()] : [],
+          anime: mediaPaths.value.anime?.trim() ? [mediaPaths.value.anime.trim()] : []
+        }
+      };
+      await API.post("/api/settings", payload);
+    }
+
+    async function savePathsAndProceed() {
+      savingPaths.value = true;
+      try {
+        await saveMediaPaths();
+        goToStep(4);
+      } catch (e) {
+        addToast("Failed to save media paths: " + (e.message || e), "error");
+      } finally {
+        savingPaths.value = false;
+      }
+    }
+
+    async function completeWizardAndLaunch() {
+      completing.value = true;
+      try {
+        await API.post("/api/setup/complete", {}).catch(() => {});
+        try { sessionStorage.removeItem("cs_setup_step"); } catch (e) {}
+        try { sessionStorage.setItem("cs_pending_onboarding", "true"); } catch (e) {}
+        addToast("Setup complete! Welcome to CapsStream.", "success");
+        router.push("/");
+        setTimeout(() => {
+          if (typeof window.startOnboardingTour === "function") {
+            window.startOnboardingTour(true);
+          }
+        }, 500);
+      } catch (e) {
+        addToast("Error finishing setup: " + (e.message || e), "error");
+      } finally {
+        completing.value = false;
+      }
+    }
+
+    onMounted(() => {
+      if (currentStep.value === 2) {
+        runSystemCheck();
+      } else if (currentStep.value === 3) {
+        loadExistingPaths();
+      }
+    });
+
+    return {
+      store,
+      currentStep,
+      stepTitles,
+      stepSubtitles,
+      name,
+      avatar,
+      color,
+      pin,
+      avatars,
+      colors,
+      creating,
+      profileCreated,
+      checkingSystem,
+      serverCheck,
+      clientCheck,
+      codecList,
+      mediaPaths,
+      pathStatus,
+      savingPaths,
+      scanTriggered,
+      completing,
+      configuredFolderCount,
+      goToStep,
+      submitStep1,
+      runSystemCheck,
+      getBadgeStyle,
+      browseFolder,
+      validatePath,
+      triggerInitialScan,
+      savePathsAndProceed,
+      completeWizardAndLaunch
+    };
+  }
 };
 
 
@@ -22907,6 +23627,13 @@ router.beforeEach((to, from, next) => {
 
   if (to.path === "/requests" && !store.features?.requests) {
     return next("/");
+  }
+
+  if (to.path === "/setup") {
+    const isExplicitSetup = sessionStorage.getItem("cs_setup_step") !== null;
+    if (store.profile && store.features?.setup_completed && !isExplicitSetup) {
+      return next("/");
+    }
   }
   next();
 });

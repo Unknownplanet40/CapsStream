@@ -137,3 +137,11 @@ Whenever the user asks to commit, release, or save changes in this project, foll
      - the commit hash
      - push status
      - the release CI will cut (e.g. “next auto-release: v2.57.3.0”)
+
+7. **Run Handoff Mode & Sync Agent Context (`.agents`)**
+   - Immediately after a successful push, run [`.agents/rules/handoff-mode.md`](.agents/rules/handoff-mode.md):
+     - Create or update [`handoff.md`](handoff.md) in the project root with the fresh snapshot across all 6 sections (Goal, Current State, Active Files, Changes Made, Failed Attempts, Specific Next Steps).
+     - Confirm creation/update to the user with the 6 section headings.
+   - Inspect [`.agents/rules/`](.agents/rules/) (including [`project-log.md`](.agents/rules/project-log.md)) and [`.agents/skills/`](.agents/skills/) (including `decision-log`).
+   - Append to [`PROJECT-LOG.md`](PROJECT-LOG.md) before session end or after shipping changes (`### Asked`, `### Decision` with `>why:`, `### Shipped`; append-only so nothing gets lost).
+   - On new sessions or when resuming, always check `handoff.md`, `PROJECT-LOG.md`, and `.agents/` first to eliminate hallucinations and continue seamlessly from the exact state.

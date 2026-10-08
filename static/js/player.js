@@ -1039,14 +1039,37 @@ const PlayerPage = {
         </button>
       </div>
 
-      <!-- Buffering Spinner & Transcode Status (strictly in front of all player controls and paused content) -->
+      <!-- Buffering Spinner / Logo Loader & Transcode Status (strictly in front of all player controls and paused content) -->
       <transition name="fade">
         <div
-          v-if="isBuffering"
+          v-if="isBuffering || isInitialLoad"
           class="player-buffering-overlay"
           :class="{ 'is-transcoding': streamState.transcode && (isTranscodeInitialLoading || transcodeElapsedSec >= 3) }"
         >
-          <div class="loading-spinner" style="width:52px;height:52px;border-width:4px"></div>
+          <!-- Initial load logo with glint (crossfades with spinner fallback) -->
+          <div
+            v-if="loaderState.showLogo && logoImgSrc"
+            class="player-loading-logo-wrapper"
+            :style="{ '--logo-mask': 'url(' + logoImgSrc + ')' }"
+          >
+            <img
+              :src="logoImgSrc"
+              :alt="(media && media.title) ? media.title : 'Loading'"
+              class="player-loading-logo"
+            />
+            <div
+              v-if="loaderState.enableGlint"
+              class="player-loading-logo-glint"
+              aria-hidden="true"
+            ></div>
+          </div>
+
+          <!-- Default Buffering Spinner -->
+          <div
+            v-else
+            class="loading-spinner"
+            style="width:52px;height:52px;border-width:4px"
+          ></div>
 
           <!-- Converted Media Detailed Status Card -->
           <div v-if="streamState.transcode && (isTranscodeInitialLoading || transcodeElapsedSec >= 3)" class="transcode-loading-card">
@@ -1753,6 +1776,129 @@ const PlayerPage = {
     const currentTime = ref(0);
     const duration = ref(0);
     const isBuffering = ref(false);
+    const isInitialLoad = ref(false);
+    const logoReady = ref(false);
+    const logoPreloadError = ref(false);
+    const logoImgSrc = ref("");
+    let logoPreloadToken = 0;
+    let logoPreloadTimeout = null;
+
+    const prefersReducedMotion = ref(
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    );
+
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+      try {
+        const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
+        if (mql && mql.addEventListener) {
+          mql.addEventListener("change", (e) => {
+            prefersReducedMotion.value = e.matches;
+          });
+        }
+      } catch (e) {}
+    }
+
+    const loaderState = computed(() => {
+      const fn = (typeof window !== "undefined" && window.logoLoaderState) ||
+        (typeof CapsLogoLoader !== "undefined" && CapsLogoLoader.logoLoaderState);
+      if (typeof fn === "function") {
+        return fn({
+          isInitialLoad: isInitialLoad.value,
+          logoPath: media.value?.logo_path,
+          logoReady: logoReady.value,
+          isError: logoPreloadError.value,
+          reducedMotion: prefersReducedMotion.value
+        });
+      }
+      const hasLogo = Boolean(
+        isInitialLoad.value &&
+        media.value?.logo_path &&
+        logoReady.value &&
+        !logoPreloadError.value
+      );
+      return {
+        showLogo: hasLogo,
+        showSpinner: !hasLogo,
+        enableGlint: !prefersReducedMotion.value
+      };
+    });
+
+    function preloadMediaLogo(logoPath) {
+      logoPreloadToken++;
+      const currentToken = logoPreloadToken;
+      if (logoPreloadTimeout) {
+        clearTimeout(logoPreloadTimeout);
+        logoPreloadTimeout = null;
+      }
+
+      logoReady.value = false;
+      logoPreloadError.value = false;
+      logoImgSrc.value = "";
+
+      if (!logoPath) return;
+
+      const rawUrl = imgUrl(logoPath);
+      const checkFn = (typeof window !== "undefined" && window.isValidLogoUrl) ||
+        (typeof CapsLogoLoader !== "undefined" && CapsLogoLoader.isValidLogoUrl);
+      if (typeof checkFn === "function" && !checkFn(rawUrl)) {
+        console.debug?.("[PlayerLogoLoader] Logo URL did not pass client validation:", rawUrl);
+        return;
+      }
+
+      // Timeout guard (~5s per plan): fall back permanently to spinner for this load
+      logoPreloadTimeout = setTimeout(() => {
+        if (currentToken === logoPreloadToken && !logoReady.value) {
+          console.warn("[PlayerLogoLoader] Logo preload timed out after 5s; falling back to spinner");
+          logoPreloadError.value = true;
+        }
+      }, 5000);
+
+      try {
+        const img = new Image();
+        img.src = rawUrl;
+        if (typeof img.decode === "function") {
+          img.decode()
+            .then(() => {
+              if (currentToken === logoPreloadToken) {
+                if (logoPreloadTimeout) {
+                  clearTimeout(logoPreloadTimeout);
+                  logoPreloadTimeout = null;
+                }
+                logoImgSrc.value = rawUrl;
+                logoReady.value = true;
+              }
+            })
+            .catch((err) => {
+              if (currentToken === logoPreloadToken) {
+                console.warn("[PlayerLogoLoader] Failed to decode media logo:", err);
+                logoPreloadError.value = true;
+              }
+            });
+        } else {
+          img.onload = () => {
+            if (currentToken === logoPreloadToken) {
+              if (logoPreloadTimeout) {
+                clearTimeout(logoPreloadTimeout);
+                logoPreloadTimeout = null;
+              }
+              logoImgSrc.value = rawUrl;
+              logoReady.value = true;
+            }
+          };
+          img.onerror = (err) => {
+            if (currentToken === logoPreloadToken) {
+              console.warn("[PlayerLogoLoader] Failed to load media logo:", err);
+              logoPreloadError.value = true;
+            }
+          };
+        }
+      } catch (err) {
+        console.warn("[PlayerLogoLoader] Unexpected error while preloading logo:", err);
+        logoPreloadError.value = true;
+      }
+    }
     const isFullscreen = ref(false);
     const controlsHidden = ref(false);
     let suppressControlsUntil = 0;
@@ -1762,6 +1908,9 @@ const PlayerPage = {
       return !/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
     }
     const playerError = ref(null);
+    watch(playerError, (err) => {
+      if (err) isInitialLoad.value = false;
+    });
     const autoSwitched4K = ref(null);  // { label, original4kOption }
     const stutter4KBanner = ref(false);
     const lowMemoryBanner = ref(null);
@@ -4451,6 +4600,7 @@ const PlayerPage = {
     function onVideoPlaying() {
       isPlaying.value = true;
       isBuffering.value = false;
+      isInitialLoad.value = false;
       isTranscodeInitialLoading.value = false;
       playerError.value = null;
       lastPlaybackStartTime = Date.now();
@@ -6015,6 +6165,7 @@ const PlayerPage = {
       if (!v.error || v.error.code === 0 || v.error.code === 1) {
         return;
       }
+      isInitialLoad.value = false;
       if (isDriveOffline.value) return;
 
       // Fast check if the underlying storage drive has been unplugged
@@ -6648,6 +6799,15 @@ const PlayerPage = {
 
     async function initPlayer() {
       const mediaId = route.params.id;
+      isInitialLoad.value = true;
+      logoPreloadToken++;
+      if (logoPreloadTimeout) {
+        clearTimeout(logoPreloadTimeout);
+        logoPreloadTimeout = null;
+      }
+      logoReady.value = false;
+      logoPreloadError.value = false;
+      logoImgSrc.value = "";
       fetchCompatCaps();
       playerError.value = null;
       showResumeModal.value = false;
@@ -6721,6 +6881,7 @@ const PlayerPage = {
 
       try {
         media.value = await API.get(`/api/media/${mediaId}`);
+        preloadMediaLogo(media.value?.logo_path);
         subtitles.value = media.value.subtitles || [];
         if (media.value?.duration > 0) {
           duration.value = media.value.duration;
@@ -6728,6 +6889,7 @@ const PlayerPage = {
 
         // Drive health check on initial entry: if drive is unmounted, halt playback and show recovery overlay
         if (media.value.is_mounted === false) {
+          isInitialLoad.value = false;
           showDriveOfflineScreen(media.value.drive_letter);
           return;
         }
@@ -6801,23 +6963,6 @@ const PlayerPage = {
         }
 
         applyResumedProgress();
-
-        // Auto-select preferred subtitle language if auto_load enabled or profile default set
-        if (subtitles.value.length > 0) {
-          const profSub = (store.profile?.default_sub_lang || "").toLowerCase();
-          if (profSub === "off") {
-            selectSub(-1);
-          } else {
-            const autoLoad = playerSettings.value?.subtitles?.auto_load !== false;
-            if (autoLoad || profSub) {
-              let prefLang = profSub || (playerSettings.value?.subtitles?.preferred_language || "en").toLowerCase();
-              if (prefLang === "auto") prefLang = "en";
-              const prefIdx = subtitles.value.findIndex((s) => (s.language || "").toLowerCase().startsWith(prefLang) || (s.label || "").toLowerCase().includes(prefLang));
-              const defaultIdx = prefIdx >= 0 ? prefIdx : 0;
-              selectSub(defaultIdx);
-            }
-          }
-        }
       } catch (e) {
         addToast("Failed to load media", "error");
         return;
@@ -6840,6 +6985,52 @@ const PlayerPage = {
       }
       defaultAudioIndex.value = targetAudio ? targetAudio.index : 0;
       streamState.audioTrack = defaultAudioIndex.value;
+
+      // Auto-select subtitle track: audio == preferred sub -> Forced first; audio != preferred sub -> full first
+      if (subtitles.value.length > 0) {
+        const profSub = (store.profile?.default_sub_lang || "").toLowerCase();
+        if (profSub === "off") {
+          selectSub(-1);
+        } else {
+          const autoLoad = playerSettings.value?.subtitles?.auto_load !== false;
+          if (autoLoad || profSub) {
+            let prefLang = profSub || (playerSettings.value?.subtitles?.preferred_language || "en").toLowerCase();
+            if (prefLang === "auto") prefLang = "en";
+
+            const activeAudioLang = (targetAudio?.language || targetAudio?.lang || "").toLowerCase().trim();
+            const audioMatchesPref = activeAudioLang && (
+              activeAudioLang === prefLang ||
+              activeAudioLang.startsWith(prefLang) ||
+              prefLang.startsWith(activeAudioLang)
+            );
+
+            const matchingCandidates = [];
+            subtitles.value.forEach((s, idx) => {
+              const sLang = (s.language || "").toLowerCase().trim();
+              const sLabel = (s.label || "").toLowerCase();
+              if (sLang === prefLang || sLang.startsWith(prefLang) || sLabel.includes(prefLang)) {
+                matchingCandidates.push({ sub: s, index: idx });
+              }
+            });
+
+            if (!matchingCandidates.length) {
+              selectSub(0);
+            } else if (audioMatchesPref) {
+              // Audio matches preferred subtitle language: prefer Forced track, else full track
+              const forcedCand = matchingCandidates.find(
+                (c) => c.sub.forced || (c.sub.label || "").toLowerCase().includes("forced")
+              );
+              selectSub(forcedCand ? forcedCand.index : matchingCandidates[0].index);
+            } else {
+              // Audio differs from preferred subtitle language: prefer full (non-forced) track
+              const fullCand = matchingCandidates.find(
+                (c) => !c.sub.forced && !(c.sub.label || "").toLowerCase().includes("forced")
+              );
+              selectSub(fullCand ? fullCand.index : matchingCandidates[0].index);
+            }
+          }
+        }
+      }
 
       let foundNext = null;
       if (media.value.type !== "movie") {
@@ -6989,6 +7180,15 @@ const PlayerPage = {
     function cleanupPlayback(options = {}) {
       reloadToken++;
       isBuffering.value = false;
+      isInitialLoad.value = false;
+      logoPreloadToken++;
+      if (logoPreloadTimeout) {
+        clearTimeout(logoPreloadTimeout);
+        logoPreloadTimeout = null;
+      }
+      logoReady.value = false;
+      logoPreloadError.value = false;
+      logoImgSrc.value = "";
       const prevMediaId = options.mediaId || streamState.mediaId || route.params.id;
 
       detachRemoteAudio();
@@ -7509,6 +7709,10 @@ const PlayerPage = {
       wtResync,
       toggleWtChat,
       wtFormatTime,
+      isInitialLoad,
+      logoReady,
+      logoImgSrc,
+      loaderState,
     };
   },
 };
