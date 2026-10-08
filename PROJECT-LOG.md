@@ -50,3 +50,18 @@ Implemented local region routing for Movies and TV Series based on TMDb origin/p
 - Added comprehensive unit tests in `backend/tests/test_sub_naming.py`, expanded `backend/tests/test_organizer.py`, `backend/tests/test_route_organizer.py`, and `backend/tests/test_subtitles.py`. Verified all 429 backend tests pass.
 
 ---
+## October 8 at 12:22 PM
+### Asked
+Test the First-Run Setup Wizard with profiles temporarily disabled, fix the Step 3 media paths status output where raw JSON dictionaries were displayed, commit all completed features, and push to origin/main.
+
+### Decision
+Implemented `extractPathInfo()` in `static/js/app.js` to parse `{ accessible, video_count }` from `/api/system/validate-paths` instead of directly rendering the raw response object. Replaced raw output with color-coded status badges (`✓ N video files found`, `0 video files detected`, `✕ Directory not found or inaccessible`). Restored original profiles to `data/capsstream.db`, ran all 429 Python tests and 9 Node tests, committed with changelog, pushed to `origin/main`, and generated `handoff.md`.
+>why: Eliminates visual bug in the setup wizard where raw backend JSON dictionaries were stringified onto the UI, while completing the full commit, push, and handoff workflow.
+
+### Shipped
+- Fixed Step 3 folder validation chip in `SetupPage` (`static/js/app.js`) to parse `video_count` and `accessible` cleanly.
+- Restored original user profiles (`Capsss`, `Maxxx`, `Elyyy`, `RJ`) in `data/capsstream.db`.
+- Committed `5d2286f` and pushed to `origin/main`.
+- Created `handoff.md` capturing the task snapshot across all 6 required sections.
+
+---
