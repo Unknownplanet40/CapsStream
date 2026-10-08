@@ -1,36 +1,35 @@
 # Handoff
 
 ## 1. Goal
-Implement, test, and ship the First-Run Setup Wizard and System Check (`docs/implementation_plan_first-run-setup-wizard.md`) alongside concurrent Player Logo Loader and Local Region Routing enhancements, verify zero regression, commit with full changelog, and push to origin/main.
+Fix companion subtitle naming and organization in the Automated Media Renamer & File Organizer engine, ensuring scene-named subtitles (e.g. `Backrooms.2026.1080p...[YTS.GG].srt`) and forced variants (`.force.srt`, `.forced.srt`) are accurately standardized to Plex/CapsStream-compliant companion names (e.g. `Backrooms (2026).en.forced.srt`, `Backrooms (2026).en.srt`), and that `Subs/` folders are discovered and organized without leaving orphaned tracks.
 
 ## 2. Current State
 - **Branch:** `main`
-- **Commit:** `5d2286f` pushed successfully to `origin/main` (`878412f..5d2286f`).
-- **Release CI:** GitHub Actions auto-release workflow triggered on push to `main` (cutting minor bump `v2.79.0.0`).
-- **Tests:** 429 Python unit/integration tests (`backend/tests/`) + 9 Node tests (`tests/test_logo_loader.test.js`) passing cleanly.
-- **Working Tree:** Clean, up to date with `origin/main`.
-- **Database Profiles:** Original profiles (`Capsss`, `Maxxx`, `Elyyy`, `RJ`) fully preserved in active `profiles` table.
+- **Commit:** `829a45c` pushed successfully to `origin/main` (`dbfe437..829a45c`).
+- **Release CI:** GitHub Actions auto-release workflow triggered on push to `main` (cutting patch bump `v2.79.2.0`).
+- **Tests:** 432 unit and integration tests passing (`OK`) across the entire repository.
+- **Working Tree:** Clean, synchronized with `origin/main`.
 
 ## 3. Active Files
-- `backend/routes/admin.py`: Setup wizard endpoints (`/api/setup/status`, `/api/setup/system-check`, `/api/setup/complete`, `/api/admin/scan` alias).
-- `backend/settings.py`: Added default `"setup_completed": False`.
-- `backend/tests/test_setup_wizard.py`: Unit tests for setup endpoints.
-- `static/js/app.js`: Expanded `SetupPage` (4-step wizard), `pathStatus` parsing, route guard in `router.beforeEach`, and Settings button.
-- `PROJECT-LOG.md`: Append-only historical log.
-- `docs/implementation_plan_first-run-setup-wizard.md`: Architectural specification for the setup wizard.
+- `backend/sub_naming.py`: Flag parsing (`force`, `forced`, `foreign`), tag formatting, and ISO 639-2 / 639-1 language alias map expansions.
+- `backend/organizer.py`: Content-aware subtitle language detection, companion subtitle identification, Plex/CapsStream standardized naming in `build_subtitle_destination_path`, multi-folder discovery and deduplication in `find_companion_subtitles`, and subtitle plan construction in `scan_incoming_for_preview`.
+- `backend/tests/test_organizer.py`: Unit tests for scene subtitle renaming, forced subtitle detection, and Subs/ folder discovery/deduplication.
+- `PROJECT-LOG.md`: Permanent append-only project log.
 
 ## 4. Changes Made
-- Expanded `SetupPage` in `static/js/app.js` into an interactive 4-step wizard (Admin Profile, System Diagnostics, Media Setup & Scanner, Ready & Tour Handoff).
-- Added `GET /api/setup/status`, `GET /api/setup/system-check`, and `POST /api/setup/complete` in `backend/routes/admin.py`.
-- Fixed Step 3 path count rendering by implementing `extractPathInfo` to parse `{ accessible, video_count }` from `/api/system/validate-paths` rather than stringifying raw response objects.
-- Added replay entrypoint under Settings ("Run Setup Wizard") and route protection in `router.beforeEach`.
-- Committed and pushed all concurrent changes (Setup Wizard, Player Logo Loader, and Local Region Routing) cleanly to `origin/main`.
+- Expanded `is_forced` regex in `backend/sub_naming.py` to match `force`, `forced`, and `foreign`.
+- Added ISO 639-2 codes to `LANG_ALIASES` (`bul`, `hrv`, `ice`, `lav`, `lit`, `slo`, `slv`, `srp`, `est`, `nob`, `fa`) for international scene subtitle packs.
+- Implemented `detect_subtitle_language()` in `backend/organizer.py` for script and stopword content inspection.
+- Updated `parse_subtitle_details()` to recognize media companion tracks and default companion subtitles to English (`en`).
+- Updated `build_subtitle_destination_path()` so companion subtitles are formatted as `<Media Title>.<lang>[.<flag>].<ext>`, while preserving original names for unrelated tracks like `Director_Commentary_Track.srt`.
+- Removed the root-subtitle gate in `find_companion_subtitles()`, enabling `Subs/` folder discovery even if a file exists beside the media, with content-fingerprint deduplication of identical root scene copies.
+- Added comprehensive unit tests in `backend/tests/test_organizer.py`.
 
 ## 5. Failed Attempts
-- Direct interpolation of `res[p]` in `SetupPage`: `/api/system/validate-paths` returned detailed dictionaries (`{ accessible: true, video_count: 18 }`), which initially rendered raw JSON text in the badge. Fixed by implementing `extractPathInfo()` to parse counts and status cleanly.
-- Running test suite while profiles were temporarily dropped: Caused `test_route_admin.py` log download/tail tests to fail (since empty profile tables grant passwordless local admin). Fixed by restoring the active profiles to `data/capsstream.db`.
+- Keying deduplication purely on `(size, head)` without folder context initially collapsed different language files in unit tests where mock files shared identical placeholder byte strings. Solved by scoping deduplication to skip root torrent copies when an exact duplicate exists inside a `Subs/` subfolder.
+- Calling `.lower()` directly on `_clean_name()` failed because `_clean_name` returns a `(title, year)` tuple. Solved by properly unpacking `_clean_name(...)[0]`.
 
 ## 6. Specific Next Steps
-1. Monitor GitHub Actions auto-release run for tag `v2.79.0.0` and asset bundle publishing.
-2. In future manual UI testing sessions, verify end-to-end Driver.js spotlight tour step transitions on different display aspect ratios.
-3. If new media categories are added in future releases, ensure `SetupPage` Step 3 directory inputs update dynamically.
+1. Verify the CI release pipeline publishes `v2.79.2.0` and Android TV companion APK.
+2. In production testing, test scanning an incoming folder with YTS/RARBG releases containing both root `.srt` and `Subs/` directories to confirm one-click clean organization.
+3. If users request non-English default fallback for companion subtitles, consider making default companion language inherit from user-configured profile `default_sub_lang`.

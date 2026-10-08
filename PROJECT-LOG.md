@@ -65,3 +65,22 @@ Implemented `extractPathInfo()` in `static/js/app.js` to parse `{ accessible, vi
 - Created `handoff.md` capturing the task snapshot across all 6 required sections.
 
 ---
+## October 8 at 1:30 PM
+### Asked
+Fix inaccurate subtitle naming and organization in the Automated Media Renamer & File Organizer where subtitles kept raw scene filenames (e.g. `Backrooms.2026.1080p.WEBRip.x264.AAC5.1-[YTS.GG - YTS.BZ]`) instead of standardized names like `Backrooms (2026).en.forced.srt` or `Backrooms (2026).en.srt`, commit, and push to production.
+
+### Decision
+Standardized companion subtitle destination naming in `backend/organizer.py` to match Plex and CapsStream conventions (`<Media Title>.<lang>[.<flag>].<ext>`), defaulting companion media subtitles without explicit language tokens to English (`en`). Added content-aware language detection (`detect_subtitle_language()`) inspecting subtitle cues and stopwords. Expanded `is_forced` flag detection in `backend/sub_naming.py` to match `force`, `forced`, and `foreign`. Removed the single-file gate in `find_companion_subtitles()` to always search `Subs/` folders, while deduplicating identical root scene copies.
+>why: Companion subtitles must match the media title for Plex, Jellyfin, and CapsStream players to link and auto-load them, scene downloads frequently omit language tags from root subtitles, and torrent releases often place complete subtitle packages in a `Subs/` subfolder alongside a redundant root copy.
+
+### Shipped
+- Added `detect_subtitle_language()` in `backend/organizer.py` to detect languages from subtitle text when filenames omit tokens.
+- Updated `parse_subtitle_details()` to recognize companion files and default companion subtitles to English (`en`).
+- Updated `build_subtitle_destination_path()` to format companion subtitles as `<Media Title>.<lang>[.<flag>].<ext>`, while preserving original filenames for unrelated tracks like `Director_Commentary_Track.srt`.
+- Expanded `is_forced` detection in `backend/sub_naming.py` to match `force`, `forced`, and `foreign`.
+- Added missing ISO 639-2 codes to `LANG_ALIASES` in `backend/sub_naming.py` (`bul`, `hrv`, `ice`, `lav`, `lit`, `slo`, `slv`, `srp`, `est`, `nob`, `fa`).
+- Removed the `if not found_subs:` restriction in `find_companion_subtitles()` and implemented duplicate pruning between root scene copies and `Subs/` subfolder tracks.
+- Added comprehensive unit tests in `backend/tests/test_organizer.py`. Verified all 432 backend tests pass.
+- Committed `829a45c` and pushed to `origin/main` for automated CI release (`v2.79.2.0`).
+
+---
