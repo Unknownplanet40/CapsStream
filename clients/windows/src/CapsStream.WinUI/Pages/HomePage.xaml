@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="CapsStream_WinUI.Pages.HomePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:CapsStream.Core.Models"
+    mc:Ignorable="d"
+    Background="#050508">
+
+    <Page.Resources>
+        <!-- Reusable Horizontal Card Template -->
+        <DataTemplate x:Key="PosterCardTemplate" x:DataType="models:MediaItem">
+            <Button Click="Card_Click" 
+                    Tag="{x:Bind}"
+                    Padding="0" 
+                    Margin="0,0,16,8"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    CornerRadius="8">
+                <Border Width="170" Height="255"
+                        CornerRadius="8"
+                        Background="#141419"
+                        BorderBrush="#252530"
+                        BorderThickness="1">
+                    <Grid>
+                        <!-- Poster Image -->
+                        <Image Source="{x:Bind PosterDisplayUri}" Stretch="UniformToFill" />
+
+                        <!-- Top-Right Rating Badge -->
+                        <Border HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Margin="6" CornerRadius="4" Background="#CC000000" Padding="6,2">
+                            <TextBlock Text="{x:Bind FormattedRating}" FontSize="11" FontWeight="Bold" Foreground="#F5C518" />
+                        </Border>
+
+                        <!-- Top-Left Quality Badge -->
+                        <Border HorizontalAlignment="Left" VerticalAlignment="Top"
+                                Margin="6" CornerRadius="3" Background="#99000000" Padding="5,2"
+                                BorderBrush="#44FFFFFF" BorderThickness="0.8">
+                            <TextBlock Text="{x:Bind QualityBadge}" FontSize="9" FontWeight="Bold" Foreground="#EEEEEE" />
+                        </Border>
+
+                        <!-- Bottom Vignette with Title & Year -->
+                        <Border VerticalAlignment="Bottom" Background="#DD08080C" Padding="8,6">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="{x:Bind Title}" FontWeight="SemiBold" MaxLines="1" TextTrimming="CharacterEllipsis" Foreground="White" FontSize="12.5" />
+                                <TextBlock Text="{x:Bind DisplayYear}" FontSize="11" Foreground="#AAAAAA" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Button>
+        </DataTemplate>
+    </Page.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="32" Padding="0,0,0,48">
+
+            <!-- 1. CINEMATIC HERO BILLBOARD -->
+            <Grid Height="500" Visibility="{x:Bind ViewModel.HasHero, Mode=OneWay}" Background="#08080C">
+                <!-- Backdrop Image -->
+                <Image Source="{x:Bind ViewModel.HeroItem.BackdropDisplayUri, Mode=OneWay}" 
+                       Stretch="UniformToFill" 
+                       HorizontalAlignment="Center" 
+                       VerticalAlignment="Center" />
+
+                <!-- Multi-layer Vignette Gradients -->
+                <Grid>
+                    <!-- Horizontal Fade (Left to Right) -->
+                    <Grid.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                            <GradientStop Color="#F0050508" Offset="0.0" />
+                            <GradientStop Color="#C8050508" Offset="0.35" />
+                            <GradientStop Color="#55050508" Offset="0.7" />
+                            <GradientStop Color="#00050508" Offset="1.0" />
+                        </LinearGradientBrush>
+                    </Grid.Background>
+                </Grid>
+
+                <!-- Vertical Fade (Bottom to Top) -->
+                <Border VerticalAlignment="Bottom" Height="180">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#00050508" Offset="0.0" />
+                            <GradientStop Color="#CC050508" Offset="0.6" />
+                            <GradientStop Color="#FF050508" Offset="1.0" />
+                        </LinearGradientBrush>
+                    </Border.Background>
+                </Border>
+
+                <!-- Hero Content (Title, Meta, Actions) -->
+                <Grid Padding="48,0,48,36" VerticalAlignment="Bottom">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MaxWidth="680" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Spacing="14">
+                        <!-- Featured Badge -->
+                        <Border Background="#E50914" 
+                                CornerRadius="4" 
+                                Padding="8,3" 
+                                HorizontalAlignment="Left">
+                            <TextBlock Text="CAPSSTREAM FEATURED" FontSize="10" FontWeight="ExtraBold" Foreground="White" CharacterSpacing="80" />
+                        </Border>
+
+                        <!-- Hero Title -->
+                        <TextBlock Text="{x:Bind ViewModel.HeroItem.Title, Mode=OneWay}" 
+                                   FontSize="36" 
+                                   FontWeight="ExtraBold" 
+                                   Foreground="White" 
+                                   TextWrapping="Wrap" />
+
+                        <!-- Metadata Row (Rating, Year, Duration, Quality, Genres) -->
+                        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                            <TextBlock Text="{x:Bind ViewModel.HeroItem.FormattedRating, Mode=OneWay}" 
+                                       FontWeight="Bold" Foreground="#F5C518" FontSize="13" />
+                            <TextBlock Text="{x:Bind ViewModel.HeroItem.DisplayYear, Mode=OneWay}" 
+                                       Foreground="#BBBBBB" FontSize="13" />
+                            <TextBlock Text="{x:Bind ViewModel.HeroItem.FormattedDuration, Mode=OneWay}" 
+                                       Foreground="#BBBBBB" FontSize="13" />
+                            <Border BorderBrush="#66FFFFFF" BorderThickness="1" CornerRadius="3" Padding="5,1" Background="#33000000">
+                                <TextBlock Text="{x:Bind ViewModel.HeroItem.QualityBadge, Mode=OneWay}" FontSize="10" FontWeight="Bold" Foreground="#EEEEEE" />
+                            </Border>
+                            <TextBlock Text="{x:Bind ViewModel.HeroItem.Genres, Mode=OneWay}" 
+                                       Foreground="#888888" FontSize="12.5" MaxLines="1" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+
+                        <!-- Overview Synopsis -->
+                        <TextBlock Text="{x:Bind ViewModel.HeroItem.Overview, Mode=OneWay}" 
+                                   FontSize="13.5" 
+                                   Foreground="#D0D0D0" 
+                                   MaxLines="3" 
+                                   TextWrapping="Wrap" 
+                                   LineHeight="20" />
+
+                        <!-- Action Buttons -->
+                        <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,8,0,0">
+                            <!-- Play Primary Button -->
+                            <Button Click="HeroPlay_Click" 
+                                    Background="White" 
+                                    Foreground="Black" 
+                                    Padding="24,10" 
+                                    CornerRadius="6">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE768;" FontSize="14" Foreground="Black" />
+                                    <TextBlock Text="Play" FontWeight="Bold" FontSize="14" Foreground="Black" />
+                                </StackPanel>
+                            </Button>
+
+                            <!-- Details Secondary Button -->
+                            <Button Click="HeroDetails_Click" 
+                                    Background="#33FFFFFF" 
+                                    BorderBrush="#55FFFFFF" 
+                                    BorderThickness="1" 
+                                    Foreground="White" 
+                                    Padding="20,10" 
+                                    CornerRadius="6">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE946;" FontSize="14" Foreground="White" />
+                                    <TextBlock Text="More Info" FontWeight="SemiBold" FontSize="14" Foreground="White" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            <!-- Loading Indicator -->
+            <ProgressRing IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}" 
+                          Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay}" 
+                          HorizontalAlignment="Center" Width="48" Height="48" />
+
+            <!-- 2. NETFLIX-STYLE HORIZONTAL RAILS -->
+            <StackPanel Spacing="32" Padding="48,0,48,0">
+
+                <!-- RAIL 1: Continue Watching -->
+                <StackPanel Spacing="12" Visibility="{x:Bind ViewModel.HasContinueWatching, Mode=OneWay}">
+                    <TextBlock Text="Continue Watching" FontSize="20" FontWeight="Bold" Foreground="White" />
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                        <ItemsRepeater ItemsSource="{x:Bind ViewModel.ContinueWatching, Mode=OneWay}" 
+                                       ItemTemplate="{StaticResource PosterCardTemplate}">
+                            <ItemsRepeater.Layout>
+                                <StackLayout Orientation="Horizontal" Spacing="0" />
+                            </ItemsRepeater.Layout>
+                        </ItemsRepeater>
+                    </ScrollViewer>
+                </StackPanel>
+
+                <!-- RAIL 2: Recently Added -->
+                <StackPanel Spacing="12" Visibility="{x:Bind ViewModel.HasRecentlyAdded, Mode=OneWay}">
+                    <TextBlock Text="Recently Added" FontSize="20" FontWeight="Bold" Foreground="White" />
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                        <ItemsRepeater ItemsSource="{x:Bind ViewModel.RecentlyAdded, Mode=OneWay}" 
+                                       ItemTemplate="{StaticResource PosterCardTemplate}">
+                            <ItemsRepeater.Layout>
+                                <StackLayout Orientation="Horizontal" Spacing="0" />
+                            </ItemsRepeater.Layout>
+                        </ItemsRepeater>
+                    </ScrollViewer>
+                </StackPanel>
+
+                <!-- RAIL 3: Trending Movies -->
+                <StackPanel Spacing="12" Visibility="{x:Bind ViewModel.HasTrendingMovies, Mode=OneWay}">
+                    <TextBlock Text="Top Rated Movies" FontSize="20" FontWeight="Bold" Foreground="White" />
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                        <ItemsRepeater ItemsSource="{x:Bind ViewModel.TrendingMovies, Mode=OneWay}" 
+                                       ItemTemplate="{StaticResource PosterCardTemplate}">
+                            <ItemsRepeater.Layout>
+                                <StackLayout Orientation="Horizontal" Spacing="0" />
+                            </ItemsRepeater.Layout>
+                        </ItemsRepeater>
+                    </ScrollViewer>
+                </StackPanel>
+
+                <!-- RAIL 4: Popular TV Series -->
+                <StackPanel Spacing="12" Visibility="{x:Bind ViewModel.HasPopularSeries, Mode=OneWay}">
+                    <TextBlock Text="Popular TV Shows" FontSize="20" FontWeight="Bold" Foreground="White" />
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                        <ItemsRepeater ItemsSource="{x:Bind ViewModel.PopularSeries, Mode=OneWay}" 
+                                       ItemTemplate="{StaticResource PosterCardTemplate}">
+                            <ItemsRepeater.Layout>
+                                <StackLayout Orientation="Horizontal" Spacing="0" />
+                            </ItemsRepeater.Layout>
+                        </ItemsRepeater>
+                    </ScrollViewer>
+                </StackPanel>
+
+                <!-- RAIL 5: Anime -->
+                <StackPanel Spacing="12" Visibility="{x:Bind ViewModel.HasAnime, Mode=OneWay}">
+                    <TextBlock Text="Anime Collection" FontSize="20" FontWeight="Bold" Foreground="White" />
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                        <ItemsRepeater ItemsSource="{x:Bind ViewModel.AnimeList, Mode=OneWay}" 
+                                       ItemTemplate="{StaticResource PosterCardTemplate}">
+                            <ItemsRepeater.Layout>
+                                <StackLayout Orientation="Horizontal" Spacing="0" />
+                            </ItemsRepeater.Layout>
+                        </ItemsRepeater>
+                    </ScrollViewer>
+                </StackPanel>
+
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

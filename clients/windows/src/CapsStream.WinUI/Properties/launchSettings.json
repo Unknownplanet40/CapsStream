@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "CapsStream.WinUI (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "CapsStream.WinUI (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

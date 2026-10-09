@@ -1,0 +1,11 @@
+## .NET / Visual Studio Ignore Rules
+bin/
+obj/
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+AppPackages/
+BundleArtifacts/
+Package.StoreAssociation.xml
+_pkg/

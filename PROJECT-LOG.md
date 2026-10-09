@@ -83,4 +83,44 @@ Standardized companion subtitle destination naming in `backend/organizer.py` to 
 - Added comprehensive unit tests in `backend/tests/test_organizer.py`. Verified all 432 backend tests pass.
 - Committed `829a45c` and pushed to `origin/main` for automated CI release (`v2.79.2.0`).
 
+## October 8 at 3:05 PM
+### Asked
+Add an Easter Egg in the Analytics & Stats section triggered by the Konami Code (`Up Up Down Down Left Right Left Right B A`) that opens a developer debug modal with:
+1. Automatic server-side backup snapshot of active user data (achievements, watch progress, watch history, favorites) before debug modifications, with one-click restore.
+2. Batch achievements lab (unlock all, lock/reset all, category toggles, individual search & toggle, celebration toast player).
+3. Wrapped & analytics simulator (force unlock Wrapped story bypassing December, viewer archetype override tester, heatmap and streak activity painter).
+4. Profile data portability (export and import profile JSON snapshots).
+5. Retro CRT arcade scanline theme and 8-bit sound effects.
+
+### Decision
+Persisted user snapshots server-side in SQLite (`profile_snapshots` table) so backups survive browser refresh or cache clears without touching overall server backups. Built dedicated `/api/social/debug/*` endpoints for creating snapshots, reverting snapshots, batch unlocking/resetting achievements, category toggling, and simulating watch history. Embedded Konami sequence listener on the Analytics view with input guard (ignores typing in text boxes), integrated Web Audio API 8-bit synthesizer tones, and crafted a glassmorphic modal with a CRT scanline shader toggle.
+>why: Provides instant sandbox testing of all achievements, yearly Wrapped stories, and heatmap graphs across standard and kids profiles without corrupting real user watch history or requiring tedious manual SQL edits.
+
+### Shipped
+- Added `profile_snapshots` table in SQLite schema with automatic migration guard in `backend/db/schema.py`.
+- Added `create_profile_snapshot`, `get_latest_profile_snapshot`, `revert_profile_snapshot`, `export_profile_data`, and `import_profile_data` in `backend/db/profiles.py`.
+- Added `unlock_all_achievements`, `reset_all_achievements`, and `toggle_category_achievements` in `backend/db/achievements.py`.
+- Added `ALL_ARCHETYPES`, `simulate_profile_stats`, and `archetype_override` support in `backend/db/stats.py`.
+- Added 7 debug REST endpoints (`/api/social/debug/*`) in `backend/routes/social.py`.
+- Implemented Konami Code sequence listener (`ArrowUp`, `ArrowUp`, `ArrowDown`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, `ArrowLeft`, `ArrowRight`, `b`, `a`), 8-bit Web Audio tone generator, automatic snapshot on unlock, and the 3-tab Dev Lab modal in `static/js/app.js`.
+- Styled the modal, CRT scanlines overlay, retro green theme, and responsive controls in `static/css/main.css`.
+- Added comprehensive unit tests in `backend/tests/test_route_social.py` and `backend/tests/test_watch_stats_persistence.py`. All 436 tests passing.
+
+## October 8 at 4:45 PM
+### Asked
+Combine duplicate media requests when the requested media already exists (even if already added or in the library), unifying co-requesters into a single card avatar stack instead of creating duplicate cards.
+
+### Decision
+Expanded request matching and deduplication logic across all non-rejected statuses (`pending`, `in_progress`, `completed`). On server startup or JSON load, `consolidate_duplicate_requests()` merges existing historical duplicate entries, combines unique requesters into `requesters`, preserves per-requester notes, and prioritizes fulfilled/completed status and library matches. On request submission, if the target title matches an already completed or in-library title, the UI now automatically switches to the 'Completed' tab and shows a success toast. Displayed each requester's note with their avatar and author name inside the card's note container.
+>why: Eliminates clutter from duplicate request cards for the same media, unifies community interest into a single co-requester avatar stack, and prevents confusion when users request media that is already completed or downloaded.
+
+### Shipped
+- Updated `find_duplicate_active_request` and `consolidate_duplicate_requests` in `backend/routes/requests.py` to match across `pending`, `in_progress`, and `completed` statuses with exact Season/Episode matching for TV/Anime.
+- Added automatic deduplication and atomic save on `_load_requests()` in `backend/routes/requests.py`.
+- Updated `api_create_request()` in `backend/routes/requests.py` to merge incoming requests into existing completed or in-progress requests, appending co-requesters and refreshing library detection.
+- Updated `submitRequest()` in `static/js/app.js` to switch to the `completed` tab with dedicated toast when merging into completed titles.
+- Added `getRequesterNotes()` in `static/js/app.js` and updated speech bubble notes rendering to show each co-requester's note with their avatar and author label.
+- Added `.req-note-avatar` and `.req-note-author` styles in `static/css/main.css`.
+- Added unit tests in `backend/tests/test_route_requests.py` covering completed request consolidation, merge on create, and TV show granularity. Verified all 41 request tests pass.
+
 ---

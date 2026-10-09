@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="CapsStream_WinUI.Pages.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Padding="36,24,36,24">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="24" MaxWidth="760" HorizontalAlignment="Left">
+                <!-- Page Header -->
+                <TextBlock Text="Settings" Style="{StaticResource DisplayTextBlockStyle}" FontWeight="Bold" />
+
+                <!-- Appearance Section -->
+                <TextBlock Text="Appearance &amp; Window" Style="{StaticResource SubtitleTextBlockStyle}" FontWeight="SemiBold" />
+                <Border CornerRadius="8" 
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" 
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" 
+                        BorderThickness="1" 
+                        Padding="20">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="Mica Backdrop Material" FontWeight="SemiBold" />
+                            <TextBlock Text="Enable Windows 11 translucent material for window framing and title bar" 
+                                       FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="1" IsOn="True" IsEnabled="False" />
+                    </Grid>
+                </Border>
+
+                <!-- Media Library Section -->
+                <TextBlock Text="Media Library Storage" Style="{StaticResource SubtitleTextBlockStyle}" FontWeight="SemiBold" />
+                <Border CornerRadius="8" 
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" 
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" 
+                        BorderThickness="1" 
+                        Padding="20">
+                    <StackPanel Spacing="16">
+                        <StackPanel>
+                            <TextBlock Text="CapsStream Database Engine" FontWeight="SemiBold" />
+                            <TextBlock Text="Direct SQLite high-performance database connection with WAL mode enabled." 
+                                       FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <TextBox Header="Database Location" Text="capsstream.db" IsReadOnly="True" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

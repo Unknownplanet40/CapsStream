@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="CapsStream_WinUI.Pages.PlayerPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Background="Black">
+
+    <Grid>
+        <MediaPlayerElement x:Name="Player"
+                            AreTransportControlsEnabled="True"
+                            AutoPlay="True"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch">
+            <MediaPlayerElement.TransportControls>
+                <MediaTransportControls IsCompact="False"
+                                        IsZoomButtonVisible="True"
+                                        IsPlaybackRateButtonVisible="True"
+                                        IsVolumeButtonVisible="True"
+                                        IsFastForwardButtonVisible="True"
+                                        IsFastRewindButtonVisible="True" />
+            </MediaPlayerElement.TransportControls>
+        </MediaPlayerElement>
+
+        <!-- Playback Error / Codec InfoBar -->
+        <InfoBar x:Name="PlayerErrorBar"
+                 VerticalAlignment="Top"
+                 Margin="24,72,24,0"
+                 IsOpen="False"
+                 Severity="Error"
+                 Title="Playback Notice" />
+
+        <!-- Top overlay bar with back button and title -->
+        <Border VerticalAlignment="Top" 
+                Background="#C8000000" 
+                Padding="16,12" 
+                CornerRadius="0,0,8,8">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Button Click="BackButton_Click" 
+                        Background="Transparent" 
+                        BorderThickness="0"
+                        Padding="8">
+                    <FontIcon Glyph="&#xE72B;" Foreground="White" />
+                </Button>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                    <TextBlock x:Name="TitleText" Text="Now Playing" FontWeight="Bold" FontSize="16" Foreground="White" />
+                    <TextBlock x:Name="SubtitleText" Text="" FontSize="11" Foreground="#AAAAAA" TextTrimming="CharacterEllipsis" MaxLines="1" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Page>

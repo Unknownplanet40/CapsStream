@@ -145,6 +145,15 @@ def init_db():
             PRIMARY KEY (profile_id, tmdb_id)
         );
 
+        CREATE TABLE IF NOT EXISTS profile_snapshots (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id  INTEGER NOT NULL,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            label       TEXT DEFAULT 'Pre-Debug Easter Egg Backup',
+            data_json   TEXT NOT NULL,
+            FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS playlists (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             profile_id  INTEGER NOT NULL,
@@ -319,6 +328,21 @@ def init_db():
         """)
     except Exception as e:
         print("[DB] Migration notice (watch_history):", e)
+    
+    # Migration guard for profile_snapshots
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS profile_snapshots (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id  INTEGER NOT NULL,
+                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                label       TEXT DEFAULT 'Pre-Debug Easter Egg Backup',
+                data_json   TEXT NOT NULL,
+                FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+            )
+        """)
+    except Exception as e:
+        print("[DB] Migration notice (profile_snapshots):", e)
 
     conn.commit()
     conn.close()

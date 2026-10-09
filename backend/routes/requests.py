@@ -62,18 +62,243 @@ def _normalize_item_requesters(item):
             "created_at": item.get("created_at") or "",
             "notes": item.get("notes")
         }]
+    else:
+        # If item has top-level notes but first requester does not, populate it
+        if item.get("notes") and len(item["requesters"]) > 0:
+            if not item["requesters"][0].get("notes"):
+                item["requesters"][0]["notes"] = item.get("notes")
     return item
 
 
+def find_duplicate_active_request(items, tmdb_id=None, title=None, media_type="Movie", year=None, season=None, episode=None, statuses=("pending", "in_progress", "completed")):
+    """
+    Find if a request already exists for this media across allowed statuses.
+    Matches primarily by tmdb_id (and season/episode if TV/Anime),
+    or normalized title + year + type + season/episode.
+    """
+    for req in items:
+        if not isinstance(req, dict):
+            continue
+        # Only allowed statuses are considered duplicates
+        if statuses is not None and req.get("status") not in statuses:
+            continue
+
+        req_tmdb = req.get("tmdb_id")
+        req_type = req.get("type", "Movie")
+        req_season = req.get("season")
+        req_episode = req.get("episode")
+
+        is_tv_new = media_type in ("TV Show", "Anime")
+        is_tv_req = req_type in ("TV Show", "Anime")
+
+        # 1. Match by TMDb ID if both have it
+        if tmdb_id and req_tmdb:
+            try:
+                if int(tmdb_id) == int(req_tmdb):
+                    if is_tv_new and is_tv_req:
+                        norm_season = int(season) if season is not None and str(season).strip() != "" else None
+                        norm_req_season = int(req_season) if req_season is not None and str(req_season).strip() != "" else None
+                        norm_episode = int(episode) if episode is not None and str(episode).strip() != "" else None
+                        norm_req_episode = int(req_episode) if req_episode is not None and str(req_episode).strip() != "" else None
+                        if norm_season == norm_req_season and norm_episode == norm_req_episode:
+                            return req
+                    elif not is_tv_new and not is_tv_req:
+                        return req
+            except (ValueError, TypeError):
+                pass
+
+        # 2. Match by normalized title + year
+        if title and req.get("title"):
+            clean_new = re.sub(r"[^\w\s]", "", title.lower()).strip()
+            clean_req = re.sub(r"[^\w\s]", "", req["title"].lower()).strip()
+            if clean_new and clean_new == clean_req:
+                if is_tv_new and is_tv_req:
+                    norm_season = int(season) if season is not None and str(season).strip() != "" else None
+                    norm_req_season = int(req_season) if req_season is not None and str(req_season).strip() != "" else None
+                    norm_episode = int(episode) if episode is not None and str(episode).strip() != "" else None
+                    norm_req_episode = int(req_episode) if req_episode is not None and str(req_episode).strip() != "" else None
+                    if norm_season == norm_req_season and norm_episode == norm_req_episode:
+                        return req
+                elif not is_tv_new and not is_tv_req:
+                    req_year = str(req.get("year") or "").strip()[:4]
+                    new_year = str(year or "").strip()[:4]
+                    if req_year and new_year:
+                        try:
+                            if abs(int(req_year) - int(new_year)) <= 1:
+                                return req
+                        except Exception:
+                            pass
+                    else:
+                        return req
+
+    return None
+
+
+def consolidate_duplicate_requests(items, delete_remote=False):
+    """
+    Consolidate requests that share the same media (TMDb ID or title+year+type+season/episode).
+    Merges their requesters lists, updates requested_by, and if delete_remote is True,
+    removes redundant rows from Supabase and updates the primary row.
+    """
+    if not items:
+        return []
+
+    consolidated = []
+    duplicates_to_delete = []
+    primary_to_update = []
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    STATUS_PRIORITY = {
+        "completed": 4,
+        "in_progress": 3,
+        "pending": 2,
+        "rejected": 1
+    }
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item = _normalize_item_requesters(item)
+
+        # Requests in pending, in_progress, and completed are candidates for merging
+        if item.get("status") not in ("pending", "in_progress", "completed"):
+            consolidated.append(item)
+            continue
+
+        existing = find_duplicate_active_request(
+            consolidated,
+            tmdb_id=item.get("tmdb_id"),
+            title=item.get("title"),
+            media_type=item.get("type", "Movie"),
+            year=item.get("year"),
+            season=item.get("season"),
+            episode=item.get("episode")
+        )
+
+        if existing and existing.get("id") != item.get("id"):
+            # Update status priority (completed > in_progress > pending)
+            if STATUS_PRIORITY.get(item.get("status"), 0) > STATUS_PRIORITY.get(existing.get("status"), 0):
+                existing["status"] = item.get("status")
+
+            # Merge library detection / auto_detected
+            if item.get("auto_detected"):
+                existing["auto_detected"] = True
+            if not existing.get("detected_media_id") and item.get("detected_media_id"):
+                existing["detected_media_id"] = item.get("detected_media_id")
+                existing["detected_media_type"] = item.get("detected_media_type")
+                existing["detected_tmdb_id"] = item.get("detected_tmdb_id")
+            if not existing.get("completed_at") and item.get("completed_at"):
+                existing["completed_at"] = item.get("completed_at")
+
+            # Merge digital release info
+            if not existing.get("has_digital_release") and item.get("has_digital_release"):
+                existing["has_digital_release"] = item.get("has_digital_release")
+                existing["digital_release_date"] = item.get("digital_release_date")
+                existing["digital_status_label"] = item.get("digital_status_label")
+
+            # Merge artwork & overview
+            if not existing.get("poster_path") and item.get("poster_path"):
+                existing["poster_path"] = item.get("poster_path")
+            if not existing.get("backdrop_path") and item.get("backdrop_path"):
+                existing["backdrop_path"] = item.get("backdrop_path")
+            if not existing.get("overview") and item.get("overview"):
+                existing["overview"] = item.get("overview")
+            if existing.get("vote_average") is None and item.get("vote_average") is not None:
+                existing["vote_average"] = item.get("vote_average")
+            if not existing.get("admin_note") and item.get("admin_note"):
+                existing["admin_note"] = item.get("admin_note")
+            if not existing.get("notes") and item.get("notes"):
+                existing["notes"] = item.get("notes")
+
+            # Preserve earliest created_at
+            if item.get("created_at") and existing.get("created_at"):
+                if item["created_at"] < existing["created_at"]:
+                    existing["created_at"] = item["created_at"]
+            elif item.get("created_at"):
+                existing["created_at"] = item.get("created_at")
+
+            # Merge requesters from item into existing
+            existing_reqs = existing.get("requesters") or []
+            item_reqs = item.get("requesters") or []
+
+            for r in item_reqs:
+                if not isinstance(r, dict):
+                    continue
+                r_pid = r.get("profile_id")
+                r_cid = r.get("client_id")
+                r_name = (r.get("requested_by") or "").strip().lower()
+
+                already_in = False
+                for ex_r in existing_reqs:
+                    ex_pid = ex_r.get("profile_id")
+                    ex_cid = ex_r.get("client_id")
+                    ex_name = (ex_r.get("requested_by") or "").strip().lower()
+                    if (r_pid is not None and ex_pid is not None and r_pid == ex_pid and r_cid == ex_cid) or \
+                       (r_name and ex_name and r_name == ex_name and r_cid == ex_cid):
+                        if not ex_r.get("notes") and r.get("notes"):
+                            ex_r["notes"] = r.get("notes")
+                        already_in = True
+                        break
+
+                if not already_in:
+                    existing_reqs.append(r)
+
+            existing["requesters"] = existing_reqs
+
+            # Update combined requested_by names
+            all_names = []
+            for r in existing_reqs:
+                n = (r.get("requested_by") or "").strip()
+                if n and n not in all_names:
+                    all_names.append(n)
+            if all_names:
+                existing["requested_by"] = ", ".join(all_names)
+
+            existing["updated_at"] = now_str
+
+            duplicates_to_delete.append(item.get("id"))
+            if existing.get("id") not in [p.get("id") for p in primary_to_update]:
+                primary_to_update.append(existing)
+        else:
+            consolidated.append(item)
+
+    if delete_remote and is_supabase_configured():
+        for dup_id in duplicates_to_delete:
+            if dup_id:
+                try:
+                    delete_online_request(dup_id)
+                except Exception as e:
+                    print(f"[Requests] Failed to delete duplicate request {dup_id} from Supabase: {e}")
+
+        for prim in primary_to_update:
+            if prim.get("id"):
+                try:
+                    update_online_request(prim["id"], {
+                        "requested_by": prim.get("requested_by"),
+                        "updated_at": prim.get("updated_at")
+                    })
+                except Exception as e:
+                    print(f"[Requests] Failed to update merged request {prim['id']} in Supabase: {e}")
+
+    return consolidated
+
+
 def _load_requests():
-    """Load requests from data/requests.json with thread safety."""
+    """Load requests from data/requests.json with thread safety and auto-deduplication."""
     if not os.path.isfile(REQUESTS_FILE):
         return []
     try:
         with open(REQUESTS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             if isinstance(data, list):
-                return [_normalize_item_requesters(it) for it in data if isinstance(it, dict)]
+                raw = [_normalize_item_requesters(it) for it in data if isinstance(it, dict)]
+                consolidated = consolidate_duplicate_requests(raw, delete_remote=False)
+                if len(consolidated) != len(raw):
+                    try:
+                        _save_requests(consolidated)
+                    except Exception:
+                        pass
+                return consolidated
             return []
     except Exception:
         return []
@@ -380,162 +605,6 @@ def filter_requests_for_client(items, client_id, dev_mode=False):
         if not client_id and not item.get("client_id"):
             filtered.append(item)
     return filtered
-
-
-def find_duplicate_active_request(items, tmdb_id=None, title=None, media_type="Movie", year=None, season=None, episode=None):
-    """
-    Find if an active request (pending or in_progress) already exists for this media.
-    Matches primarily by tmdb_id (and season/episode if TV/Anime),
-    or normalized title + year + type + season/episode.
-    """
-    for req in items:
-        if not isinstance(req, dict):
-            continue
-        # Only active requests are considered duplicates
-        if req.get("status") not in ("pending", "in_progress"):
-            continue
-
-        req_tmdb = req.get("tmdb_id")
-        req_type = req.get("type", "Movie")
-        req_season = req.get("season")
-        req_episode = req.get("episode")
-
-        is_tv_new = media_type in ("TV Show", "Anime")
-        is_tv_req = req_type in ("TV Show", "Anime")
-
-        # 1. Match by TMDb ID if both have it
-        if tmdb_id and req_tmdb:
-            try:
-                if int(tmdb_id) == int(req_tmdb):
-                    if is_tv_new and is_tv_req:
-                        if season == req_season and episode == req_episode:
-                            return req
-                    elif not is_tv_new and not is_tv_req:
-                        return req
-            except (ValueError, TypeError):
-                pass
-
-        # 2. Match by normalized title + year
-        if title and req.get("title"):
-            clean_new = re.sub(r"[^\w\s]", "", title.lower()).strip()
-            clean_req = re.sub(r"[^\w\s]", "", req["title"].lower()).strip()
-            if clean_new and clean_new == clean_req:
-                if (is_tv_new and is_tv_req) or (not is_tv_new and not is_tv_req):
-                    if is_tv_new:
-                        if season == req_season and episode == req_episode:
-                            return req
-                    else:
-                        req_year = str(req.get("year") or "").strip()[:4]
-                        new_year = str(year or "").strip()[:4]
-                        if req_year and new_year:
-                            try:
-                                if abs(int(req_year) - int(new_year)) <= 1:
-                                    return req
-                            except Exception:
-                                pass
-                        else:
-                            return req
-
-    return None
-
-
-def consolidate_duplicate_requests(items, delete_remote=False):
-    """
-    Consolidate active requests that share the same media (TMDb ID or title+year+type+season/episode).
-    Merges their requesters lists, updates requested_by, and if delete_remote is True,
-    removes redundant rows from Supabase and updates the primary row.
-    """
-    if not items:
-        return []
-
-    consolidated = []
-    duplicates_to_delete = []
-    primary_to_update = []
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        item = _normalize_item_requesters(item)
-
-        # Only active requests (pending or in_progress) are candidates for merging
-        if item.get("status") not in ("pending", "in_progress"):
-            consolidated.append(item)
-            continue
-
-        existing = find_duplicate_active_request(
-            consolidated,
-            tmdb_id=item.get("tmdb_id"),
-            title=item.get("title"),
-            media_type=item.get("type", "Movie"),
-            year=item.get("year"),
-            season=item.get("season"),
-            episode=item.get("episode")
-        )
-
-        if existing and existing.get("id") != item.get("id"):
-            # Merge requesters from item into existing
-            existing_reqs = existing.get("requesters") or []
-            item_reqs = item.get("requesters") or []
-
-            for r in item_reqs:
-                if not isinstance(r, dict):
-                    continue
-                r_pid = r.get("profile_id")
-                r_cid = r.get("client_id")
-                r_name = (r.get("requested_by") or "").strip().lower()
-
-                already_in = False
-                for ex_r in existing_reqs:
-                    ex_pid = ex_r.get("profile_id")
-                    ex_cid = ex_r.get("client_id")
-                    ex_name = (ex_r.get("requested_by") or "").strip().lower()
-                    if (r_pid is not None and ex_pid is not None and r_pid == ex_pid and r_cid == ex_cid) or \
-                       (r_name and ex_name and r_name == ex_name and r_cid == ex_cid):
-                        already_in = True
-                        break
-
-                if not already_in:
-                    existing_reqs.append(r)
-
-            existing["requesters"] = existing_reqs
-
-            # Update combined requested_by names
-            all_names = []
-            for r in existing_reqs:
-                n = (r.get("requested_by") or "").strip()
-                if n and n not in all_names:
-                    all_names.append(n)
-            if all_names:
-                existing["requested_by"] = ", ".join(all_names)
-
-            existing["updated_at"] = now_str
-
-            duplicates_to_delete.append(item.get("id"))
-            if existing.get("id") not in [p.get("id") for p in primary_to_update]:
-                primary_to_update.append(existing)
-        else:
-            consolidated.append(item)
-
-    if delete_remote and is_supabase_configured():
-        for dup_id in duplicates_to_delete:
-            if dup_id:
-                try:
-                    delete_online_request(dup_id)
-                except Exception as e:
-                    print(f"[Requests] Failed to delete duplicate request {dup_id} from Supabase: {e}")
-
-        for prim in primary_to_update:
-            if prim.get("id"):
-                try:
-                    update_online_request(prim["id"], {
-                        "requested_by": prim.get("requested_by"),
-                        "updated_at": prim.get("updated_at")
-                    })
-                except Exception as e:
-                    print(f"[Requests] Failed to update merged request {prim['id']} in Supabase: {e}")
-
-    return consolidated
 
 
 def sync_online_requests():
@@ -968,6 +1037,8 @@ def api_create_request():
             requesters.append(requester_entry)
             existing["requesters"] = requesters
             existing["updated_at"] = now_str
+            if not existing.get("notes") and notes:
+                existing["notes"] = notes
 
             # Update top-level comma-separated list of names for Supabase / backward compat
             all_names = []
@@ -977,6 +1048,17 @@ def api_create_request():
                     all_names.append(n)
             if all_names:
                 existing["requested_by"] = ", ".join(all_names)
+
+            if is_dev_mode():
+                matched = detect_media_in_library(existing)
+                if matched:
+                    existing["status"] = "completed"
+                    existing["auto_detected"] = True
+                    existing["detected_media_id"] = matched["id"]
+                    existing["detected_media_type"] = matched["type"]
+                    existing["detected_tmdb_id"] = matched.get("tmdb_id")
+                    if not existing.get("completed_at"):
+                        existing["completed_at"] = now_str
 
             _save_requests(items)
 

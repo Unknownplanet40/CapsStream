@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="CapsStream_WinUI.Pages.AboutPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Padding="36,24,36,24">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="24" MaxWidth="700" HorizontalAlignment="Left">
+                <!-- App Title Header -->
+                <StackPanel Spacing="8">
+                    <TextBlock Text="About CapsStream" Style="{StaticResource DisplayTextBlockStyle}" FontWeight="Bold" />
+                    <TextBlock Text="Windows 11 Native Client built with WinUI 3 &amp; Windows App SDK." 
+                               Style="{StaticResource BodyTextBlockStyle}" 
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+
+                <!-- Information Card -->
+                <Border CornerRadius="8" 
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" 
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" 
+                        BorderThickness="1" 
+                        Padding="24">
+                    <StackPanel Spacing="16">
+                        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                            <Image Source="ms-appx:///Assets/Square44x44Logo.scale-200.png" Width="40" Height="40" />
+                            <StackPanel>
+                                <TextBlock Text="CapsStream Windows Native" FontWeight="SemiBold" FontSize="16" />
+                                <TextBlock Text="Version 2.80.0 Preview" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <TextBlock Text="CapsStream is a portable, self-hosted personal media server and client for movies, TV series, and anime with TMDb metadata, subtitle synchronization, and hardware-accelerated playback." 
+                                   TextWrapping="Wrap" LineHeight="20" />
+
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="4" Padding="8,4">
+                                <TextBlock Text="WinUI 3" FontSize="11" Foreground="White" FontWeight="Bold" />
+                            </Border>
+                            <Border Background="{ThemeResource SystemFillColorNeutralBrush}" CornerRadius="4" Padding="8,4">
+                                <TextBlock Text=".NET 8" FontSize="11" FontWeight="Bold" />
+                            </Border>
+                            <Border Background="{ThemeResource SystemFillColorNeutralBrush}" CornerRadius="4" Padding="8,4">
+                                <TextBlock Text="Windows App SDK" FontSize="11" FontWeight="Bold" />
+                            </Border>
+                            <Border Background="{ThemeResource SystemFillColorNeutralBrush}" CornerRadius="4" Padding="8,4">
+                                <TextBlock Text="Mica Fluent" FontSize="11" FontWeight="Bold" />
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

@@ -240,7 +240,7 @@ def get_profile_watch_stats(profile_id):
     }
 
 
-def get_profile_wrapped_analytics(profile_id, period="year", year=None):
+def get_profile_wrapped_analytics(profile_id, period="year", year=None, archetype_override=None):
     """
     Compute comprehensive CapsStream Wrapped & Advanced Analytics for a profile.
     Supports period in ('year', 'month', 'all').
@@ -811,6 +811,11 @@ def get_profile_wrapped_analytics(profile_id, period="year", year=None):
             "description": "You appreciate great cinema in all forms, hopping seamlessly across diverse genres."
         }
 
+    if archetype_override:
+        matching_arch = next((a for a in ALL_ARCHETYPES if a["id"] == archetype_override), None)
+        if matching_arch:
+            archetype = dict(matching_arch)
+
     # 11. Top Obsession (#1 Title)
     all_titles = []
     for k, v in movie_items.items():
@@ -1039,6 +1044,117 @@ def get_profile_wrapped_analytics(profile_id, period="year", year=None):
             "genre": genre_quiz,
             "talent": talent_quiz
         },
-        "archetype": archetype
+        "archetype": archetype,
+        "available_archetypes": ALL_ARCHETYPES
     }
+
+
+ALL_ARCHETYPES = [
+    {
+        "id": "midnight_binge_lord",
+        "title": "Midnight Binge Lord",
+        "tagline": "Sleep is merely a suggestion. The night belongs to the next episode.",
+        "badge": "ph-moon-stars",
+        "color": "#8b5cf6",
+        "description": "Your prime viewing hours kick in when the rest of the world is asleep."
+    },
+    {
+        "id": "anime_ascendant",
+        "title": "Anime Ascendant",
+        "tagline": "Powered by ramen, Japanese subtitles, and unmatched shonen willpower.",
+        "badge": "ph-sword",
+        "color": "#f43f5e",
+        "description": "You dive deep into anime universes, from seasonal epics to classic arcs."
+    },
+    {
+        "id": "weekend_marathoner",
+        "title": "The Weekend Marathoner",
+        "tagline": "Work hard during the week, stream without limits on Saturday & Sunday.",
+        "badge": "ph-couch",
+        "color": "#06b6d4",
+        "description": "Your weekends are dedicated cinema marathons and binge sessions."
+    },
+    {
+        "id": "4k_cinematic_purist",
+        "title": "4K Cinematic Purist",
+        "tagline": "Every pixel matters. Uncompromising devotion to cinema-grade visuals.",
+        "badge": "ph-projector-screen",
+        "color": "#eab308",
+        "description": "Only ultra-crisp resolutions and pristine bitrates make it to your screen."
+    },
+    {
+        "id": "the_completionist",
+        "title": "The Completionist",
+        "tagline": "No credits skipped. No unfinished business. Pure cinematic dedication.",
+        "badge": "ph-seal-check",
+        "color": "#10b981",
+        "description": "When you start a movie or season, you see it through to the final credits."
+    },
+    {
+        "id": "genre_connoisseur",
+        "title": "Sci-Fi Connoisseur",
+        "tagline": "A true master of cinematic universes with refined and unwavering taste.",
+        "badge": "ph-crown",
+        "color": "#ec4899",
+        "description": "You know your favorite genres inside out and follow their greatest stories."
+    },
+    {
+        "id": "omnivorous_cinephile",
+        "title": "The Omnivorous Cinephile",
+        "tagline": "An eclectic taste across genres, formats, and worlds. A true film lover.",
+        "badge": "ph-film-strip",
+        "color": "#3b82f6",
+        "description": "You appreciate great cinema in all forms, hopping seamlessly across diverse genres."
+    }
+]
+
+
+def simulate_profile_stats(profile_id, streak_days=14, hours_to_add=20, weekend_spike=True):
+    """Debug helper: inject synthetic watch records into watch_history to simulate heatmaps and streaks."""
+    if not profile_id:
+        return 0
+    conn = get_conn()
+    try:
+        now = datetime.now()
+        added_count = 0
+        media_row = conn.execute("SELECT id, title, type, tmdb_id, genres, year FROM media LIMIT 1").fetchone()
+        if media_row:
+            mid = media_row["id"]
+            m_title = media_row["title"]
+            m_type = media_row["type"]
+            m_tmdb = media_row["tmdb_id"]
+            m_genres = media_row["genres"] or "Action, Sci-Fi"
+            m_year = media_row["year"] or now.year
+        else:
+            mid = 1
+            m_title = "Demo Easter Egg Stream"
+            m_type = "movie"
+            m_tmdb = 999999
+            m_genres = "Action, Adventure"
+            m_year = now.year
+
+        per_day_seconds = int((hours_to_add * 3600) / max(1, streak_days))
+        for day_offset in range(streak_days):
+            day_dt = now - timedelta(days=day_offset)
+            is_weekend = day_dt.weekday() in (5, 6)
+            pos = int(per_day_seconds * (1.8 if (is_weekend and weekend_spike) else 1.0))
+            ts_str = day_dt.strftime("%Y-%m-%d 21:30:00")
+            
+            conn.execute("""
+                INSERT INTO watch_history (profile_id, tmdb_id, title, type, season, episode, ep_title, genres, year, position, duration, completed, updated_at)
+                VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 1, ?)
+            """, (profile_id, m_tmdb, m_title, m_type, m_genres, m_year, pos, pos, ts_str))
+            
+            if media_row:
+                conn.execute("""
+                    INSERT OR REPLACE INTO watch_progress (profile_id, media_id, position, duration, completed, updated_at)
+                    VALUES (?, ?, ?, ?, 1, ?)
+                """, (profile_id, mid, pos, pos, ts_str))
+            added_count += 1
+            
+        conn.commit()
+        return added_count
+    finally:
+        conn.close()
+
 

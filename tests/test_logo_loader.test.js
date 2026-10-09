@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 
 const logoLoader = require(path.resolve(__dirname, "../static/js/logo-loader.js"));
-const { logoLoaderState, isValidLogoUrl } = logoLoader;
+const { logoLoaderState, isValidLogoUrl, shouldShowPausedInfo } = logoLoader;
 
 test("isValidLogoUrl - accepts valid metadata image paths with allowed extensions", () => {
   assert.equal(isValidLogoUrl("/metadata/images/w500_test.png"), true);
@@ -145,3 +145,81 @@ test("logoLoaderState - slow logo preloading transition simulation", () => {
   assert.equal(s3.showLogo, false);
   assert.equal(s3.showSpinner, true);
 });
+
+test("shouldShowPausedInfo - suppresses paused info during initial load to prevent interference with logo loader", () => {
+  // During initial load, media metadata is present and isPlaying is false,
+  // but it MUST NOT show because the logo loader is actively displaying
+  const showDuringInitialLoad = shouldShowPausedInfo({
+    isPlaying: false,
+    isMediaLoaded: false,
+    isInitialLoad: true,
+    isBuffering: false,
+    hasMedia: true
+  });
+  assert.equal(showDuringInitialLoad, false);
+
+  // Even if isMediaLoaded were accidentally true, isInitialLoad must still block it
+  const blockedByInitialLoad = shouldShowPausedInfo({
+    isPlaying: false,
+    isMediaLoaded: true,
+    isInitialLoad: true,
+    isBuffering: false,
+    hasMedia: true
+  });
+  assert.equal(blockedByInitialLoad, false);
+});
+
+test("shouldShowPausedInfo - suppresses paused info while media is not fully loaded", () => {
+  const showUnloaded = shouldShowPausedInfo({
+    isPlaying: false,
+    isMediaLoaded: false,
+    isInitialLoad: false,
+    isBuffering: false,
+    hasMedia: true
+  });
+  assert.equal(showUnloaded, false);
+});
+
+test("shouldShowPausedInfo - suppresses paused info while actively buffering or playing", () => {
+  // Actively playing
+  const showWhilePlaying = shouldShowPausedInfo({
+    isPlaying: true,
+    isMediaLoaded: true,
+    isInitialLoad: false,
+    isBuffering: false,
+    hasMedia: true
+  });
+  assert.equal(showWhilePlaying, false);
+
+  // Buffering mid-stream or seek
+  const showWhileBuffering = shouldShowPausedInfo({
+    isPlaying: false,
+    isMediaLoaded: true,
+    isInitialLoad: false,
+    isBuffering: true,
+    hasMedia: true
+  });
+  assert.equal(showWhileBuffering, false);
+
+  // No media object
+  const showNoMedia = shouldShowPausedInfo({
+    isPlaying: false,
+    isMediaLoaded: true,
+    isInitialLoad: false,
+    isBuffering: false,
+    hasMedia: false
+  });
+  assert.equal(showNoMedia, false);
+});
+
+test("shouldShowPausedInfo - shows paused info strictly when media is fully loaded and paused", () => {
+  const showPaused = shouldShowPausedInfo({
+    isPlaying: false,
+    isMediaLoaded: true,
+    isInitialLoad: false,
+    isBuffering: false,
+    hasMedia: true
+  });
+  assert.equal(showPaused, true);
+});
+

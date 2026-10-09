@@ -5,6 +5,7 @@ import sqlite3
 import hashlib
 import hmac
 import secrets
+from datetime import datetime
 from .connection import get_conn
 
 def get_all_profiles():
@@ -406,6 +407,210 @@ def remove_kids_override(tmdb_id):
     conn.execute("DELETE FROM kids_overrides WHERE tmdb_id=?", (int(tmdb_id),))
     conn.commit()
     conn.close()
+
+
+def create_profile_snapshot(profile_id, label="Pre-Debug Easter Egg Backup"):
+    """Capture achievements, watch_progress, watch_history, and favorites for a profile."""
+    if not profile_id:
+        return None
+    conn = get_conn()
+    try:
+        ach_rows = [dict(r) for r in conn.execute("SELECT achievement_id, unlocked_at FROM achievements WHERE profile_id=?", (profile_id,)).fetchall()]
+        wp_rows = [dict(r) for r in conn.execute("SELECT media_id, position, duration, completed, updated_at FROM watch_progress WHERE profile_id=?", (profile_id,)).fetchall()]
+        wh_rows = [dict(r) for r in conn.execute("SELECT tmdb_id, title, type, season, episode, ep_title, genres, year, poster_path, position, duration, completed, updated_at FROM watch_history WHERE profile_id=?", (profile_id,)).fetchall()]
+        fav_rows = [dict(r) for r in conn.execute("SELECT media_id, added_at FROM favorites WHERE profile_id=?", (profile_id,)).fetchall()]
+        
+        snapshot_payload = {
+            "version": 1,
+            "profile_id": profile_id,
+            "label": label,
+            "counts": {
+                "achievements": len(ach_rows),
+                "watch_progress": len(wp_rows),
+                "watch_history": len(wh_rows),
+                "favorites": len(fav_rows),
+            },
+            "achievements": ach_rows,
+            "watch_progress": wp_rows,
+            "watch_history": wh_rows,
+            "favorites": fav_rows,
+        }
+        json_str = json.dumps(snapshot_payload)
+        cur = conn.execute(
+            "INSERT INTO profile_snapshots (profile_id, label, data_json) VALUES (?, ?, ?)",
+            (profile_id, label, json_str)
+        )
+        snapshot_id = cur.lastrowid
+        conn.commit()
+        return {
+            "id": snapshot_id,
+            "profile_id": profile_id,
+            "label": label,
+            "counts": snapshot_payload["counts"],
+        }
+    finally:
+        conn.close()
+
+
+def get_latest_profile_snapshot(profile_id):
+    """Retrieve the most recent snapshot metadata for a profile."""
+    if not profile_id:
+        return None
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT id, profile_id, label, created_at, data_json FROM profile_snapshots WHERE profile_id=? ORDER BY id DESC LIMIT 1",
+            (profile_id,)
+        ).fetchone()
+        if not row:
+            return None
+        data = json.loads(row["data_json"])
+        return {
+            "id": row["id"],
+            "profile_id": row["profile_id"],
+            "label": row["label"],
+            "created_at": row["created_at"],
+            "counts": data.get("counts", {}),
+        }
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def revert_profile_snapshot(profile_id, snapshot_id=None):
+    """Restore profile data (achievements, watch_progress, watch_history, favorites) from snapshot."""
+    if not profile_id:
+        return False, "Invalid profile"
+    conn = get_conn()
+    try:
+        if snapshot_id:
+            row = conn.execute(
+                "SELECT id, data_json FROM profile_snapshots WHERE profile_id=? AND id=?",
+                (profile_id, int(snapshot_id))
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id, data_json FROM profile_snapshots WHERE profile_id=? ORDER BY id DESC LIMIT 1",
+                (profile_id,)
+            ).fetchone()
+        
+        if not row:
+            return False, "No snapshot found for profile"
+        
+        payload = json.loads(row["data_json"])
+        
+        # 1. Clear current state for this profile
+        conn.execute("DELETE FROM achievements WHERE profile_id=?", (profile_id,))
+        conn.execute("DELETE FROM watch_progress WHERE profile_id=?", (profile_id,))
+        conn.execute("DELETE FROM watch_history WHERE profile_id=?", (profile_id,))
+        conn.execute("DELETE FROM favorites WHERE profile_id=?", (profile_id,))
+        
+        # 2. Re-insert achievements
+        for a in payload.get("achievements", []):
+            conn.execute(
+                "INSERT OR IGNORE INTO achievements (profile_id, achievement_id, unlocked_at) VALUES (?, ?, ?)",
+                (profile_id, a["achievement_id"], a.get("unlocked_at"))
+            )
+        
+        # 3. Re-insert watch_progress
+        for wp in payload.get("watch_progress", []):
+            conn.execute(
+                "INSERT OR IGNORE INTO watch_progress (profile_id, media_id, position, duration, completed, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (profile_id, wp["media_id"], wp.get("position", 0), wp.get("duration", 0), wp.get("completed", 0), wp.get("updated_at"))
+            )
+        
+        # 4. Re-insert watch_history
+        for wh in payload.get("watch_history", []):
+            conn.execute(
+                "INSERT INTO watch_history (profile_id, tmdb_id, title, type, season, episode, ep_title, genres, year, poster_path, position, duration, completed, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (profile_id, wh.get("tmdb_id"), wh.get("title", ""), wh.get("type", "movie"), wh.get("season"), wh.get("episode"), wh.get("ep_title"), wh.get("genres"), wh.get("year"), wh.get("poster_path"), wh.get("position", 0), wh.get("duration", 0), wh.get("completed", 0), wh.get("updated_at"))
+            )
+        
+        # 5. Re-insert favorites
+        for f in payload.get("favorites", []):
+            conn.execute(
+                "INSERT OR IGNORE INTO favorites (profile_id, media_id, added_at) VALUES (?, ?, ?)",
+                (profile_id, f["media_id"], f.get("added_at"))
+            )
+        
+        conn.commit()
+        return True, "Profile restored successfully"
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        conn.close()
+
+
+def export_profile_data(profile_id):
+    """Export current profile data state directly as dict."""
+    if not profile_id:
+        return None
+    conn = get_conn()
+    try:
+        p_row = conn.execute("SELECT id, name, is_kids FROM profiles WHERE id=?", (profile_id,)).fetchone()
+        if not p_row:
+            return None
+        ach_rows = [dict(r) for r in conn.execute("SELECT achievement_id, unlocked_at FROM achievements WHERE profile_id=?", (profile_id,)).fetchall()]
+        wp_rows = [dict(r) for r in conn.execute("SELECT media_id, position, duration, completed, updated_at FROM watch_progress WHERE profile_id=?", (profile_id,)).fetchall()]
+        wh_rows = [dict(r) for r in conn.execute("SELECT tmdb_id, title, type, season, episode, ep_title, genres, year, poster_path, position, duration, completed, updated_at FROM watch_history WHERE profile_id=?", (profile_id,)).fetchall()]
+        fav_rows = [dict(r) for r in conn.execute("SELECT media_id, added_at FROM favorites WHERE profile_id=?", (profile_id,)).fetchall()]
+        return {
+            "version": 1,
+            "exported_at": datetime.now().isoformat() if "datetime" in globals() else "",
+            "profile": dict(p_row),
+            "achievements": ach_rows,
+            "watch_progress": wp_rows,
+            "watch_history": wh_rows,
+            "favorites": fav_rows,
+        }
+    finally:
+        conn.close()
+
+
+def import_profile_data(profile_id, payload):
+    """Import and apply profile data from payload dict."""
+    if not profile_id or not isinstance(payload, dict):
+        return False, "Invalid payload"
+    conn = get_conn()
+    try:
+        if "achievements" in payload:
+            conn.execute("DELETE FROM achievements WHERE profile_id=?", (profile_id,))
+            for a in payload["achievements"]:
+                conn.execute(
+                    "INSERT OR IGNORE INTO achievements (profile_id, achievement_id, unlocked_at) VALUES (?, ?, ?)",
+                    (profile_id, a["achievement_id"], a.get("unlocked_at"))
+                )
+        if "watch_progress" in payload:
+            conn.execute("DELETE FROM watch_progress WHERE profile_id=?", (profile_id,))
+            for wp in payload["watch_progress"]:
+                conn.execute(
+                    "INSERT OR IGNORE INTO watch_progress (profile_id, media_id, position, duration, completed, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (profile_id, wp["media_id"], wp.get("position", 0), wp.get("duration", 0), wp.get("completed", 0), wp.get("updated_at"))
+                )
+        if "watch_history" in payload:
+            conn.execute("DELETE FROM watch_history WHERE profile_id=?", (profile_id,))
+            for wh in payload["watch_history"]:
+                conn.execute(
+                    "INSERT INTO watch_history (profile_id, tmdb_id, title, type, season, episode, ep_title, genres, year, poster_path, position, duration, completed, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (profile_id, wh.get("tmdb_id"), wh.get("title", ""), wh.get("type", "movie"), wh.get("season"), wh.get("episode"), wh.get("ep_title"), wh.get("genres"), wh.get("year"), wh.get("poster_path"), wh.get("position", 0), wh.get("duration", 0), wh.get("completed", 0), wh.get("updated_at"))
+                )
+        if "favorites" in payload:
+            conn.execute("DELETE FROM favorites WHERE profile_id=?", (profile_id,))
+            for f in payload["favorites"]:
+                conn.execute(
+                    "INSERT OR IGNORE INTO favorites (profile_id, media_id, added_at) VALUES (?, ?, ?)",
+                    (profile_id, f["media_id"], f.get("added_at"))
+                )
+        conn.commit()
+        return True, "Data imported successfully"
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        conn.close()
+
 
 
 # ─── Watch Progress Queries ───────────────────────────────────────────────────

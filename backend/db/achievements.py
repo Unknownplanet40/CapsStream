@@ -1371,6 +1371,80 @@ def unlock_achievement(profile_id, achievement_id):
     return None
 
 
+def unlock_all_achievements(profile_id):
+    """Debug helper: unlock all achievements in the profile's active catalog. Returns count and newly unlocked list."""
+    if not profile_id:
+        return 0, []
+    catalog = get_profile_catalog(profile_id)
+    conn = get_conn()
+    count = 0
+    newly_unlocked = []
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for ach in catalog:
+        aid = ach["id"]
+        res = conn.execute(
+            "INSERT OR IGNORE INTO achievements (profile_id, achievement_id, unlocked_at) VALUES (?, ?, ?)",
+            (profile_id, aid, now_str)
+        )
+        if res.rowcount > 0:
+            count += 1
+            newly_unlocked.append({
+                "id": aid,
+                "title": ach.get("title", aid),
+                "description": ach.get("description", ""),
+                "icon": ach.get("icon", "ph-trophy"),
+                "rarity": ach.get("rarity", "Gold"),
+                "category": ach.get("category", "General"),
+            })
+    conn.commit()
+    conn.close()
+    return count, newly_unlocked
+
+
+def reset_all_achievements(profile_id):
+    """Debug helper: remove all achievements for profile."""
+    if not profile_id:
+        return 0
+    conn = get_conn()
+    cur = conn.execute("DELETE FROM achievements WHERE profile_id=?", (profile_id,))
+    count = cur.rowcount
+    conn.commit()
+    conn.close()
+    return count
+
+
+def toggle_category_achievements(profile_id, category, unlock=True):
+    """Debug helper: unlock or lock all achievements in a specific category."""
+    if not profile_id or not category:
+        return 0
+    catalog = get_profile_catalog(profile_id)
+    target_ids = [ach["id"] for ach in catalog if ach.get("category") == category]
+    if not target_ids:
+        return 0
+    conn = get_conn()
+    count = 0
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if unlock:
+        for aid in target_ids:
+            res = conn.execute(
+                "INSERT OR IGNORE INTO achievements (profile_id, achievement_id, unlocked_at) VALUES (?, ?, ?)",
+                (profile_id, aid, now_str)
+            )
+            if res.rowcount > 0:
+                count += 1
+    else:
+        q_marks = ",".join("?" for _ in target_ids)
+        cur = conn.execute(
+            f"DELETE FROM achievements WHERE profile_id=? AND achievement_id IN ({q_marks})",
+            [profile_id] + target_ids
+        )
+        count = cur.rowcount
+    conn.commit()
+    conn.close()
+    return count
+
+
+
 def check_and_unlock_achievements(profile_id):
     from datetime import datetime
     conn = get_conn()

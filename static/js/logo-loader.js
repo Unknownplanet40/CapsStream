@@ -10,6 +10,7 @@
     root.CapsLogoLoader = exports;
     root.logoLoaderState = exports.logoLoaderState;
     root.isValidLogoUrl = exports.isValidLogoUrl;
+    root.shouldShowPausedInfo = exports.shouldShowPausedInfo;
   }
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
@@ -71,9 +72,36 @@
     };
   }
 
+  /**
+   * Pure state function determining whether the paused info overlay should be shown.
+   * Only show when the media is fully loaded, playback is paused,
+   * not during initial load (so it does not interfere with the player logo loader),
+   * and not while actively buffering.
+   *
+   * @param {Object} params
+   * @param {boolean} params.isPlaying
+   * @param {boolean} params.isMediaLoaded
+   * @param {boolean} params.isInitialLoad
+   * @param {boolean} params.isBuffering
+   * @param {boolean} params.hasMedia
+   * @returns {boolean}
+   */
+  function shouldShowPausedInfo(params) {
+    if (!params) return false;
+    var isPlaying = Boolean(params.isPlaying);
+    var isMediaLoaded = Boolean(params.isMediaLoaded);
+    var isInitialLoad = Boolean(params.isInitialLoad);
+    var isBuffering = Boolean(params.isBuffering);
+    var hasMedia = Boolean(params.hasMedia);
+
+    return !isPlaying && isMediaLoaded && !isInitialLoad && !isBuffering && hasMedia;
+  }
+
   return {
     ALLOWED_EXTS: ALLOWED_EXTS,
     isValidLogoUrl: isValidLogoUrl,
-    logoLoaderState: logoLoaderState
+    logoLoaderState: logoLoaderState,
+    shouldShowPausedInfo: shouldShowPausedInfo
   };
 });
+

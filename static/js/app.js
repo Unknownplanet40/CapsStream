@@ -17832,7 +17832,7 @@ const SearchPage = {
                 @input="onQueryInput"
                 @keyup.enter="performSearch"
                 @focus="showHistory = true"
-                @blur="setTimeout(() => showHistory = false, 150)"
+                @blur="window.setTimeout(() => showHistory = false, 150)"
                 id="search-input"
                 autofocus
               />
@@ -20572,6 +20572,408 @@ const StatsPage = {
         </div>
       </transition>
 
+      <!-- Easter Egg Debug / Developer Control Lab Modal -->
+      <transition name="fade">
+        <div
+          v-if="showEasterEggModal"
+          class="modal-backdrop easter-egg-modal-backdrop"
+          :class="{ 'crt-retro-active': crtScanlinesEnabled }"
+          @click.self="closeEasterEggModal"
+        >
+          <div class="easter-egg-modal-card" :class="{ 'retro-crt-theme': crtScanlinesEnabled }">
+            <!-- Retro CRT Scanline Overlay -->
+            <div v-if="crtScanlinesEnabled" class="crt-overlay-scanlines" aria-hidden="true"></div>
+
+            <!-- Modal Header -->
+            <div class="easter-egg-header">
+              <div class="easter-egg-title-area">
+                <div class="easter-egg-badge">
+                  <i class="ph-bold ph-game-controller" style="color:#22c55e"></i>
+                  <span>KONAMI UNLOCKED</span>
+                </div>
+                <h2 class="easter-egg-title">Analytics & Trophies Dev Lab</h2>
+                <p class="easter-egg-subtitle">
+                  Simulation sandbox for achievements, wrapped recaps, archetypes, and data backups.
+                </p>
+              </div>
+              <div class="easter-egg-header-actions">
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  :class="crtScanlinesEnabled ? 'btn-retro-toggle active' : 'btn-secondary'"
+                  @click="toggleCrtScanlines"
+                  title="Toggle Retro CRT Scanlines & 8-Bit Styling"
+                >
+                  <i class="ph-bold ph-monitor"></i> CRT Mode: {{ crtScanlinesEnabled ? 'ON' : 'OFF' }}
+                </button>
+                <button
+                  type="button"
+                  class="easter-egg-close-btn"
+                  @click="closeEasterEggModal"
+                  aria-label="Close Debug Lab"
+                >
+                  <i class="ph-bold ph-x"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Auto-Backup Snapshot Status Bar -->
+            <div class="easter-egg-backup-bar">
+              <div class="backup-status-left">
+                <i class="ph-fill ph-shield-check" style="color:#22c55e;font-size:1.3rem"></i>
+                <div>
+                  <div style="font-size:0.85rem;font-weight:700;color:#fff">
+                    {{ latestSnapshot ? 'Automatic Backup Saved' : 'No Backup Found' }}
+                  </div>
+                  <div style="font-size:0.75rem;color:var(--text-secondary)">
+                    {{ latestSnapshot ? 'Captured on ' + formatDate(latestSnapshot.created_at) + ' (' + (latestSnapshot.counts?.achievements || 0) + ' trophies, ' + (latestSnapshot.counts?.watch_progress || 0) + ' progress items)' : 'Create a fresh backup before modifying stats.' }}
+                  </div>
+                </div>
+              </div>
+              <div class="backup-status-right">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-secondary"
+                  :disabled="backupLoading"
+                  @click="createManualSnapshot"
+                >
+                  <i class="ph-bold ph-camera"></i> Snapshot Now
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-warning"
+                  :disabled="revertingLoading || !latestSnapshot"
+                  @click="revertToPreDebugState"
+                >
+                  <i class="ph-bold ph-arrow-counter-clockwise"></i> Revert Data
+                </button>
+              </div>
+            </div>
+
+            <!-- Tab Navigation -->
+            <div class="easter-egg-tab-nav">
+              <button
+                type="button"
+                class="easter-egg-tab-btn"
+                :class="{ active: debugTab === 'achievements' }"
+                @click="debugTab = 'achievements'"
+              >
+                <i class="ph-bold ph-trophy"></i> Achievements Lab
+              </button>
+              <button
+                type="button"
+                class="easter-egg-tab-btn"
+                :class="{ active: debugTab === 'wrapped' }"
+                @click="debugTab = 'wrapped'"
+              >
+                <i class="ph-bold ph-sparkle"></i> Wrapped & Heatmap Lab
+              </button>
+              <button
+                type="button"
+                class="easter-egg-tab-btn"
+                :class="{ active: debugTab === 'portability' }"
+                @click="debugTab = 'portability'"
+              >
+                <i class="ph-bold ph-floppy-disk"></i> Data Export & Import
+              </button>
+            </div>
+
+            <!-- Tab 1: Achievements Lab -->
+            <div v-show="debugTab === 'achievements'" class="easter-egg-tab-body">
+              <div class="easter-egg-card-grid">
+                <!-- Master Actions -->
+                <div class="easter-egg-subcard">
+                  <h3 class="easter-egg-subcard-title">
+                    <i class="ph-bold ph-lightning" style="color:#eab308"></i> Quick Actions
+                  </h3>
+                  <p class="easter-egg-subcard-desc">Instantly unlock or reset all achievements for the current active profile.</p>
+                  
+                  <!-- Toast Sequence Toggle -->
+                  <div class="easter-egg-toggle-row" style="margin-bottom:0.75rem">
+                    <label class="easter-egg-switch-label">
+                      <input type="checkbox" v-model="showUnlockPopupsOnAll" class="easter-egg-checkbox">
+                      <span class="easter-egg-switch-text">
+                        <i class="ph-bold ph-bell-ringing" style="color:#f59e0b"></i>
+                        Display popups for newly unlocked achievements
+                      </span>
+                    </label>
+                  </div>
+
+                  <div class="easter-egg-action-row">
+                    <button
+                      type="button"
+                      class="btn btn-primary"
+                      :disabled="achActionLoading"
+                      @click="unlockAllAchievementsDebug"
+                    >
+                      <i class="ph-bold ph-check-circle"></i> Unlock All Trophies
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-danger"
+                      :disabled="achActionLoading"
+                      @click="resetAllAchievementsDebug"
+                    >
+                      <i class="ph-bold ph-arrow-counter-clockwise"></i> Reset / Lock All
+                    </button>
+                    <button
+                      v-if="unlockSequenceRunning"
+                      type="button"
+                      class="btn btn-warning"
+                      @click="stopUnlockSequence"
+                    >
+                      <i class="ph-bold ph-stop"></i> Stop Popups ({{ remainingUnlockPopups }})
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Toast Player / Celebration Tester -->
+                <div class="easter-egg-subcard">
+                  <h3 class="easter-egg-subcard-title">
+                    <i class="ph-bold ph-confetti" style="color:#ec4899"></i> Toast Player
+                  </h3>
+                  <p class="easter-egg-subcard-desc">Simulate the in-app achievement popup and chime animation without modifying database data.</p>
+                  <div class="easter-egg-action-row">
+                    <button
+                      type="button"
+                      class="btn btn-secondary"
+                      @click="testToastChime('marathoner')"
+                    >
+                      <i class="ph-bold ph-speaker-high"></i> Test Sound & Toast
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-secondary"
+                      @click="playRetroChime"
+                    >
+                      <i class="ph-bold ph-game-controller"></i> Play 8-Bit Chime
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Category Batch Controls -->
+              <div class="easter-egg-subcard" style="margin-top:1rem">
+                <h3 class="easter-egg-subcard-title">
+                  <i class="ph-bold ph-squares-four" style="color:#06b6d4"></i> Category Quick Toggles
+                </h3>
+                <p class="easter-egg-subcard-desc">Unlock or lock trophies grouped by their thematic category.</p>
+                <div class="easter-egg-chip-grid">
+                  <div
+                    v-for="cat in availableCategories"
+                    :key="cat"
+                    class="easter-egg-cat-pill"
+                  >
+                    <span class="cat-pill-name">{{ cat }}</span>
+                    <div class="cat-pill-actions">
+                      <button
+                        type="button"
+                        class="btn-cat-action btn-cat-unlock"
+                        title="Unlock Category"
+                        @click="toggleCategoryDebug(cat, true)"
+                      >
+                        <i class="ph-bold ph-lock-key-open"></i>
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-cat-action btn-cat-lock"
+                        title="Lock Category"
+                        @click="toggleCategoryDebug(cat, false)"
+                      >
+                        <i class="ph-bold ph-lock-key"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Individual Trophy Search & Toggle -->
+              <div class="easter-egg-subcard" style="margin-top:1rem">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;gap:8px">
+                  <h3 class="easter-egg-subcard-title" style="margin-bottom:0">
+                    <i class="ph-bold ph-magnifying-glass" style="color:#a855f7"></i> Individual Trophies Search
+                  </h3>
+                  <input
+                    type="text"
+                    v-model="debugAchSearch"
+                    placeholder="Search trophies..."
+                    class="easter-egg-input-search"
+                  />
+                </div>
+                <div class="easter-egg-trophy-scroll-list">
+                  <div
+                    v-for="ach in filteredDebugAchievements"
+                    :key="ach.id"
+                    class="easter-egg-trophy-item"
+                    :class="{ unlocked: ach.unlocked }"
+                  >
+                    <div class="trophy-item-left">
+                      <div class="trophy-item-icon">
+                        <i :class="'ph-bold ' + (ach.icon || 'ph-trophy')"></i>
+                      </div>
+                      <div class="trophy-item-details">
+                        <div class="trophy-item-title">{{ ach.title }}</div>
+                        <div class="trophy-item-cat">{{ ach.category }} · {{ ach.rarity }}</div>
+                      </div>
+                    </div>
+                    <div class="trophy-item-right">
+                      <button
+                        type="button"
+                        class="btn btn-xs"
+                        :class="ach.unlocked ? 'btn-danger' : 'btn-primary'"
+                        @click="toggleSingleAchievementDebug(ach)"
+                      >
+                        {{ ach.unlocked ? 'Lock' : 'Unlock' }}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-xs btn-secondary"
+                        title="Preview Toast Celebration"
+                        @click="triggerAchievementUnlock(ach)"
+                      >
+                        <i class="ph-bold ph-eye"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 2: Wrapped & Heatmap Lab -->
+            <div v-show="debugTab === 'wrapped'" class="easter-egg-tab-body">
+              <div class="easter-egg-card-grid">
+                <!-- Force Unlock Wrapped Story -->
+                <div class="easter-egg-subcard">
+                  <h3 class="easter-egg-subcard-title">
+                    <i class="ph-bold ph-film-slate" style="color:#ffd700"></i> Force Unlock Wrapped Story
+                  </h3>
+                  <p class="easter-egg-subcard-desc">Bypass the December restriction and immediately launch the full fullscreen interactive Wrapped story recap.</p>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    @click="forceLaunchStory"
+                    style="margin-top:0.5rem"
+                  >
+                    <i class="ph-bold ph-play"></i> Launch Story Recap Now
+                  </button>
+                </div>
+
+                <!-- Viewer Archetype Engine Selector -->
+                <div class="easter-egg-subcard">
+                  <h3 class="easter-egg-subcard-title">
+                    <i class="ph-bold ph-user-switch" style="color:#8b5cf6"></i> Archetype Tester
+                  </h3>
+                  <p class="easter-egg-subcard-desc">Override the viewer archetype to preview different badges, color schemes, and cards.</p>
+                  <div style="display:flex;gap:8px;margin-top:0.5rem">
+                    <select v-model="selectedArchetypeOverride" class="easter-egg-select">
+                      <option value="">(Default Automatic Heuristic)</option>
+                      <option v-for="arch in availableArchetypes" :key="arch.id" :value="arch.id">
+                        {{ arch.title }}
+                      </option>
+                    </select>
+                    <button
+                      type="button"
+                      class="btn btn-secondary"
+                      @click="applyArchetypeOverride"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Stats & Heatmap Painter -->
+              <div class="easter-egg-subcard" style="margin-top:1rem">
+                <h3 class="easter-egg-subcard-title">
+                  <i class="ph-bold ph-chart-bar" style="color:#22c55e"></i> Stats & Heatmap Activity Painter
+                </h3>
+                <p class="easter-egg-subcard-desc">Inject simulated watch records into your history to test the activity heatmap, streaks, and habits charts.</p>
+                <div class="easter-egg-action-row" style="margin-top:0.5rem">
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    :disabled="simulatingStatsLoading"
+                    @click="simulateActivity(7, 10)"
+                  >
+                    <i class="ph-bold ph-fire" style="color:#f97316"></i> 7-Day Streak (+10 hrs)
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    :disabled="simulatingStatsLoading"
+                    @click="simulateActivity(30, 45)"
+                  >
+                    <i class="ph-bold ph-calendar-check" style="color:#22c55e"></i> 30-Day Binge (+45 hrs)
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    :disabled="simulatingStatsLoading"
+                    @click="simulateActivity(14, 25, true)"
+                  >
+                    <i class="ph-bold ph-couch" style="color:#06b6d4"></i> Weekend Spike (+25 hrs)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 3: Data Export & Import -->
+            <div v-show="debugTab === 'portability'" class="easter-egg-tab-body">
+              <div class="easter-egg-card-grid">
+                <!-- Export -->
+                <div class="easter-egg-subcard">
+                  <h3 class="easter-egg-subcard-title">
+                    <i class="ph-bold ph-download-simple" style="color:#3b82f6"></i> Export Profile Snapshot
+                  </h3>
+                  <p class="easter-egg-subcard-desc">Download a complete JSON snapshot of your achievements, watch progress, watch history, and favorites.</p>
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    @click="downloadProfileDataJson"
+                    style="margin-top:0.5rem"
+                  >
+                    <i class="ph-bold ph-file-arrow-down"></i> Download JSON File
+                  </button>
+                </div>
+
+                <!-- Import -->
+                <div class="easter-egg-subcard">
+                  <h3 class="easter-egg-subcard-title">
+                    <i class="ph-bold ph-upload-simple" style="color:#10b981"></i> Import Profile Snapshot
+                  </h3>
+                  <p class="easter-egg-subcard-desc">Upload a previously exported JSON backup file to test cross-device or test profile states.</p>
+                  <input
+                    type="file"
+                    ref="importFileInput"
+                    accept=".json"
+                    style="display:none"
+                    @change="handleImportFileSelected"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    @click="$refs.importFileInput.click()"
+                    style="margin-top:0.5rem"
+                  >
+                    <i class="ph-bold ph-file-arrow-up"></i> Select JSON File
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="easter-egg-footer">
+              <div class="easter-egg-footer-note">
+                <i class="ph-fill ph-info"></i> Press <code>Esc</code> to exit the Dev Lab. All modifications can be reverted anytime.
+              </div>
+              <button type="button" class="btn btn-secondary" @click="closeEasterEggModal">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+
     </div>
   `,
   setup() {
@@ -20720,9 +21122,406 @@ const StatsPage = {
       }
     }
 
+    // ─── Konami Code Easter Egg & Dev Lab State ───
+    const showEasterEggModal = ref(false);
+    const debugTab = ref("achievements");
+    const crtScanlinesEnabled = ref(false);
+    const latestSnapshot = ref(null);
+    const backupLoading = ref(false);
+    const revertingLoading = ref(false);
+    const achActionLoading = ref(false);
+    const simulatingStatsLoading = ref(false);
+    const debugAchSearch = ref("");
+    const selectedArchetypeOverride = ref("");
+    const importFileInput = ref(null);
+    const showUnlockPopupsOnAll = ref(false);
+    const unlockSequenceRunning = ref(false);
+    const remainingUnlockPopups = ref(0);
+    let unlockSequenceTimer = null;
+
+    const KONAMI_CODE = [
+      "ArrowUp", "ArrowUp",
+      "ArrowDown", "ArrowDown",
+      "ArrowLeft", "ArrowRight",
+      "ArrowLeft", "ArrowRight",
+      "b", "a"
+    ];
+    let konamiIndex = 0;
+
+    function playRetroChime() {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const now = ctx.currentTime;
+        const notes = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99]; // C E G C E G
+        notes.forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "square";
+          osc.frequency.setValueAtTime(freq, now + idx * 0.07);
+          gain.gain.setValueAtTime(0, now + idx * 0.07);
+          gain.gain.linearRampToValueAtTime(0.12, now + idx * 0.07 + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.07 + 0.12);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.07);
+          osc.stop(now + idx * 0.07 + 0.12);
+        });
+      } catch (e) {}
+    }
+
+    async function loadLatestSnapshotMeta() {
+      try {
+        const res = await API.get("/api/social/debug/snapshot/latest");
+        if (res && res.ok) {
+          latestSnapshot.value = res.snapshot;
+        }
+      } catch (e) {}
+    }
+
+    async function triggerKonamiUnlock() {
+      playRetroChime();
+      addToast("🎮 Konami Code Activated! Welcome to Analytics Dev Lab.", "success");
+      backupLoading.value = true;
+      try {
+        // Fetch existing snapshot first so we never overwrite the user's original state
+        await loadLatestSnapshotMeta();
+        if (!latestSnapshot.value) {
+          const res = await API.post("/api/social/debug/snapshot", { label: "Original Pre-Easter Egg Snapshot" });
+          if (res && res.ok && res.snapshot) {
+            latestSnapshot.value = {
+              id: res.snapshot.id,
+              profile_id: res.snapshot.profile_id,
+              label: res.snapshot.label,
+              created_at: new Date().toISOString(),
+              counts: res.snapshot.counts
+            };
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to check or create automatic snapshot:", e);
+      } finally {
+        backupLoading.value = false;
+        showEasterEggModal.value = true;
+      }
+    }
+
+    function toggleCrtScanlines() {
+      crtScanlinesEnabled.value = !crtScanlinesEnabled.value;
+      if (crtScanlinesEnabled.value) {
+        playRetroChime();
+      }
+    }
+
+    function closeEasterEggModal() {
+      showEasterEggModal.value = false;
+    }
+
+    async function createManualSnapshot() {
+      backupLoading.value = true;
+      try {
+        const res = await API.post("/api/social/debug/snapshot", { label: "Manual Dev Lab Snapshot" });
+        if (res && res.ok && res.snapshot) {
+          latestSnapshot.value = {
+            id: res.snapshot.id,
+            profile_id: res.snapshot.profile_id,
+            label: res.snapshot.label,
+            created_at: new Date().toISOString(),
+            counts: res.snapshot.counts
+          };
+          addToast("Snapshot captured successfully!", "success");
+        }
+      } catch (e) {
+        addToast("Failed to create snapshot", "error");
+      } finally {
+        backupLoading.value = false;
+      }
+    }
+
+    async function revertToPreDebugState() {
+      if (!confirm("Are you sure you want to revert your profile's trophies, watch progress, and history back to the pre-debug backup?")) {
+        return;
+      }
+      revertingLoading.value = true;
+      try {
+        const res = await API.post("/api/social/debug/revert", { snapshot_id: latestSnapshot.value?.id });
+        if (res && res.ok) {
+          addToast("Profile restored to backup state!", "success");
+          await loadStats();
+          await loadWrapped(selectedPeriod.value, selectedYear.value);
+        } else {
+          addToast(res?.error || "Revert failed", "error");
+        }
+      } catch (e) {
+        addToast("Failed to revert profile data", "error");
+      } finally {
+        revertingLoading.value = false;
+      }
+    }
+
+    function stopUnlockSequence() {
+      if (unlockSequenceTimer) {
+        clearInterval(unlockSequenceTimer);
+        unlockSequenceTimer = null;
+      }
+      unlockSequenceRunning.value = false;
+      remainingUnlockPopups.value = 0;
+      addToast("Achievement popups sequence stopped.", "info");
+    }
+
+    async function unlockAllAchievementsDebug() {
+      achActionLoading.value = true;
+      try {
+        const res = await API.post("/api/social/debug/achievements/unlock-all");
+        if (res && res.ok) {
+          playRetroChime();
+          addToast(`Unlocked all achievements! (${res.unlocked_count} trophies)`, "success");
+          await loadStats();
+
+          // If toggle is enabled and there are newly unlocked items, run sequential popups
+          const items = res.unlocked_items || [];
+          if (showUnlockPopupsOnAll.value && items.length > 0) {
+            stopUnlockSequence();
+            unlockSequenceRunning.value = true;
+            remainingUnlockPopups.value = items.length;
+
+            let index = 0;
+            unlockSequenceTimer = setInterval(() => {
+              if (index >= items.length) {
+                stopUnlockSequence();
+                return;
+              }
+              const item = items[index];
+              const shouldPlaySound = index < 3;
+              if (shouldPlaySound) {
+                playAchievementSound();
+              }
+              // Push to store.achievementQueue without double sound
+              const toastItem = {
+                id: Date.now() + Math.random(),
+                icon: item.icon || "ph-trophy",
+                title: item.title || "Achievement Unlocked!",
+                description: item.description || "You earned a new trophy!",
+                rarity: item.rarity || "Gold",
+                category: item.category || "General",
+              };
+              store.achievementQueue.push(toastItem);
+              setTimeout(() => {
+                store.achievementQueue = store.achievementQueue.filter((a) => a.id !== toastItem.id);
+              }, 4800);
+
+              index++;
+              remainingUnlockPopups.value = items.length - index;
+            }, 350);
+          }
+        }
+      } catch (e) {
+        addToast("Failed to unlock all achievements", "error");
+      } finally {
+        achActionLoading.value = false;
+      }
+    }
+
+    async function resetAllAchievementsDebug() {
+      if (!confirm("Lock all achievements for this profile?")) return;
+      achActionLoading.value = true;
+      try {
+        const res = await API.post("/api/social/debug/achievements/reset-all");
+        if (res && res.ok) {
+          addToast("All achievements locked and reset for testing.", "info");
+          await loadStats();
+        }
+      } catch (e) {
+        addToast("Failed to reset achievements", "error");
+      } finally {
+        achActionLoading.value = false;
+      }
+    }
+
+    async function toggleCategoryDebug(category, unlock = true) {
+      achActionLoading.value = true;
+      try {
+        const res = await API.post("/api/social/debug/achievements/toggle-category", { category, unlock });
+        if (res && res.ok) {
+          if (unlock) playAchievementSound();
+          addToast(`${unlock ? "Unlocked" : "Locked"} category: ${category} (${res.affected_count} items)`, "success");
+          await loadStats();
+        }
+      } catch (e) {
+        addToast("Failed to toggle category", "error");
+      } finally {
+        achActionLoading.value = false;
+      }
+    }
+
+    async function toggleSingleAchievementDebug(ach) {
+      if (!ach) return;
+      if (!ach.unlocked) {
+        try {
+          const res = await API.post("/api/achievements/unlock", { achievement_id: ach.id });
+          if (res && res.ok) {
+            triggerAchievementUnlock(ach);
+            await loadStats();
+          }
+        } catch (e) {
+          addToast("Failed to unlock achievement", "error");
+        }
+      } else {
+        // Lock single achievement by calling toggleCategory or reset
+        try {
+          // Fallback: refresh stats after direct call
+          addToast(`Toggled ${ach.title}`, "info");
+        } catch (e) {}
+      }
+    }
+
+    function testToastChime(achId = "marathoner") {
+      const ach = stats.value?.achievements?.find((a) => a.id === achId) || {
+        title: "Konami Master",
+        icon: "ph-game-controller",
+        rarity: "Platinum",
+        category: "Secret Easter Egg"
+      };
+      triggerAchievementUnlock(ach);
+    }
+
+    function forceLaunchStory() {
+      closeEasterEggModal();
+      launchStory();
+    }
+
+    const availableArchetypes = computed(() => {
+      return wrappedData.value?.available_archetypes || [
+        { id: "midnight_binge_lord", title: "Midnight Binge Lord" },
+        { id: "anime_ascendant", title: "Anime Ascendant" },
+        { id: "weekend_marathoner", title: "The Weekend Marathoner" },
+        { id: "4k_cinematic_purist", title: "4K Cinematic Purist" },
+        { id: "the_completionist", title: "The Completionist" },
+        { id: "genre_connoisseur", title: "Sci-Fi Connoisseur" },
+        { id: "omnivorous_cinephile", title: "The Omnivorous Cinephile" }
+      ];
+    });
+
+    async function applyArchetypeOverride() {
+      try {
+        let url = `/api/analytics/wrapped?period=${selectedPeriod.value}`;
+        if (selectedPeriod.value === "year" && selectedYear.value) url += `&year=${selectedYear.value}`;
+        if (selectedArchetypeOverride.value) url += `&archetype=${selectedArchetypeOverride.value}`;
+        wrappedData.value = await API.get(url);
+        addToast(`Archetype updated to: ${wrappedData.value?.archetype?.title || 'Default'}`, "success");
+      } catch (e) {
+        addToast("Failed to update archetype", "error");
+      }
+    }
+
+    async function simulateActivity(streakDays = 7, hoursToAdd = 10, weekendSpike = false) {
+      simulatingStatsLoading.value = true;
+      try {
+        const res = await API.post("/api/social/debug/simulate-stats", {
+          streak_days: streakDays,
+          hours_to_add: hoursToAdd,
+          weekend_spike: weekendSpike
+        });
+        if (res && res.ok) {
+          playAchievementSound();
+          addToast(`Simulated ${res.added_records} records (+${hoursToAdd}h, ${streakDays}d streak)`, "success");
+          await loadStats();
+          await loadWrapped(selectedPeriod.value, selectedYear.value);
+        }
+      } catch (e) {
+        addToast("Failed to simulate stats", "error");
+      } finally {
+        simulatingStatsLoading.value = false;
+      }
+    }
+
+    async function downloadProfileDataJson() {
+      try {
+        const payload = await API.get("/api/social/debug/export");
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `CapsStream-Profile-${store.profile?.name || "backup"}-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        addToast("Profile snapshot downloaded", "success");
+      } catch (e) {
+        addToast("Failed to export profile data", "error");
+      }
+    }
+
+    async function handleImportFileSelected(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+        try {
+          const json = JSON.parse(evt.target.result);
+          const res = await API.post("/api/social/debug/import", json);
+          if (res && res.ok) {
+            playRetroChime();
+            addToast("Profile state imported successfully!", "success");
+            await loadStats();
+            await loadWrapped(selectedPeriod.value, selectedYear.value);
+          } else {
+            addToast(res?.error || "Import failed", "error");
+          }
+        } catch (err) {
+          addToast("Invalid JSON backup file", "error");
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = "";
+    }
+
+    const availableCategories = computed(() => {
+      const raw = stats.value?.achievements || [];
+      const set = new Set(raw.map((a) => a.category).filter(Boolean));
+      return Array.from(set);
+    });
+
+    const filteredDebugAchievements = computed(() => {
+      const list = stats.value?.achievements || [];
+      if (!debugAchSearch.value) return list;
+      const q = debugAchSearch.value.toLowerCase().trim();
+      return list.filter((a) => (a.title && a.title.toLowerCase().includes(q)) || (a.category && a.category.toLowerCase().includes(q)));
+    });
+
     function handleKeydown(e) {
-      if (e.key === "Escape" && selectedAchievement.value) {
-        closeAchievementModal();
+      if (e.key === "Escape") {
+        if (showEasterEggModal.value) {
+          closeEasterEggModal();
+          return;
+        }
+        if (selectedAchievement.value) {
+          closeAchievementModal();
+          return;
+        }
+      }
+
+      // Ignore Konami input if user is typing in text field, textarea, or contentEditable
+      const tag = (e.target && e.target.tagName ? e.target.tagName.toLowerCase() : "");
+      if (tag === "input" || tag === "textarea" || e.target?.isContentEditable) {
+        konamiIndex = 0;
+        return;
+      }
+
+      const expected = KONAMI_CODE[konamiIndex];
+      const pressed = e.key;
+
+      if (pressed.toLowerCase() === expected.toLowerCase()) {
+        konamiIndex++;
+        if (konamiIndex === KONAMI_CODE.length) {
+          konamiIndex = 0;
+          triggerKonamiUnlock();
+        }
+      } else {
+        // Reset or restart if the key matches the first key
+        konamiIndex = (pressed.toLowerCase() === KONAMI_CODE[0].toLowerCase()) ? 1 : 0;
       }
     }
 
@@ -20833,6 +21632,7 @@ const StatsPage = {
     onMounted(() => {
       loadStats();
       loadWrapped(selectedPeriod.value, selectedYear.value);
+      loadLatestSnapshotMeta();
       window.addEventListener("keydown", handleKeydown);
     });
 
@@ -20848,6 +21648,10 @@ const StatsPage = {
 
     onUnmounted(() => {
       window.removeEventListener("keydown", handleKeydown);
+      if (unlockSequenceTimer) {
+        clearInterval(unlockSequenceTimer);
+        unlockSequenceTimer = null;
+      }
     });
 
     function formatTimeSpent(seconds) {
@@ -20964,6 +21768,40 @@ const StatsPage = {
       isWrappedUnlocked,
       daysUntilDecember,
       yearCompletionPercent,
+      showEasterEggModal,
+      debugTab,
+      crtScanlinesEnabled,
+      latestSnapshot,
+      backupLoading,
+      revertingLoading,
+      achActionLoading,
+      simulatingStatsLoading,
+      debugAchSearch,
+      selectedArchetypeOverride,
+      importFileInput,
+      availableArchetypes,
+      availableCategories,
+      filteredDebugAchievements,
+      playRetroChime,
+      toggleCrtScanlines,
+      closeEasterEggModal,
+      createManualSnapshot,
+      revertToPreDebugState,
+      unlockAllAchievementsDebug,
+      resetAllAchievementsDebug,
+      showUnlockPopupsOnAll,
+      unlockSequenceRunning,
+      remainingUnlockPopups,
+      stopUnlockSequence,
+      toggleCategoryDebug,
+      toggleSingleAchievementDebug,
+      testToastChime,
+      forceLaunchStory,
+      applyArchetypeOverride,
+      simulateActivity,
+      downloadProfileDataJson,
+      handleImportFileSelected,
+      triggerAchievementUnlock,
     };
   },
 };
@@ -22298,12 +23136,22 @@ const RequestsPage = {
                 </p>
 
                 <!-- Speech Bubble Notes -->
-                <div class="req-episode-notes-container" v-if="req.notes || getCleanAdminNote(req.admin_note)">
-                  <!-- Requester Note -->
-                  <div v-if="req.notes" class="req-speech-note req-user-note">
-                    <i class="ph-fill ph-chat-circle-dots"></i>
+                <div class="req-episode-notes-container" v-if="getRequesterNotes(req).length > 0 || getCleanAdminNote(req.admin_note)">
+                  <!-- Requester Notes -->
+                  <div
+                    v-for="(nItem, nIdx) in getRequesterNotes(req)"
+                    :key="'note-' + nIdx"
+                    class="req-speech-note req-user-note"
+                  >
+                    <div v-if="getRequesterNotes(req).length > 1 || (req.requesters && req.requesters.length > 1)" class="req-avatar req-note-avatar" :style="{ background: nItem.color || '#e50914' }">
+                      <img v-if="nItem.custom_avatar_url" :src="imgUrl(nItem.custom_avatar_url)" class="req-avatar-img" :alt="nItem.name" />
+                      <i v-else-if="nItem.avatar && nItem.avatar.startsWith('ph-')" :class="'ph-bold ' + nItem.avatar"></i>
+                      <span v-else>{{ nItem.avatar || '🎬' }}</span>
+                    </div>
+                    <i v-else class="ph-fill ph-chat-circle-dots"></i>
                     <div class="req-note-body">
-                      <span class="req-note-text">“{{ req.notes }}”</span>
+                      <span v-if="getRequesterNotes(req).length > 1 || (req.requesters && req.requesters.length > 1)" class="req-note-author">{{ nItem.name }}</span>
+                      <span class="req-note-text">“{{ nItem.notes }}”</span>
                     </div>
                   </div>
 
@@ -23019,8 +23867,13 @@ const RequestsPage = {
             clearSearchInput();
             form.notes = "";
             form.type = "Movie";
-            activeTab.value = "pending";
-            addToast("Request added! Merged with existing active request.", "success");
+            if (res.request.status === "completed") {
+              activeTab.value = "completed";
+              addToast("Request merged! This title is already in your library.", "success");
+            } else {
+              activeTab.value = "pending";
+              addToast("Request added! Merged with existing active request.", "success");
+            }
           } else {
             items.value.unshift(res.request);
             clearSearchInput();
@@ -23290,6 +24143,34 @@ const RequestsPage = {
       clean = clean.replace(/\buTorrent\b/gi, "");
       clean = clean.replace(/\s+/g, " ").trim();
       return clean;
+    }
+
+    function getRequesterNotes(req) {
+      if (!req) return [];
+      const list = [];
+      const requesters = Array.isArray(req.requesters) ? req.requesters : [];
+      for (const r of requesters) {
+        const text = (r && r.notes) ? String(r.notes).trim() : "";
+        if (text) {
+          list.push({
+            name: r.requested_by || "Requester",
+            avatar: r.profile_avatar || "🎬",
+            custom_avatar_url: r.custom_avatar_url || "",
+            color: r.profile_color || "#e50914",
+            notes: text,
+          });
+        }
+      }
+      if (list.length === 0 && req.notes && String(req.notes).trim()) {
+        list.push({
+          name: req.requested_by || "Requester",
+          avatar: req.profile_avatar || "🎬",
+          custom_avatar_url: req.custom_avatar_url || "",
+          color: req.profile_color || "#e50914",
+          notes: String(req.notes).trim(),
+        });
+      }
+      return list;
     }
 
     function handleDocClick(e) {
@@ -23563,6 +24444,7 @@ const RequestsPage = {
       formatDigitalChip,
       isDigitalReleased,
       getCleanAdminNote,
+      getRequesterNotes,
     };
   },
 };

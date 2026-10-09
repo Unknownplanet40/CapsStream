@@ -61,6 +61,34 @@ class TestRouteSocial(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         mock_clear_net.assert_called_once()
 
+    @patch("backend.db.create_profile_snapshot")
+    def test_api_debug_snapshot(self, mock_snap):
+        mock_snap.return_value = {"id": 1, "profile_id": 1, "counts": {}}
+        with self.client.session_transaction() as sess:
+            sess["profile_id"] = 1
+        resp = self.client.post("/api/social/debug/snapshot", json={"label": "test"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["ok"])
+
+    @patch("backend.db.revert_profile_snapshot")
+    def test_api_debug_revert(self, mock_revert):
+        mock_revert.return_value = (True, "Profile restored successfully")
+        with self.client.session_transaction() as sess:
+            sess["profile_id"] = 1
+        resp = self.client.post("/api/social/debug/revert", json={})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["ok"])
+
+    @patch("backend.db.unlock_all_achievements")
+    def test_api_debug_unlock_all(self, mock_unlock_all):
+        mock_unlock_all.return_value = 42
+        with self.client.session_transaction() as sess:
+            sess["profile_id"] = 1
+        resp = self.client.post("/api/social/debug/achievements/unlock-all")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["unlocked_count"], 42)
+
 
 if __name__ == "__main__":
     unittest.main()
+

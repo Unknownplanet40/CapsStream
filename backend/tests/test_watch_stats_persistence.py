@@ -312,7 +312,40 @@ class TestWatchStatsPersistence(unittest.TestCase):
         self.assertEqual(show_item["ep_count"], 3)  # exactly 3 episodes, not 3x3=9!
         self.assertIn(show_item["media_id"], (ep1, ep2, ep3))
 
+    def test_profile_snapshot_and_revert(self):
+        """Verify snapshotting, batch achievements, and reverting profile state."""
+        from backend.db.profiles import create_profile_snapshot, get_latest_profile_snapshot, revert_profile_snapshot
+        from backend.db.achievements import unlock_achievement, unlock_all_achievements, reset_all_achievements, get_profile_achievements
+        from backend.db.stats import simulate_profile_stats
+
+        # 1. Take snapshot of fresh profile
+        initial_ach = get_profile_achievements(1)
+        initial_unlocked_count = len([a for a in initial_ach if a["unlocked"]])
+        snap = create_profile_snapshot(1, label="Initial State")
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap["counts"]["achievements"], initial_unlocked_count)
+
+        # 2. Unlock all achievements
+        unlocked_count, _ = unlock_all_achievements(1)
+        self.assertGreater(unlocked_count, 10)
+        ach_after = get_profile_achievements(1)
+        self.assertTrue(all(a["unlocked"] for a in ach_after))
+
+        # 3. Simulate stats
+        added_sim = simulate_profile_stats(1, streak_days=7, hours_to_add=10)
+        self.assertEqual(added_sim, 7)
+
+        # 4. Revert to snapshot
+        ok, msg = revert_profile_snapshot(1, snap["id"])
+        self.assertTrue(ok)
+        
+        # 5. Check achievements restored to initial count
+        ach_reverted = get_profile_achievements(1)
+        reverted_unlocked_count = len([a for a in ach_reverted if a["unlocked"]])
+        self.assertEqual(reverted_unlocked_count, initial_unlocked_count)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

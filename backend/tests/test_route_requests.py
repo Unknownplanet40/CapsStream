@@ -523,6 +523,132 @@ class TestRouteRequests(unittest.TestCase):
             mock_del.assert_called_once_with("req_2")
             mock_update.assert_called_once()
 
+    def test_consolidate_completed_requests(self):
+        """consolidate_duplicate_requests merges completed and in-library requests into a unified item."""
+        from backend.routes.requests import consolidate_duplicate_requests
+
+        item1 = {
+            "id": "req_fall2_rj",
+            "title": "Fall 2: Deadpoint",
+            "type": "Movie",
+            "year": "2026",
+            "tmdb_id": 1101412,
+            "status": "completed",
+            "auto_detected": True,
+            "detected_media_id": 3555,
+            "client_id": "client_rj",
+            "requested_by": "RJ",
+            "requesters": [{"profile_id": 46, "requested_by": "RJ", "client_id": "client_rj", "notes": "4K please"}]
+        }
+        item2 = {
+            "id": "req_fall2_tito",
+            "title": "Fall 2: Deadpoint",
+            "type": "Movie",
+            "year": "2026",
+            "tmdb_id": 1101412,
+            "status": "completed",
+            "auto_detected": False,
+            "client_id": "client_tito",
+            "requested_by": "Tito",
+            "requesters": [{"profile_id": 1, "requested_by": "Tito", "client_id": "client_tito", "notes": None}]
+        }
+
+        result = consolidate_duplicate_requests([item1, item2], delete_remote=False)
+        self.assertEqual(len(result), 1)
+        consolidated = result[0]
+        self.assertEqual(consolidated["id"], "req_fall2_rj")
+        self.assertEqual(consolidated["status"], "completed")
+        self.assertTrue(consolidated["auto_detected"])
+        self.assertEqual(consolidated["detected_media_id"], 3555)
+        names = [r["requested_by"] for r in consolidated["requesters"]]
+        self.assertIn("RJ", names)
+        self.assertIn("Tito", names)
+        self.assertEqual(len(consolidated["requesters"]), 2)
+        # Verify notes preserved
+        rj_r = next(r for r in consolidated["requesters"] if r["requested_by"] == "RJ")
+        self.assertEqual(rj_r["notes"], "4K please")
+
+    def test_create_request_merges_with_completed_request(self):
+        """Creating a request that is already completed merges into the completed item."""
+        completed_req = {
+            "id": "req_completed_fall2",
+            "title": "Fall 2: Deadpoint",
+            "type": "Movie",
+            "tmdb_id": 1101412,
+            "status": "completed",
+            "client_id": "client_tito",
+            "requested_by": "Tito",
+            "requesters": [{
+                "profile_id": 1,
+                "requested_by": "Tito",
+                "client_id": "client_tito"
+            }]
+        }
+
+        with patch("backend.routes.requests.is_dev_mode", return_value=False), \
+             patch("backend.routes.requests.get_client_id", return_value="client_rj"), \
+             patch("backend.routes.requests._load_requests", return_value=[completed_req]), \
+             patch("backend.routes.requests._save_requests") as mock_save, \
+             patch("backend.routes.requests.current_profile", return_value=46), \
+             patch("backend.routes.requests.get_profile", return_value={"name": "RJ", "avatar": "🍿", "color": "#00b894"}):
+
+            resp = self.client.post("/api/requests", json={
+                "title": "Fall 2: Deadpoint",
+                "type": "Movie",
+                "tmdb_id": 1101412,
+                "notes": "Hyped for this!"
+            })
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data["ok"])
+            self.assertTrue(data.get("merged"))
+            req = data["request"]
+            self.assertEqual(req["id"], "req_completed_fall2")
+            self.assertEqual(req["status"], "completed")
+            requester_names = [r["requested_by"] for r in req["requesters"]]
+            self.assertIn("Tito", requester_names)
+            self.assertIn("RJ", requester_names)
+            mock_save.assert_called_once()
+
+    def test_tv_show_exact_season_episode_matching(self):
+        """TV Show requests only merge when season and episode match exactly."""
+        from backend.routes.requests import find_duplicate_active_request
+
+        items = [
+            {
+                "id": "req_show",
+                "title": "Severance",
+                "type": "TV Show",
+                "tmdb_id": 95396,
+                "season": None,
+                "episode": None,
+                "status": "pending"
+            },
+            {
+                "id": "req_s1e1",
+                "title": "Severance",
+                "type": "TV Show",
+                "tmdb_id": 95396,
+                "season": 1,
+                "episode": 1,
+                "status": "pending"
+            }
+        ]
+
+        # Whole show request should match req_show, not req_s1e1
+        match1 = find_duplicate_active_request(items, tmdb_id=95396, title="Severance", media_type="TV Show", season=None, episode=None)
+        self.assertIsNotNone(match1)
+        self.assertEqual(match1["id"], "req_show")
+
+        # S1E1 request should match req_s1e1
+        match2 = find_duplicate_active_request(items, tmdb_id=95396, title="Severance", media_type="TV Show", season=1, episode=1)
+        self.assertIsNotNone(match2)
+        self.assertEqual(match2["id"], "req_s1e1")
+
+        # S2E1 request should not match any existing item
+        match3 = find_duplicate_active_request(items, tmdb_id=95396, title="Severance", media_type="TV Show", season=2, episode=1)
+        self.assertIsNone(match3)
+
     def test_filter_requests_for_client(self):
         """filter_requests_for_client scopes requests correctly for non-dev vs dev clients."""
         from backend.routes.requests import filter_requests_for_client

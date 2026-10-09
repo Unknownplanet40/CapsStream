@@ -34,6 +34,7 @@ const PlayerPage = {
         @playing="onVideoPlaying"
         @pause="onVideoPause"
         @seeked="onVideoSeeked"
+        @canplay="onVideoCanPlay"
         @error="onVideoError"
       >
         <track
@@ -292,8 +293,8 @@ const PlayerPage = {
 
         <!-- Bottom Bar (Disabled when showResumeModal is true) -->
         <div class="custom-player-bottom" :class="{ 'resume-active-disabled': showResumeModal }">
-          <!-- Side-by-Side Row above Seekbar: Show Info (LEFT) strictly when paused -->
-          <div class="player-overlay-row" v-if="!isPlaying && media">
+          <!-- Side-by-Side Row above Seekbar: Show Info (LEFT) strictly when paused and media is fully loaded -->
+          <div class="player-overlay-row" v-if="showPausedInfo">
             <div class="player-paused-info">
               <div class="player-paused-logo-container">
                 <img v-if="media.logo_path" :src="imgUrl(media.logo_path)" :alt="media.title" class="player-paused-logo" />
@@ -1777,6 +1778,7 @@ const PlayerPage = {
     const duration = ref(0);
     const isBuffering = ref(false);
     const isInitialLoad = ref(false);
+    const isMediaLoaded = ref(false);
     const logoReady = ref(false);
     const logoPreloadError = ref(false);
     const logoImgSrc = ref("");
@@ -1823,6 +1825,21 @@ const PlayerPage = {
         showSpinner: !hasLogo,
         enableGlint: !prefersReducedMotion.value
       };
+    });
+
+    const showPausedInfo = computed(() => {
+      const fn = (typeof window !== "undefined" && window.shouldShowPausedInfo) ||
+        (typeof CapsLogoLoader !== "undefined" && CapsLogoLoader.shouldShowPausedInfo);
+      if (typeof fn === "function") {
+        return fn({
+          isPlaying: isPlaying.value,
+          isMediaLoaded: isMediaLoaded.value,
+          isInitialLoad: isInitialLoad.value,
+          isBuffering: isBuffering.value,
+          hasMedia: Boolean(media.value)
+        });
+      }
+      return !isPlaying.value && isMediaLoaded.value && !isInitialLoad.value && !isBuffering.value && Boolean(media.value);
     });
 
     function preloadMediaLogo(logoPath) {
@@ -2872,6 +2889,7 @@ const PlayerPage = {
       const needsFullReload = forceReload || !!v.error || isTranscode || !v.src || !v.src.startsWith(absWantBase);
 
       if (needsFullReload) {
+        isMediaLoaded.value = false;
         currentTime.value = playerPos;
         v.src = want;
         try {
@@ -4069,6 +4087,10 @@ const PlayerPage = {
 
     function onVideoSeeked() {
       wtEmitSync();
+      isBuffering.value = false;
+      if (!isInitialLoad.value) {
+        isMediaLoaded.value = true;
+      }
       // After a native video seek, decide how to realign the remote audio:
       //
       //  1. SLIDE — if the new position is still covered by the audio
@@ -4601,6 +4623,7 @@ const PlayerPage = {
       isPlaying.value = true;
       isBuffering.value = false;
       isInitialLoad.value = false;
+      isMediaLoaded.value = true;
       isTranscodeInitialLoading.value = false;
       playerError.value = null;
       lastPlaybackStartTime = Date.now();
@@ -4616,6 +4639,13 @@ const PlayerPage = {
         return;
       }
       showControls();
+    }
+
+    function onVideoCanPlay() {
+      isBuffering.value = false;
+      if (!isInitialLoad.value) {
+        isMediaLoaded.value = true;
+      }
     }
 
     function onVideoPause() {
@@ -6166,6 +6196,7 @@ const PlayerPage = {
         return;
       }
       isInitialLoad.value = false;
+      isMediaLoaded.value = false;
       if (isDriveOffline.value) return;
 
       // Fast check if the underlying storage drive has been unplugged
@@ -6800,6 +6831,7 @@ const PlayerPage = {
     async function initPlayer() {
       const mediaId = route.params.id;
       isInitialLoad.value = true;
+      isMediaLoaded.value = false;
       logoPreloadToken++;
       if (logoPreloadTimeout) {
         clearTimeout(logoPreloadTimeout);
@@ -7181,6 +7213,7 @@ const PlayerPage = {
       reloadToken++;
       isBuffering.value = false;
       isInitialLoad.value = false;
+      isMediaLoaded.value = false;
       logoPreloadToken++;
       if (logoPreloadTimeout) {
         clearTimeout(logoPreloadTimeout);
@@ -7710,6 +7743,9 @@ const PlayerPage = {
       toggleWtChat,
       wtFormatTime,
       isInitialLoad,
+      isMediaLoaded,
+      showPausedInfo,
+      onVideoCanPlay,
       logoReady,
       logoImgSrc,
       loaderState,

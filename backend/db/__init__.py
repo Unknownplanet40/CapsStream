@@ -75,6 +75,11 @@ from .profiles import (
     list_kids_overrides,
     set_kids_override,
     remove_kids_override,
+    create_profile_snapshot,
+    get_latest_profile_snapshot,
+    revert_profile_snapshot,
+    export_profile_data,
+    import_profile_data,
 )
 
 from .playback import (
@@ -93,6 +98,9 @@ from .achievements import (
     ACTION_TO_KIDS_ACHIEVEMENTS,
     get_profile_catalog,
     unlock_achievement,
+    unlock_all_achievements,
+    reset_all_achievements,
+    toggle_category_achievements,
     check_and_unlock_achievements,
     get_profile_achievements,
 )
@@ -100,6 +108,8 @@ from .achievements import (
 from .stats import (
     get_profile_watch_stats,
     get_profile_wrapped_analytics,
+    simulate_profile_stats,
+    ALL_ARCHETYPES,
 )
 
 from .collections import (
@@ -188,6 +198,11 @@ __all__ = [
     "list_kids_overrides",
     "set_kids_override",
     "remove_kids_override",
+    "create_profile_snapshot",
+    "get_latest_profile_snapshot",
+    "revert_profile_snapshot",
+    "export_profile_data",
+    "import_profile_data",
     "get_progress",
     "get_progress_for_media_items",
     "save_progress",
@@ -200,10 +215,15 @@ __all__ = [
     "ACTION_TO_KIDS_ACHIEVEMENTS",
     "get_profile_catalog",
     "unlock_achievement",
+    "unlock_all_achievements",
+    "reset_all_achievements",
+    "toggle_category_achievements",
     "check_and_unlock_achievements",
     "get_profile_achievements",
     "get_profile_watch_stats",
     "get_profile_wrapped_analytics",
+    "simulate_profile_stats",
+    "ALL_ARCHETYPES",
     "get_favorites",
     "toggle_favorite",
     "is_favorite",
