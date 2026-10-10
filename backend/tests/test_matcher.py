@@ -147,6 +147,37 @@ class TestMediaMatcher(unittest.TestCase):
             _BACKDROPS_CACHE.clear()
 
 
+    def test_fetch_movie_detail_credit_scenes(self):
+        """Verify _fetch_movie_detail extracts post-credits and mid-credits flags from TMDb keywords."""
+        from backend.matcher import _fetch_movie_detail
+        fake_detail = {
+            "id": 99999,
+            "title": "Super Hero Movie",
+            "release_date": "2024-05-01",
+            "keywords": {
+                "keywords": [
+                    {"id": 179430, "name": "aftercredits scene"},
+                    {"id": 179431, "name": "duringcredits scene"}
+                ]
+            },
+            "genres": [{"name": "Action"}],
+            "credits": {"cast": []},
+            "videos": {"results": []}
+        }
+        with patch("backend.matcher._load_cache", return_value=None), \
+             patch("backend.matcher._save_cache"), \
+             patch("backend.matcher._tmdb_get", return_value=fake_detail), \
+             patch("backend.matcher._download_image", return_value=None), \
+             patch("backend.matcher._extract_logo", return_value=None):
+            res = _fetch_movie_detail(99999)
+            self.assertIsNotNone(res)
+            self.assertIn("credit_scenes", res)
+            self.assertTrue(res["credit_scenes"]["has_post_credits"])
+            self.assertTrue(res["credit_scenes"]["has_mid_credits"])
+            self.assertTrue(res["credit_scenes"]["has_credit_scene"])
+            self.assertEqual(res["credit_scenes"]["label"], "Post & Mid-Credits Scenes")
+
+
 if __name__ == "__main__":
     unittest.main()
 

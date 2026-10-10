@@ -4776,6 +4776,14 @@ const DetailPage = {
               <i class="ph-bold ph-subtitles"></i>
               <span>{{ hasSubtitlesAvailable ? (subtitlesCount > 1 ? subtitlesCount + ' Subs' : 'CC / Subs') : 'No Subs' }}</span>
             </span>
+            <span
+              v-if="media.credit_scenes && media.credit_scenes.has_credit_scene"
+              class="credit-scene-meta-badge"
+              :title="media.credit_scenes.has_post_credits && media.credit_scenes.has_mid_credits ? 'Includes mid-credits and post-credits scenes' : (media.credit_scenes.has_mid_credits ? 'Includes mid-credits scene' : 'Includes post-credits scene')"
+            >
+              <i class="ph-bold ph-film-strip"></i>
+              <span>{{ media.credit_scenes.label || 'Post-Credits Scene' }}</span>
+            </span>
           </div>
 
           <!-- Quality & Drive Badges -->
@@ -5325,6 +5333,14 @@ const DetailPage = {
                   >
                     <i class="ph-bold ph-subtitles"></i>
                     <span>{{ hasSubtitlesAvailable ? (subtitlesCount + ' Subtitle Track' + (subtitlesCount > 1 ? 's' : '')) : 'No Subtitles' }}</span>
+                  </div>
+                  <div
+                    v-if="media.credit_scenes && media.credit_scenes.has_credit_scene"
+                    class="file-pill credit-scene-pill"
+                    :title="media.credit_scenes.label + ' detected for this film'"
+                  >
+                    <i class="ph-bold ph-sparkle" style="color:#f59e0b"></i>
+                    <span>{{ media.credit_scenes.label }}</span>
                   </div>
                 </div>
 

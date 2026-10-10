@@ -497,6 +497,29 @@ def api_media_detail(media_id):
     except Exception:
         media["franchise"] = None
 
+    # Resolve post-credits / mid-credits scene metadata
+    credit_scenes = media.get("credit_scenes")
+    if not credit_scenes and media.get("tmdb_id") and media.get("type", "movie") == "movie":
+        from backend.matcher import _load_cache
+        cached_movie = _load_cache("movie", media["tmdb_id"])
+        if cached_movie and cached_movie.get("credit_scenes"):
+            credit_scenes = cached_movie["credit_scenes"]
+        else:
+            # Check cached or probed chapters for explicit credit scene markers
+            from backend.skip_times import probe_chapters_for_skips
+            ch_skips = probe_chapters_for_skips(media.get("file_path"))
+            if "credit_scene" in ch_skips:
+                cs = ch_skips["credit_scene"]
+                is_mid = cs.get("scene_type") == "mid_credits"
+                credit_scenes = {
+                    "has_post_credits": not is_mid,
+                    "has_mid_credits": is_mid,
+                    "has_credit_scene": True,
+                    "label": "Mid-Credits Scene" if is_mid else "Post-Credits Scene",
+                    "chapter_target": cs.get("start"),
+                }
+    media["credit_scenes"] = credit_scenes
+
     try:
         media["similar_items"] = get_similar_media(media_id, limit=16, profile_id=pid)
     except Exception:

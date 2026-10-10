@@ -254,11 +254,30 @@ def _fetch_movie_detail(tmdb_id, default_title="", year=None):
             else:
                 cached["belongs_to_collection"] = None
             updated = True
+        if "credit_scenes" not in cached:
+            kw_detail = _tmdb_get(f"movie/{tmdb_id}/keywords")
+            kws = kw_detail.get("keywords", []) if (kw_detail and isinstance(kw_detail, dict)) else []
+            has_p = False
+            has_m = False
+            for kw in kws:
+                kid = kw.get("id")
+                kname = str(kw.get("name", "")).lower()
+                if kid == 179430 or any(p in kname for p in ["aftercredits", "after credits", "post-credits", "post credits"]):
+                    has_p = True
+                if kid == 179431 or any(p in kname for p in ["duringcredits", "during credits", "mid-credits", "mid credits"]):
+                    has_m = True
+            cached["credit_scenes"] = {
+                "has_post_credits": has_p,
+                "has_mid_credits": has_m,
+                "has_credit_scene": has_p or has_m,
+                "label": "Post & Mid-Credits Scenes" if (has_p and has_m) else ("Post-Credits Scene" if has_p else ("Mid-Credits Scene" if has_m else None)),
+            }
+            updated = True
         if updated:
             _save_cache("movie", tmdb_id, cached)
         return cached
 
-    detail = _tmdb_get(f"movie/{tmdb_id}", {"language": "en-US", "append_to_response": "credits,videos,images", "include_image_language": "en,null"})
+    detail = _tmdb_get(f"movie/{tmdb_id}", {"language": "en-US", "append_to_response": "credits,videos,images,keywords", "include_image_language": "en,null"})
     if not detail:
         return None
 
@@ -294,6 +313,24 @@ def _fetch_movie_detail(tmdb_id, default_title="", year=None):
     release = detail.get("release_date", "")
     release_year = int(release[:4]) if release and len(release) >= 4 else year
 
+    keywords_list = detail.get("keywords", {}).get("keywords", []) if isinstance(detail.get("keywords"), dict) else []
+    has_post_credits = False
+    has_mid_credits = False
+    for kw in keywords_list:
+        kid = kw.get("id")
+        kname = str(kw.get("name", "")).lower()
+        if kid == 179430 or any(p in kname for p in ["aftercredits", "after credits", "post-credits", "post credits"]):
+            has_post_credits = True
+        if kid == 179431 or any(p in kname for p in ["duringcredits", "during credits", "mid-credits", "mid credits"]):
+            has_mid_credits = True
+
+    credit_scenes = {
+        "has_post_credits": has_post_credits,
+        "has_mid_credits": has_mid_credits,
+        "has_credit_scene": has_post_credits or has_mid_credits,
+        "label": "Post & Mid-Credits Scenes" if (has_post_credits and has_mid_credits) else ("Post-Credits Scene" if has_post_credits else ("Mid-Credits Scene" if has_mid_credits else None)),
+    }
+
     result = {
         "tmdb_id":       tmdb_id,
         "type":          "movie",
@@ -315,6 +352,7 @@ def _fetch_movie_detail(tmdb_id, default_title="", year=None):
         "origin_country":       detail.get("origin_country") or [],
         "production_countries": detail.get("production_countries") or [],
         "original_language":    detail.get("original_language"),
+        "credit_scenes":        credit_scenes,
     }
     _save_cache("movie", tmdb_id, result)
     print(f"[Matcher] Matched movie: {result['title']} ({result['year']})")

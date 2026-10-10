@@ -1361,6 +1361,44 @@ const PlayerPage = {
         </div>
       </transition>
 
+      <!-- Prominent Centered Post-Credits & Mid-Credits Scene Overlay Prompt Card -->
+      <transition name="fade">
+        <div v-if="showCreditSceneAlert && creditSceneInfo" class="player-credit-scene-overlay" @click.stop>
+          <div class="credit-scene-prompt-card">
+            <div class="credit-scene-icon-wrap">
+              <i class="ph-bold ph-film-strip"></i>
+            </div>
+            <h3 class="credit-scene-prompt-title">{{ creditSceneInfo.label }} Ahead</h3>
+            <p class="credit-scene-prompt-desc">
+              <template v-if="creditSceneInfo.hasChapter">
+                Stay tuned — this movie features an extra scene after the credits roll. Click below to jump directly to it!
+              </template>
+              <template v-else>
+                Stay tuned — this movie features a post-credits scene once the credits conclude!
+              </template>
+            </p>
+            <div class="credit-scene-actions-row">
+              <button
+                v-if="creditSceneInfo.hasChapter"
+                class="credit-scene-jump-btn"
+                @click="jumpToCreditScene"
+                title="Jump directly to credit scene"
+              >
+                <i class="ph-bold ph-fast-forward"></i>
+                <span>Jump to Scene</span>
+              </button>
+              <button
+                class="credit-scene-dismiss-btn"
+                @click="dismissCreditSceneAlert"
+                :title="creditSceneInfo.hasChapter ? 'Dismiss prompt and continue watching credits' : 'Keep watching credits'"
+              >
+                <span>{{ creditSceneInfo.hasChapter ? 'Watch Credits' : 'Got it' }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+
       <!-- Online Subtitles Search Modal -->
       <div v-if="showOnlineSubModal" class="modal-backdrop" @click.self="showOnlineSubModal = false">
         <div class="online-sub-modal" @click.stop>
@@ -5952,6 +5990,7 @@ const PlayerPage = {
       updateActiveCueText();
       checkAutoSkip();
       checkCreditsShrink();
+      checkCreditsSceneAlert();
     }
 
     let hasResumedProgress = false;
@@ -6145,6 +6184,78 @@ const PlayerPage = {
       showCreditsShrink.value = false;
       creditsShrinkDismissed.value = true;
       cancelAutoAdvance();
+    }
+
+    // ─── Post-Credits & Mid-Credits Scene Prominent Alert ─────────
+    const showCreditSceneAlert = ref(false);
+    const creditSceneAlertDismissed = ref(false);
+
+    const creditSceneInfo = computed(() => {
+      // 1. Check media level credit_scenes metadata (from TMDb keywords)
+      const meta = media.value?.credit_scenes;
+      // 2. Check chapter-level credit scene markers
+      const chapterMarker = skipTimes.value?.credit_scene;
+
+      const hasMeta = meta && meta.has_credit_scene;
+      const hasChapter = !!chapterMarker;
+
+      if (!hasMeta && !hasChapter) return null;
+
+      const label = chapterMarker?.label || meta?.label || "Post-Credits Scene";
+      const targetTime = chapterMarker?.start || meta?.chapter_target || null;
+
+      return {
+        label,
+        hasChapter: !!targetTime,
+        targetTime,
+        hasMid: meta?.has_mid_credits || chapterMarker?.scene_type === "mid_credits",
+        hasPost: meta?.has_post_credits || chapterMarker?.scene_type === "post_credits",
+      };
+    });
+
+    function checkCreditsSceneAlert() {
+      if (creditSceneAlertDismissed.value || !creditSceneInfo.value) return;
+
+      const curr = displayTime.value || currentTime.value || 0;
+      const dur = displayDuration.value || (videoRef.value ? videoRef.value.duration : 0) || 0;
+      if (dur < 60) return;
+
+      let inCreditsWindow = false;
+      const edStart = skipTimes.value?.ed?.start;
+      const outroStart = media.value?.outro_start;
+
+      if (edStart && edStart > 0 && curr >= edStart) {
+        inCreditsWindow = true;
+      } else if (outroStart && outroStart > 0 && curr >= outroStart) {
+        inCreditsWindow = true;
+      } else if (curr / dur >= 0.94 || (dur - curr) <= 90) {
+        inCreditsWindow = true;
+      }
+
+      // If we already passed the target credit scene timestamp, hide the alert
+      if (creditSceneInfo.value.targetTime && curr >= creditSceneInfo.value.targetTime) {
+        showCreditSceneAlert.value = false;
+        return;
+      }
+
+      if (inCreditsWindow && !showCreditSceneAlert.value) {
+        showCreditSceneAlert.value = true;
+      }
+    }
+
+    function jumpToCreditScene() {
+      if (!creditSceneInfo.value) return;
+      if (creditSceneInfo.value.targetTime) {
+        seekTo(creditSceneInfo.value.targetTime);
+      }
+      showCreditSceneAlert.value = false;
+      creditSceneAlertDismissed.value = true;
+      addToast(`Jumped to ${creditSceneInfo.value.label}`, "success");
+    }
+
+    function dismissCreditSceneAlert() {
+      showCreditSceneAlert.value = false;
+      creditSceneAlertDismissed.value = true;
     }
 
     const isEnded = ref(false);
@@ -8214,6 +8325,10 @@ const PlayerPage = {
       confirmStillWatching,
       showCreditsShrink,
       dismissCreditsShrink,
+      showCreditSceneAlert,
+      creditSceneInfo,
+      jumpToCreditScene,
+      dismissCreditSceneAlert,
       showEpisodesDrawer,
       toggleEpisodesDrawer,
       seriesData,

@@ -31,7 +31,13 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-LABELS = {"op": "Skip Intro", "ed": "Skip Outro", "recap": "Skip Recap", "preview": "Skip Preview"}
+LABELS = {
+    "op": "Skip Intro",
+    "ed": "Skip Outro",
+    "recap": "Skip Recap",
+    "preview": "Skip Preview",
+    "credit_scene": "Post-Credits Scene",
+}
 
 
 def _load_mal_cache():
@@ -142,7 +148,18 @@ def probe_chapters_for_skips(file_path):
                 title = (tags.get("title") or tags.get("TITLE") or "").lower()
                 words = set(re.findall(r'[a-z0-9]+', title))
 
-                if any(kw in title for kw in ["preview", "next time", "next episode", "next ep", "teaser"]):
+                # Explicit post-credits / mid-credits / stinger chapter detection
+                if any(kw in title for kw in ["post-credit", "post credit", "after-credit", "after credit", "mid-credit", "mid credit", "stinger", "bonus scene"]):
+                    is_mid = any(kw in title for kw in ["mid-credit", "mid credit", "during credit", "during-credit"])
+                    skips["credit_scene"] = {
+                        "start": round(start, 2),
+                        "end": round(end, 2),
+                        "type": "credit_scene",
+                        "scene_type": "mid_credits" if is_mid else "post_credits",
+                        "label": "Mid-Credits Scene" if is_mid else "Post-Credits Scene",
+                        "source": "chapters"
+                    }
+                elif any(kw in title for kw in ["preview", "next time", "next episode", "next ep", "teaser"]):
                     skips["preview"] = {
                         "start": round(start, 2),
                         "end": round(end, 2),

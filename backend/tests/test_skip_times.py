@@ -88,6 +88,11 @@ class TestSkipTimes(unittest.TestCase):
                     "start_time": "1390.000",
                     "end_time": "1420.000",
                     "tags": {"title": "Next Episode Preview"}
+                },
+                {
+                    "start_time": "1420.000",
+                    "end_time": "1480.000",
+                    "tags": {"title": "Post-Credits Scene"}
                 }
             ]
         }
@@ -104,6 +109,10 @@ class TestSkipTimes(unittest.TestCase):
 
         self.assertIn("preview", skips)
         self.assertEqual(skips["preview"]["start"], 1390.0)
+
+        self.assertIn("credit_scene", skips)
+        self.assertEqual(skips["credit_scene"]["start"], 1420.0)
+        self.assertEqual(skips["credit_scene"]["label"], "Post-Credits Scene")
 
     @patch("backend.skip_times.requests.get")
     def test_fetch_skipdb_times_tv(self, mock_get):
