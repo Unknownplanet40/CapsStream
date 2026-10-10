@@ -225,7 +225,43 @@ class TestSubtitles(unittest.TestCase):
                 except OSError:
                     pass
 
+    def test_api_media_subtitles_endpoint(self):
+        """Verify GET /api/media/<id>/subtitles returns status, subtitle count, and track list."""
+        from flask import Flask
+        from backend.routes.media import media_bp
+
+        app = Flask(__name__)
+        app.register_blueprint(media_bp)
+        client = app.test_client()
+
+        with patch("backend.routes.media.get_media_by_id") as mock_get_media, \
+             patch("backend.subtitles.get_all_subtitles") as mock_get_subs:
+            mock_get_media.return_value = {
+                "id": 42,
+                "title": "Interstellar",
+                "file_path": "C:/Media/Interstellar.2014.mkv"
+            }
+            mock_get_subs.return_value = [
+                {
+                    "type": "external",
+                    "label": "English (SDH)",
+                    "language": "en",
+                    "is_sdh": True,
+                    "filename": "Interstellar.en.sdh.srt",
+                    "url": "/api/subtitles/42/Interstellar.en.sdh.srt"
+                }
+            ]
+
+            resp = client.get("/api/media/42/subtitles")
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data.get("has_subtitles"))
+            self.assertEqual(data.get("count"), 1)
+            self.assertEqual(len(data.get("subtitles")), 1)
+            self.assertEqual(data["subtitles"][0]["label"], "English (SDH)")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -4767,6 +4767,15 @@ const DetailPage = {
             <span v-if="media.has_multi_audio" class="multi-audio-badge" :title="media.audio_tracks ? media.audio_tracks.map(t => t.title).join(', ') : 'Multiple audio tracks available'">
               Multi-Audio
             </span>
+            <span
+              class="subtitles-meta-badge"
+              :class="{ 'has-subs': hasSubtitlesAvailable, 'no-subs': !hasSubtitlesAvailable }"
+              @click="openSubtitlesModal(media)"
+              :title="hasSubtitlesAvailable ? (subtitlesCount + ' subtitle track(s) available • Click to inspect') : 'No local or embedded subtitles detected'"
+            >
+              <i class="ph-bold ph-subtitles"></i>
+              <span>{{ hasSubtitlesAvailable ? (subtitlesCount > 1 ? subtitlesCount + ' Subs' : 'CC / Subs') : 'No Subs' }}</span>
+            </span>
           </div>
 
           <!-- Quality & Drive Badges -->
@@ -5019,6 +5028,109 @@ const DetailPage = {
             </div>
           </transition>
 
+          <!-- Subtitles Inspector Modal in DetailPage -->
+          <transition name="fade">
+            <div v-if="subtitlesModalState.active" class="moment-modal-backdrop sub-modal-backdrop" @click.stop.prevent="closeSubtitlesModal" @dblclick.stop.prevent>
+              <div class="moment-modal-card sub-modal-card" @click.stop @dblclick.stop>
+                <div class="moment-modal-header">
+                  <div class="moment-modal-title">
+                    <div class="moment-modal-icon-badge" style="background:rgba(56, 189, 248, 0.18);color:#38bdf8">
+                      <i class="ph-bold ph-subtitles"></i>
+                    </div>
+                    <div>
+                      <div class="moment-modal-heading">Subtitles & Audio Tracks</div>
+                      <div class="moment-modal-subheading">
+                        {{ subtitlesModalState.targetTitle || media.title }}
+                        <span v-if="subtitlesModalState.targetSeason && subtitlesModalState.targetEpisode">
+                          • S{{ subtitlesModalState.targetSeason.toString().padStart(2, '0') }}E{{ subtitlesModalState.targetEpisode.toString().padStart(2, '0') }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <button class="moment-modal-close" @click="closeSubtitlesModal" title="Close (Esc)">
+                    <i class="ph ph-x"></i>
+                  </button>
+                </div>
+
+                <div class="moment-modal-body sub-modal-body">
+                  <!-- Summary Banner -->
+                  <div class="sub-modal-summary-banner">
+                    <div class="sub-summary-item">
+                      <span class="sub-summary-num">{{ subtitlesModalState.subtitles.length }}</span>
+                      <span class="sub-summary-lbl">Total Tracks</span>
+                    </div>
+                    <div class="sub-summary-divider"></div>
+                    <div class="sub-summary-item">
+                      <span class="sub-summary-num">{{ subtitlesModalState.subtitles.filter(s => s.type === 'embedded').length }}</span>
+                      <span class="sub-summary-lbl">Embedded</span>
+                    </div>
+                    <div class="sub-summary-divider"></div>
+                    <div class="sub-summary-item">
+                      <span class="sub-summary-num">{{ subtitlesModalState.subtitles.filter(s => s.type === 'external').length }}</span>
+                      <span class="sub-summary-lbl">External Files</span>
+                    </div>
+                  </div>
+
+                  <!-- Subtitle List -->
+                  <div class="sub-modal-tracks-list" v-if="subtitlesModalState.subtitles && subtitlesModalState.subtitles.length">
+                    <div
+                      v-for="(sub, sIdx) in subtitlesModalState.subtitles"
+                      :key="'modal-sub-' + sIdx"
+                      class="sub-modal-track-row"
+                    >
+                      <div class="sub-modal-track-left">
+                        <div class="sub-modal-lang-avatar">
+                          {{ (sub.language || 'und').slice(0, 3).toUpperCase() }}
+                        </div>
+                        <div class="sub-modal-track-meta">
+                          <div class="sub-modal-track-title">
+                            {{ sub.label }}
+                          </div>
+                          <div class="sub-modal-track-filename" :title="sub.raw_filename || sub.filename">
+                            {{ sub.raw_filename || sub.filename }}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="sub-modal-track-badges">
+                        <span class="sub-track-type-tag" :class="sub.type === 'embedded' ? 'tag-embedded' : 'tag-external'">
+                          {{ sub.type === 'embedded' ? 'Container Stream' : 'File (.srt/.vtt)' }}
+                        </span>
+                        <span v-if="sub.is_sdh || sub.hi" class="sub-track-sdh-tag">SDH / CC</span>
+                        <span v-if="sub.forced" class="sub-track-forced-tag">Forced</span>
+                        <a
+                          v-if="sub.url"
+                          :href="sub.url"
+                          target="_blank"
+                          class="sub-stream-test-link"
+                          title="Open WebVTT stream in new tab"
+                          @click.stop
+                        >
+                          <i class="ph ph-arrow-square-out"></i>
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Empty State -->
+                  <div v-else class="sub-modal-empty-state">
+                    <div class="sub-empty-icon">
+                      <i class="ph-bold ph-subtitles-slash"></i>
+                    </div>
+                    <div class="sub-empty-title">No Subtitles Found</div>
+                    <p class="sub-empty-desc">
+                      No embedded subtitle streams or companion <code>.srt</code> / <code>.vtt</code> files were detected beside this media.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="moment-modal-footer">
+                  <button class="btn btn-secondary btn-full" @click="closeSubtitlesModal">Done</button>
+                </div>
+              </div>
+            </div>
+          </transition>
+
           <!-- Cast Section -->
           <div class="detail-section" v-if="media.cast && media.cast.length">
             <div class="detail-section-header">
@@ -5205,6 +5317,41 @@ const DetailPage = {
                     <i class="ph ph-speaker-high"></i>
                     <span>Multi-Audio Track</span>
                   </div>
+                  <div
+                    class="file-pill sub-inspect-pill"
+                    :class="{ 'has-subs': hasSubtitlesAvailable, 'no-subs': !hasSubtitlesAvailable }"
+                    @click="openSubtitlesModal(media)"
+                    title="Click to view full subtitle list and format breakdown"
+                  >
+                    <i class="ph-bold ph-subtitles"></i>
+                    <span>{{ hasSubtitlesAvailable ? (subtitlesCount + ' Subtitle Track' + (subtitlesCount > 1 ? 's' : '')) : 'No Subtitles' }}</span>
+                  </div>
+                </div>
+
+                <!-- Subtitle Tracks Detail List -->
+                <div class="file-audio-tracks file-subtitles-section" v-if="media.subtitles && media.subtitles.length">
+                  <div class="file-section-header-row">
+                    <div class="file-audio-label">SUBTITLE TRACKS ({{ media.subtitles.length }})</div>
+                    <button class="file-action-link-btn" @click="openSubtitlesModal(media)">
+                      <i class="ph ph-arrow-square-out"></i>
+                      <span>Inspect Details</span>
+                    </button>
+                  </div>
+                  <div class="sub-track-list">
+                    <div
+                      v-for="(sub, idx) in media.subtitles"
+                      :key="idx"
+                      class="sub-track-pill"
+                      :class="sub.type === 'embedded' ? 'sub-embedded' : 'sub-external'"
+                      @click="openSubtitlesModal(media)"
+                    >
+                      <span class="sub-track-type-tag">{{ sub.type === 'embedded' ? 'CONTAINER' : 'EXTERNAL' }}</span>
+                      <span class="sub-track-lang-tag">{{ (sub.language || 'und').toUpperCase() }}</span>
+                      <span class="sub-track-label">{{ sub.label }}</span>
+                      <span v-if="sub.is_sdh || sub.hi" class="sub-track-sdh-tag">SDH</span>
+                      <span v-if="sub.forced" class="sub-track-forced-tag">FORCED</span>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- Audio Tracks Detail List -->
@@ -5375,6 +5522,17 @@ const DetailPage = {
                           :title="(hasVLC ? 'Play in VLC: S' : 'Play in Default Player: S') + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0')"
                         >
                           <i :class="hasVLC ? 'ph-bold ph-traffic-cone' : 'ph-bold ph-arrow-square-out'"></i>
+                        </button>
+
+                        <!-- Per-episode subtitle inspector button -->
+                        <button
+                          v-if="ep.id && ep.is_local !== false"
+                          class="episode-skip-btn"
+                          :class="{ 'has-subs': ep.has_subtitles || (ep.subtitles && ep.subtitles.length) }"
+                          @click.stop="openSubtitlesModal(ep)"
+                          :title="'Inspect subtitles for S' + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0')"
+                        >
+                          <i class="ph-bold ph-subtitles"></i>
                         </button>
 
                         <!-- Per-episode skip marker editor -->
@@ -5707,6 +5865,65 @@ const DetailPage = {
       } catch (e) {
         addToast(e?.message || "Failed to delete moment", "error");
       }
+    }
+
+    const subtitlesModalState = reactive({
+      active: false,
+      targetTitle: "",
+      targetSeason: null,
+      targetEpisode: null,
+      subtitles: [],
+      loading: false,
+    });
+
+    const hasSubtitlesAvailable = computed(() => {
+      if (!media.value) return false;
+      if (media.value.has_subtitles !== undefined) return Boolean(media.value.has_subtitles);
+      if (Array.isArray(media.value.subtitles)) return media.value.subtitles.length > 0;
+      return false;
+    });
+
+    const subtitlesCount = computed(() => {
+      if (!media.value) return 0;
+      if (Array.isArray(media.value.subtitles)) return media.value.subtitles.length;
+      return 0;
+    });
+
+    async function openSubtitlesModal(target) {
+      const item = target || media.value;
+      if (!item) return;
+
+      subtitlesModalState.targetTitle = item.ep_title || item.title || media.value?.title || "Media";
+      subtitlesModalState.targetSeason = item.season || null;
+      subtitlesModalState.targetEpisode = item.episode || null;
+      subtitlesModalState.active = true;
+
+      // If item already has populated subtitles array, display immediately
+      if (Array.isArray(item.subtitles) && item.subtitles.length > 0) {
+        subtitlesModalState.subtitles = item.subtitles;
+      } else if (item.id) {
+        subtitlesModalState.loading = true;
+        try {
+          const res = await API.get(`/api/media/${item.id}/subtitles`);
+          subtitlesModalState.subtitles = res?.subtitles || [];
+          if (res?.subtitles) {
+            item.subtitles = res.subtitles;
+            item.has_subtitles = res.subtitles.length > 0;
+          }
+        } catch (e) {
+          subtitlesModalState.subtitles = [];
+        } finally {
+          subtitlesModalState.loading = false;
+        }
+      } else {
+        subtitlesModalState.subtitles = [];
+      }
+    }
+
+    function closeSubtitlesModal() {
+      subtitlesModalState.active = false;
+      subtitlesModalState.subtitles = [];
+      subtitlesModalState.targetTitle = "";
     }
 
     const showFixMatchModal = ref(false);
@@ -6508,6 +6725,11 @@ const DetailPage = {
       setEditMomentCategory,
       saveEditMoment,
       deleteDetailMoment,
+      subtitlesModalState,
+      hasSubtitlesAvailable,
+      subtitlesCount,
+      openSubtitlesModal,
+      closeSubtitlesModal,
     };
   },
 };

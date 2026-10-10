@@ -484,6 +484,7 @@ def api_media_detail(media_id):
 
     from backend.subtitles import get_all_subtitles
     media["subtitles"] = get_all_subtitles(media["file_path"], media_id)
+    media["has_subtitles"] = len(media["subtitles"]) > 0
     media["quality_options"] = get_media_quality_options(media_id)
 
     from backend.audio_probe import probe_audio_tracks
@@ -637,6 +638,22 @@ def api_remove_kids_override(tmdb_id):
     return jsonify({"ok": True})
 
 
+@media_bp.route("/api/media/<int:media_id>/subtitles", methods=["GET"])
+def api_media_subtitles(media_id):
+    media = get_media_by_id(media_id)
+    if not media:
+        return jsonify({"error": "Media not found"}), 404
+    from backend.subtitles import get_all_subtitles
+    subs = get_all_subtitles(media.get("file_path", ""), media_id)
+    return jsonify({
+        "media_id": media_id,
+        "title": media.get("title"),
+        "has_subtitles": len(subs) > 0,
+        "count": len(subs),
+        "subtitles": subs,
+    })
+
+
 @media_bp.route("/api/show/<int:tmdb_id>", methods=["GET"])
 def api_show_detail(tmdb_id):
     media_type = request.args.get("type", "series")
@@ -765,6 +782,13 @@ def api_show_detail(tmdb_id):
             from backend.audio_probe import probe_audio_tracks
             show["audio_tracks"] = probe_audio_tracks(first_local["file_path"])
             show["has_multi_audio"] = len(show.get("audio_tracks", [])) > 1
+            try:
+                from backend.subtitles import get_all_subtitles
+                show["subtitles"] = get_all_subtitles(first_local["file_path"], first_local.get("id"))
+                show["has_subtitles"] = len(show["subtitles"]) > 0
+            except Exception:
+                show["subtitles"] = []
+                show["has_subtitles"] = False
 
     try:
         from backend.franchises import get_media_franchise
