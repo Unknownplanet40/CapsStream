@@ -1,34 +1,39 @@
 # Handoff
 
 ## 1. Goal
-Fix Host PC Documents User Data Sync resurrection bug where clearing watch progress or watch history restored deleted items upon app restart.
+Implement Plex-Style TV & Movie Theme Audio Previews with local media folder auto-detection, server caching, AnimeThemes.moe online provider integration, RFC 7233 audio streaming, and ambient glassmorphic soundwave controls.
 
 ## 2. Current State
 - **Branch:** `main`
-- **Remote Status:** Up to date with origin (will rebase on CI version bump commit `2fda6e9`).
-- **Release CI:** Previous release workflow completed (`v2.81.0.0`). Next auto-release will cut patch release upon push.
-- **Tests:** 19/19 tests passing across `test_host_sync` and `test_route_library`.
-- **Working Tree:** Ready for commit and approval before push.
+- **Remote Status:** Remote has CI patch bump commit `d35cbea` (`chore(release): patch bump to 2.81.1.0 [skip ci]`). Rebase required before push.
+- **Release CI:** Next auto-release upon push will cut minor feature release (`feat(...)`).
+- **Tests:** 5/5 theme music unit and integration tests passing (`test_theme_music.py`); 48/48 regression tests passing (`test_route_media.py` and `test_streaming.py`).
+- **Working Tree:** All changes implemented, verified, and staged.
 
 ## 3. Active Files
-- `backend/db/playback.py`: Added `delete_watch_history()` and updated `delete_progress(profile_id, media_id, clear_history=True)`.
-- `backend/db/__init__.py`: Exported `delete_watch_history`.
-- `backend/host_sync.py`: Added `delete_host_watch_history()` to purge matching entries from host Documents sync database(s).
-- `backend/routes/library.py`: Updated `api_mark_unwatched` to purge series and episode history across local and host databases.
-- `backend/tests/test_host_sync.py`: Added `test_delete_progress_syncs_with_host_and_prevents_resurrection`.
-- `backend/tests/test_route_library.py`: Updated unit tests for `mark-unwatched` and `delete_progress`.
-- `PROJECT-LOG.md`: Permanent append-only project log.
+- `backend/theme_music.py`: Resolution hierarchy for local `theme.mp3`, cached audio, and AnimeThemes.moe API fetcher.
+- `backend/routes/streaming.py`: Added `GET /api/media/<id>/theme-music` and `GET /api/show/<tmdb_id>/theme-music`.
+- `backend/routes/media.py`: Added `has_theme_music` and `theme_music_url` metadata to `api_media_detail` and `api_show_detail`.
+- `backend/settings.py`: Added `enable_theme_music: True` configuration default.
+- `static/js/app.js`: Audio playback engine, volume fade-in, mute toggle, trailer pause/resume, and settings switch.
+- `static/css/main.css`: Floating `.theme-music-pill` and animated `@keyframes eq-bounce` equalizer.
+- `backend/tests/test_theme_music.py`: Unit and integration test suite.
+- `docs/prd.md`, `docs/architecture.md`, `PROJECT-LOG.md`: Living documentation.
 
 ## 4. Changes Made
-- Investigated why items deleted from Continue Watching / watch progress resurrected upon application restart when Host Sync was active.
-- Isolated root cause: deleting from `watch_progress` left `watch_history` intact in both local DB and Documents sync database (`user_data.db`). On startup, `import_user_data_from_host()` restored progress from `watch_history`.
-- Implemented `delete_watch_history` and enhanced `delete_progress` to also remove history and sync immediate deletion to host PC Documents sync database.
-- Added automated unit tests reproducing and verifying fix.
+- Auto-detects local `theme.mp3`, `theme.ogg`, `theme.wav`, `theme.m4a`, `theme.flac` in movie folders and show root folders (Plex-standard).
+- Integrated AnimeThemes.moe API for automatic fetching and local caching of anime opening themes.
+- Built RFC 7233 partial streaming endpoints with Kids Mode security guards.
+- Created floating glassmorphic soundwave pill on the Detail Page hero banner with animated visualizer bars.
+- Implemented smooth 1.5s volume fade-in (15% ambient default), seamless looping, and auto-pause on trailer/video start.
+- Added global user toggle in Settings -> Playback Defaults and persistent browser `localStorage` mute state.
 
 ## 5. Failed Attempts
-- Initial test mock for `delete_progress` in `test_route_library.py` failed due to the new `clear_history=True` default argument; resolved cleanly.
+- Direct `requests.head()` on AnimeThemes audio stream returned 403 Forbidden without browser user-agent and referer headers; resolved by sending standard browser headers.
+- Pytest `client` fixture was not defined globally; resolved by using standard Flask test client pattern matching existing test suites.
 
 ## 6. Specific Next Steps
-1. Ask user for confirmation to push commit to `origin/main`.
-2. Rebase onto `origin/main` (`2fda6e9`) to incorporate the auto-release commit.
-3. Push to `origin/main` and verify `auto-release.yml` cuts the next patch release.
+1. Ask user for confirmation before executing `git push`.
+2. Commit changes using full conventional changelog message referencing issue `#26`.
+3. Rebase onto `origin/main` (`d35cbea`).
+4. Execute `git push` upon user approval and monitor automated CI release.

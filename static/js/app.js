@@ -198,6 +198,7 @@ const store = reactive({
   tvFocus: { rowIndex: 0, cardIndex: 0 },
   playback: {
     enable_trailers: true,
+    enable_theme_music: true,
   },
   fourKWarningModal: {
     show: false,
@@ -4682,7 +4683,7 @@ const DetailPage = {
         v-if="trailerModalUrl"
         :url="trailerModalUrl"
         :title="trailerModalTitle"
-        @close="trailerModalUrl = null"
+        @close="trailerModalUrl = null; resumeThemeMusic()"
       />
 
       <!-- Backdrop -->
@@ -4716,6 +4717,24 @@ const DetailPage = {
             @click.stop="activeBackdropIdx = idx"
             :title="'Backdrop ' + (idx + 1)"
           ></div>
+        </div>
+
+        <!-- Floating Theme Music Soundwave Pill -->
+        <div
+          v-if="media.has_theme_music && store.playback?.enable_theme_music !== false"
+          class="theme-music-pill"
+          :class="{ 'is-playing': isThemeMusicPlaying, 'is-muted': isThemeMusicMuted }"
+          @click="toggleThemeMusicMute"
+          :title="isThemeMusicMuted ? 'Theme Music Muted • Click to play' : 'Theme Music Playing • Click to mute'"
+        >
+          <div class="theme-music-equalizer">
+            <span class="eq-bar bar-1"></span>
+            <span class="eq-bar bar-2"></span>
+            <span class="eq-bar bar-3"></span>
+            <span class="eq-bar bar-4"></span>
+          </div>
+          <span class="theme-music-label">{{ isThemeMusicMuted ? 'Muted' : 'Theme' }}</span>
+          <i :class="isThemeMusicMuted ? 'ph-bold ph-speaker-slash' : 'ph-bold ph-speaker-high'" class="theme-music-icon"></i>
         </div>
       </div>
 
@@ -6007,6 +6026,94 @@ const DetailPage = {
 
     const activeBackdrop = computed(() => backdrops.value[activeBackdropIdx.value] || media.value?.backdrop_path || null);
 
+    // ── Theme Music Audio Previews ─────────────────────────────
+    let themeAudioEl = null;
+    let themeFadeTimer = null;
+    const isThemeMusicPlaying = ref(false);
+    const isThemeMusicMuted = ref(localStorage.getItem("capsstream_theme_music_muted") === "true");
+
+    function stopThemeMusic() {
+      if (themeFadeTimer) {
+        clearInterval(themeFadeTimer);
+        themeFadeTimer = null;
+      }
+      if (themeAudioEl) {
+        try {
+          themeAudioEl.pause();
+          themeAudioEl.src = "";
+          themeAudioEl.load();
+        } catch (e) {}
+        themeAudioEl = null;
+      }
+      isThemeMusicPlaying.value = false;
+    }
+
+    function initThemeMusic(url) {
+      stopThemeMusic();
+      if (!url || store.playback?.enable_theme_music === false) return;
+
+      themeAudioEl = new Audio(url);
+      themeAudioEl.loop = true;
+      themeAudioEl.volume = 0;
+      themeAudioEl.muted = isThemeMusicMuted.value;
+
+      themeAudioEl.play().then(() => {
+        isThemeMusicPlaying.value = true;
+        if (!isThemeMusicMuted.value) {
+          // Smooth fade-in from 0 to 0.15 over 1.5s (15 steps)
+          let currentVol = 0;
+          const targetVol = 0.15;
+          const step = targetVol / 15;
+          themeFadeTimer = setInterval(() => {
+            if (!themeAudioEl) {
+              clearInterval(themeFadeTimer);
+              return;
+            }
+            currentVol = Math.min(targetVol, currentVol + step);
+            themeAudioEl.volume = currentVol;
+            if (currentVol >= targetVol) {
+              clearInterval(themeFadeTimer);
+              themeFadeTimer = null;
+            }
+          }, 100);
+        }
+      }).catch((e) => {
+        // Autoplay may be blocked by browser policy until user interacts
+        isThemeMusicPlaying.value = false;
+      });
+    }
+
+    function pauseThemeMusic() {
+      if (themeAudioEl && !themeAudioEl.paused) {
+        try { themeAudioEl.pause(); } catch (e) {}
+        isThemeMusicPlaying.value = false;
+      }
+    }
+
+    function resumeThemeMusic() {
+      if (themeAudioEl && themeAudioEl.paused && !isThemeMusicMuted.value && store.playback?.enable_theme_music !== false) {
+        try {
+          themeAudioEl.play().then(() => { isThemeMusicPlaying.value = true; }).catch(() => {});
+        } catch (e) {}
+      }
+    }
+
+    function toggleThemeMusicMute() {
+      isThemeMusicMuted.value = !isThemeMusicMuted.value;
+      localStorage.setItem("capsstream_theme_music_muted", isThemeMusicMuted.value ? "true" : "false");
+      if (themeAudioEl) {
+        themeAudioEl.muted = isThemeMusicMuted.value;
+        if (!isThemeMusicMuted.value) {
+          themeAudioEl.volume = 0.15;
+          if (themeAudioEl.paused) {
+            themeAudioEl.play().then(() => { isThemeMusicPlaying.value = true; }).catch(() => {});
+          }
+        }
+      } else if (!isThemeMusicMuted.value && media.value?.theme_music_url) {
+        initThemeMusic(media.value.theme_music_url);
+      }
+    }
+
     const backdropStyle = computed(() => ({
       transform: `translate3d(${parallaxX.value}px, ${parallaxY.value + scrollOffsetY.value}px, 0) scale(1.06)`,
       transition: "transform 0.15s cubic-bezier(0.2, 0, 0.2, 1)"
@@ -6066,6 +6173,14 @@ const DetailPage = {
         media.value = loadedMedia;
         activeBackdropIdx.value = 0;
         startBackdropCycle();
+
+        // Start theme music audio preview if available
+        if (loadedMedia && loadedMedia.theme_music_url) {
+          initThemeMusic(loadedMedia.theme_music_url);
+        } else {
+          stopThemeMusic();
+        }
+
         if (sortedSeasons.value.length) {
           const reqSeason = route.query.season ? String(route.query.season) : null;
           if (reqSeason && sortedSeasons.value.includes(reqSeason)) {
@@ -6105,6 +6220,7 @@ const DetailPage = {
     });
     onUnmounted(() => {
       clearLoadingTimers();
+      stopThemeMusic();
       if (backdropCycleTimer) clearInterval(backdropCycleTimer);
       window.removeEventListener("scroll", onScroll);
     });
@@ -6399,6 +6515,7 @@ const DetailPage = {
         if (!isInternetAvailable()) return;
         if (res && res.embed_url) {
           unlockAchievement("trailer_buff");
+          pauseThemeMusic();
           trailerModalUrl.value = res.embed_url;
           trailerModalTitle.value = `${media.value.title} — ${res.title || 'Official Trailer'}`;
         } else {
@@ -6746,6 +6863,10 @@ const DetailPage = {
       subtitlesCount,
       openSubtitlesModal,
       closeSubtitlesModal,
+      isThemeMusicPlaying,
+      isThemeMusicMuted,
+      toggleThemeMusicMute,
+      resumeThemeMusic,
     };
   },
 };
@@ -8238,6 +8359,17 @@ const SettingsPage = {
               </div>
               <label class="toggle-switch">
                 <input type="checkbox" v-model="form.playback.enable_trailers" id="setting-trailers-toggle" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row" id="setting-theme-music">
+              <div class="settings-label-container">
+                <div class="settings-label">Theme Music Previews</div>
+                <div class="settings-desc">Softly play iconic TV and movie theme songs in the background when browsing title detail pages.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="form.playback.enable_theme_music" id="setting-theme-music-toggle" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -10791,6 +10923,7 @@ const SettingsPage = {
         auto_fullscreen: false,
         start_muted: false,
         enable_trailers: true,
+        enable_theme_music: true,
       },
       host_sync: {
         enabled: false,

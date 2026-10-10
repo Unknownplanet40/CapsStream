@@ -51,3 +51,26 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_shared ON bookmarks(media_id, is_shared
   - `ProfilesPage`: Adds "Saved Moments" gallery tab with search and category filtering.
 - **Styling (`static/css/main.css`)**:
   - CSS styles for `.moment-seekbar-pin`, `.moment-hover-card`, `.moment-toast`, and `.moment-drawer`.
+
+---
+
+# System Architecture: Theme Audio Previews
+
+## 1. Resolution & Cache Service (`backend/theme_music.py`)
+- Directory: `data/metadata/theme_music/`.
+- Resolves theme audio via `find_local_theme_file()`, `find_cached_theme_file()`, and `fetch_animethemes_audio()`.
+- Supports audio extensions `.mp3`, `.ogg`, `.m4a`, `.wav`, `.flac`.
+
+## 2. Streaming Endpoints (`backend/routes/streaming.py`)
+- `GET /api/media/<int:media_id>/theme-music`: Streams audio file for movie or episode with RFC 7233 byte-range support.
+- `GET /api/show/<int:tmdb_id>/theme-music`: Streams audio file for TV or anime series.
+- `api_media_detail` & `api_show_detail` in `backend/routes/media.py`: Returns `has_theme_music: bool` and `theme_music_url: str`.
+
+## 3. Frontend Audio Controller & UI
+- **Detail Page Component (`static/js/app.js`)**:
+  - Audio controller: HTML5 `Audio()` instance with 1.5s volume fade-in from 0 to 15%.
+  - Looping: Continuous playback while viewing detail page.
+  - Event hooks: Pauses on trailer launch and cleans up completely on page leave (`onUnmounted`).
+  - `.theme-music-pill`: Floating glassmorphic soundwave pill with animated CSS equalizer bars and mute toggle.
+  - Global toggle in Settings (`playback.enable_theme_music`) and localStorage mute preference.
+

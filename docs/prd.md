@@ -34,3 +34,23 @@ CapsStream Moments is an interactive scene bookmarking, note annotation, and see
 - **Transcode Fallback**: If browser Canvas is tainted due to CORS/HLS streaming, on-demand server thumbnail generation via FFmpeg provides a reliable fallback.
 - **Zero Foreign Key Violations**: Cascading SQLite deletes when media or profiles are removed.
 - **Responsive Layout**: Designed for mobile touch screens (<640px), tablets (768px), desktop displays (1024px+), and TV Leanback remote navigation.
+
+---
+
+# Product Requirements Document (PRD): Plex-Style Theme Audio Previews
+
+## 1. Executive Summary
+Plex-Style Theme Audio Previews bring ambient audio immersion to CapsStream. When browsing a TV show, anime, or movie detail page, iconic opening theme songs play softly in the background with ambient ducking, smooth volume fade-in, and interactive glassmorphic soundwave controls.
+
+## 2. Audio Source Resolution Hierarchy
+1. **Local Media Asset Standard (Plex Compatibility)**: Detects `theme.mp3`, `theme.ogg`, `theme.wav`, `theme.m4a`, or `theme.flac` located in the movie directory or show root folder (e.g. `<show_dir>/theme.mp3`).
+2. **Server Metadata Cache**: Checks `data/metadata/theme_music/{key}.{ext}` for previously fetched audio.
+3. **AnimeThemes.moe Auto-Fetch**: For anime series, automatically looks up the opening theme (OP1) audio track via AnimeThemes.moe API, streams it, and caches it locally.
+
+## 3. Playback & UI Behavior
+- **Ambient Default Volume**: 15% volume with smooth 1.5-second fade-in to prevent sudden jarring audio.
+- **Seamless Looping**: Seamless loop while user browses episodes, cast, and franchise details.
+- **Auto-Ducking & Pause**: Instantly pauses audio when trailer video or media playback starts; resumes smoothly on modal close.
+- **Floating Soundwave Pill**: Glassmorphic pill in hero banner displaying animated 4-bar equalizer, mute indicator, and click-to-mute toggle.
+- **Global & Local Preferences**: Global toggle in Settings -> Playback Defaults; persistent mute state remembered in browser `localStorage`.
+

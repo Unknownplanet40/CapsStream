@@ -69,7 +69,8 @@ DEFAULT_CONFIG = {
         "resume_behavior": "ask",
         "auto_fullscreen": False,
         "start_muted": False,
-        "enable_trailers": True
+        "enable_trailers": True,
+        "enable_theme_music": True
     },
     "profiles": {
         "max_profiles": 8

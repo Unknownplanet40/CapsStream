@@ -543,6 +543,15 @@ def api_media_detail(media_id):
         "tooltip": "Play in VLC Media Player with live progress tracking" if has_vlc else "Play using default device player"
     }
 
+    try:
+        from backend.theme_music import resolve_theme_music
+        theme_info = resolve_theme_music(media)
+        media["has_theme_music"] = bool(theme_info.get("has_theme"))
+        media["theme_music_url"] = f"/api/media/{media_id}/theme-music" if theme_info.get("has_theme") else None
+    except Exception:
+        media["has_theme_music"] = False
+        media["theme_music_url"] = None
+
     return jsonify(media)
 
 
@@ -823,6 +832,15 @@ def api_show_detail(tmdb_id):
         show["similar_items"] = get_similar_media(show.get("id"), limit=16, profile_id=pid)
     except Exception:
         show["similar_items"] = []
+
+    try:
+        from backend.theme_music import resolve_theme_music
+        theme_info = resolve_theme_music(show)
+        show["has_theme_music"] = bool(theme_info.get("has_theme"))
+        show["theme_music_url"] = f"/api/show/{tmdb_id}/theme-music" if theme_info.get("has_theme") else None
+    except Exception:
+        show["has_theme_music"] = False
+        show["theme_music_url"] = None
 
     return jsonify(show)
 

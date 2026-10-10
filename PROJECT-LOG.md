@@ -184,3 +184,28 @@ Fixed at the root by:
 - `backend/tests/test_route_library.py`: Updated mock expectations and verified route tests.
 
 ---
+
+## October 11 at 1:04 AM
+### Asked
+Can we do the Plex-Style TV & Movie Theme Audio Previews? Automatically fetch and softly play iconic TV/movie theme songs in the background when browsing a show's detail page (with ambient volume ducking and mute toggle).
+
+### Decision
+Architected a multi-tiered theme audio resolution system following Plex conventions:
+1. Checked local directory for `theme.mp3`, `theme.ogg`, `theme.wav`, `theme.m4a`, `theme.flac` (Plex Local Media Assets standard) in movie directories or TV show root directories.
+2. Cached server storage under `data/metadata/theme_music/`.
+3. Auto-fetched online anime opening theme (OP1) tracks via AnimeThemes.moe API and cached locally.
+4. Added RFC 7233 byte-range streaming endpoints `GET /api/media/<id>/theme-music` and `GET /api/show/<tmdb_id>/theme-music`.
+5. Created a floating glassmorphic soundwave pill (`.theme-music-pill`) on the detail page hero banner with 4 animated equalizer bars, ambient 15% volume fade-in over 1.5s, click-to-mute, trailer pause/resume hooks, complete `onUnmounted` teardown, global Playback Settings toggle, and localStorage mute persistence.
+>why: Delivers Plex-grade ambient audio immersion when exploring titles while maintaining zero latency for local library files, avoiding heavy external scrapers, and providing smooth volume fading and mute controls.
+
+### Shipped
+- `backend/theme_music.py`: Created theme music resolution engine with local folder scanning, disk caching, and AnimeThemes.moe integration.
+- `backend/routes/streaming.py`: Added `/api/media/<id>/theme-music` and `/api/show/<tmdb_id>/theme-music` endpoints.
+- `backend/routes/media.py`: Added `has_theme_music` and `theme_music_url` metadata to `api_media_detail` and `api_show_detail`.
+- `backend/settings.py`: Added `enable_theme_music: True` default to `playback` configuration.
+- `static/js/app.js`: Added theme audio lifecycle controller (`initThemeMusic`, `stopThemeMusic`, `pauseThemeMusic`, `resumeThemeMusic`, `toggleThemeMusicMute`), hero soundwave pill, settings toggle in `SettingsPage`, and trailer modal pause/resume hooks.
+- `static/css/main.css`: Added `.theme-music-pill`, animated `.theme-music-equalizer` with `@keyframes eq-bounce`, and responsive mobile styles.
+- `backend/tests/test_theme_music.py`: Added 5 unit and integration tests covering local folder detection, cache lookup, AnimeThemes query parsing, and streaming routes.
+- `docs/prd.md` & `docs/architecture.md`: Updated living documentation.
+
+---

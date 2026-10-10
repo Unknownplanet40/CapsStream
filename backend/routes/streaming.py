@@ -522,3 +522,51 @@ def api_update_skip_timestamps(media_id):
     if ok:
         return jsonify({"ok": True, "saved": cleaned})
     return jsonify({"error": "Failed to update skip timestamps"}), 400
+
+
+@streaming_bp.route("/api/media/<int:media_id>/theme-music")
+def api_media_theme_music(media_id):
+    """Streams theme audio for a specific media item (movie or episode)."""
+    media = get_media_by_id(media_id)
+    if not media:
+        abort(404, description="Media not found")
+
+    guard = kids_guard_media(media, deep=True)
+    if guard:
+        return guard
+
+    from backend.theme_music import resolve_theme_music
+    resolved = resolve_theme_music(media)
+    if not resolved.get("has_theme") or not resolved.get("file_path"):
+        abort(404, description="Theme music not available")
+
+    return stream_file(resolved["file_path"])
+
+
+@streaming_bp.route("/api/show/<int:tmdb_id>/theme-music")
+def api_show_theme_music(tmdb_id):
+    """Streams theme audio for a TV show or anime series by TMDB ID."""
+    from backend.db import get_media_by_tmdb, get_media_by_id
+    episodes = get_media_by_tmdb(tmdb_id)
+    media = None
+    if episodes:
+        media = dict(episodes[0])
+    else:
+        single = get_media_by_id(tmdb_id)
+        if single:
+            media = dict(single)
+
+    if not media:
+        abort(404, description="Show not found")
+
+    guard = kids_guard_media(media, deep=True)
+    if guard:
+        return guard
+
+    from backend.theme_music import resolve_theme_music
+    resolved = resolve_theme_music(media)
+    if not resolved.get("has_theme") or not resolved.get("file_path"):
+        abort(404, description="Theme music not available")
+
+    return stream_file(resolved["file_path"])
+

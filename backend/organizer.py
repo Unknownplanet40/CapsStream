@@ -105,6 +105,7 @@ def get_organizer_library_roots(cfg: Dict[str, Any]) -> Dict[str, str]:
 
 # Constants
 SUBTITLE_EXTS = {".srt", ".ass", ".vtt", ".sub", ".idx"}
+THEME_AUDIO_EXTS = {".mp3", ".ogg", ".wav", ".m4a", ".flac"}
 INCOMPLETE_EXTS = {".part", ".!ut", ".crdownload", ".tmp", ".downloading", ".aria2", ".temp"}
 CLUTTER_EXTS = {".nfo", ".txt", ".url", ".website", ".lnk", ".exe", ".bat", ".cmd", ".md"}
 SAMPLE_SIZE_THRESHOLD_BYTES = 50 * 1024 * 1024  # 50 MB
@@ -1060,6 +1061,78 @@ def find_companion_subtitles(media_file_path: str) -> List[str]:
     return sorted_subs
 
 
+def find_companion_theme_song(media_file_path: str, incoming_dir: Optional[str] = None) -> Optional[str]:
+    """
+    Find companion theme song file for a media file.
+    Searches for:
+      1. Explicit matching: <Media_Stem>.theme_song.<ext> or <Clean_Title>.theme_song.<ext>
+         (allows placing files directly in Incoming without subfolders without mixing!)
+      2. In the same directory: theme.<ext> or theme_song.<ext>
+    """
+    parent_dir = os.path.dirname(media_file_path)
+    if not os.path.isdir(parent_dir):
+        return None
+
+    media_stem = os.path.splitext(os.path.basename(media_file_path))[0].lower()
+    m_clean_res = _clean_name(media_stem)
+    m_clean = (m_clean_res[0] if isinstance(m_clean_res, tuple) else str(m_clean_res)).strip().lower()
+
+    dirs_to_check = [parent_dir]
+    if incoming_dir and os.path.isdir(incoming_dir) and os.path.abspath(incoming_dir) not in [os.path.abspath(d) for d in dirs_to_check]:
+        dirs_to_check.append(incoming_dir)
+
+    for directory in dirs_to_check:
+        try:
+            for entry in os.listdir(directory):
+                ep_path = os.path.join(directory, entry)
+                if not os.path.isfile(ep_path):
+                    continue
+                entry_stem, entry_ext = os.path.splitext(entry)
+                if entry_ext.lower() not in THEME_AUDIO_EXTS:
+                    continue
+
+                stem_l = entry_stem.lower()
+
+                # 1. Explicit medianame.theme_song.ext match (e.g. Inception (2010).theme_song.mp3)
+                if stem_l.endswith(".theme_song") or stem_l.endswith("-theme_song"):
+                    prefix = stem_l[:-11].strip()
+                    p_clean_res = _clean_name(prefix)
+                    p_clean = (p_clean_res[0] if isinstance(p_clean_res, tuple) else str(p_clean_res)).strip().lower()
+                    if prefix == media_stem or (m_clean and p_clean == m_clean) or prefix in media_stem:
+                        return ep_path
+
+                # 2. If media is in its own isolated subfolder, accept theme.ext or theme_song.ext
+                is_subfolder = incoming_dir and os.path.abspath(parent_dir) != os.path.abspath(incoming_dir)
+                if is_subfolder and stem_l in ("theme", "theme_song"):
+                    return ep_path
+        except OSError:
+            pass
+
+    return None
+
+
+def build_theme_destination_path(theme_src: str, destination_media_path: str) -> str:
+    """
+    Build destination path for companion theme song.
+    For movies: Moves to the movie directory as <Movie Name (Year)>.theme_song.<ext>
+    For TV shows: Moves to the show root directory (parent of Season folder) as theme.<ext> or <Show Name>.theme_song.<ext>
+    """
+    dest_dir = os.path.dirname(destination_media_path)
+    dest_stem = os.path.splitext(os.path.basename(destination_media_path))[0]
+    _, ext = os.path.splitext(theme_src)
+
+    # If TV show inside Season folder (e.g. TV Shows/Show/Season 01/ep.mkv), place theme in show root (TV Shows/Show/)
+    parent_of_dest = os.path.dirname(dest_dir)
+    if os.path.basename(dest_dir).lower().startswith("season "):
+        target_dir = parent_of_dest
+    else:
+        target_dir = dest_dir
+
+    # Standard naming: <Canonical Media Name>.theme_song.<ext> (Plex and CapsStream both support this)
+    return os.path.join(target_dir, f"{dest_stem}.theme_song{ext.lower()}")
+
+
+
 # ─── Undo & History ────────────────────────────────────────────────────────────
 
 def record_history(batch_id: str, operations: List[Dict[str, Any]], history_file: Optional[str] = None):
@@ -1210,6 +1283,8 @@ def scan_incoming_for_preview(
             is_locked = is_file_locked(fpath)
             is_settled = is_file_settled(fpath)
             companions = find_companion_subtitles(fpath)
+            companion_theme = find_companion_theme_song(fpath, incoming_dir=incoming_dir)
+            companion_theme_dst = build_theme_destination_path(companion_theme, dest_path) if companion_theme else None
 
             # Build companion subtitle plan
             subtitle_plan = []
@@ -1248,6 +1323,8 @@ def scan_incoming_for_preview(
                 "is_settled": is_settled,
                 "subtitles": companions,
                 "subtitle_plan": subtitle_plan,
+                "theme_song": companion_theme,
+                "theme_song_destination": companion_theme_dst,
                 "destination_exists": dest_exists,
                 "route_reason": resolved.get("route_reason", "region-off"),
                 "origin_countries": resolved.get("origin_countries", []),
@@ -1324,6 +1401,22 @@ def execute_organization_plan(
                     })
                 else:
                     logger.warning(f"Could not organize companion subtitle {sub_src} -> {sub_dst}: {s_err}")
+
+            # Organize companion theme song if found
+            theme_src = item.get("theme_song")
+            if theme_src and os.path.isfile(theme_src):
+                theme_dst = item.get("theme_song_destination") or build_theme_destination_path(theme_src, dst)
+                t_ok, t_action, t_err = execute_file_operation(theme_src, theme_dst, mode=mode)
+                if t_ok:
+                    operations.append({
+                        "source": theme_src,
+                        "destination": theme_dst,
+                        "action": t_action,
+                        "type": "theme_song"
+                    })
+                    logger.info(f"Organized companion theme song {theme_src} -> {theme_dst} ({t_action})")
+                else:
+                    logger.warning(f"Could not organize companion theme song {theme_src} -> {theme_dst}: {t_err}")
 
         else:
             failed_items.append({"source": src, "error": err or "Operation failed"})
