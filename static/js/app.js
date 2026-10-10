@@ -5345,9 +5345,9 @@ const DetailPage = {
                       :class="sub.type === 'embedded' ? 'sub-embedded' : 'sub-external'"
                       @click="openSubtitlesModal(media)"
                     >
-                      <span class="sub-track-type-tag">{{ sub.type === 'embedded' ? 'CONTAINER' : 'EXTERNAL' }}</span>
+                      <span class="sub-track-type-tag">{{ sub.type === 'embedded' ? 'EMBEDDED' : 'EXTERNAL' }}</span>
                       <span class="sub-track-lang-tag">{{ (sub.language || 'und').toUpperCase() }}</span>
-                      <span class="sub-track-label">{{ sub.label }}</span>
+                      <span class="sub-track-label">{{ sub.language_name || sub.label }}</span>
                       <span v-if="sub.is_sdh || sub.hi" class="sub-track-sdh-tag">SDH</span>
                       <span v-if="sub.forced" class="sub-track-forced-tag">FORCED</span>
                     </div>

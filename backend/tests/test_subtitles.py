@@ -29,7 +29,7 @@ class TestSubtitles(unittest.TestCase):
             ("Show.S01E01.Japanese.vtt", "Japanese", "jpn"),
             ("Film.fr.srt", "French", "fr"),
             ("Video.ger.srt", "German", "ger"),
-            ("Anime.tag.srt", "Tagalog", "tag"),
+            ("Anime.tag.srt", "Filipino", "tag"),
         ]
 
         for fname, expected_lang_name, expected_code in test_cases:

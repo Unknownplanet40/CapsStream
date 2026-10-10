@@ -21,6 +21,7 @@ SUB_CACHE_DIR = os.path.join(BASE_DIR, "data", "metadata", "subtitles")
 from backend.sub_naming import (
     LANG_NAMES,
     LANG_MAP,
+    LANG_ALIASES,
     parse_filename,
     display_label,
     normalize_lang,
@@ -363,10 +364,14 @@ def get_all_subtitles(video_path, media_id):
                     if parent_folder_name.lower() not in label.lower():
                         label = f"{label} ({parent_folder_name})"
 
+                canon_lang = LANG_ALIASES.get(parsed.lang, parsed.lang)
+                lang_disp = LANG_MAP.get(canon_lang) or LANG_NAMES.get(parsed.lang) or (parsed.lang.upper() if parsed.lang != "und" else "Unknown Language")
+
                 sub_list.append({
                     "type": "external",
                     "label": label,
-                    "language": parsed.lang,
+                    "language": canon_lang,
+                    "language_name": lang_disp,
                     "forced": parsed.is_forced,
                     "hi": parsed.is_hi,
                     "is_sdh": parsed.is_hi,
@@ -406,14 +411,21 @@ def get_all_subtitles(video_path, media_id):
                     codec = s.get("codec_name", "sub").upper()
 
                     is_sdh = "sdh" in title_tag.lower() or "hearing" in title_tag.lower()
-                    lang_disp = LANG_NAMES.get(lang, lang.upper())
+                    canon_lang = LANG_ALIASES.get(lang, lang)
+                    lang_disp = LANG_MAP.get(canon_lang) or LANG_NAMES.get(lang) or (lang.upper() if lang != "und" else "Unknown Language")
 
-                    label = f"Embedded: {lang_disp}"
+                    # Primary label starts directly with full human-friendly language name
                     if title_tag:
-                        label += f" — {title_tag}"
-                    elif codec != "SUB":
-                        label += f" ({codec})"
-                    if is_sdh and "[SDH]" not in label:
+                        if lang_disp.lower() in title_tag.lower():
+                            label = title_tag
+                        else:
+                            label = f"{lang_disp} — {title_tag}"
+                    else:
+                        label = lang_disp
+                        if codec != "SUB":
+                            label += f" ({codec})"
+
+                    if is_sdh and "[SDH]" not in label and "(SDH)" not in label and "(HI)" not in label:
                         label += " [SDH]"
 
                     sub_list.append({
@@ -421,10 +433,11 @@ def get_all_subtitles(video_path, media_id):
                         "stream_index": s.get("index"),
                         "sub_index": sub_idx,
                         "label": label,
-                        "language": lang,
+                        "language": canon_lang,
+                        "language_name": lang_disp,
                         "is_sdh": is_sdh,
                         "filename": f"embedded_{s.get('index')}.vtt",
-                        "raw_filename": title_tag or f"Embedded Track {sub_idx+1}",
+                        "raw_filename": title_tag or f"Embedded Track {sub_idx+1} ({lang_disp})",
                         "url": f"/api/subtitles/{media_id}/embedded/{s.get('index')}.vtt"
                     })
                     sub_idx += 1
