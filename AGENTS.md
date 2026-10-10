@@ -145,3 +145,43 @@ Whenever the user asks to commit, release, or save changes in this project, foll
    - Inspect [`.agents/rules/`](.agents/rules/) (including [`project-log.md`](.agents/rules/project-log.md)) and [`.agents/skills/`](.agents/skills/) (including `decision-log`).
    - Append to [`PROJECT-LOG.md`](PROJECT-LOG.md) before session end or after shipping changes (`### Asked`, `### Decision` with `>why:`, `### Shipped`; append-only so nothing gets lost).
    - On new sessions or when resuming, always check `handoff.md`, `PROJECT-LOG.md`, and `.agents/` first to eliminate hallucinations and continue seamlessly from the exact state.
+---
+
+## 8. Discovery & Clarification (`/grill-me` & `/plan`)
+When scoping a new feature, major improvement, or bug fix:
+- **Recommend `/grill-me`:** Run an interactive discovery interview. Deeply interrogate requirements, probe for edge cases, identify target audience constraints, and clarify exact user goals before writing code.
+- **Do Not Stop Until User is Satisfied:** Never cut the `/grill-me` interview short or assume completeness prematurely. Continue probing into technical edge cases, UX trade-offs, and failure states until the user explicitly confirms they are satisfied and ready to proceed.
+- **Recommend `/plan`:** Break down complex implementations into phased, verifiable steps once discovery is approved.
+
+---
+
+## 9. Workflows & Lifecycle Rules
+All active rules are defined in `.agents/rules/`. Pay close attention to:
+
+### A. New Feature Lifecycle (`.agents/rules/new-feature.md`)
+- Triggered by `/new-feature`, `/add-feature`, or natural language requests to add functionality.
+- Governs the full quality gate: `/grill-me` (must loop until user confirms satisfaction) ➔ `/plan` ➔ GitHub Issue ➔ Ponytail minimal implementation ➔ Runnable self-check & zero regression ➔ Conventional commit & release.
+- Guide located at [`docs/feature-workflow.md`](docs/feature-workflow.md).
+
+### B. Root-Cause Bug Fixing (`.agents/rules/fix-bug.md`)
+- Triggered by `/fix-bug`, `/debug`, or natural language bug reports.
+- Governs root-cause resolution: `/grill-me` discovery (repro steps & environment) ➔ Map to `.github/ISSUE_TEMPLATE/bug_report.yml` ➔ Grep all callers ➔ Write failing reproduction check ➔ Ponytail root fix ➔ Zero regression verification ➔ Conventional `fix(...)` commit.
+- Guide located at [`docs/bug-fix-workflow.md`](docs/bug-fix-workflow.md).
+
+### C. UI/UX Redesign & Polish (`.agents/rules/ui-redesign.md`)
+- Triggered by `/fix-ui`, `/change-ui`, `/redesign-ui`, or UI polish requests.
+- Governs visual redesigns: `/grill-me` aesthetic discovery ➔ 4-layer UI skill orchestration ➔ Responsive verification (<640px, 768px, 1024px) ➔ Conventional `style(...)`/`feat(...)` commit.
+- Guide located at [`docs/ui-workflow.md`](docs/ui-workflow.md).
+
+### D. ADHD Output Style (`.agents/rules/adhd-output.md`)
+- Defined in `.agents/rules/adhd-output.md` (`trigger: always_on`).
+- Shapes responses for direct actionability: next action/command first, numbered single-action steps, concrete time estimates, visible wins, and zero conversational fluff.
+
+---
+
+## 10. UI / UX & Design Skills Orchestration
+`.agents/skills/` holds this project's 18 design and agent skills. For any UI work, orchestrate them systematically across 4 phases:
+1. **Audit (Anti-Slop):** Use `design-taste-frontend` and `redesign-existing-projects` to eliminate cheap AI tropes (overused purple gradients, floaty unanchored cards, low typographic hierarchy).
+2. **Tokens & Layout:** Use `design-system` and `ui-styling` for strict token architecture and accessible components.
+3. **Polish & Micro-interactions:** Use `make-interfaces-feel-better`, `high-end-visual-design`, and `better-icons` for precise motion (150–200ms), optical alignment, and SVG icons.
+4. **Accessibility Check:** Use `web-design-guidelines` for contrast (WCAG AA), tap targets, and responsive viewports.

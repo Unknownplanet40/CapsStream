@@ -339,6 +339,29 @@ const PlayerPage = {
                 </div>
               </div>
             </div>
+
+            <!-- Moment Pin Hover Card -->
+            <div
+              v-if="hoverMoment"
+              class="moment-pin-hover-card"
+              :style="{ left: hoverMomentClampedPos + 'px' }"
+              @click.stop="seekTo(hoverMoment.position)"
+            >
+              <div class="moment-hover-thumb" v-if="hoverMoment.thumb_path">
+                <img :src="'/api/bookmarks/' + hoverMoment.id + '/thumb'" alt="Moment thumbnail" />
+              </div>
+              <div class="moment-hover-info">
+                <div class="moment-hover-time-tag">
+                  <span class="moment-hover-time">{{ formatTime(hoverMoment.position) }}</span>
+                  <span class="moment-hover-cat" :style="{ background: (hoverMoment.color || '#e50914') + '33', color: hoverMoment.color || '#e50914' }">
+                    {{ hoverMoment.category || 'moment' }}
+                  </span>
+                </div>
+                <div v-if="hoverMoment.note" class="moment-hover-note">{{ hoverMoment.note }}</div>
+                <div v-if="hoverMoment.profile_name" class="moment-hover-author">by {{ hoverMoment.profile_name }}</div>
+              </div>
+            </div>
+
             <div class="seekbar-track">
               <!-- Seekbar Segment Markers (Recap / Intro / Outro / Preview) -->
               <div v-if="skipTimes.recap" class="seekbar-segment recap-segment" :style="getSegmentStyle(skipTimes.recap)" :title="'Recap: ' + formatSecToTime(skipTimes.recap.start) + ' - ' + formatSecToTime(skipTimes.recap.end)"></div>
@@ -353,6 +376,19 @@ const PlayerPage = {
                 :style="{ left: (ch.start / (displayDuration || duration || 1) * 100) + '%' }"
                 :title="ch.title"
               ></div>
+              <!-- CapsStream Moments Pins -->
+              <div
+                v-for="bm in bookmarks"
+                :key="'bm-' + bm.id"
+                class="seekbar-moment-pin"
+                :style="{ left: ((bm.position / (displayDuration || duration || 1)) * 100) + '%', '--moment-color': bm.color || '#e50914' }"
+                :title="bm.note ? bm.note : 'Saved Moment at ' + formatTime(bm.position)"
+                @click.stop="seekTo(bm.position)"
+                @mouseenter.stop="hoverMoment = bm"
+                @mouseleave.stop="hoverMoment = null"
+              >
+                <div class="moment-pin-diamond"></div>
+              </div>
               <div class="seekbar-fill" :style="{ width: progressPercent + '%' }">
                 <div class="seekbar-handle"></div>
               </div>
@@ -591,6 +627,23 @@ const PlayerPage = {
                 </button>
               </div>
 
+              <!-- Moments & Bookmarks Button -->
+              <div style="position:relative">
+                <button
+                  class="ctrl-btn"
+                  :class="{ active: showMomentsDrawer }"
+                  @click="toggleMomentsDrawer"
+                  title="Moments & Bookmarks (B)"
+                  id="ctrl-moments"
+                  style="position:relative"
+                >
+                  <i class="ph ph-bookmark-simple" style="font-size:1.35rem"></i>
+                  <span v-if="bookmarks && bookmarks.length" class="player-queue-badge" style="background:var(--accent)">
+                    {{ bookmarks.length }}
+                  </span>
+                </button>
+              </div>
+
               <!-- Multi-Page Player Settings Menu (Gear Icon) -->
               <div style="position:relative">
                 <button
@@ -695,6 +748,18 @@ const PlayerPage = {
                       </div>
                       <div class="player-nav-row-right">
                         <span v-if="store.queue && store.queue.length" class="player-nav-value">{{ store.queue.length }} items</span>
+                        <i class="ph ph-caret-right"></i>
+                      </div>
+                    </div>
+
+                    <!-- 6b. Saved Moments link -->
+                    <div class="player-menu-nav-row" @click="toggleMomentsDrawer(); showQualityMenu = false" id="settings-nav-moments">
+                      <div class="player-nav-row-left">
+                        <i class="ph ph-bookmark-simple"></i>
+                        <span>Saved Moments (B)</span>
+                      </div>
+                      <div class="player-nav-row-right">
+                        <span class="player-nav-value">{{ bookmarks && bookmarks.length ? bookmarks.length + ' moments' : 'None' }}</span>
                         <i class="ph ph-caret-right"></i>
                       </div>
                     </div>
@@ -1521,6 +1586,253 @@ const PlayerPage = {
                   <i class="ph ph-x"></i>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      </transition>
+
+      <!-- Moments Slide-out Drawer -->
+      <transition name="slide-left">
+        <div v-if="showMomentsDrawer" class="player-queue-drawer player-moments-drawer" @click.stop>
+          <div class="queue-drawer-header">
+            <div class="queue-drawer-title">
+              <i class="ph-bold ph-bookmark-simple" style="color:var(--accent);font-size:1.3rem"></i>
+              <span>Saved Moments</span>
+              <span v-if="bookmarks && bookmarks.length" class="queue-count-pill">{{ bookmarks.length }}</span>
+            </div>
+            <button class="queue-close-btn" @click="showMomentsDrawer = false" title="Close Moments (Esc)">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+          <!-- Drawer toolbar -->
+          <div class="moments-drawer-toolbar">
+            <button class="moments-pin-now-btn" @click="saveQuickMoment" title="Pin current playback time (B)">
+              <i class="ph-bold ph-plus-circle"></i>
+              <span>Pin Current Time ({{ formatTime(currentTime) }})</span>
+            </button>
+          </div>
+          <!-- List of moments -->
+          <div class="queue-items-list moments-drawer-list" v-if="bookmarks && bookmarks.length">
+            <div
+              v-for="bm in bookmarks"
+              :key="'drawer-bm-' + bm.id"
+              class="moment-drawer-card"
+              @click="openMomentActionModal(bm)"
+            >
+              <div class="moment-card-thumb-wrap" @click.stop="seekToMomentDirect(bm)" title="Click thumbnail to seek immediately">
+                <img v-if="bm.thumb_path" :src="'/api/bookmarks/' + bm.id + '/thumb'" alt="Thumb" loading="lazy" class="moment-card-thumb-img" />
+                <div v-else class="moment-card-thumb-fallback">
+                  <i class="ph ph-film-strip"></i>
+                </div>
+                <div class="moment-card-play-overlay">
+                  <i class="ph-fill ph-play"></i>
+                </div>
+                <span class="moment-card-time-badge">{{ formatTime(bm.position) }}</span>
+              </div>
+              <div class="moment-card-info">
+                <div class="moment-card-header-row">
+                  <span class="moment-cat-pill" :style="{ background: (bm.color || '#e50914') + '24', color: bm.color || '#e50914', borderColor: (bm.color || '#e50914') + '55' }">
+                    <span class="moment-cat-dot" :style="{ background: bm.color || '#e50914' }"></span>
+                    {{ bm.category || 'General' }}
+                  </span>
+                  <span v-if="bm.is_shared" class="moment-shared-badge" title="Shared with Family">
+                    <i class="ph ph-users-three"></i> Shared
+                  </span>
+                </div>
+                <div class="moment-card-note" :title="bm.note">
+                  {{ bm.note || 'Saved scene marker' }}
+                </div>
+                <div class="moment-card-footer">
+                  <span class="moment-card-author">
+                    <i class="ph ph-user"></i> {{ bm.profile_name || 'You' }}
+                  </span>
+                  <div class="moment-card-actions" @click.stop>
+                    <button class="moment-card-btn seek-btn" @click.stop="seekToMomentDirect(bm)" title="Jump to Moment">
+                      <i class="ph-fill ph-play"></i>
+                    </button>
+                    <button class="moment-card-btn" @click.stop="editPinnedMoment(bm)" title="Edit Note">
+                      <i class="ph ph-pencil-simple"></i>
+                    </button>
+                    <button class="moment-card-btn danger" @click.stop="confirmDeleteMoment(bm)" title="Delete Moment">
+                      <i class="ph ph-trash"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="queue-empty-state moments-empty-state">
+            <div class="moments-empty-icon-wrap">
+              <i class="ph-bold ph-bookmark-simple"></i>
+            </div>
+            <div class="moments-empty-title">No Moments Pinned Yet</div>
+            <p class="moments-empty-desc">Press <kbd class="player-kbd-inline">B</kbd> while watching or click the button above to bookmark your favorite scenes.</p>
+          </div>
+        </div>
+      </transition>
+
+      <!-- Moment Action Sheet Modal (Custom dialog on card click) -->
+      <transition name="fade">
+        <div v-if="momentActionModal.active && momentActionModal.bookmark" class="moment-modal-backdrop" @click.stop.prevent="closeMomentActionModal" @dblclick.stop.prevent>
+          <div class="moment-modal-card moment-action-sheet-card" @click.stop @dblclick.stop>
+            <div class="moment-modal-header">
+              <div class="moment-modal-title">
+                <div class="moment-modal-icon-badge" :style="{ background: (momentActionModal.bookmark.color || 'var(--accent)') + '22', color: momentActionModal.bookmark.color || 'var(--accent)' }">
+                  <i class="ph-bold ph-bookmark-simple"></i>
+                </div>
+                <div>
+                  <div class="moment-modal-heading">Moment at {{ formatTime(momentActionModal.bookmark.position) }}</div>
+                  <div class="moment-modal-subheading">{{ momentActionModal.bookmark.category || 'General' }} · Saved Scene</div>
+                </div>
+              </div>
+              <button class="moment-modal-close" @click="closeMomentActionModal" title="Close (Esc)">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+
+            <!-- Preview Card -->
+            <div class="moment-action-preview-row">
+              <div class="moment-action-preview-thumb">
+                <img v-if="momentActionModal.bookmark.thumb_path" :src="'/api/bookmarks/' + momentActionModal.bookmark.id + '/thumb'" alt="Thumb" class="moment-card-thumb-img" />
+                <div v-else class="moment-card-thumb-fallback"><i class="ph ph-film-strip"></i></div>
+                <span class="moment-card-time-badge">{{ formatTime(momentActionModal.bookmark.position) }}</span>
+              </div>
+              <div class="moment-action-preview-info">
+                <p class="moment-action-preview-note">{{ momentActionModal.bookmark.note || 'No custom caption provided.' }}</p>
+                <div class="moment-action-preview-meta">
+                  <span>Pinned by {{ momentActionModal.bookmark.profile_name || 'You' }}</span>
+                  <span v-if="momentActionModal.bookmark.is_shared" class="moment-shared-badge"><i class="ph ph-users-three"></i> Family</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Actions List -->
+            <div class="moment-action-options-list">
+              <button class="moment-action-option-btn primary" @click="seekFromActionModal">
+                <div class="moment-action-btn-icon"><i class="ph-fill ph-play"></i></div>
+                <div class="moment-action-btn-text">
+                  <span class="moment-action-btn-title">Seek to this Moment</span>
+                  <span class="moment-action-btn-sub">Jump playback immediately to {{ formatTime(momentActionModal.bookmark.position) }}</span>
+                </div>
+              </button>
+              <button class="moment-action-option-btn" @click="editFromActionModal">
+                <div class="moment-action-btn-icon"><i class="ph ph-pencil-simple"></i></div>
+                <div class="moment-action-btn-text">
+                  <span class="moment-action-btn-title">Edit Caption & Category</span>
+                  <span class="moment-action-btn-sub">Update note, category tags, or family sharing</span>
+                </div>
+              </button>
+              <button class="moment-action-option-btn danger" @click="deleteFromActionModal">
+                <div class="moment-action-btn-icon"><i class="ph ph-trash"></i></div>
+                <div class="moment-action-btn-text">
+                  <span class="moment-action-btn-title">Delete Saved Moment</span>
+                  <span class="moment-action-btn-sub">Permanently delete this bookmark marker</span>
+                </div>
+              </button>
+            </div>
+
+            <div class="moment-modal-footer">
+              <button class="btn btn-secondary btn-full" @click="closeMomentActionModal">Close</button>
+            </div>
+          </div>
+        </div>
+      </transition>
+
+      <!-- Moments Quick Save Toast -->
+      <transition name="fade">
+        <div v-if="momentToast.active" class="moment-save-toast" @click.stop>
+          <div class="moment-toast-icon-wrap" :style="{ background: (momentToast.bookmark?.color || 'var(--accent)') + '22', color: momentToast.bookmark?.color || 'var(--accent)' }">
+            <i class="ph-bold ph-bookmark-simple"></i>
+          </div>
+          <div class="moment-toast-body">
+            <div class="moment-toast-title">Moment Pinned</div>
+            <div class="moment-toast-time">{{ formatTime(momentToast.bookmark?.position || 0) }}</div>
+          </div>
+          <button class="moment-toast-action-btn" @click.stop="editPinnedMoment(momentToast.bookmark)">
+            <i class="ph ph-pencil-simple"></i>
+            <span>Add Note</span>
+          </button>
+          <button class="moment-toast-close-btn" @click.stop="dismissMomentToast">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+      </transition>
+
+      <!-- Moment Edit Modal -->
+      <transition name="fade">
+        <div v-if="momentEditModal.active" class="moment-modal-backdrop" @click.stop.prevent="closeMomentEditModal" @dblclick.stop.prevent>
+          <div class="moment-modal-card" @click.stop @dblclick.stop>
+            <div class="moment-modal-header">
+              <div class="moment-modal-title">
+                <div class="moment-modal-icon-badge" :style="{ background: (momentEditModal.color || 'var(--accent)') + '22', color: momentEditModal.color || 'var(--accent)' }">
+                  <i class="ph-bold ph-bookmark-simple"></i>
+                </div>
+                <div>
+                  <div class="moment-modal-heading">Annotate Moment</div>
+                  <div class="moment-modal-subheading">Customize seekbar pin label and category</div>
+                </div>
+              </div>
+              <button class="moment-modal-close" @click="closeMomentEditModal" title="Close (Esc)">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+            <div class="moment-modal-body">
+              <div class="moment-modal-time-row">
+                <span class="moment-modal-time-label">Timestamp:</span>
+                <span class="moment-modal-time-badge">
+                  <i class="ph ph-clock"></i>
+                  {{ formatTime(momentEditModal.position || 0) }}
+                </span>
+              </div>
+              <!-- Category Chips -->
+              <div class="moment-modal-field">
+                <label class="moment-modal-label">Category Tag</label>
+                <div class="moment-tag-chips">
+                  <button
+                    v-for="cat in momentCategories"
+                    :key="cat.id"
+                    type="button"
+                    class="moment-tag-chip"
+                    :class="{ active: momentEditModal.category === cat.id }"
+                    :style="momentEditModal.category === cat.id ? { background: cat.color + '26', borderColor: cat.color, color: cat.color } : {}"
+                    @click="setMomentCategory(cat)"
+                  >
+                    <span class="moment-chip-icon">{{ cat.icon }}</span>
+                    <span>{{ cat.label }}</span>
+                  </button>
+                </div>
+              </div>
+              <!-- Note input -->
+              <div class="moment-modal-field">
+                <label class="moment-modal-label">Caption / Note</label>
+                <input
+                  v-model="momentEditModal.note"
+                  class="moment-modal-input"
+                  placeholder="E.g. Epic combat sequence, best soundtrack, funny dialogue..."
+                  maxlength="200"
+                  @keydown.enter.prevent="saveMomentEdit"
+                  ref="momentNoteInputRef"
+                />
+                <span class="moment-input-counter">{{ (momentEditModal.note || '').length }} / 200</span>
+              </div>
+              <!-- Family Sharing Toggle -->
+              <div class="moment-modal-toggle-row">
+                <div class="moment-modal-toggle-info">
+                  <span class="moment-modal-toggle-title">Share with Family</span>
+                  <span class="moment-modal-toggle-sub">Make this seekbar pin visible to all household profiles</span>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="momentEditModal.is_shared" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="moment-modal-footer">
+              <button class="btn btn-secondary" @click="closeMomentEditModal">Cancel</button>
+              <button class="btn btn-primary" @click="saveMomentEdit">
+                <i class="ph-bold ph-check"></i>
+                <span>Save Moment</span>
+              </button>
             </div>
           </div>
         </div>
@@ -3320,6 +3632,7 @@ const PlayerPage = {
       loadSkipTimes(option.media_id);
       loadChapters(option.media_id);
       loadThumbSheet(option.media_id);
+      loadBookmarks(option.media_id);
 
       swapStream(atContent, true);
 
@@ -4029,7 +4342,8 @@ const PlayerPage = {
 
     function handleContainerClick(e) {
       if (playerError.value) return;
-      if (e.target.closest(".custom-player-controls")) return;
+      if (momentEditModal.active || momentActionModal.active || (window.confirmState && window.confirmState.show)) return;
+      if (e.target.closest(".custom-player-controls") || e.target.closest(".moment-modal-backdrop") || e.target.closest(".player-moments-drawer")) return;
       // Prevent synthetic touch clicks from toggling play immediately after tap
       if (Date.now() - lastTouchTime < 1000) return;
       if (controlsHidden.value) {
@@ -4041,7 +4355,8 @@ const PlayerPage = {
 
     function handleContainerDblClick(e) {
       if (playerError.value) return;
-      if (e.target.closest(".custom-player-controls")) return;
+      if (momentEditModal.active || momentActionModal.active || (window.confirmState && window.confirmState.show)) return;
+      if (e.target.closest(".custom-player-controls") || e.target.closest(".moment-modal-backdrop") || e.target.closest(".player-moments-drawer")) return;
       // Strictly ignore dblclick on touch interactions to prevent unfullscreen
       if (Date.now() - lastTouchTime < 1500) return;
       toggleFullscreen();
@@ -5099,6 +5414,243 @@ const PlayerPage = {
       }
     }
 
+    // ─── CapsStream Moments (Scene Bookmarks) ────────────────────
+    const bookmarks = ref([]);
+    const showMomentsDrawer = ref(false);
+    const hoverMoment = ref(null);
+    const momentNoteInputRef = ref(null);
+    const momentToast = reactive({
+      active: false,
+      bookmark: null,
+      timer: null,
+    });
+    const momentEditModal = reactive({
+      active: false,
+      id: null,
+      media_id: null,
+      position: 0,
+      note: "",
+      category: "general",
+      color: "#e50914",
+      is_shared: false,
+    });
+    const momentActionModal = reactive({
+      active: false,
+      bookmark: null,
+    });
+    const momentCategories = [
+      { id: "general", label: "Moment", icon: "📌", color: "#e50914" },
+      { id: "action", label: "Action", icon: "💥", color: "#ef4444" },
+      { id: "funny", label: "Funny", icon: "😂", color: "#f59e0b" },
+      { id: "quote", label: "Quote", icon: "💬", color: "#10b981" },
+      { id: "plot_twist", label: "Plot Twist", icon: "⚡", color: "#8b5cf6" },
+      { id: "music", label: "Music", icon: "🎵", color: "#06b6d4" },
+    ];
+
+    async function loadBookmarks(mediaId) {
+      if (!mediaId) {
+        bookmarks.value = [];
+        return;
+      }
+      try {
+        const pid = store.profile?.id || "";
+        const res = await API.get(`/api/media/${mediaId}/bookmarks?profile_id=${pid}`);
+        bookmarks.value = res?.bookmarks || [];
+      } catch (e) {
+        bookmarks.value = [];
+      }
+    }
+
+    function toggleMomentsDrawer() {
+      showMomentsDrawer.value = !showMomentsDrawer.value;
+      if (showMomentsDrawer.value) {
+        showQueueDrawer.value = false;
+        showEpisodesDrawer.value = false;
+        showQualityMenu.value = false;
+        showControls();
+      }
+    }
+
+    async function saveQuickMoment() {
+      const mid = media.value?.id || route.params.id;
+      if (!mid) return;
+      const pos = Math.round(currentTime.value || (videoRef.value ? videoRef.value.currentTime : 0) || 0);
+
+      // Attempt to capture video frame via canvas without stalling playback
+      let thumbDataUrl = "";
+      try {
+        if (videoRef.value && videoRef.value.videoWidth > 0) {
+          const cvs = document.createElement("canvas");
+          const targetW = 320;
+          const targetH = Math.round((targetW / videoRef.value.videoWidth) * videoRef.value.videoHeight) || 180;
+          cvs.width = targetW;
+          cvs.height = targetH;
+          const ctx = cvs.getContext("2d");
+          ctx.drawImage(videoRef.value, 0, 0, targetW, targetH);
+          thumbDataUrl = cvs.toDataURL("image/webp", 0.75);
+        }
+      } catch (err) {
+        // Protected / fallback
+      }
+
+      try {
+        const pid = store.profile?.id || 1;
+        const res = await API.post(`/api/media/${mid}/bookmarks`, {
+          profile_id: pid,
+          position: pos,
+          note: "",
+          category: "general",
+          color: "#e50914",
+          is_shared: false,
+          thumb_data_url: thumbDataUrl
+        });
+
+        if (res?.ok && res.bookmark) {
+          bookmarks.value.push(res.bookmark);
+          bookmarks.value.sort((a, b) => a.position - b.position);
+
+          // Subtle 3-second quick action toast
+          if (momentToast.timer) clearTimeout(momentToast.timer);
+          momentToast.active = true;
+          momentToast.bookmark = res.bookmark;
+          momentToast.timer = setTimeout(() => {
+            momentToast.active = false;
+          }, 3500);
+        }
+      } catch (e) {
+        if (typeof addToast === "function") addToast("Failed to save moment", "error");
+      }
+    }
+
+    function dismissMomentToast() {
+      if (momentToast.timer) clearTimeout(momentToast.timer);
+      momentToast.active = false;
+    }
+
+    function editPinnedMoment(bm) {
+      dismissMomentToast();
+      momentEditModal.active = true;
+      momentEditModal.id = bm.id;
+      momentEditModal.media_id = bm.media_id;
+      momentEditModal.position = bm.position;
+      momentEditModal.note = bm.note || "";
+      momentEditModal.category = bm.category || "general";
+      momentEditModal.color = bm.color || "#e50914";
+      momentEditModal.is_shared = Boolean(bm.is_shared);
+
+      nextTick(() => {
+        if (momentNoteInputRef.value) momentNoteInputRef.value.focus();
+      });
+    }
+
+    function setMomentCategory(cat) {
+      momentEditModal.category = cat.id;
+      momentEditModal.color = cat.color;
+    }
+
+    function closeMomentEditModal() {
+      momentEditModal.active = false;
+    }
+
+    async function saveMomentEdit() {
+      if (!momentEditModal.id) return;
+      try {
+        const pid = store.profile?.id || 1;
+        const res = await API.patch(`/api/bookmarks/${momentEditModal.id}`, {
+          profile_id: pid,
+          note: momentEditModal.note,
+          category: momentEditModal.category,
+          color: momentEditModal.color,
+          is_shared: momentEditModal.is_shared
+        });
+
+        if (res?.ok && res.bookmark) {
+          const idx = bookmarks.value.findIndex(b => b.id === momentEditModal.id);
+          if (idx !== -1) {
+            bookmarks.value[idx] = res.bookmark;
+          }
+          if (typeof addToast === "function") addToast("Moment updated", "success");
+        }
+      } catch (e) {
+        if (typeof addToast === "function") addToast("Failed to update moment", "error");
+      } finally {
+        momentEditModal.active = false;
+      }
+    }
+
+    function openMomentActionModal(bm) {
+      if (!bm) return;
+      momentActionModal.bookmark = bm;
+      momentActionModal.active = true;
+    }
+
+    function closeMomentActionModal() {
+      momentActionModal.active = false;
+      momentActionModal.bookmark = null;
+    }
+
+    function seekToMomentDirect(bm) {
+      if (!bm) return;
+      seekTo(bm.position);
+      addToast(`Jumped to moment (${formatTime(bm.position)})`, "info");
+    }
+
+    function seekFromActionModal() {
+      if (momentActionModal.bookmark) {
+        seekToMomentDirect(momentActionModal.bookmark);
+      }
+      closeMomentActionModal();
+    }
+
+    function editFromActionModal() {
+      const bm = momentActionModal.bookmark;
+      closeMomentActionModal();
+      if (bm) editPinnedMoment(bm);
+    }
+
+    async function deleteFromActionModal() {
+      const bm = momentActionModal.bookmark;
+      closeMomentActionModal();
+      if (bm) await confirmDeleteMoment(bm);
+    }
+
+    async function confirmDeleteMoment(bm) {
+      const confirmFn = window.customConfirm || (async ({ message }) => confirm(message));
+      const ok = await confirmFn({
+        title: "Delete Saved Moment",
+        message: `Delete saved moment at ${formatTime(bm.position)}? This scene marker will be removed from playback.`,
+        icon: "ph ph-trash",
+        okText: "Delete Moment",
+        cancelText: "Keep",
+        danger: true,
+      });
+      if (!ok) return;
+
+      try {
+        const pid = store.profile?.id || 1;
+        const res = await API.delete(`/api/bookmarks/${bm.id}?profile_id=${pid}`);
+        if (res?.ok) {
+          bookmarks.value = bookmarks.value.filter(b => b.id !== bm.id);
+          if (hoverMoment.value && hoverMoment.value.id === bm.id) {
+            hoverMoment.value = null;
+          }
+          if (typeof addToast === "function") addToast("Moment deleted", "info");
+        }
+      } catch (e) {
+        if (typeof addToast === "function") addToast(e?.message || "Failed to delete moment", "error");
+      }
+    }
+
+    const hoverMomentClampedPos = computed(() => {
+      if (!hoverMoment.value || !seekbarRef.value) return 0;
+      const rect = seekbarRef.value.getBoundingClientRect();
+      const dur = displayDuration.value || duration.value || 1;
+      const pct = hoverMoment.value.position / dur;
+      const rawX = pct * rect.width;
+      const halfWidth = 110;
+      return Math.max(halfWidth, Math.min(rect.width - halfWidth, rawX));
+    });
+
     // ─── Multi-Page Player Settings & Submenus ──────────────────
     const activeSettingsSubmenu = ref(null); // 'speed' | 'sleep' | 'quality' | 'audio' | 'chapters' | null
 
@@ -5410,6 +5962,15 @@ const PlayerPage = {
     function applyResumedProgress() {
       if (hasResumedProgress || suppressResume || !videoRef.value || !media.value) return;
       if (Number(media.value.id) !== Number(route.params.id)) return;
+      if (route.query?.t) {
+        const explicitT = Number(route.query.t);
+        if (!isNaN(explicitT) && explicitT >= 0) {
+          resumeTime.value = explicitT;
+          hasResumedProgress = true;
+          confirmResume();
+          return;
+        }
+      }
       const progress = media.value.progress;
       if (progress && progress.position > 5 && !progress.completed) {
         const dur = media.value.duration || duration.value || 0;
@@ -6507,6 +7068,21 @@ const PlayerPage = {
     }
 
     function handleKeyboard(e) {
+      // ─── Modal / Confirmation Dialog Isolation ──────────────────
+      if (momentEditModal.active || momentActionModal.active || (window.confirmState && window.confirmState.show)) {
+        if (e.key === "Escape" || e.key === "Back" || e.key === "BrowserBack") {
+          e.preventDefault();
+          if (window.confirmState && window.confirmState.show) {
+            window.handleConfirmCancel?.();
+          } else if (momentEditModal.active) {
+            closeMomentEditModal();
+          } else if (momentActionModal.active) {
+            closeMomentActionModal();
+          }
+        }
+        return;
+      }
+
       if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
       // Block all shortcuts while error overlay is shown
       if (playerError.value) return;
@@ -6667,6 +7243,11 @@ const PlayerPage = {
           e.preventDefault();
           toggleQueueDrawer();
           break;
+        case "b":
+        case "B":
+          e.preventDefault();
+          saveQuickMoment();
+          break;
         case "z":
         case "Z":
           e.preventDefault();
@@ -6700,7 +7281,13 @@ const PlayerPage = {
         case "Escape":
         case "Back":
         case "BrowserBack":
-          if (showEpisodesDrawer.value) {
+          if (momentEditModal.active) {
+            e.preventDefault();
+            momentEditModal.active = false;
+          } else if (showMomentsDrawer.value) {
+            e.preventDefault();
+            showMomentsDrawer.value = false;
+          } else if (showEpisodesDrawer.value) {
             e.preventDefault();
             showEpisodesDrawer.value = false;
           } else if (showQueueDrawer.value) {
@@ -6882,6 +7469,7 @@ const PlayerPage = {
       loadSkipTimes(mediaId);
       loadChapters(mediaId);
       loadThumbSheet(mediaId);
+      loadBookmarks(mediaId);
 
       try {
         playerSettings.value = await API.get("/api/settings");
@@ -7749,6 +8337,30 @@ const PlayerPage = {
       logoReady,
       logoImgSrc,
       loaderState,
+      // CapsStream Moments
+      bookmarks,
+      showMomentsDrawer,
+      hoverMoment,
+      momentNoteInputRef,
+      momentToast,
+      momentEditModal,
+      momentActionModal,
+      momentCategories,
+      saveQuickMoment,
+      toggleMomentsDrawer,
+      dismissMomentToast,
+      openMomentActionModal,
+      closeMomentActionModal,
+      seekToMomentDirect,
+      seekFromActionModal,
+      editFromActionModal,
+      deleteFromActionModal,
+      editPinnedMoment,
+      setMomentCategory,
+      closeMomentEditModal,
+      saveMomentEdit,
+      confirmDeleteMoment,
+      hoverMomentClampedPos,
     };
   },
 };

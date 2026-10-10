@@ -175,6 +175,21 @@ def init_db():
             FOREIGN KEY(media_id) REFERENCES media(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS bookmarks (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            media_id   INTEGER NOT NULL,
+            position   INTEGER NOT NULL DEFAULT 0,
+            note       TEXT DEFAULT '',
+            category   TEXT DEFAULT 'general',
+            color      TEXT DEFAULT '#e50914',
+            is_shared  INTEGER NOT NULL DEFAULT 0,
+            thumb_path TEXT DEFAULT '',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE,
+            FOREIGN KEY(media_id) REFERENCES media(id) ON DELETE CASCADE
+        );
+
         CREATE INDEX IF NOT EXISTS idx_media_type ON media(type);
         CREATE INDEX IF NOT EXISTS idx_media_tmdb ON media(tmdb_id);
         CREATE INDEX IF NOT EXISTS idx_media_title ON media(title);
@@ -182,6 +197,9 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_favorites_profile ON favorites(profile_id);
         CREATE INDEX IF NOT EXISTS idx_playlists_prof ON playlists(profile_id);
         CREATE INDEX IF NOT EXISTS idx_playlist_items_pl ON playlist_items(playlist_id, position);
+        CREATE INDEX IF NOT EXISTS idx_bookmarks_media ON bookmarks(media_id, position);
+        CREATE INDEX IF NOT EXISTS idx_bookmarks_profile ON bookmarks(profile_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_bookmarks_shared ON bookmarks(media_id, is_shared);
         CREATE INDEX IF NOT EXISTS idx_watch_progress_prof_upd ON watch_progress(profile_id, updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_watch_progress_prof_med ON watch_progress(profile_id, media_id);
         CREATE INDEX IF NOT EXISTS idx_watch_progress_prof_comp_upd ON watch_progress(profile_id, completed, updated_at DESC);
@@ -343,6 +361,30 @@ def init_db():
         """)
     except Exception as e:
         print("[DB] Migration notice (profile_snapshots):", e)
+
+    # Migration guard for bookmarks
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS bookmarks (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                media_id   INTEGER NOT NULL,
+                position   INTEGER NOT NULL DEFAULT 0,
+                note       TEXT DEFAULT '',
+                category   TEXT DEFAULT 'general',
+                color      TEXT DEFAULT '#e50914',
+                is_shared  INTEGER NOT NULL DEFAULT 0,
+                thumb_path TEXT DEFAULT '',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE,
+                FOREIGN KEY(media_id) REFERENCES media(id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bookmarks_media ON bookmarks(media_id, position)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bookmarks_profile ON bookmarks(profile_id, created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bookmarks_shared ON bookmarks(media_id, is_shared)")
+    except Exception as e:
+        print("[DB] Migration notice (bookmarks):", e)
 
     conn.commit()
     conn.close()

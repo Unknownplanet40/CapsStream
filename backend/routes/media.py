@@ -4,8 +4,10 @@ routes/media.py — Home, library, media detail, search, genres, kids overrides.
 """
 import json
 import threading
+import os
+import base64
 
-from flask import Blueprint, jsonify, request, current_app
+from flask import Blueprint, jsonify, request, current_app, send_file
 
 from .middleware import (
     current_profile, active_is_kids, kids_guard_media,
@@ -19,6 +21,9 @@ from backend.db import (
     get_unmatched, get_media_needing_recache, upsert_media,
     delete_media_by_id, delete_media_by_tmdb, delete_media_by_title_and_type,
     get_all_sources_for_media, format_file_size_bytes,
+    create_bookmark, get_bookmark, get_bookmarks_for_media,
+    get_bookmarks_for_profile, update_bookmark, delete_bookmark,
+    DATA_DIR,
 )
 from backend.matcher import safe_logo_path
 
@@ -1205,3 +1210,137 @@ def api_media_playlist_m3u(media_id):
             "Cache-Control": "no-cache"
         }
     )
+
+
+# ─── CapsStream Moments (Bookmarks) ──────────────────────────────────────────
+
+def _save_moment_thumb(media_id, position, data_url):
+    """Save base64 data URL to data/metadata/moments/ or return empty string."""
+    if not data_url or not isinstance(data_url, str):
+        return ""
+    try:
+        moments_dir = os.path.join(DATA_DIR, "metadata", "moments")
+        os.makedirs(moments_dir, exist_ok=True)
+        ext = "webp" if "image/webp" in data_url[:30] else "jpg"
+        clean_url = data_url.split(",", 1)[1] if "," in data_url else data_url
+        raw = base64.b64decode(clean_url)
+        filename = f"m_{int(media_id)}_{int(position)}_{os.urandom(4).hex()}.{ext}"
+        filepath = os.path.join(moments_dir, filename)
+        with open(filepath, "wb") as f:
+            f.write(raw)
+        return filepath
+    except Exception:
+        return ""
+
+
+@media_bp.route("/api/media/<int:media_id>/bookmarks", methods=["GET"])
+def api_get_media_bookmarks(media_id):
+    """Retrieve all moments for a media item visible to the current or requested profile."""
+    pid = request.args.get("profile_id")
+    if pid is not None:
+        try:
+            pid = int(pid)
+        except (ValueError, TypeError):
+            pid = current_profile()
+    else:
+        pid = current_profile()
+
+    bookmarks = get_bookmarks_for_media(media_id, profile_id=pid)
+    return jsonify({"bookmarks": bookmarks, "total": len(bookmarks)})
+
+
+@media_bp.route("/api/media/<int:media_id>/bookmarks", methods=["POST"])
+def api_create_media_bookmark(media_id):
+    """Create a new moment for a media item."""
+    data = request.get_json(silent=True) or {}
+    pid = data.get("profile_id") or current_profile() or 1
+    position = data.get("position", 0)
+    note = data.get("note", "")
+    category = data.get("category", "general")
+    color = data.get("color", "#e50914")
+    is_shared = bool(data.get("is_shared", False))
+    thumb_data_url = data.get("thumb_data_url", "")
+
+    media = get_media_by_id(media_id)
+    if not media:
+        media = get_best_media_source(media_id)
+    if not media:
+        return jsonify({"error": "Media not found"}), 404
+
+    thumb_path = _save_moment_thumb(media_id, position, thumb_data_url)
+    bookmark = create_bookmark(
+        profile_id=pid,
+        media_id=media_id,
+        position=position,
+        note=note,
+        category=category,
+        color=color,
+        is_shared=is_shared,
+        thumb_path=thumb_path
+    )
+    return jsonify({"ok": True, "bookmark": bookmark}), 201
+
+
+@media_bp.route("/api/bookmarks/<int:bookmark_id>", methods=["PATCH"])
+def api_update_bookmark(bookmark_id):
+    """Update note, category, color, or family sharing for a moment."""
+    data = request.get_json(silent=True) or {}
+    pid = data.get("profile_id") or request.args.get("profile_id") or current_profile() or 1
+    try:
+        pid = int(pid)
+    except (ValueError, TypeError):
+        pid = 1
+
+    note = data.get("note")
+    category = data.get("category")
+    color = data.get("color")
+    is_shared = data.get("is_shared")
+
+    updated = update_bookmark(
+        bookmark_id=bookmark_id,
+        profile_id=pid,
+        note=note,
+        category=category,
+        color=color,
+        is_shared=is_shared
+    )
+    if not updated:
+        return jsonify({"error": "Bookmark not found or unauthorized"}), 404
+    return jsonify({"ok": True, "bookmark": updated})
+
+
+@media_bp.route("/api/bookmarks/<int:bookmark_id>", methods=["DELETE"])
+def api_delete_bookmark(bookmark_id):
+    """Delete a moment."""
+    data = request.get_json(silent=True) or {}
+    pid = request.args.get("profile_id") or data.get("profile_id") or current_profile() or 1
+    try:
+        pid = int(pid)
+    except (ValueError, TypeError):
+        pid = 1
+
+    success = delete_bookmark(bookmark_id, profile_id=pid)
+    if not success:
+        return jsonify({"error": "Bookmark not found or unauthorized"}), 404
+    return jsonify({"ok": True, "deleted": bookmark_id})
+
+
+@media_bp.route("/api/profile/<int:profile_id>/bookmarks", methods=["GET"])
+def api_get_profile_bookmarks(profile_id):
+    """Retrieve all moments for a profile gallery across the library."""
+    cat = request.args.get("category")
+    bookmarks = get_bookmarks_for_profile(profile_id, category=cat)
+    return jsonify({"bookmarks": bookmarks, "total": len(bookmarks)})
+
+
+@media_bp.route("/api/bookmarks/<int:bookmark_id>/thumb", methods=["GET"])
+def api_get_bookmark_thumb(bookmark_id):
+    """Serve the thumbnail image for a saved moment."""
+    bm = get_bookmark(bookmark_id)
+    if not bm or not bm.get("thumb_path") or not os.path.exists(bm["thumb_path"]):
+        return jsonify({"error": "Thumbnail not found"}), 404
+
+    thumb_path = bm["thumb_path"]
+    mime = "image/webp" if thumb_path.lower().endswith(".webp") else "image/jpeg"
+    return send_file(thumb_path, mimetype=mime, max_age=86400)
+

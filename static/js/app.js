@@ -116,6 +116,9 @@ const API = {
     }
     return r.json();
   },
+  async delete(url) {
+    return this.del(url);
+  },
 };
 
 window.API = API;
@@ -733,6 +736,10 @@ function customConfirm({ title = "Confirmation Required", message, icon = "ph ph
     confirmState.show = true;
   });
 }
+window.customConfirm = customConfirm;
+window.confirmState = confirmState;
+window.handleConfirmOk = handleConfirmOk;
+window.handleConfirmCancel = handleConfirmCancel;
 
 function handleConfirmOk() {
   confirmState.show = false;
@@ -1976,6 +1983,18 @@ function formatDuration(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function formatTime(seconds) {
+  if (!seconds || isNaN(seconds)) return "0:00";
+  const s = Math.floor(seconds);
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  if (hrs > 0) {
+    return `${hrs}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+  return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
 function formatGenres(genresStr, max = 3) {
@@ -4853,6 +4872,153 @@ const DetailPage = {
             </div>
           </div>
 
+          <!-- Saved Moments Shelf -->
+          <div class="detail-section" v-if="detailMoments && detailMoments.length">
+            <div class="detail-section-header">
+              <div class="detail-section-title" style="display:flex;align-items:center;gap:10px">
+                <i class="ph-bold ph-bookmark-simple" style="color:var(--accent)"></i>
+                <span>Saved Moments</span>
+                <span class="universe-card-badge" style="font-size:0.7rem;text-transform:uppercase">
+                  {{ detailMoments.length }} Saved
+                </span>
+              </div>
+              <div class="row-header-controls" v-if="detailMoments.length > 3">
+                <button class="row-control-btn" @click="scrollMoments(-400)" title="Scroll Left">
+                  <i class="ph ph-caret-left"></i>
+                </button>
+                <button class="row-control-btn" @click="scrollMoments(400)" title="Scroll Right">
+                  <i class="ph ph-caret-right"></i>
+                </button>
+              </div>
+            </div>
+            <div class="cards-scroller" ref="momentsScrollerRef" style="padding:4px 0 16px">
+              <div
+                v-for="bm in detailMoments"
+                :key="bm.id"
+                class="detail-moment-card"
+                @click="playMoment(bm)"
+              >
+                <div class="detail-moment-thumb-wrap">
+                  <img v-if="bm.thumb_path" :src="'/api/bookmarks/' + bm.id + '/thumb'" alt="Moment thumb" loading="lazy" class="detail-moment-thumb" />
+                  <div v-else class="detail-moment-fallback">
+                    <i class="ph ph-film-strip"></i>
+                  </div>
+                  <div class="detail-moment-play-overlay">
+                    <i class="ph-fill ph-play"></i>
+                  </div>
+                  <span class="detail-moment-time-pill">{{ formatTime(bm.position) }}</span>
+                </div>
+                <div class="detail-moment-info">
+                  <div class="detail-moment-top">
+                    <span class="detail-moment-cat-chip" :style="{ background: (bm.color || '#e50914') + '22', color: bm.color || '#e50914', borderColor: (bm.color || '#e50914') + '44' }">
+                      <span class="detail-moment-cat-dot" :style="{ background: bm.color || '#e50914' }"></span>
+                      {{ bm.category || 'moment' }}
+                    </span>
+                    <span v-if="bm.is_shared" class="detail-moment-shared" title="Shared with Family">
+                      <i class="ph ph-users-three"></i> Family
+                    </span>
+                  </div>
+                  <div class="detail-moment-note" :title="bm.note">
+                    {{ bm.note || 'Scene marker at ' + formatTime(bm.position) }}
+                  </div>
+                  <div class="detail-moment-footer">
+                    <span class="detail-moment-author"><i class="ph ph-user"></i> {{ bm.profile_name || 'You' }}</span>
+                    <div class="detail-moment-actions" @click.stop>
+                      <button class="detail-moment-act-btn play-act" @click="playMoment(bm)" title="Jump to this scene in player">
+                        <i class="ph-bold ph-play"></i>
+                      </button>
+                      <button class="detail-moment-act-btn edit-act" @click="openEditMoment(bm)" title="Edit note & category">
+                        <i class="ph-bold ph-pencil-simple"></i>
+                      </button>
+                      <button class="detail-moment-act-btn delete-act" @click="deleteDetailMoment(bm)" title="Delete saved moment">
+                        <i class="ph-bold ph-trash"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Edit Moment Modal in DetailPage -->
+          <transition name="fade">
+            <div v-if="editMomentState.active" class="moment-modal-backdrop" @click.stop.prevent="closeEditMoment" @dblclick.stop.prevent>
+              <div class="moment-modal-card" @click.stop @dblclick.stop>
+                <div class="moment-modal-header">
+                  <div class="moment-modal-title">
+                    <div class="moment-modal-icon-badge" :style="{ background: (editMomentState.color || 'var(--accent)') + '22', color: editMomentState.color || 'var(--accent)' }">
+                      <i class="ph-bold ph-bookmark-simple"></i>
+                    </div>
+                    <div>
+                      <div class="moment-modal-heading">Edit Saved Moment</div>
+                      <div class="moment-modal-subheading">Update scene caption and category badge</div>
+                    </div>
+                  </div>
+                  <button class="moment-modal-close" @click="closeEditMoment" title="Close (Esc)">
+                    <i class="ph ph-x"></i>
+                  </button>
+                </div>
+                <div class="moment-modal-body">
+                  <div class="moment-modal-time-row">
+                    <span class="moment-modal-time-label">Timestamp:</span>
+                    <span class="moment-modal-time-badge">
+                      <i class="ph ph-clock"></i>
+                      {{ formatTime(editMomentState.position || 0) }}
+                    </span>
+                  </div>
+                  <!-- Category Chips -->
+                  <div class="moment-modal-field">
+                    <label class="moment-modal-label">Category Tag</label>
+                    <div class="moment-tag-chips">
+                      <button
+                        v-for="cat in detailMomentCategories"
+                        :key="cat.id"
+                        type="button"
+                        class="moment-tag-chip"
+                        :class="{ active: editMomentState.category === cat.id }"
+                        :style="editMomentState.category === cat.id ? { background: cat.color + '26', borderColor: cat.color, color: cat.color } : {}"
+                        @click="setEditMomentCategory(cat)"
+                      >
+                        <span class="moment-chip-icon">{{ cat.icon }}</span>
+                        <span>{{ cat.label }}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <!-- Note input -->
+                  <div class="moment-modal-field">
+                    <label class="moment-modal-label">Caption / Note</label>
+                    <input
+                      v-model="editMomentState.note"
+                      class="moment-modal-input"
+                      placeholder="E.g. Epic combat sequence, best soundtrack, funny dialogue..."
+                      maxlength="200"
+                      @keydown.enter.prevent="saveEditMoment"
+                    />
+                    <span class="moment-input-counter">{{ (editMomentState.note || '').length }} / 200</span>
+                  </div>
+                  <!-- Family Sharing Toggle -->
+                  <div class="moment-modal-toggle-row">
+                    <div class="moment-modal-toggle-info">
+                      <span class="moment-modal-toggle-title">Share with Family</span>
+                      <span class="moment-modal-toggle-sub">Make this seekbar pin visible to all household profiles</span>
+                    </div>
+                    <label class="toggle-switch">
+                      <input type="checkbox" v-model="editMomentState.is_shared" />
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="moment-modal-footer">
+                  <button class="btn btn-secondary" @click="closeEditMoment">Cancel</button>
+                  <button class="btn btn-primary" @click="saveEditMoment">
+                    <i class="ph-bold ph-check"></i>
+                    <span>Save Changes</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </transition>
+
           <!-- Cast Section -->
           <div class="detail-section" v-if="media.cast && media.cast.length">
             <div class="detail-section-header">
@@ -5442,6 +5608,106 @@ const DetailPage = {
     const seasonTabsRef = ref(null);
     const showCollectionModal = ref(false);
     const collections = ref([]);
+    const detailMoments = ref([]);
+    const momentsScrollerRef = ref(null);
+
+    function scrollMoments(offset) {
+      if (momentsScrollerRef.value) {
+        momentsScrollerRef.value.scrollBy({ left: offset, behavior: "smooth" });
+      }
+    }
+
+    function playMoment(bm) {
+      if (!bm) return;
+      router.push(`/watch/${bm.media_id || media.value?.id}?t=${bm.position}`);
+    }
+
+    const detailMomentCategories = [
+      { id: "general", label: "Moment", icon: "📌", color: "#e50914" },
+      { id: "action", label: "Action", icon: "💥", color: "#ef4444" },
+      { id: "funny", label: "Funny", icon: "😂", color: "#f59e0b" },
+      { id: "quote", label: "Quote", icon: "💬", color: "#10b981" },
+      { id: "plot_twist", label: "Plot Twist", icon: "⚡", color: "#8b5cf6" },
+      { id: "music", label: "Music", icon: "🎵", color: "#06b6d4" },
+    ];
+
+    const editMomentState = reactive({
+      active: false,
+      id: null,
+      position: 0,
+      note: "",
+      category: "general",
+      color: "#e50914",
+      is_shared: false,
+    });
+
+    function openEditMoment(bm) {
+      if (!bm) return;
+      editMomentState.id = bm.id;
+      editMomentState.position = bm.position;
+      editMomentState.note = bm.note || "";
+      editMomentState.category = bm.category || "general";
+      editMomentState.color = bm.color || "#e50914";
+      editMomentState.is_shared = Boolean(bm.is_shared);
+      editMomentState.active = true;
+    }
+
+    function closeEditMoment() {
+      editMomentState.active = false;
+      editMomentState.id = null;
+    }
+
+    function setEditMomentCategory(cat) {
+      editMomentState.category = cat.id;
+      editMomentState.color = cat.color;
+    }
+
+    async function saveEditMoment() {
+      if (!editMomentState.id) return;
+      try {
+        const res = await API.patch(`/api/bookmarks/${editMomentState.id}`, {
+          note: editMomentState.note,
+          category: editMomentState.category,
+          color: editMomentState.color,
+          is_shared: editMomentState.is_shared,
+        });
+        if (res?.ok && res?.bookmark) {
+          const idx = detailMoments.value.findIndex(b => b.id === editMomentState.id);
+          if (idx !== -1) {
+            detailMoments.value[idx] = { ...detailMoments.value[idx], ...res.bookmark };
+          }
+          addToast("Moment updated", "success");
+        }
+      } catch (e) {
+        addToast(e?.message || "Failed to update moment", "error");
+      } finally {
+        closeEditMoment();
+      }
+    }
+
+    async function deleteDetailMoment(bm) {
+      if (!bm) return;
+      const ok = await customConfirm({
+        title: "Delete Saved Moment",
+        message: `Delete this moment at ${formatTime(bm.position)}? This scene pin will be permanently removed.`,
+        icon: "ph ph-trash",
+        okText: "Delete",
+        cancelText: "Keep",
+        danger: true,
+      });
+      if (!ok) return;
+
+      try {
+        const pid = store.profile?.id || 1;
+        const res = await API.delete(`/api/bookmarks/${bm.id}?profile_id=${pid}`);
+        if (res?.ok) {
+          detailMoments.value = detailMoments.value.filter(b => b.id !== bm.id);
+          addToast("Moment deleted", "info");
+        }
+      } catch (e) {
+        addToast(e?.message || "Failed to delete moment", "error");
+      }
+    }
 
     const showFixMatchModal = ref(false);
     const fixQuery = ref("");
@@ -5579,6 +5845,14 @@ const DetailPage = {
           API.get("/api/collections").then((res) => {
             collections.value = res || [];
           }).catch(() => {});
+        }
+        if (loadedMedia && loadedMedia.id) {
+          const pid = store.profile?.id || "";
+          API.get(`/api/media/${loadedMedia.id}/bookmarks?profile_id=${pid}`).then((res) => {
+            detailMoments.value = res?.bookmarks || [];
+          }).catch(() => { detailMoments.value = []; });
+        } else {
+          detailMoments.value = [];
         }
       } catch (e) {
         if (!media.value) {
@@ -6222,6 +6496,18 @@ const DetailPage = {
       openWatchTogetherModal,
       startWatchTogetherHost,
       joinWatchTogetherRoom,
+      detailMoments,
+      momentsScrollerRef,
+      scrollMoments,
+      playMoment,
+      formatTime,
+      editMomentState,
+      detailMomentCategories,
+      openEditMoment,
+      closeEditMoment,
+      setEditMomentCategory,
+      saveEditMoment,
+      deleteDetailMoment,
     };
   },
 };
@@ -12431,6 +12717,7 @@ const ShortcutsModal = {
           { desc: "Seek 10s Backward / Forward", keys: ["←", "→"] },
           { desc: "Seek 0% – 90% Percentage", keys: ["0", "...", "9"] },
           { desc: "Picture-in-Picture", keys: ["P"] },
+          { desc: "Pin Moment (Bookmark Timestamp)", keys: ["B"] },
         ]
       },
       {
@@ -15035,8 +15322,26 @@ const FavoritesPage = {
   components: { MediaCard },
   template: `
     <div class="favorites-page">
-      <div class="page-header">
-        <h1 class="page-title">Watchlist</h1>
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <h1 class="page-title">{{ activeTab === 'watchlist' ? 'Watchlist' : 'Saved Moments' }}</h1>
+        <div class="moments-tab-toggle" v-if="store.profile">
+          <button
+            class="moments-tab-btn"
+            :class="{ active: activeTab === 'watchlist' }"
+            @click="activeTab = 'watchlist'"
+          >
+            <i class="ph-bold ph-heart"></i>
+            <span>Watchlist ({{ items.length }})</span>
+          </button>
+          <button
+            class="moments-tab-btn"
+            :class="{ active: activeTab === 'moments' }"
+            @click="activeTab = 'moments'"
+          >
+            <i class="ph-bold ph-bookmark-simple"></i>
+            <span>Moments ({{ moments.length }})</span>
+          </button>
+        </div>
       </div>
 
       <div v-if="!store.profile" class="empty-state">
@@ -15044,25 +15349,119 @@ const FavoritesPage = {
         <div class="empty-title">Select a profile first</div>
       </div>
 
-      <div v-else-if="items.length === 0" class="empty-state">
-        <div class="empty-icon"><i class="ph-bold ph-heart"></i></div>
-        <div class="empty-title">Nothing saved yet</div>
-        <div class="empty-subtitle">Heart any title to add it to your watchlist.</div>
+      <!-- ── 1. Watchlist Tab ── -->
+      <div v-else-if="activeTab === 'watchlist'">
+        <div v-if="items.length === 0" class="empty-state">
+          <div class="empty-icon"><i class="ph-bold ph-heart"></i></div>
+          <div class="empty-title">Nothing saved yet</div>
+          <div class="empty-subtitle">Heart any title to add it to your watchlist.</div>
+        </div>
+
+        <div v-else class="media-grid">
+          <media-card
+            v-for="item in items"
+            :key="item.id"
+            :item="item"
+            @click="handleClick"
+          />
+        </div>
       </div>
 
-      <div v-else class="media-grid">
-        <media-card
-          v-for="item in items"
-          :key="item.id"
-          :item="item"
-          @click="handleClick"
-        />
+      <!-- ── 2. Saved Moments Tab ── -->
+      <div v-else-if="activeTab === 'moments'">
+        <!-- Filter Toolbar -->
+        <div class="moments-filter-toolbar">
+          <div class="moments-category-pills">
+            <button
+              v-for="cat in categoryFilters"
+              :key="cat.id"
+              class="moments-cat-pill-btn"
+              :class="{ active: selectedCategory === cat.id }"
+              @click="selectedCategory = cat.id"
+            >
+              <span>{{ cat.icon }}</span>
+              <span>{{ cat.label }}</span>
+            </button>
+          </div>
+          <div class="moments-search-box">
+            <i class="ph ph-magnifying-glass"></i>
+            <input
+              v-model="momentSearch"
+              class="moments-search-input"
+              placeholder="Search notes or titles..."
+            />
+          </div>
+        </div>
+
+        <div v-if="filteredMoments.length === 0" class="empty-state">
+          <div class="empty-icon"><i class="ph-bold ph-bookmark-simple"></i></div>
+          <div class="empty-title">{{ moments.length === 0 ? 'No moments pinned yet' : 'No matching moments found' }}</div>
+          <div class="empty-subtitle">Press 'B' or tap the bookmark button while watching any video to pin moments.</div>
+        </div>
+
+        <div v-else class="moments-gallery-grid">
+          <div
+            v-for="bm in filteredMoments"
+            :key="bm.id"
+            class="moment-gallery-card"
+            @click="playMoment(bm)"
+          >
+            <div class="moment-gallery-thumb-wrap">
+              <img v-if="bm.thumb_path" :src="'/api/bookmarks/' + bm.id + '/thumb'" alt="Thumbnail" loading="lazy" />
+              <img v-else-if="bm.backdrop_path" :src="imgUrl(bm.backdrop_path)" alt="Backdrop" loading="lazy" />
+              <div v-else class="detail-moment-fallback">
+                <i class="ph ph-film-strip"></i>
+              </div>
+              <div class="detail-moment-play-overlay">
+                <i class="ph-fill ph-play"></i>
+              </div>
+              <span class="detail-moment-time-pill">{{ formatTime(bm.position) }}</span>
+            </div>
+            <div class="moment-gallery-content">
+              <div class="moment-gallery-meta-row">
+                <span class="detail-moment-cat-chip" :style="{ background: (bm.color || '#e50914') + '22', color: bm.color || '#e50914', borderColor: (bm.color || '#e50914') + '44' }">
+                  {{ bm.category || 'moment' }}
+                </span>
+                <span v-if="bm.is_shared" class="detail-moment-shared" title="Shared with Family">
+                  <i class="ph ph-users-three"></i>
+                </span>
+              </div>
+              <div class="moment-gallery-note" :title="bm.note">
+                {{ bm.note || 'Scene marker at ' + formatTime(bm.position) }}
+              </div>
+              <div class="moment-gallery-title" :title="bm.media_title">
+                {{ bm.media_title }}
+                <span v-if="bm.season && bm.episode"> · S{{ bm.season }}E{{ bm.episode }}</span>
+              </div>
+              <div class="moment-gallery-footer">
+                <span>Pinned by {{ bm.profile_name || 'You' }}</span>
+                <button class="moment-delete-btn" @click.stop="deleteMoment(bm)" title="Delete Moment">
+                  <i class="ph ph-trash"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   `,
   setup() {
     const router = VueRouter.useRouter();
     const items = ref([]);
+    const moments = ref([]);
+    const activeTab = ref("watchlist");
+    const selectedCategory = ref("all");
+    const momentSearch = ref("");
+
+    const categoryFilters = [
+      { id: "all", label: "All", icon: "✨" },
+      { id: "action", label: "Action", icon: "💥" },
+      { id: "funny", label: "Funny", icon: "😂" },
+      { id: "quote", label: "Quote", icon: "💬" },
+      { id: "plot_twist", label: "Plot Twist", icon: "⚡" },
+      { id: "music", label: "Music", icon: "🎵" },
+      { id: "general", label: "Other", icon: "📌" },
+    ];
 
     async function load() {
       if (!store.profile) return;
@@ -15071,17 +15470,79 @@ const FavoritesPage = {
       } catch (e) {
         addToast("Failed to load watchlist", "error");
       }
+      try {
+        const res = await API.get(`/api/profile/${store.profile.id}/bookmarks?category=all`);
+        moments.value = res?.bookmarks || [];
+      } catch (e) {
+        moments.value = [];
+      }
     }
+
+    const filteredMoments = computed(() => {
+      let list = moments.value || [];
+      if (selectedCategory.value !== "all") {
+        list = list.filter(m => (m.category || "general").toLowerCase() === selectedCategory.value);
+      }
+      if (momentSearch.value.trim()) {
+        const q = momentSearch.value.toLowerCase().trim();
+        list = list.filter(m =>
+          (m.note || "").toLowerCase().includes(q) ||
+          (m.media_title || "").toLowerCase().includes(q)
+        );
+      }
+      return list;
+    });
 
     function handleClick(item) {
       if (item.type === "movie") router.push(`/title/movie/${item.id}`);
       else router.push(`/title/${item.type}/${item.tmdb_id}`);
     }
 
+    function playMoment(bm) {
+      router.push(`/watch/${bm.media_id}?t=${bm.position}`);
+    }
+
+    async function deleteMoment(bm) {
+      const ok = await customConfirm({
+        title: "Delete Saved Moment",
+        message: `Delete this saved moment at ${formatTime(bm.position)}? This scene marker will be removed from your collection.`,
+        icon: "ph ph-trash",
+        okText: "Delete Moment",
+        cancelText: "Keep",
+        danger: true
+      });
+      if (!ok) return;
+
+      try {
+        const pid = store.profile?.id || 1;
+        const res = await API.delete(`/api/bookmarks/${bm.id}?profile_id=${pid}`);
+        if (res?.ok) {
+          moments.value = moments.value.filter(m => m.id !== bm.id);
+          addToast("Moment deleted", "info");
+        }
+      } catch (e) {
+        addToast(e?.message || "Failed to delete moment", "error");
+      }
+    }
+
     onMounted(load);
     watch(() => store.profile, load);
 
-    return { store, items, handleClick };
+    return {
+      store,
+      items,
+      moments,
+      activeTab,
+      selectedCategory,
+      momentSearch,
+      categoryFilters,
+      filteredMoments,
+      handleClick,
+      playMoment,
+      deleteMoment,
+      formatTime,
+      imgUrl
+    };
   },
 };
 

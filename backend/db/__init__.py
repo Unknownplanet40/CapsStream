@@ -139,6 +139,15 @@ from .playlists import (
     is_media_in_playlist,
 )
 
+from .bookmarks import (
+    create_bookmark,
+    get_bookmark,
+    get_bookmarks_for_media,
+    get_bookmarks_for_profile,
+    update_bookmark,
+    delete_bookmark,
+)
+
 __all__ = [
     "DB_PATH",
     "TEMPLATE_DB_PATH",
@@ -245,4 +254,10 @@ __all__ = [
     "remove_from_playlist",
     "reorder_playlist",
     "is_media_in_playlist",
+    "create_bookmark",
+    "get_bookmark",
+    "get_bookmarks_for_media",
+    "get_bookmarks_for_profile",
+    "update_bookmark",
+    "delete_bookmark",
 ]

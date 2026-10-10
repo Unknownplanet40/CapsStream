@@ -186,3 +186,46 @@ Before any session ends or after shipping a requested change:
   ```
 
 - Never overwrite, delete, or truncate previous entries in `PROJECT-LOG.md` so that decisions outlive every session and nothing ever gets lost.
+## 6. Interactive Planning & Discovery (`/grill-me` & `/plan`)
+
+When the user asks to start planning an app, formulate requirements, or explore a feature concept in Antigravity:
+1. **Interactive Interview (`/grill-me`)**:
+   - Recommend and trigger `/grill-me` to align on plans through an interactive interview.
+   - Clarify underspecified requirements, drill down into user expectations, uncover unstated edge cases, and resolve architectural or design decisions.
+   - **Do not stop prematurely**: Never end the discovery interview after just 1 or 2 shallow questions. Continue probing into workflows, constraints, error handling, and visual preferences across multiple rounds until the user explicitly confirms they are satisfied and ready to move forward.
+2. **Execution Breakdown (`/plan`)**:
+   - Recommend and trigger `/plan` to convert high-level requirements into phased, step-by-step implementation roadmaps once the user approves the discovery phase.
+3. **Capture in Living Docs**:
+   - Immediately transcribe the answers, constraints, and architecture discovered during `/grill-me` and `/plan` sessions into [`docs/prd.md`](docs/prd.md) and [`docs/architecture.md`](docs/architecture.md).
+
+## 7. New Feature Development Workflow (`/new-feature`)
+
+**Trigger:** When the user runs `/new-feature`, `/add-feature`, or requests adding new functionality, follow the standardized quality gate defined in [`.agents/rules/new-feature.md`](.agents/rules/new-feature.md) and [`docs/feature-workflow.md`](docs/feature-workflow.md):
+1. **Interactive Discovery (`/grill-me`)**: Multi-round questioning probing user flows, edge cases, error states, and permissions. Never stop until the user explicitly confirms satisfaction.
+2. **Technical Phasing (`/plan`)**: Break down implementation steps, self-checks, and file diffs.
+3. **Issue & Docs Sync**: Create GitHub Issue via `gh issue create`, update [`docs/prd.md`](docs/prd.md) and [`docs/architecture.md`](docs/architecture.md), and update `.env.example` if applicable.
+4. **Implementation**: Minimal diffs per `ponytail.md`, applying workspace design skills for UI components.
+5. **Verification**: Run self-checks, leave behind at least ONE runnable check, and confirm zero regressions.
+6. **Save & Release**: Follow Section 2 commit workflow, link `Closes #N`, append to [`PROJECT-LOG.md`](PROJECT-LOG.md), and refresh [`handoff.md`](handoff.md).
+
+## 8. Root-Cause Bug Fixing Workflow (`/fix-bug`)
+
+**Trigger:** When the user runs `/fix-bug`, `/debug`, or reports broken functionality:
+1. **Interactive Discovery (`/grill-me`)**: Interrogate exact reproduction steps, expected vs. actual behavior, error messages, and regression timeline until the user confirms satisfaction.
+2. **Template Mapping**: Align with `.github/ISSUE_TEMPLATE/bug_report.yml` and create an issue via `gh issue create`.
+3. **No Caller Band-Aids**: Isolate the root cause and grep all callers across the codebase.
+4. **Reproduce with a Test**: Write ONE failing test/check before modifying production code.
+5. **Ponytail Root Fix**: Shortest clean diff at the root source.
+6. **Verify & Release**: Ensure the reproduction test passes with zero regressions, commit as `fix(...)`, link `Fixes #N`, update [`PROJECT-LOG.md`](PROJECT-LOG.md), and refresh [`handoff.md`](handoff.md).
+
+## 9. UI/UX Redesign & Polish Workflow (`/fix-ui`)
+
+**Trigger:** When the user runs `/fix-ui`, `/change-ui`, `/redesign-ui`, or asks to improve interface design:
+1. **Interactive Discovery (`/grill-me`)**: Probe aesthetic style, layout pain points, design tokens, and states until the user confirms satisfaction.
+2. **4-Layer Skill Orchestration**:
+   - Audit with `design-taste-frontend` & `redesign-existing-projects` (block AI cliches).
+   - Tokens & layout with `design-system` & `ui-styling` (accessible primitives).
+   - Polish with `make-interfaces-feel-better`, `high-end-visual-design`, & `better-icons`.
+   - Audit with `web-design-guidelines` (WCAG AA contrast, touch targets).
+3. **Viewport Verification**: Verify across mobile (<640px), tablet, and desktop viewports.
+4. **Commit & Release**: Commit as `style(...)` or `feat(...)`, update [`PROJECT-LOG.md`](PROJECT-LOG.md), and refresh [`handoff.md`](handoff.md).
