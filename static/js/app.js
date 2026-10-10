@@ -17014,6 +17014,11 @@ const ProfilesPage = {
     );
 
     async function load() {
+      // Defensive redirect if user lands on /profiles with an active session (e.g. via direct URL or history)
+      if ((store.profile || sessionStorage.getItem("cs_active_profile_id")) && route.query.manage !== "true") {
+        router.replace("/");
+        return;
+      }
       try {
         profiles.value = await API.get("/api/profiles");
         checkQueryManage();
@@ -17314,7 +17319,7 @@ const ProfilesPage = {
       totpChallenge.value = null;
       totpCode.value = "";
       totpError.value = "";
-      router.push("/").then(() => {
+      router.replace("/").then(() => {
         startLibraryScan();
         if (typeof window.checkPostUpdateWhatsNew === "function") window.checkPostUpdateWhatsNew();
         if (typeof window.checkFulfilledRequestsAlerts === "function") window.checkFulfilledRequestsAlerts();
@@ -25187,6 +25192,13 @@ router.beforeEach((to, from, next) => {
           }
         } catch (e) {}
       }
+    }
+  }
+
+  if (to.path === "/profiles") {
+    const hasActiveSession = !!(store.profile || sessionStorage.getItem("cs_active_profile_id"));
+    if (hasActiveSession && to.query?.manage !== "true") {
+      return next("/");
     }
   }
 
