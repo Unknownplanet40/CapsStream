@@ -124,3 +124,21 @@ Expanded request matching and deduplication logic across all non-rejected status
 - Added unit tests in `backend/tests/test_route_requests.py` covering completed request consolidation, merge on create, and TV show granularity. Verified all 41 request tests pass.
 
 ---
+
+## October 10 at 8:00 AM
+### Asked
+Explore porting CapsStream into a Windows native app using C# and pure WinUI 3 (Windows App SDK) with Windows 11 Fluent Design style matching the home page 1:1, test the UI and player, and commit and push all changes while pausing further Windows native client development for now.
+
+### Decision
+Scaffolded a clean-architecture WinUI 3 solution under `clients/windows/` (.NET 8 + Windows App SDK) with `CapsStream.Core`, `CapsStream.Data` (Dapper + SQLite), and `CapsStream.WinUI`. Designed the Home page to match CapsStream web 1:1 featuring the 500px Cinematic Hero Billboard with multi-layer vignette gradients, metadata chips, and Netflix-style horizontal scrolling rails. Solved runtime host path resolution issues via `WindowsAppSDKSelfContained`, `RollForward Major`, and ancestor SQLite path traversal. Hardened the `MediaPlayerElement` player with normalized paths and visual diagnostic error notices. Marked development on this Windows prototype as paused/on hold per user preference.
+>why: Establishes a functional, compiling Windows App SDK prototype aligned with monorepo standards without committing to active desktop client maintenance while the web server and Android TV clients remain primary.
+
+### Shipped
+- Created `clients/windows/CapsStream.sln` (.NET 8 + WinUI 3 desktop client).
+- Implemented `CapsStream.Core` domain models (`MediaItem`, `MediaType`, `Profile`, `WatchProgress`, `WatchHistoryItem`).
+- Implemented `CapsStream.Data` (`CapsDb`, `MediaRepository`, `ProfileRepository`) with underscore-mapped SQLite queries.
+- Implemented `CapsStream.WinUI` (`MainWindow.xaml`, 1:1 `HomePage.xaml`, `PlayerPage.xaml`, `MoviesPage.xaml`, `SeriesPage.xaml`, `AnimePage.xaml`, `SettingsPage.xaml`, `AboutPage.xaml`).
+- Added `clients/windows/.gitignore` keeping all .NET build binaries and user caches out of version control.
+- Committed `91c78bd` and pushed to `origin/main`.
+
+---
