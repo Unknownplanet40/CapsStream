@@ -141,4 +141,46 @@ Scaffolded a clean-architecture WinUI 3 solution under `clients/windows/` (.NET 
 - Added `clients/windows/.gitignore` keeping all .NET build binaries and user caches out of version control.
 - Committed `91c78bd` and pushed to `origin/main`.
 
+## October 10 at 9:55 PM
+### Asked
+1. Add a feature in media details displaying subtitle availability and inspecting subtitles; for embedded tracks, show actual language names (e.g. English, Filipino, Japanese) instead of generic "Embedded" text.
+2. Fix bug where pressing the browser Back button after authenticating into a profile returns to the "Who's Watching?" profile selection view.
+3. Detect whether a movie has an end-credits or mid-credits scene using TMDb and display a prompt/modal when credits roll to jump directly to the bonus scene.
+
+### Decision
+1. Implemented subtitle inspector drawer, added availability badges in media details and episode cards, mapped Filipino (`fil`/`tl`), and overhauled embedded track naming to format clean human-readable language names.
+2. Switched login navigation from `router.push("/")` to `router.replace("/")` and added global `router.beforeEach` guard redirecting `/profiles` to `/` whenever an authenticated session exists (unless `manage=true`).
+3. Created hybrid credit scene detection querying TMDb keywords (`179430` aftercredits, `179431` duringcredits) with local embedded chapter fallback (`stinger`, `post-credit`, `mid-credit`). Added amber badges in details and a prominent centered glassmorphic prompt card in the player when credits roll with a "Jump to Scene" action.
+>why: Delivers comprehensive subtitle discoverability, fixes browser history security/UX leakage back into profile selection, and enriches movie watching with seamless post-credits scene navigation.
+
+### Shipped
+- Added `/api/media/<id>/subtitles` endpoint in `backend/routes/media.py` and `sub_naming.py` Filipino normalization.
+- Subtitle availability badge and modal inspector drawer in `static/js/app.js` and `static/css/main.css`.
+- Fixed auth back button navigation with `router.replace("/")` and route guard in `static/js/app.js`.
+- Implemented TMDb keywords post/mid-credits detection in `backend/matcher.py` and chapter markers in `backend/skip_times.py`.
+- Added `.credit-scene-meta-badge`, `.credit-scene-pill`, and centered player prompt card in `static/js/player.js` & `static/css/main.css`.
+- Added unit tests in `backend/tests/test_subtitles.py`, `backend/tests/test_matcher.py`, and `backend/tests/test_skip_times.py`.
+- Pushed commits `fc8e0d0`, `62dc73a`, `72fe528`, `fdc4993`, and `11e1330` to `origin/main`.
+
+## October 11 at 12:30 AM
+### Asked
+Fix an issue where clearing watch history or removing an item from Continue Watching / watch progress resurrects upon restart or reopening the app when Host PC Documents User Data Sync is active.
+
+### Decision
+Root-cause analysis revealed that `DELETE /api/progress/<media_id>` and `/api/progress/mark-unwatched` previously only deleted rows from the transient `watch_progress` table. The persistent `watch_history` table (and the host PC sync database `%USERPROFILE%/Documents/CapsStream/<Drive_Tag>/user_data.db`) remained untouched. On app restart, `import_user_data_from_host()` ran `restore_progress_for_media()`, which matched all items against `watch_history` and re-inserted them into `watch_progress`.
+Fixed at the root by:
+1. Adding `delete_watch_history(profile_id, ...)` in `backend/db/playback.py` and extending `delete_progress(profile_id, media_id, clear_history=True)` to delete from `watch_history`.
+2. Adding `delete_host_watch_history(profile_id, ...)` in `backend/host_sync.py` to immediately purge matching entries from the host Documents sync database so the host DB cannot resurrect deleted entries.
+3. Updating `/api/progress/mark-unwatched` in `backend/routes/library.py` to purge series and episode watch history across local and host databases.
+4. Added reproduction test verifying `delete_progress` purges local `watch_history` and host sync DB, preventing resurrection on restart/import.
+>why: Guarantees user actions to clear progress or history are permanent across both local SQLite tables and host PC sync databases, eliminating phantom items returning after restarts.
+
+### Shipped
+- `backend/db/playback.py`: Added `delete_watch_history()` and updated `delete_progress(profile_id, media_id, clear_history=True)` to purge matching history and propagate to host sync.
+- `backend/db/__init__.py`: Exported `delete_watch_history`.
+- `backend/host_sync.py`: Added `delete_host_watch_history()` to remove purged entries from all matching host sync user data databases.
+- `backend/routes/library.py`: Updated `api_mark_unwatched` to purge series and episode history across local and host databases.
+- `backend/tests/test_host_sync.py`: Added `test_delete_progress_syncs_with_host_and_prevents_resurrection` test.
+- `backend/tests/test_route_library.py`: Updated mock expectations and verified route tests.
+
 ---

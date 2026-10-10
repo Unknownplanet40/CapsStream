@@ -10,7 +10,7 @@ from .middleware import (
 )
 from backend.db import (
     get_media_by_id, get_media_by_tmdb, get_unique_shows, get_recently_added, get_top_rated,
-    get_progress, save_progress, delete_progress, get_continue_watching,
+    get_progress, save_progress, delete_progress, delete_watch_history, get_continue_watching,
     get_favorites, toggle_favorite, is_favorite,
     get_collections, create_collection, update_collection, update_smart_collection_rule, delete_collection,
     add_to_collection, remove_from_collection, get_progress_for_media_items,
@@ -135,15 +135,20 @@ def api_mark_unwatched():
             episodes = get_media_by_tmdb(media.get("tmdb_id"), media.get("type")) if media.get("tmdb_id") else []
             for ep in episodes:
                 if ep.get("id"):
-                    delete_progress(pid, ep["id"])
-            delete_progress(pid, int(media_id))
+                    delete_progress(pid, ep["id"], clear_history=True)
+            delete_progress(pid, int(media_id), clear_history=True)
+            if media.get("tmdb_id"):
+                delete_watch_history(pid, tmdb_id=media.get("tmdb_id"), media_type=media.get("type"))
+            elif media.get("title"):
+                delete_watch_history(pid, title=media.get("title"), media_type=media.get("type"))
         else:
-            delete_progress(pid, int(media_id))
+            delete_progress(pid, int(media_id), clear_history=True)
     elif tmdb_id:
         episodes = get_media_by_tmdb(int(tmdb_id), media_type)
         for ep in episodes:
             if ep.get("id"):
-                delete_progress(pid, ep["id"])
+                delete_progress(pid, ep["id"], clear_history=True)
+        delete_watch_history(pid, tmdb_id=int(tmdb_id), media_type=media_type)
 
     return jsonify({"ok": True, "completed": False})
 

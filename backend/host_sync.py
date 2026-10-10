@@ -208,6 +208,62 @@ def get_host_sync_status(custom_tag: str = None) -> dict:
     }
 
 
+def delete_host_watch_history(profile_id: int, tmdb_id=None, title=None, media_type=None, season=None, episode=None, custom_tag: str = None) -> int:
+    """
+    Directly delete matching entries from %USERPROFILE%/Documents/CapsStream/<Drive_Tag>/user_data.db
+    if it exists, ensuring host sync does not retain purged watch history.
+    """
+    sync_dirs = []
+    if custom_tag:
+        sync_dirs.append(get_host_sync_dir(custom_tag))
+    sync_dirs.append(get_host_sync_dir())
+
+    # Also inspect all subfolders in host Documents/CapsStream to ensure cross-drive cleanliness
+    if platform.system() == "Windows":
+        user_profile = os.environ.get("USERPROFILE")
+        docs = os.path.join(user_profile, "Documents") if user_profile and os.path.isdir(user_profile) else os.path.expanduser("~/Documents")
+    else:
+        docs = os.path.expanduser("~/Documents")
+    caps_base = os.path.join(docs, "CapsStream")
+    if os.path.isdir(caps_base):
+        for entry in os.listdir(caps_base):
+            cand = os.path.join(caps_base, entry)
+            if os.path.isdir(cand) and cand not in sync_dirs:
+                sync_dirs.append(cand)
+
+    deleted = 0
+    for s_dir in sync_dirs:
+        db_file = os.path.join(s_dir, "user_data.db")
+        if not os.path.isfile(db_file):
+            continue
+
+        try:
+            h_conn = sqlite3.connect(db_file)
+            if tmdb_id:
+                cur = h_conn.execute("""
+                    DELETE FROM watch_history
+                    WHERE profile_id=? AND tmdb_id=?
+                      AND (? IS NULL OR type=?)
+                      AND (? IS NULL OR COALESCE(season, -1) = ?)
+                      AND (? IS NULL OR COALESCE(episode, -1) = ?)
+                """, (profile_id, tmdb_id, media_type, media_type, season, season, episode, episode))
+                deleted += cur.rowcount
+            elif title:
+                cur = h_conn.execute("""
+                    DELETE FROM watch_history
+                    WHERE profile_id=? AND title=?
+                      AND (? IS NULL OR type=?)
+                      AND (? IS NULL OR COALESCE(season, -1) = ?)
+                      AND (? IS NULL OR COALESCE(episode, -1) = ?)
+                """, (profile_id, title, media_type, media_type, season, season, episode, episode))
+                deleted += cur.rowcount
+            h_conn.commit()
+            h_conn.close()
+        except Exception as e:
+            print("[HostSync] Error deleting history from host DB:", e)
+    return deleted
+
+
 def export_user_data_to_host(force_dev: bool = False, conn=None, custom_tag: str = None) -> dict:
     """
     Export user data (profiles, history, progress, playlists, favorites, achievements, avatars)

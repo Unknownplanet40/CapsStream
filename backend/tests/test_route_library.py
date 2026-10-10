@@ -83,6 +83,15 @@ class TestRouteLibrary(unittest.TestCase):
         resp = self.client.post("/api/progress/mark-unwatched", json={"media_id": 101})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(resp.get_json()["completed"])
+        mock_del.assert_called_once_with(1, 101, clear_history=True)
+
+    @patch("backend.routes.library.delete_progress")
+    def test_api_delete_progress(self, mock_del):
+        with self.client.session_transaction() as sess:
+            sess["profile_id"] = 1
+        resp = self.client.delete("/api/progress/101")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["ok"])
         mock_del.assert_called_once_with(1, 101)
 
 

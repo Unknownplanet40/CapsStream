@@ -213,7 +213,56 @@ def restore_progress_for_media(media_item, conn=None):
     return restored
 
 
-def delete_progress(profile_id, media_id):
+def delete_watch_history(profile_id: int, tmdb_id=None, title=None, media_type=None, season=None, episode=None, conn=None):
+    """
+    Purge matching entries from persistent watch_history and host sync user_data.db.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_conn()
+        close_conn = True
+
+    try:
+        if tmdb_id:
+            conn.execute("""
+                DELETE FROM watch_history
+                WHERE profile_id=? AND tmdb_id=?
+                  AND (? IS NULL OR type=?)
+                  AND (? IS NULL OR COALESCE(season, -1) = ?)
+                  AND (? IS NULL OR COALESCE(episode, -1) = ?)
+            """, (profile_id, tmdb_id, media_type, media_type, season, season, episode, episode))
+        elif title:
+            conn.execute("""
+                DELETE FROM watch_history
+                WHERE profile_id=? AND title=?
+                  AND (? IS NULL OR type=?)
+                  AND (? IS NULL OR COALESCE(season, -1) = ?)
+                  AND (? IS NULL OR COALESCE(episode, -1) = ?)
+            """, (profile_id, title, media_type, media_type, season, season, episode, episode))
+        if close_conn:
+            conn.commit()
+    except Exception as e:
+        print("[Playback] Error purging watch_history:", e)
+    finally:
+        if close_conn:
+            conn.close()
+
+    # Sync deletion with host Documents user_data.db if available
+    try:
+        from backend.host_sync import delete_host_watch_history
+        delete_host_watch_history(
+            profile_id=profile_id,
+            tmdb_id=tmdb_id,
+            title=title,
+            media_type=media_type,
+            season=season,
+            episode=episode
+        )
+    except Exception:
+        pass
+
+
+def delete_progress(profile_id, media_id, clear_history=True):
     conn = get_conn()
     media = get_media_by_id(media_id)
     sources = get_all_sources_for_media(media) if media else []
@@ -226,6 +275,16 @@ def delete_progress(profile_id, media_id):
         )
     conn.commit()
     conn.close()
+
+    if clear_history and media:
+        delete_watch_history(
+            profile_id=profile_id,
+            tmdb_id=media.get("tmdb_id"),
+            title=media.get("title"),
+            media_type=media.get("type"),
+            season=media.get("season"),
+            episode=media.get("episode")
+        )
 
 
 def get_continue_watching(profile_id, limit=20):

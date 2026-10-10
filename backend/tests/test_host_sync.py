@@ -267,5 +267,59 @@ class TestHostSync(unittest.TestCase):
         self.assertGreater(stat2["db_size"], 0)
 
 
+    @patch("backend.host_sync.is_dev_mode", return_value=False)
+    def test_delete_progress_syncs_with_host_and_prevents_resurrection(self, mock_dev):
+        """Verify deleting watch progress purges watch_history and host sync, preventing resurrection on restart/import."""
+        from backend.db.playback import delete_progress
+        conn = get_conn()
+        conn.execute("INSERT INTO profiles (id, name, is_admin) VALUES (1, 'Alice', 1)")
+        m_id = conn.execute("""
+            INSERT INTO media (type, tmdb_id, title, year, duration, genres, file_path)
+            VALUES ('movie', 5555, 'Movie to Delete', 2024, 7200, 'Action', 'E:\\Movies\\Movie.mkv')
+        """).lastrowid
+        conn.commit()
+        conn.close()
+
+        # 1. User watches movie
+        save_progress(profile_id=1, media_id=m_id, position=3600, duration=7200, completed=False)
+
+        # 2. Host sync exports to host user_data.db
+        export_user_data_to_host(custom_tag="Drive_Test")
+
+        # Verify host db has watch history
+        host_db = os.path.join(self.test_docs_base, "CapsStream", "Drive_Test", "user_data.db")
+        h_conn = sqlite3.connect(host_db)
+        h_conn.row_factory = sqlite3.Row
+        self.assertEqual(len(h_conn.execute("SELECT * FROM watch_history WHERE profile_id=1").fetchall()), 1)
+        h_conn.close()
+
+        # 3. User clears item from Continue Watching / watch progress
+        delete_progress(profile_id=1, media_id=m_id, clear_history=True)
+
+        # Local watch_progress and watch_history must be gone
+        chk_conn = get_conn()
+        self.assertIsNone(chk_conn.execute("SELECT * FROM watch_progress WHERE profile_id=1 AND media_id=?", (m_id,)).fetchone())
+        self.assertIsNone(chk_conn.execute("SELECT * FROM watch_history WHERE profile_id=1 AND title='Movie to Delete'").fetchone())
+        chk_conn.close()
+
+        # 4. Host sync DB must also have item removed
+        h_conn = sqlite3.connect(host_db)
+        h_conn.row_factory = sqlite3.Row
+        self.assertEqual(len(h_conn.execute("SELECT * FROM watch_history WHERE profile_id=1 AND title='Movie to Delete'").fetchall()), 0)
+        h_conn.close()
+
+        # 5. App restarts / runs import_user_data_from_host
+        imp_res = import_user_data_from_host(conn=get_conn(), custom_tag="Drive_Test")
+        self.assertTrue(imp_res["ok"])
+
+        # 6. Verify item does NOT resurrect in watch_progress or watch_history!
+        chk_conn = get_conn()
+        wp = chk_conn.execute("SELECT * FROM watch_progress WHERE profile_id=1 AND media_id=?", (m_id,)).fetchone()
+        wh = chk_conn.execute("SELECT * FROM watch_history WHERE profile_id=1 AND title='Movie to Delete'").fetchone()
+        chk_conn.close()
+        self.assertIsNone(wp, "Deleted watch_progress resurrected after host sync import!")
+        self.assertIsNone(wh, "Deleted watch_history resurrected after host sync import!")
+
+
 if __name__ == "__main__":
     unittest.main()
