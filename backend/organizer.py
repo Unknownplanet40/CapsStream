@@ -1149,13 +1149,24 @@ def record_history(batch_id: str, operations: List[Dict[str, Any]], history_file
         except Exception:
             history = []
 
-    batch_record = {
-        "batch_id": batch_id,
-        "timestamp": datetime.now().isoformat(),
-        "count": len(operations),
-        "operations": operations
-    }
-    history.insert(0, batch_record)
+    # If batch_id already exists in history, merge operations into it
+    existing_batch = None
+    for b in history:
+        if b.get("batch_id") == batch_id:
+            existing_batch = b
+            break
+
+    if existing_batch:
+        existing_batch["operations"].extend(operations)
+        existing_batch["count"] = len(existing_batch["operations"])
+    else:
+        batch_record = {
+            "batch_id": batch_id,
+            "timestamp": datetime.now().isoformat(),
+            "count": len(operations),
+            "operations": operations
+        }
+        history.insert(0, batch_record)
 
     # Keep last 50 batches
     history = history[:50]
@@ -1344,12 +1355,13 @@ def execute_organization_plan(
     incoming_dir: Optional[str] = None,
     history_file: Optional[str] = None,
     collision_policy: str = "skip",
+    batch_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Execute a batch of approved organization items.
     Records history for rollback and returns execution metrics.
     """
-    batch_id = f"batch_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+    batch_id = batch_id or f"batch_{int(time.time())}_{uuid.uuid4().hex[:6]}"
     operations = []
     successful_items = []
     failed_items = []

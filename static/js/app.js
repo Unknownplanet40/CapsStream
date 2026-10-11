@@ -9493,10 +9493,27 @@ const SettingsPage = {
                         </span>
                       </td>
                       <td>
-                        <span v-if="item.confidence === 'low'" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 6px" title="Low confidence — please review before organizing">Unrecognized</span>
-                        <span v-else-if="item.is_locked" class="server-status-pill error" style="font-size:0.7rem;padding:2px 6px">Locked</span>
-                        <span v-else-if="item.destination_exists" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 6px">Exists (Upgrade)</span>
-                        <span v-else class="server-status-pill success" style="font-size:0.7rem;padding:2px 6px">Ready</span>
+                        <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">
+                          <span v-if="item.confidence === 'low'" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 6px" title="Low match confidence (<70%). Review or edit title/year manually before organizing.">
+                            <i class="ph ph-warning" style="margin-right:2px"></i>Unrecognized
+                          </span>
+                          <span v-else-if="item.is_locked" class="server-status-pill error" style="font-size:0.7rem;padding:2px 6px" title="File is currently open, downloading, or locked by another process. Wait until download completes or release the lock.">
+                            <i class="ph ph-lock" style="margin-right:2px"></i>Locked
+                          </span>
+                          <span v-else-if="item.destination_exists" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 6px" title="Destination already exists. Organizing will replace or upgrade the destination file.">
+                            <i class="ph ph-arrows-clockwise" style="margin-right:2px"></i>Exists (Upgrade)
+                          </span>
+                          <span v-else class="server-status-pill success" style="font-size:0.7rem;padding:2px 6px" title="Ready to be linked or moved into your organized library folder.">
+                            <i class="ph ph-check" style="margin-right:2px"></i>Ready
+                          </span>
+
+                          <span v-if="item.is_locked" style="font-size:0.65rem;color:#f87171;line-height:1.1">
+                            In use / downloading
+                          </span>
+                          <span v-else-if="item.confidence === 'low'" style="font-size:0.65rem;color:#fbbf24;line-height:1.1">
+                            Check title &amp; year
+                          </span>
+                        </div>
                       </td>
                     </tr>
                   </tbody>
@@ -9505,139 +9522,194 @@ const SettingsPage = {
             </div>
           </div>
 
-          <!-- Organizer Detecting & Processing Status Modal (In-Container Overlay) -->
-          <div class="organizer-progress-modal-backdrop" v-if="organizerProgressModal.show" @click.self="organizerProgressModal.type === 'success' ? (organizerProgressModal.show = false) : null">
-            <div class="organizer-progress-modal-card" @click.stop>
-              <div class="organizer-progress-icon-wrap" :class="organizerProgressModal.type">
-                <i v-if="organizerProgressModal.type === 'detecting'" class="ph ph-magnifying-glass" style="animation:spin 1.8s linear infinite"></i>
-                <i v-else-if="organizerProgressModal.type === 'processing'" class="ph ph-arrows-clockwise" style="animation:spin 1.2s linear infinite"></i>
-                <i v-else-if="organizerProgressModal.type === 'success'" class="ph-bold ph-check"></i>
-              </div>
-
-              <div class="organizer-progress-badge" :class="organizerProgressModal.type">
-                <span v-if="organizerProgressModal.type === 'detecting'">Detecting &amp; Matching</span>
-                <span v-else-if="organizerProgressModal.type === 'processing'">Processing {{ organizerProgressModal.count }} Item{{ organizerProgressModal.count === 1 ? '' : 's' }}</span>
-                <span v-else-if="organizerProgressModal.type === 'success'">Finished</span>
-              </div>
-
-              <h3 class="organizer-progress-title">{{ organizerProgressModal.title }}</h3>
-              <p class="organizer-progress-subtitle">{{ organizerProgressModal.subtitle }}</p>
-
-              <div class="organizer-progress-details" v-if="organizerProgressModal.detail">
-                <div style="display:flex;align-items:center;gap:6px">
-                  <i class="ph ph-info" style="color:var(--accent)"></i>
-                  <span style="font-weight:600;color:var(--text-primary)">{{ organizerProgressModal.type === 'detecting' ? 'Target Folder:' : 'Operation Status:' }}</span>
+          <!-- Organizer Detecting & Processing Status Modal (Teleported to Body for Global Overlay) -->
+          <teleport to="body">
+            <div class="organizer-progress-modal-backdrop" v-if="organizerProgressModal.show" @click.self="organizerProgressModal.type === 'success' || organizerProgressModal.type === 'error' ? (organizerProgressModal.show = false) : null">
+              <div class="organizer-progress-modal-card" @click.stop>
+                <div class="organizer-progress-icon-wrap" :class="organizerProgressModal.type">
+                  <i v-if="organizerProgressModal.type === 'detecting'" class="ph ph-magnifying-glass" style="animation:spin 1.8s linear infinite"></i>
+                  <i v-else-if="organizerProgressModal.type === 'processing'" class="ph ph-arrows-clockwise" style="animation:spin 1.2s linear infinite"></i>
+                  <i v-else-if="organizerProgressModal.type === 'success'" class="ph-bold ph-check"></i>
+                  <i v-else-if="organizerProgressModal.type === 'error'" class="ph-bold ph-warning"></i>
                 </div>
-                <div style="word-break:break-all;color:var(--text-secondary)">{{ organizerProgressModal.detail }}</div>
-              </div>
 
-              <div v-if="organizerProgressModal.type === 'detecting'" style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin-top:2px">
-                <i class="ph ph-shield-check" style="color:#4ade80"></i>
-                <span>Read-only inspection. Files remain untouched until confirmed.</span>
-              </div>
-
-              <div v-else-if="organizerProgressModal.type === 'processing'" style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin-top:2px">
-                <i class="ph ph-warning-circle" style="color:#fbbf24"></i>
-                <span>Please keep server running while links/moves are executed.</span>
-              </div>
-
-              <button v-if="organizerProgressModal.type === 'success'" class="btn btn-primary btn-sm" @click="organizerProgressModal.show = false" style="margin-top:6px;width:100%">
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- History & Rollback Modal -->
-        <div class="organizer-history-modal-backdrop" v-if="organizerHistoryOpen" @click.self="organizerHistoryOpen = false">
-          <div class="organizer-history-modal-card" @click.stop>
-            <div class="organizer-history-header">
-              <div class="organizer-history-header-left">
-                <div class="organizer-history-icon-badge">
-                  <i class="ph ph-clock-counter-clockwise"></i>
+                <div class="organizer-progress-badge" :class="organizerProgressModal.type">
+                  <span v-if="organizerProgressModal.type === 'detecting'">Detecting &amp; Matching Media</span>
+                  <span v-else-if="organizerProgressModal.type === 'processing'">
+                    Processing {{ organizerProgressModal.current || 0 }} of {{ organizerProgressModal.total || organizerProgressModal.count }} Item{{ (organizerProgressModal.total || organizerProgressModal.count) === 1 ? '' : 's' }} ({{ organizerProgressModal.percent || 0 }}%)
+                  </span>
+                  <span v-else-if="organizerProgressModal.type === 'success'">Completed Successfully</span>
+                  <span v-else-if="organizerProgressModal.type === 'error'">Operation Encountered Errors</span>
                 </div>
-                <div class="organizer-history-title-wrap">
-                  <h3>Organizer History &amp; Rollback</h3>
-                  <div class="organizer-history-subtitle">Review past runs or revert organized files to their original state</div>
+
+                <h3 class="organizer-progress-title">{{ organizerProgressModal.title }}</h3>
+                <p class="organizer-progress-subtitle">{{ organizerProgressModal.subtitle }}</p>
+
+                <!-- Progress Bar when processing -->
+                <div class="organizer-modal-progress-wrap" v-if="organizerProgressModal.type === 'processing' || (organizerProgressModal.type === 'success' && organizerProgressModal.total)">
+                  <div class="organizer-modal-progress-bar" :style="{ width: (organizerProgressModal.percent || 0) + '%' }"></div>
                 </div>
-              </div>
-              <button class="modal-close-btn" @click="organizerHistoryOpen = false" title="Close">
-                <i class="ph ph-x"></i>
-              </button>
-            </div>
 
-            <div class="organizer-history-body">
-              <div v-if="organizerHistoryLoading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3rem 1.5rem;gap:12px">
-                <div class="loading-spinner"></div>
-                <span style="font-size:0.85rem;color:var(--text-muted)">Loading organization history...</span>
-              </div>
-
-              <div v-else-if="organizerHistory.length === 0" class="organizer-history-empty">
-                <div class="organizer-history-empty-icon">
-                  <i class="ph ph-tray"></i>
-                </div>
-                <div style="font-weight:700;font-size:0.95rem;color:var(--text-primary);margin-bottom:4px">No Past Batches Recorded</div>
-                <div style="font-size:0.8rem;color:var(--text-muted);max-width:380px;margin:0 auto">
-                  Files processed automatically or organized from preview will appear here with one-click rollback.
-                </div>
-              </div>
-
-              <div v-else style="display:flex;flex-direction:column;gap:12px">
-                <div v-for="batch in organizerHistory" :key="batch.batch_id" class="organizer-batch-card">
-                  <div class="organizer-batch-top">
-                    <div class="organizer-batch-meta">
-                      <span class="organizer-batch-id-pill" :title="batch.batch_id">{{ batch.batch_id }}</span>
-                      <span class="organizer-batch-date">
-                        <i class="ph ph-calendar-blank"></i>
-                        {{ new Date(batch.timestamp).toLocaleString() }}
-                      </span>
-                      <span class="organizer-batch-count">
-                        <i class="ph ph-files" style="margin-right:2px"></i>
-                        {{ batch.count }} file{{ batch.count === 1 ? '' : 's' }}
-                      </span>
-                    </div>
-
-                    <button class="organizer-batch-btn-revert" @click="undoOrganizerBatch(batch.batch_id)" :disabled="organizerRevertingBatch === batch.batch_id" title="Revert files in this batch">
-                      <i :class="organizerRevertingBatch === batch.batch_id ? 'ph ph-circle-notch' : 'ph ph-arrow-u-up-left'" :style="organizerRevertingBatch === batch.batch_id ? 'animation:spin 1s linear infinite' : ''"></i>
-                      <span>{{ organizerRevertingBatch === batch.batch_id ? 'Reverting...' : 'Revert Batch' }}</span>
-                    </button>
+                <!-- Active Item Card when processing -->
+                <div class="organizer-active-item-card" v-if="organizerProgressModal.type === 'processing' && organizerProgressModal.currentItem">
+                  <div class="organizer-active-item-title">
+                    <i class="ph ph-film-slate" style="color:var(--accent)"></i>
+                    <span>Currently Organizing: <strong>{{ organizerProgressModal.currentItem.canonical_title || organizerProgressModal.currentItem.original_filename }}</strong></span>
+                    <span v-if="organizerProgressModal.currentItem.year" style="color:var(--text-muted);font-size:0.75rem">({{ organizerProgressModal.currentItem.year }})</span>
                   </div>
 
-                  <!-- Operation details -->
-                  <div v-if="batch.operations && batch.operations.length > 0" class="organizer-batch-ops">
-                    <div v-for="(op, opIdx) in batch.operations.slice(0, organizerExpandedBatches.has(batch.batch_id) ? undefined : 3)" :key="opIdx" class="organizer-op-row">
-                      <div class="organizer-op-file-flow">
-                        <span class="organizer-op-src" :title="op.source">
-                          <i class="ph ph-file-arrow-up" style="margin-right:3px"></i>
-                          {{ getFileBasename(op.source) }}
-                        </span>
-                        <i class="ph ph-arrow-right organizer-op-arrow"></i>
-                        <span class="organizer-op-dst" :title="op.destination">
-                          <i class="ph ph-folder" style="margin-right:3px;color:var(--accent)"></i>
-                          {{ op.destination }}
-                        </span>
+                  <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:3px;display:flex;align-items:center;gap:4px">
+                    <i class="ph ph-file-arrow-up"></i>
+                    <span>Source:</span>
+                    <span class="organizer-path-code" :title="organizerProgressModal.currentItem.source_path">{{ getFileBasename(organizerProgressModal.currentItem.source_path) }}</span>
+                    <span v-if="organizerProgressModal.currentItem.file_size" style="margin-left:auto;color:var(--text-secondary)">{{ (organizerProgressModal.currentItem.file_size / (1024*1024*1024)).toFixed(2) }} GB</span>
+                  </div>
+
+                  <div style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
+                    <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
+                    <span>Destination:</span>
+                    <span class="organizer-path-code" :title="organizerProgressModal.currentItem.destination_path">{{ organizerProgressModal.currentItem.destination_path }}</span>
+                  </div>
+
+                  <div v-if="organizerProgressModal.currentItem.subtitles?.length || organizerProgressModal.currentItem.extras?.length" style="display:flex;align-items:center;gap:6px;margin-top:6px">
+                    <span v-if="organizerProgressModal.currentItem.subtitles?.length" class="tag" style="font-size:0.68rem;padding:1px 5px;background:rgba(34,197,94,0.15);color:#4ade80">
+                      +{{ organizerProgressModal.currentItem.subtitles.length }} companion subtitle(s)
+                    </span>
+                    <span v-if="organizerProgressModal.currentItem.extras?.length" class="tag" style="font-size:0.68rem;padding:1px 5px;background:rgba(59,130,246,0.15);color:#60a5fa">
+                      +{{ organizerProgressModal.currentItem.extras.length }} theme/extra(s)
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Processed Activity Log (Recent items) -->
+                <div class="organizer-modal-items-log" v-if="organizerProgressModal.processedItems && organizerProgressModal.processedItems.length > 0">
+                  <div style="font-size:0.7rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">
+                    Activity Log ({{ organizerProgressModal.processedItems.length }})
+                  </div>
+                  <div v-for="(pItem, pIdx) in organizerProgressModal.processedItems.slice().reverse().slice(0, 5)" :key="pIdx" class="organizer-log-entry">
+                    <i :class="pItem.status === 'ok' ? 'ph-bold ph-check' : 'ph-bold ph-warning'" :style="{ color: pItem.status === 'ok' ? '#4ade80' : '#f87171' }"></i>
+                    <span style="font-weight:600;color:var(--text-primary)">{{ pItem.title }}</span>
+                    <span class="organizer-path-code" style="max-width:180px" :title="pItem.destination">{{ getFileBasename(pItem.destination) }}</span>
+                    <span style="margin-left:auto;font-size:0.68rem;color:var(--text-muted)">{{ pItem.action }}</span>
+                  </div>
+                </div>
+
+                <div class="organizer-progress-details" v-if="organizerProgressModal.detail">
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <i class="ph ph-info" style="color:var(--accent)"></i>
+                    <span style="font-weight:600;color:var(--text-primary)">{{ organizerProgressModal.type === 'detecting' ? 'Target Folder:' : 'Operation Details:' }}</span>
+                  </div>
+                  <div style="word-break:break-all;color:var(--text-secondary)">{{ organizerProgressModal.detail }}</div>
+                </div>
+
+                <div v-if="organizerProgressModal.type === 'detecting'" style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin-top:2px">
+                  <i class="ph ph-shield-check" style="color:#4ade80"></i>
+                  <span>Read-only inspection. Files remain untouched until confirmed.</span>
+                </div>
+
+                <div v-else-if="organizerProgressModal.type === 'processing'" style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin-top:2px">
+                  <i class="ph ph-warning-circle" style="color:#fbbf24"></i>
+                  <span>Please keep server running while links/moves are executed.</span>
+                </div>
+
+                <button v-if="organizerProgressModal.type === 'success' || organizerProgressModal.type === 'error'" class="btn btn-primary btn-sm" @click="organizerProgressModal.show = false" style="margin-top:6px;width:100%">
+                  Done
+                </button>
+              </div>
+            </div>
+
+            <!-- History & Rollback Modal (Teleported to Body for Global Overlay) -->
+            <div class="organizer-history-modal-backdrop" v-if="organizerHistoryOpen" @click.self="organizerHistoryOpen = false">
+              <div class="organizer-history-modal-card" @click.stop>
+                <div class="organizer-history-header">
+                  <div class="organizer-history-header-left">
+                    <div class="organizer-history-icon-badge">
+                      <i class="ph ph-clock-counter-clockwise"></i>
+                    </div>
+                    <div class="organizer-history-title-wrap">
+                      <h3>Organizer History &amp; Rollback</h3>
+                      <div class="organizer-history-subtitle">Review past runs or revert organized files to their original state</div>
+                    </div>
+                  </div>
+                  <button class="modal-close-btn" @click="organizerHistoryOpen = false" title="Close">
+                    <i class="ph ph-x"></i>
+                  </button>
+                </div>
+
+                <div class="organizer-history-body">
+                  <div v-if="organizerHistoryLoading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3rem 1.5rem;gap:12px">
+                    <div class="loading-spinner"></div>
+                    <span style="font-size:0.85rem;color:var(--text-muted)">Loading organization history...</span>
+                  </div>
+
+                  <div v-else-if="organizerHistory.length === 0" class="organizer-history-empty">
+                    <div class="organizer-history-empty-icon">
+                      <i class="ph ph-tray"></i>
+                    </div>
+                    <div style="font-weight:700;font-size:0.95rem;color:var(--text-primary);margin-bottom:4px">No Past Batches Recorded</div>
+                    <div style="font-size:0.8rem;color:var(--text-muted);max-width:380px;margin:0 auto">
+                      Files processed automatically or organized from preview will appear here with one-click rollback.
+                    </div>
+                  </div>
+
+                  <div v-else style="display:flex;flex-direction:column;gap:12px">
+                    <div v-for="batch in organizerHistory" :key="batch.batch_id" class="organizer-batch-card">
+                      <div class="organizer-batch-top">
+                        <div class="organizer-batch-meta">
+                          <span class="organizer-batch-id-pill" :title="batch.batch_id">{{ batch.batch_id }}</span>
+                          <span class="organizer-batch-date">
+                            <i class="ph ph-calendar-blank"></i>
+                            {{ new Date(batch.timestamp).toLocaleString() }}
+                          </span>
+                          <span class="organizer-batch-count">
+                            <i class="ph ph-files" style="margin-right:2px"></i>
+                            {{ batch.count }} file{{ batch.count === 1 ? '' : 's' }}
+                          </span>
+                        </div>
+
+                        <button class="organizer-batch-btn-revert" @click="undoOrganizerBatch(batch.batch_id)" :disabled="organizerRevertingBatch === batch.batch_id" title="Revert files in this batch">
+                          <i :class="organizerRevertingBatch === batch.batch_id ? 'ph ph-circle-notch' : 'ph ph-arrow-u-up-left'" :style="organizerRevertingBatch === batch.batch_id ? 'animation:spin 1s linear infinite' : ''"></i>
+                          <span>{{ organizerRevertingBatch === batch.batch_id ? 'Reverting...' : 'Revert Batch' }}</span>
+                        </button>
                       </div>
-                      <span class="organizer-op-badge" :class="op.action || 'smart'">
-                        {{ op.action || 'smart' }}
-                      </span>
-                    </div>
 
-                    <button v-if="batch.operations.length > 3" class="btn btn-ghost btn-sm" @click="toggleExpandBatch(batch.batch_id)" style="font-size:0.72rem;padding:2px 8px;margin-top:2px;align-self:flex-start">
-                      {{ organizerExpandedBatches.has(batch.batch_id) ? 'Show Less' : ('+ Show ' + (batch.operations.length - 3) + ' more file(s)') }}
-                    </button>
+                      <!-- Operation details -->
+                      <div v-if="batch.operations && batch.operations.length > 0" class="organizer-batch-ops">
+                        <div v-for="(op, opIdx) in batch.operations.slice(0, organizerExpandedBatches.has(batch.batch_id) ? undefined : 3)" :key="opIdx" class="organizer-op-row">
+                          <div class="organizer-op-file-flow">
+                            <span class="organizer-op-src" :title="op.source">
+                              <i class="ph ph-file-arrow-up" style="margin-right:3px"></i>
+                              {{ getFileBasename(op.source) }}
+                            </span>
+                            <i class="ph ph-arrow-right organizer-op-arrow"></i>
+                            <span class="organizer-op-dst" :title="op.destination">
+                              <i class="ph ph-folder" style="margin-right:3px;color:var(--accent)"></i>
+                              {{ op.destination }}
+                            </span>
+                          </div>
+                          <span class="organizer-op-badge" :class="op.action || 'smart'">
+                            {{ op.action || 'smart' }}
+                          </span>
+                        </div>
+
+                        <button v-if="batch.operations.length > 3" class="btn btn-ghost btn-sm" @click="toggleExpandBatch(batch.batch_id)" style="font-size:0.72rem;padding:2px 8px;margin-top:2px;align-self:flex-start">
+                          {{ organizerExpandedBatches.has(batch.batch_id) ? 'Show Less' : ('+ Show ' + (batch.operations.length - 3) + ' more file(s)') }}
+                        </button>
+                      </div>
+                    </div>
                   </div>
+                </div>
+
+                <div class="organizer-history-footer">
+                  <div class="organizer-history-note">
+                    <i class="ph ph-info" style="color:var(--accent)"></i>
+                    <span>Hardlinks delete created links without touching downloads. Moves restore files to Incoming.</span>
+                  </div>
+                  <button class="btn btn-secondary btn-sm" @click="organizerHistoryOpen = false">Close</button>
                 </div>
               </div>
             </div>
-
-            <div class="organizer-history-footer">
-              <div class="organizer-history-note">
-                <i class="ph ph-info" style="color:var(--accent)"></i>
-                <span>Hardlinks delete created links without touching downloads. Moves restore files to Incoming.</span>
-              </div>
-              <button class="btn btn-secondary btn-sm" @click="organizerHistoryOpen = false">Close</button>
-            </div>
-          </div>
+          </teleport>
         </div>
 
         <!-- ══════ Unified Web Browser & Server Configuration ══════ -->
@@ -11736,53 +11808,112 @@ const SettingsPage = {
       }
 
       organizerExecuting.value = true;
+      const totalCount = selectedItems.length;
+      const batchId = "batch_" + new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
+      let successCount = 0;
+      let totalOps = 0;
+      const processedItemsList = [];
+      const modeLabel = organizerConfig.value.mode === 'smart' ? 'Smart Mode (Hardlink / Move)' : (organizerConfig.value.mode === 'move' ? 'Move Only' : 'Copy Only');
+
       organizerProgressModal.value = {
         show: true,
         type: "processing",
         title: "Processing & Organizing Media...",
-        subtitle: "Creating zero-cost hardlinks or relocating files into your media library...",
-        count: selectedItems.length,
-        detail: `Mode: ${organizerConfig.value.mode === 'smart' ? 'Smart Mode (Hardlink / Move)' : (organizerConfig.value.mode === 'move' ? 'Move Only' : 'Copy Only')}`
+        subtitle: `Relocating and linking ${totalCount} selected media item${totalCount === 1 ? '' : 's'} into your library...`,
+        count: totalCount,
+        total: totalCount,
+        current: 0,
+        percent: 0,
+        currentItem: selectedItems[0],
+        processedItems: [],
+        detail: `Mode: ${modeLabel}`
       };
+
       try {
-        const res = await fetch("/api/admin/organizer/execute", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            items: selectedItems,
-            mode: organizerConfig.value.mode
-          })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          let detailMsg = `${data.operations?.length || 0} file operations recorded with 1-click rollback support`;
-          if (data.cleaned_folders && data.cleaned_folders.length > 0) {
-            detailMsg += ` • Cleaned ${data.cleaned_folders.length} empty subfolder(s)`;
-            addToast(`Cleaned ${data.cleaned_folders.length} empty subfolder(s) in Incoming`, "info");
-          }
+        for (let i = 0; i < selectedItems.length; i++) {
+          const it = selectedItems[i];
+          const isLast = (i === selectedItems.length - 1);
+          const currentPercent = Math.round((i / totalCount) * 100);
+
           organizerProgressModal.value = {
-            show: true,
-            type: "success",
-            title: "Organization Complete!",
-            subtitle: `Successfully organized ${data.success_count} item(s) into your library folders.`,
-            count: data.success_count || 0,
-            detail: detailMsg
+            ...organizerProgressModal.value,
+            current: i + 1,
+            percent: currentPercent,
+            currentItem: it,
+            detail: `Processing item ${i + 1} of ${totalCount}: ${it.canonical_title || it.original_filename}`
           };
-          addToast(`Organized ${data.success_count} item(s) successfully!`, "success");
+
+          try {
+            const res = await fetch("/api/admin/organizer/execute", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                items: [it],
+                mode: organizerConfig.value.mode,
+                batch_id: batchId,
+                prune_empty_dirs: isLast
+              })
+            });
+            const data = await res.json();
+            if (res.ok && data.success_count > 0) {
+              successCount += data.success_count;
+              totalOps += (data.operations?.length || 1);
+              processedItemsList.push({
+                title: it.canonical_title || it.original_filename,
+                destination: it.destination_path,
+                action: data.operations?.[0]?.action || organizerConfig.value.mode,
+                status: "ok"
+              });
+            } else {
+              processedItemsList.push({
+                title: it.canonical_title || it.original_filename,
+                destination: it.destination_path,
+                action: "failed",
+                status: "error"
+              });
+            }
+          } catch (itemErr) {
+            processedItemsList.push({
+              title: it.canonical_title || it.original_filename,
+              destination: it.destination_path,
+              action: "network error",
+              status: "error"
+            });
+          }
+
+          organizerProgressModal.value.processedItems = [...processedItemsList];
+        }
+
+        // Final completion state
+        const allOk = successCount === totalCount;
+        let detailMsg = `${totalOps} file operation(s) recorded in batch ${batchId} with 1-click rollback support`;
+
+        organizerProgressModal.value = {
+          show: true,
+          type: allOk ? "success" : (successCount > 0 ? "success" : "error"),
+          title: allOk ? "Organization Complete!" : (successCount > 0 ? "Partially Completed" : "Organization Failed"),
+          subtitle: `Successfully organized ${successCount} of ${totalCount} item(s) into your library folders.`,
+          count: successCount,
+          total: totalCount,
+          current: totalCount,
+          percent: 100,
+          currentItem: null,
+          processedItems: processedItemsList,
+          detail: detailMsg
+        };
+
+        if (successCount > 0) {
+          addToast(`Organized ${successCount} item(s) successfully!`, "success");
           organizerPreviewItems.value = organizerPreviewItems.value.filter((_, idx) => !organizerSelectedIndices.value.has(idx));
           organizerSelectedIndices.value.clear();
-          setTimeout(() => {
-            if (organizerProgressModal.value.type === "success") {
-              organizerProgressModal.value.show = false;
-            }
-          }, 1800);
         } else {
-          addToast(data.error || "Failed to execute organization", "error");
-          organizerProgressModal.value.show = false;
+          addToast("Failed to organize selected items", "error");
         }
       } catch (e) {
-        addToast("Error executing organization", "error");
-        organizerProgressModal.value.show = false;
+        addToast("Error during media organization", "error");
+        organizerProgressModal.value.type = "error";
+        organizerProgressModal.value.title = "Process Encountered An Error";
+        organizerProgressModal.value.subtitle = e?.message || "Unknown error occurred";
       } finally {
         organizerExecuting.value = false;
       }

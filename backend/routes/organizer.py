@@ -213,7 +213,17 @@ def api_organizer_execute():
                 item["extension"] = os.path.splitext(item["source_path"])[1].lower()
             item["destination_path"] = build_destination_path(item, lib_roots)
 
-    res = execute_organization_plan(items, mode=mode, incoming_dir=incoming_dir, collision_policy=col_policy)
+    batch_id = body.get("batch_id")
+    prune_empty = bool(body.get("prune_empty_dirs", True))
+
+    res = execute_organization_plan(
+        items,
+        mode=mode,
+        incoming_dir=incoming_dir,
+        collision_policy=col_policy,
+        batch_id=batch_id,
+        prune_empty_dirs=prune_empty
+    )
     trigger_post_processing(res)
 
     return jsonify(res)
