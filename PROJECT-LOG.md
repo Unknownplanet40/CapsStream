@@ -229,3 +229,25 @@ Architected a multi-tiered theme audio resolution system following Plex conventi
 - `static/js/app.js`: Teleported organizer modals to `<body>`, enriched preview table status column with tooltips and sub-labels, and updated `executeOrganizer()` to stream live progress updates per item.
 
 ---
+
+## October 11 at 10:47 PM
+### Asked
+1. Update the media organizer process: show unmatched items in a dedicated card-based review modal (with max 3-5 items visible and scrollable) and include real-time progress indicators during scanning and matching.
+2. In the video player, when media playback fails or recovers multiple times in a row, automatically exit back to the media details page and display a recommendation modal proposing to open the title in an external player (e.g. VLC or default player), with 1-click launch that activates the VLC live sync modal and minimizes the web app.
+
+### Decision
+1. Separated Media Organizer preview scanning from execution so preview scans never auto-rename files prematurely. Created a dedicated Review Modal with tabs for "Unmatched / Issues" and "Matched (Ready)", interactive TMDb search, and isolated activity log scrolling.
+2. Upgraded player FreezeGuard: when recovery attempts hit `MAX_RECOVERY_ATTEMPTS` (or server-side transcoding fails to advance), the player captures failure details in `sessionStorage`, tears down video decoding, and navigates back to Media Details.
+3. Implemented `preserveRecoveryCounter` in `swapStream()` and `enableCompatPlayback()` so recovery attempts are not cleared mid-recovery.
+4. Added the "Playback Issue Detected" recommendation modal to `MediaDetailsPage` in `app.js` with direct external player invocation, window auto-minimization, and centered VLC live synchronization.
+>why: Prevents frustrating infinite stall loops in the web player on corrupt or unplayable video streams, giving users an immediate, seamless fallback to native hardware-accelerated playback with progress tracking.
+
+### Shipped
+- `static/js/player.js`: Added `triggerRecoveryFailureExit()`, preserved recovery attempt streaks during recovery tiers, and implemented automatic exit to Media Details on limit exhaustion.
+- `static/js/app.js`: Added `checkPlaybackRecoveryFailure()` lifecycle hook, `showRecoveryModal` state, and `launchExternalFromRecovery()` in `MediaDetailsPage`. Added dedicated Organizer Review Modal with dual filter tabs.
+- `static/css/main.css`: Styled `.recovery-recommend-modal-*` with glassmorphic cards and action buttons. Isolated scrollbars to `.organizer-items-log-scroll`.
+- `backend/external_player.py`: Integrated Win32 `ShowWindowAsync` for native window minimization on VLC launch.
+- `backend/organizer.py`: Added SSE progress telemetry stream for preview scans.
+
+---
+

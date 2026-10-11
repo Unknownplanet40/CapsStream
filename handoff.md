@@ -1,34 +1,37 @@
 # Handoff
 
 ## 1. Goal
-Modernize the Automated Media Renamer & File Organizer UI and processing lifecycle with a global viewport teleported overlay, live real-time item processing telemetry (active source/destination card, progress bar, activity log), clear file status badges & tooltips (Locked/Unrecognized), and unified batch rollback support.
+Implement graceful player recovery loop exit (navigating back to Media Details with external player recommendation modal upon repeated playback stalls) and modernize Media Organizer with a dedicated review modal and SSE progress telemetry.
 
 ## 2. Current State
 - **Branch:** `main`
-- **Pushed Commit:** `76ac354` (`feat(organizer): modern global progress modal, live item tracking, and clear status tooltips`)
-- **Push Status:** Successfully pushed to `origin/main` (`921179b..76ac354`).
-- **Release CI:** GitHub Actions `.github/workflows/auto-release.yml` is triggered to auto-bump version and publish `v2.83.0.0` with release update zip and Android TV APK.
-- **Server Running Status:** Inactive / offline (no active instance on port 8000).
-- **Tests:** 22/22 organizer tests passing; 6/6 theme music tests passing; 48/48 media/streaming regression tests passing.
+- **Pushed Commit:** `79e854a` (`feat(player): auto-redirect to details on playback stalls with external player recommendation`)
+- **Push Status:** Successfully pushed to `origin/main` (`f674fad..79e854a`).
+- **Release CI:** GitHub Actions `.github/workflows/auto-release.yml` triggered for auto-bump to `v2.84.0.0` with release update zip and Android TV APK.
+- **Server Running Status:** Server verified on port `8700`.
+- **Tests:** All 39 relevant test suites passing (`test_route_media.py`, `test_route_organizer.py`, `test_sub_naming.py`).
 
 ## 3. Active Files
-- `backend/organizer.py`: Updated `record_history()` to merge sequential operations into an existing `batch_id` for multi-item sequential execution and unified 1-click rollback.
-- `backend/routes/organizer.py`: Added client-provided `batch_id` and deferred `prune_empty_dirs` support in `api_organizer_execute()`.
-- `static/css/main.css`: Elevated `.organizer-progress-modal-backdrop` and `.organizer-history-modal-backdrop` to fixed full-screen overlay (`z-index: 9999999; backdrop-filter: blur(24px);`) with styling for active item card, progress bars, and activity logs.
-- `static/js/app.js`: Teleported organizer progress and history modals to `<body>`; updated preview table with descriptive status pills & tooltips; updated `executeOrganizer()` for live per-item progress tracking.
+- `static/js/player.js`: FreezeGuard recovery loop logic (`executeFreezeRecovery`, `triggerRecoveryFailureExit`, `swapStream`, `enableCompatPlayback`, `checkPlaybackStall`).
+- `static/js/app.js`: `MediaDetailsPage` recovery failure modal lifecycle check (`checkPlaybackRecoveryFailure`) and external player launcher integration (`launchExternalFromRecovery`). Organizer Review modal with filter tabs.
+- `static/css/main.css`: Styles for `.recovery-recommend-modal-*` and organizer review modal.
+- `backend/external_player.py`: Win32 window minimization and external player process lifecycle management.
+- `backend/organizer.py`: SSE telemetry stream and review scan isolation.
+- `PROJECT-LOG.md`: Permanent historical session record.
 
 ## 4. Changes Made
-- Teleported the progress and history modals out of the nested `#settings-organizer-section` container directly onto `<body>` to ensure a true global overlay in front of all application UI.
-- Added live Active Item Card showing the item currently being organized: canonical title, year, source basename, file size (GB), destination folder, and companion subtitle/theme counts.
-- Added live progress bar (`%`) and activity log displaying completed/failed items with status icons.
-- Clarified status pills in the preview table with sub-text and tooltips explaining why a file is "Locked" (active torrent/download or locked by another process) or "Unrecognized" (low confidence match).
-- Supported sequential execution with continuous UI updates while coalescing all operations into a single rollback batch.
+- Added `triggerRecoveryFailureExit()` in `static/js/player.js` to tear down the HTML5 video element cleanly, set `capsstream_playback_recovery_failed` in `sessionStorage`, and call `goBack()`.
+- Fixed counter reset regression in `swapStream()` and `enableCompatPlayback()` by introducing `preserveRecoveryCounter`, ensuring FreezeGuard reaches `MAX_RECOVERY_ATTEMPTS` without getting trapped in an infinite retry loop.
+- Added "Playback Issue Detected" modal in `MediaDetailsPage` on `static/js/app.js` with 1-click external player launch (`Open with VLC` / `Open in Default Player`).
+- Activated VLC live sync tracking modal and native window minimization via `/api/system/minimize-window`.
+- Upgraded Media Organizer to separate preview scans from execution, preventing premature auto-renaming, and isolated scrollbars to `.organizer-items-log-scroll`.
+- Cleaned up temporary corrupt test files and verified zero regressions.
 
 ## 5. Failed Attempts
-- In-container modal positioning (`position: absolute`) was trapped by parent `#settings-organizer-section` styling (`overflow: hidden; position: relative`). Fixed cleanly by combining Vue 3 `<teleport to="body">` with `position: fixed` and `z-index: 9999999`.
-- Running bulk items in a single HTTP POST request prevented real-time per-item modal updates. Resolved by sending sequential requests sharing a generated `batch_id` and enabling backend batch merging.
+- Resetting `consecutiveRecoveryAttempts` inside `swapStream()` and `enableCompatPlayback()` reset the retry count during recovery, creating an endless "Stream buffer stalled — auto-recovering..." toast loop. Fixed by adding `preserveRecoveryCounter: true` to recovery callers.
+- In-page player error banner did not automatically guide the user to external players. Solved by returning to Media Details and rendering the centered recommendation modal with 1-click VLC launch.
 
 ## 6. Specific Next Steps
-1. Monitor GitHub Actions auto-release CI for `v2.83.0.0`.
-2. Start server via `start.bat` or `python app.py` when testing in browser.
-3. Test processing incoming files in Settings ➔ Organizer to visually confirm the teleported modal and live tracking.
+1. Verify GitHub Actions auto-release workflow run for `v2.84.0.0`.
+2. Test real unplayable/corrupted media or network stream drops in production.
+3. Verify Android TV companion client playback fallback on unplayable codecs.
