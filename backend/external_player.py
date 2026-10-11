@@ -464,6 +464,132 @@ class VLCProgressTracker(threading.Thread):
             print("[CapsStream VLC Tracker] Tracker shutdown complete.", flush=True)
 
 
+def stop_vlc_playback() -> bool:
+    """
+    Stop active VLC playback instances, terminate processes,
+    and reset the active session state.
+    """
+    with _TRACKERS_LOCK:
+        trackers = list(_ACTIVE_TRACKERS)
+
+    if not trackers:
+        with _TRACKERS_LOCK:
+            _CURRENT_VLC_SESSION["active"] = False
+            _CURRENT_VLC_SESSION["state"] = "stopped"
+        return True
+
+    for tracker in trackers:
+        try:
+            try:
+                import requests
+                requests.get(
+                    f"http://127.0.0.1:{tracker.port}/requests/status.json?command=pl_stop",
+                    auth=("", tracker.password),
+                    timeout=1.0
+                )
+            except Exception:
+                pass
+
+            tracker.stop()
+
+            if tracker.process and tracker.process.poll() is None:
+                tracker.process.terminate()
+                try:
+                    tracker.process.wait(timeout=1.5)
+                except Exception:
+                    tracker.process.kill()
+        except Exception as e:
+            logger.warning(f"Error stopping VLC playback: {e}")
+
+    with _TRACKERS_LOCK:
+        _CURRENT_VLC_SESSION["active"] = False
+        _CURRENT_VLC_SESSION["state"] = "stopped"
+
+    return True
+
+
+def minimize_capsstream_window(url: str = "http://127.0.0.1:8000") -> bool:
+    """
+    Locate and minimize the CapsStream browser or standalone PWA window on Windows.
+    Returns True if a matching window was minimized, False otherwise.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        psapi = ctypes.windll.psapi
+
+        SW_MINIMIZE = 6
+        minimized = [False]
+
+        try:
+            from silent_launcher import find_capsstream_window
+            hwnd = find_capsstream_window(url)
+            if hwnd:
+                user32.ShowWindow(hwnd, SW_MINIMIZE)
+                minimized[0] = True
+        except Exception:
+            pass
+
+        PROCESS_QUERY_INFORMATION = 0x0400
+        PROCESS_VM_READ = 0x0010
+        ignore_markers = (
+            "github", "google search", "bing search", "duckduckgo",
+            "reddit", "gitlab", "stackoverflow", "commit", "action",
+            "workflow", "pull request", "issue", "blob", "tree",
+            "antigravity", "visual studio", "powershell"
+        )
+        known_browsers = (
+            "msedge", "chrome", "brave", "opera", "vivaldi",
+            "firefox", "arc", "applicationframehost", "python", "pythonw"
+        )
+
+        def _enum_cb(hwnd, lparam):
+            if user32.IsWindowVisible(hwnd) and not user32.IsIconic(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buff, length + 1)
+                    title = buff.value.strip().lower()
+
+                    if not title or any(ign in title for ign in ignore_markers):
+                        return True
+
+                    is_match = (
+                        title == "capsstream"
+                        or title.startswith("capsstream -")
+                        or title.startswith("capsstream —")
+                        or title.startswith("capsstream |")
+                        or title.startswith("capsstream •")
+                        or ("capsstream" in title and any(p in title for p in ("8000", "localhost", "127.0.0.1")))
+                    )
+
+                    if is_match:
+                        pid = ctypes.c_ulong()
+                        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                        pname = ""
+                        hProc = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid.value)
+                        if hProc:
+                            pbuff = ctypes.create_unicode_buffer(260)
+                            if psapi.GetModuleBaseNameW(hProc, None, pbuff, 260):
+                                pname = pbuff.value.lower()
+                            kernel32.CloseHandle(hProc)
+
+                        if not pname or any(b in pname for b in known_browsers):
+                            user32.ShowWindow(hwnd, SW_MINIMIZE)
+                            minimized[0] = True
+            return True
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_ssize_t, ctypes.c_ssize_t)
+        user32.EnumWindows(WNDENUMPROC(_enum_cb), 0)
+        return minimized[0]
+    except Exception as e:
+        logger.debug(f"Failed to minimize CapsStream window: {e}")
+        return False
+
+
 def get_vlc_tracker_status() -> Dict[str, Any]:
     """Return the current VLC playback tracking status."""
     with _TRACKERS_LOCK:
@@ -535,6 +661,14 @@ def launch_external_player(
 
             with _TRACKERS_LOCK:
                 _ACTIVE_TRACKERS.append(tracker)
+
+            # Auto-minimize CapsStream window so VLC player takes foreground
+            def _delayed_minimize():
+                time.sleep(0.35)
+                minimize_capsstream_window()
+
+            min_thread = threading.Thread(target=_delayed_minimize, name="VLCAutoMinimize", daemon=True)
+            min_thread.start()
 
             return {
                 "ok": True,

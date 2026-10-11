@@ -175,6 +175,23 @@ class TestRouteOrganizer(unittest.TestCase):
                 self.assertEqual(cfg_data.get("local_region"), "PH")
                 self.assertEqual(cfg_data.get("collision_policy"), "suffix")
 
+    @patch("backend.routes.organizer.require_admin")
+    def test_preview_stream(self, mock_require_admin):
+        with patch("backend.routes.organizer.load_config", return_value=dict(self.test_cfg)):
+            movie_file = os.path.join(self.incoming_dir, "Inception.2010.mkv")
+            with open(movie_file, "wb") as f:
+                f.write(b"sample video bytes")
+
+            resp = self.client.post("/api/admin/organizer/preview-stream", json={
+                "incoming_dir": self.incoming_dir
+            })
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.mimetype, "text/event-stream")
+            text = resp.get_data(as_text=True)
+            self.assertIn("data:", text)
+            self.assertIn('"step": "done"', text)
+
 
 if __name__ == "__main__":
     unittest.main()
+

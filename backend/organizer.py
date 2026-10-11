@@ -1257,90 +1257,116 @@ def scan_incoming_for_preview(
     clean_empty: bool = True,
     local_region: str = "",
     collision_policy: str = "skip",
+    progress_callback: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     """
     Perform a dry-run scan of an incoming directory.
     Returns list of proposed actions without modifying disk.
     If clean_empty is True, cleans up any empty subfolders after scanning.
+    If progress_callback is provided, emits live progress events per item.
     """
     if not os.path.isdir(incoming_dir):
         return []
+
+    # 1. First pass: collect candidate media files
+    candidate_files = []
+    for root, dirs, files in os.walk(incoming_dir):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and not d.startswith("$")]
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            if not is_incomplete_file(fpath) and not is_clutter(fpath) and is_media_file(fpath):
+                candidate_files.append((fpath, fname))
+
+    total_candidates = len(candidate_files)
+    if progress_callback:
+        progress_callback({"step": "init", "total": total_candidates, "count": 0})
 
     results = []
     existing_preview_destinations = set()
     existing_preview_subs = set()
 
-    for root, dirs, files in os.walk(incoming_dir):
-        # Skip hidden/temporary directories
-        dirs[:] = [d for d in dirs if not d.startswith(".") and not d.startswith("$")]
-
-        for fname in files:
-            fpath = os.path.join(root, fname)
-
-            # Check incomplete or clutter
-            if is_incomplete_file(fpath) or is_clutter(fpath) or not is_media_file(fpath):
-                continue
-
-            classified = classify_media_file(fpath)
-            resolved = resolve_canonical_item(classified, tmdb_api_key=tmdb_api_key, local_region=local_region)
-            dest_path = build_destination_path(resolved, library_roots)
-
-            dest_exists = os.path.exists(dest_path)
-            if dest_exists and collision_policy == "suffix":
-                dest_path = disambiguate_video_path(dest_path, existing_preview_destinations)
-            else:
-                existing_preview_destinations.add(dest_path)
-
-            is_locked = is_file_locked(fpath)
-            is_settled = is_file_settled(fpath)
-            companions = find_companion_subtitles(fpath)
-            companion_theme = find_companion_theme_song(fpath, incoming_dir=incoming_dir)
-            companion_theme_dst = build_theme_destination_path(companion_theme, dest_path) if companion_theme else None
-
-            # Build companion subtitle plan
-            subtitle_plan = []
-            for sub_src in companions:
-                sub_dst = build_subtitle_destination_path(sub_src, dest_path, existing_preview_subs)
-                details = parse_subtitle_details(sub_src, media_basename=os.path.basename(os.path.splitext(dest_path)[0]))
-                flags = []
-                if details.get("is_forced"):
-                    flags.append("forced")
-                if details.get("is_hi"):
-                    flags.append("hi")
-                action = "rename" if os.path.basename(sub_dst) != os.path.basename(sub_src) else "keep_name"
-                subtitle_plan.append({
-                    "source": sub_src,
-                    "destination": sub_dst,
-                    "lang": details.get("lang"),
-                    "flags": flags,
-                    "action": action,
-                    "skipped_reason": None,
-                })
-
-            results.append({
-                "source_path": fpath,
-                "filename": fname,
-                "media_type": resolved["media_type"],
-                "canonical_title": resolved["canonical_title"],
-                "year": resolved.get("year"),
-                "season": resolved.get("season"),
-                "episode": resolved.get("episode"),
-                "match_source": resolved.get("match_source"),
-                "request_id": resolved.get("request_id"),
-                "destination_path": dest_path,
-                "file_size": resolved["file_size"],
-                "confidence": resolved.get("confidence", "high"),
-                "is_locked": is_locked,
-                "is_settled": is_settled,
-                "subtitles": companions,
-                "subtitle_plan": subtitle_plan,
-                "theme_song": companion_theme,
-                "theme_song_destination": companion_theme_dst,
-                "destination_exists": dest_exists,
-                "route_reason": resolved.get("route_reason", "region-off"),
-                "origin_countries": resolved.get("origin_countries", []),
-                "collision_policy": collision_policy,
+    for idx, (fpath, fname) in enumerate(candidate_files, 1):
+        if progress_callback:
+            progress_callback({
+                "step": "inspecting",
+                "current": idx,
+                "total": total_candidates,
+                "file": fname,
+                "status": "Inspecting tokens & video metadata..."
             })
+
+        classified = classify_media_file(fpath)
+        clean_hint = classified.get("clean_title") or fname
+
+        if progress_callback:
+            progress_callback({
+                "step": "matching",
+                "current": idx,
+                "total": total_candidates,
+                "file": fname,
+                "query": clean_hint,
+                "status": f"Querying TMDb for '{clean_hint}'..."
+            })
+
+        resolved = resolve_canonical_item(classified, tmdb_api_key=tmdb_api_key, local_region=local_region)
+        dest_path = build_destination_path(resolved, library_roots)
+
+        dest_exists = os.path.exists(dest_path)
+        if dest_exists and collision_policy == "suffix":
+            dest_path = disambiguate_video_path(dest_path, existing_preview_destinations)
+        else:
+            existing_preview_destinations.add(dest_path)
+
+        is_locked = is_file_locked(fpath)
+        is_settled = is_file_settled(fpath)
+        companions = find_companion_subtitles(fpath)
+        companion_theme = find_companion_theme_song(fpath, incoming_dir=incoming_dir)
+        companion_theme_dst = build_theme_destination_path(companion_theme, dest_path) if companion_theme else None
+
+        # Build companion subtitle plan
+        subtitle_plan = []
+        for sub_src in companions:
+            sub_dst = build_subtitle_destination_path(sub_src, dest_path, existing_preview_subs)
+            details = parse_subtitle_details(sub_src, media_basename=os.path.basename(os.path.splitext(dest_path)[0]))
+            flags = []
+            if details.get("is_forced"):
+                flags.append("forced")
+            if details.get("is_hi"):
+                flags.append("hi")
+            action = "rename" if os.path.basename(sub_dst) != os.path.basename(sub_src) else "keep_name"
+            subtitle_plan.append({
+                "source": sub_src,
+                "destination": sub_dst,
+                "lang": details.get("lang"),
+                "flags": flags,
+                "action": action,
+                "skipped_reason": None,
+            })
+
+        results.append({
+            "source_path": fpath,
+            "filename": fname,
+            "media_type": resolved["media_type"],
+            "canonical_title": resolved["canonical_title"],
+            "year": resolved.get("year"),
+            "season": resolved.get("season"),
+            "episode": resolved.get("episode"),
+            "match_source": resolved.get("match_source"),
+            "request_id": resolved.get("request_id"),
+            "destination_path": dest_path,
+            "file_size": resolved["file_size"],
+            "confidence": resolved.get("confidence", "high"),
+            "is_locked": is_locked,
+            "is_settled": is_settled,
+            "subtitles": companions,
+            "subtitle_plan": subtitle_plan,
+            "theme_song": companion_theme,
+            "theme_song_destination": companion_theme_dst,
+            "destination_exists": dest_exists,
+            "route_reason": resolved.get("route_reason", "region-off"),
+            "origin_countries": resolved.get("origin_countries", []),
+            "collision_policy": collision_policy,
+        })
 
     if clean_empty and os.path.isdir(incoming_dir):
         clean_empty_subfolders(incoming_dir, delete_root_if_empty=False)

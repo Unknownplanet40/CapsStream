@@ -533,8 +533,29 @@ class TestRouteMedia(unittest.TestCase):
         data = resp.get_json()
         self.assertIsNone(data.get("logo_path"))
 
+    @patch("backend.external_player.stop_vlc_playback", return_value=True)
+    def test_vlc_stop_route(self, mock_stop):
+        """Verify POST /api/media/vlc-stop delegates to stop_vlc_playback."""
+        resp = self.client.post("/api/media/vlc-stop")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("ok"))
+        self.assertTrue(data.get("stopped"))
+        mock_stop.assert_called_once()
+
+    @patch("backend.external_player.minimize_capsstream_window", return_value=True)
+    def test_minimize_window_route(self, mock_minimize):
+        """Verify POST /api/system/minimize-window calls minimize_capsstream_window."""
+        resp = self.client.post("/api/system/minimize-window")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("ok"))
+        self.assertTrue(data.get("minimized"))
+        mock_minimize.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

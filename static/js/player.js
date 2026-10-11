@@ -3183,15 +3183,17 @@ const PlayerPage = {
       return url;
     }
 
-    function swapStream(atContentTime, forceReload = false) {
+    function swapStream(atContentTime, forceReload = false, preserveRecoveryCounter = false) {
       const v = videoRef.value;
       if (!v) return;
-      consecutiveRecoveryAttempts = 0;
+      if (!preserveRecoveryCounter) {
+        consecutiveRecoveryAttempts = 0;
+        recoveryToastSuppressed = false;
+        freezeWarningNotice.value = null;
+      }
       stallDurationMs = 0;
       isRecovering.value = false;
       continuousProgressSec = 0;
-      recoveryToastSuppressed = false;
-      freezeWarningNotice.value = null;
       lastMonitoredVideoTime = -1;
       lastMonitoredWallTime = Date.now();
       const token = ++reloadToken;
@@ -3961,7 +3963,7 @@ const PlayerPage = {
         streamState.maxHeight = options.maxHeight;
       }
       streamState.streamStart = startAt;
-      swapStream(0, force);
+      swapStream(0, force, !!options?.preserveRecoveryCounter);
     }
 
     function disableCompatPlayback() {
@@ -5764,9 +5766,20 @@ const PlayerPage = {
             const count = res.items_count || 1;
             const countStr = count > 1 ? ` (${count} episodes queued)` : "";
             if (typeof addToast === "function") addToast(`Playing in VLC with live progress sync${countStr}`, "success");
+            if (window.vlcSyncState) {
+              window.vlcSyncState.minimized = false;
+            }
             if (typeof window.startVlcStatusPolling === "function") {
               window.startVlcStatusPolling(true);
             }
+            if (document.fullscreenElement && typeof document.exitFullscreen === "function") {
+              try { document.exitFullscreen(); } catch (e) {}
+            }
+            try {
+              if (typeof API !== "undefined" && API.post) {
+                API.post("/api/system/minimize-window");
+              }
+            } catch (e) {}
           } else if (res.method === "system") {
             if (typeof addToast === "function") addToast(`Playing in default device player (${res.file || 'video'})`, "success");
           } else if (res.stream_url) {
@@ -6634,11 +6647,43 @@ const PlayerPage = {
         return;
       }
 
+      function triggerRecoveryFailureExit(failureReason) {
+        console.warn("[Player FreezeGuard] Playback recovery failed (" + failureReason + ", attempts: " + consecutiveRecoveryAttempts + "). Exiting to media details with external player recommendation.");
+        recoveryToastSuppressed = true;
+        isRecovering.value = false;
+        try {
+          const fallbackData = {
+            id: media.value?.id || route.params.id,
+            title: media.value?.title || "Media",
+            type: media.value?.type || "movie",
+            tmdb_id: media.value?.tmdb_id,
+            season: media.value?.season,
+            episode: media.value?.episode,
+            ep_title: media.value?.ep_title || media.value?.name,
+            reason: failureReason || "repeated_stalls",
+            timestamp: Date.now()
+          };
+          sessionStorage.setItem("capsstream_playback_recovery_failed", JSON.stringify(fallbackData));
+        } catch (e) {}
+
+        try {
+          if (videoRef.value) {
+            videoRef.value.pause();
+            videoRef.value.removeAttribute("src");
+            videoRef.value.load();
+          }
+        } catch (e) {}
+
+        if (typeof addToast === "function") {
+          addToast("Web playback stalled multiple times. Returning to details...", "warning", 4000);
+        }
+
+        goBack();
+      }
+
       // Safeguard 2: Limit recovery attempts (max 3 consecutive tries)
       if (consecutiveRecoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
-        console.warn("[Player FreezeGuard] Maximum recovery attempts reached. Halting automated retry loop to prevent freeze/toast loop.");
-        recoveryToastSuppressed = true;
-        freezeWarningNotice.value = "Playback issues detected – trying to continue";
+        triggerRecoveryFailureExit(reason);
         return;
       }
 
@@ -6740,18 +6785,23 @@ const PlayerPage = {
           // Rebuild and re-anchor stream at position
           if (streamState.transcode) {
             streamState.streamStart = atPos;
-            swapStream(0, true);
+            swapStream(0, true, true);
           } else {
-            swapStream(atPos, true);
+            swapStream(atPos, true, true);
           }
           return;
         }
 
         // ─── Tier 3: Fallback Recovery (Attempt 3, or Attempt 2 for fatal decode error) ──────────────────
         // Fall back to server-side error-resilient transcode (use hardware first, fallback to software if needed)
+        if (consecutiveRecoveryAttempts >= MAX_RECOVERY_ATTEMPTS || (streamState.transcode && consecutiveRecoveryAttempts >= 2)) {
+          triggerRecoveryFailureExit("exhausted_recovery_tiers");
+          return;
+        }
+
         if (consecutiveRecoveryAttempts >= 3 || (consecutiveRecoveryAttempts >= 2 && isFatalError)) {
           if (isHevcDirect && autoConvertMode === "never") {
-            freezeWarningNotice.value = "HEVC playback is still stalled. Enable Smart HEVC Compatibility to switch formats automatically.";
+            triggerRecoveryFailureExit("hevc_incompatible");
             return;
           }
           if (isHevcDirect && autoConvertMode === "ask") {
@@ -6763,7 +6813,7 @@ const PlayerPage = {
           const useSw = streamState.transcode || consecutiveRecoveryAttempts > 3;
           console.log(`[Player FreezeGuard] [Tier 3] Fallback Recovery: switching to error-resilient transcoding (forceSoftware: ${useSw})`);
           await saveProgressForRecovery();
-          await enableCompatPlayback(true, { forceSoftware: useSw });
+          await enableCompatPlayback(true, { forceSoftware: useSw, preserveRecoveryCounter: true });
           return;
         }
       } catch (err) {
@@ -6778,10 +6828,15 @@ const PlayerPage = {
 
     function checkPlaybackStall() {
       const v = videoRef.value;
-      if (!v || v.paused || v.ended || v.seeking || !media.value || showResumeModal.value || showInactivityPrompt.value || showHevcConvertModal.value || isRecovering.value || consecutiveRecoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
+      if (!v || v.paused || v.ended || v.seeking || !media.value || showResumeModal.value || showInactivityPrompt.value || showHevcConvertModal.value || isRecovering.value) {
         lastMonitoredVideoTime = v ? v.currentTime : -1;
         lastMonitoredWallTime = Date.now();
         stallDurationMs = 0;
+        return;
+      }
+
+      if (consecutiveRecoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
+        executeFreezeRecovery("max_attempts_exceeded");
         return;
       }
 

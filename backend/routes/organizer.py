@@ -192,6 +192,71 @@ def api_organizer_preview():
     })
 
 
+@organizer_bp.route("/api/admin/organizer/preview-stream", methods=["POST"])
+def api_organizer_preview_stream():
+    """Stream dry-run scan progress events on the incoming folder with real-time telemetry."""
+    require_admin()
+    body = request.json or {}
+    org_cfg = _get_organizer_config()
+
+    incoming_dir = body.get("incoming_dir") or org_cfg["incoming_dir"]
+    if not os.path.isdir(incoming_dir):
+        return jsonify({"error": f"Directory not found: {incoming_dir}", "items": []}), 404
+
+    lib_roots = org_cfg["library_roots"]
+    cfg = load_config()
+    tmdb_key = cfg.get("tmdb_api_key")
+    local_reg = org_cfg.get("local_region", "")
+    col_policy = org_cfg.get("collision_policy", "skip")
+
+    import queue
+    import json
+    import threading
+
+    event_queue = queue.Queue()
+
+    def _progress_cb(evt):
+        event_queue.put(evt)
+
+    def _worker():
+        try:
+            items = scan_incoming_for_preview(
+                incoming_dir,
+                lib_roots,
+                tmdb_api_key=tmdb_key,
+                clean_empty=True,
+                local_region=local_reg,
+                collision_policy=col_policy,
+                progress_callback=_progress_cb
+            )
+            cleaned = clean_empty_subfolders(incoming_dir, delete_root_if_empty=False)
+            event_queue.put({
+                "step": "done",
+                "incoming_dir": incoming_dir,
+                "count": len(items),
+                "items": items,
+                "cleaned_folders": cleaned
+            })
+        except Exception as e:
+            event_queue.put({"step": "error", "error": str(e)})
+
+    worker_thread = threading.Thread(target=_worker, name="OrganizerScanWorker", daemon=True)
+    worker_thread.start()
+
+    def generate():
+        while True:
+            try:
+                evt = event_queue.get(timeout=25.0)
+                yield f"data: {json.dumps(evt)}\n\n"
+                if evt.get("step") in ("done", "error"):
+                    break
+            except queue.Empty:
+                yield ": keep-alive\n\n"
+
+    from flask import Response
+    return Response(generate(), mimetype="text/event-stream")
+
+
 @organizer_bp.route("/api/admin/organizer/execute", methods=["POST"])
 def api_organizer_execute():
     """Execute organization for selected or all previewed items."""

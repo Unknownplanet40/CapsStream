@@ -583,6 +583,21 @@ def api_vlc_tracker_status():
     return jsonify(get_vlc_tracker_status())
 
 
+@media_bp.route("/api/media/vlc-stop", methods=["POST"])
+def api_vlc_stop():
+    from backend.external_player import stop_vlc_playback
+    stopped = stop_vlc_playback()
+    return jsonify({"ok": True, "stopped": stopped})
+
+
+@media_bp.route("/api/system/minimize-window", methods=["POST"])
+@media_bp.route("/api/media/minimize-window", methods=["POST"])
+def api_minimize_window():
+    from backend.external_player import minimize_capsstream_window
+    minimized = minimize_capsstream_window()
+    return jsonify({"ok": True, "minimized": minimized})
+
+
 @media_bp.route("/api/media/<int:media_id>/franchise", methods=["GET"])
 def api_media_franchise(media_id):
     media = get_media_by_id(media_id)

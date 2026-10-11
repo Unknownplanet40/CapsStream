@@ -1630,11 +1630,62 @@ const vlcSyncState = {
   state: "idle",
   wasActive: false,
   timer: null,
+  minimized: false,
 };
+window.vlcSyncState = vlcSyncState;
+
+async function stopVlcPlaybackAndClose() {
+  try {
+    if (typeof API !== "undefined" && API.post) {
+      await API.post("/api/media/vlc-stop");
+    }
+  } catch (e) {}
+  vlcSyncState.active = false;
+  vlcSyncState.wasActive = false;
+  renderVlcSyncPill();
+  if (typeof addToast === "function") {
+    addToast("✓ VLC playback stopped • Progress saved to your profile", "success");
+  }
+  if (typeof window.refreshHomeRows === "function") {
+    window.refreshHomeRows(true);
+  }
+}
+window.stopVlcPlaybackAndClose = stopVlcPlaybackAndClose;
+
+async function minimizeAppWindow() {
+  try {
+    if (typeof API !== "undefined" && API.post) {
+      const res = await API.post("/api/system/minimize-window");
+      if (res && res.ok && res.minimized) {
+        if (typeof addToast === "function") {
+          addToast("CapsStream window minimized to taskbar", "info");
+        }
+      }
+    }
+  } catch (e) {}
+}
+window.minimizeAppWindow = minimizeAppWindow;
+
+function _handleVlcModalKeyDown(e) {
+  if (!vlcSyncState.active || vlcSyncState.minimized) return;
+  if (["Space", "PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown"].includes(e.code)) {
+    const tag = (document.activeElement && document.activeElement.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    e.preventDefault();
+  }
+}
 
 function renderVlcSyncPill() {
-  let pill = document.getElementById("vlc-live-sync-pill");
+  const modal = document.getElementById("vlc-live-sync-modal");
+  const pill = document.getElementById("vlc-live-sync-pill");
+
   if (!vlcSyncState.active) {
+    document.body.classList.remove("vlc-modal-open");
+    window.removeEventListener("keydown", _handleVlcModalKeyDown, true);
+    if (modal) {
+      modal.classList.add("fade-out");
+      setTimeout(() => { if (modal && modal.parentNode) modal.remove(); }, 300);
+    }
     if (pill) {
       pill.classList.add("fade-out");
       setTimeout(() => { if (pill && pill.parentNode) pill.remove(); }, 300);
@@ -1642,55 +1693,243 @@ function renderVlcSyncPill() {
     return;
   }
 
-  if (!pill) {
-    pill = document.createElement("div");
-    pill.id = "vlc-live-sync-pill";
-    pill.className = "vlc-live-sync-pill";
-    pill.innerHTML = `
-      <div class="vlc-pill-inner">
-        <div class="vlc-pill-left">
-          <div class="vlc-live-pulse-dot"></div>
-          <i class="ph-bold ph-traffic-cone vlc-pill-traffic-cone"></i>
+  const timeStr = _formatVlcTime(vlcSyncState.time);
+  const durStr = _formatVlcTime(vlcSyncState.duration);
+  const isPaused = vlcSyncState.state === "paused";
+  const displayTitle = vlcSyncState.title || "Playing in VLC";
+
+  // CASE 1: Minimized Mode (Floating Corner Pill)
+  if (vlcSyncState.minimized) {
+    document.body.classList.remove("vlc-modal-open");
+    window.removeEventListener("keydown", _handleVlcModalKeyDown, true);
+    if (modal) {
+      modal.classList.add("fade-out");
+      setTimeout(() => { if (modal && modal.parentNode) modal.remove(); }, 250);
+    }
+
+    let p = document.getElementById("vlc-live-sync-pill");
+    if (!p) {
+      p = document.createElement("div");
+      p.id = "vlc-live-sync-pill";
+      p.className = "vlc-live-sync-pill";
+      p.innerHTML = `
+        <div class="vlc-pill-inner">
+          <div class="vlc-pill-left">
+            <div class="vlc-live-pulse-dot"></div>
+            <i class="ph-bold ph-traffic-cone vlc-pill-traffic-cone"></i>
+          </div>
+          <div class="vlc-pill-content">
+            <div class="vlc-pill-top">
+              <span class="vlc-pill-title"></span>
+              <span class="vlc-pill-tag">Live Syncing</span>
+              <div class="vlc-pill-actions">
+                <button type="button" class="vlc-pill-btn expand" title="Expand to modal"><i class="ph-bold ph-arrows-out-simple"></i></button>
+                <button type="button" class="vlc-pill-btn close" title="Stop VLC and close"><i class="ph-bold ph-x"></i></button>
+              </div>
+            </div>
+            <div class="vlc-pill-bottom">
+              <span class="vlc-pill-time"></span>
+              <span class="vlc-pill-pct"></span>
+            </div>
+            <div class="vlc-pill-progress-bg">
+              <div class="vlc-pill-progress-bar"></div>
+            </div>
+            <div class="vlc-pill-note">
+              <i class="ph-bold ph-info"></i> Click to expand modal
+            </div>
+          </div>
         </div>
-        <div class="vlc-pill-content">
-          <div class="vlc-pill-top">
-            <span class="vlc-pill-title"></span>
-            <span class="vlc-pill-tag">Live Syncing</span>
+      `;
+      p.title = "Click to open VLC live sync modal";
+      p.addEventListener("click", (e) => {
+        if (e.target.closest(".vlc-pill-btn.close")) {
+          e.stopPropagation();
+          stopVlcPlaybackAndClose();
+          return;
+        }
+        vlcSyncState.minimized = false;
+        renderVlcSyncPill();
+      });
+      document.body.appendChild(p);
+    }
+
+    const titleEl = p.querySelector(".vlc-pill-title");
+    const tagEl = p.querySelector(".vlc-pill-tag");
+    const timeEl = p.querySelector(".vlc-pill-time");
+    const pctEl = p.querySelector(".vlc-pill-pct");
+    const barEl = p.querySelector(".vlc-pill-progress-bar");
+    const dotEl = p.querySelector(".vlc-live-pulse-dot");
+
+    if (titleEl) {
+      titleEl.textContent = displayTitle;
+      titleEl.title = displayTitle;
+    }
+    if (tagEl) tagEl.textContent = isPaused ? "Paused" : "Live Syncing";
+    if (timeEl) timeEl.textContent = `${timeStr} / ${durStr}`;
+    if (pctEl) pctEl.textContent = `${vlcSyncState.percent}%`;
+    if (barEl) barEl.style.width = `${vlcSyncState.percent}%`;
+    if (dotEl) {
+      if (isPaused) {
+        dotEl.classList.add("paused");
+      } else {
+        dotEl.classList.remove("paused");
+      }
+    }
+    return;
+  }
+
+  // CASE 2: Centered Modal Mode
+  document.body.classList.add("vlc-modal-open");
+  window.addEventListener("keydown", _handleVlcModalKeyDown, true);
+
+  if (pill) {
+    pill.classList.add("fade-out");
+    setTimeout(() => { if (pill && pill.parentNode) pill.remove(); }, 250);
+  }
+
+  let m = document.getElementById("vlc-live-sync-modal");
+  if (!m) {
+    m = document.createElement("div");
+    m.id = "vlc-live-sync-modal";
+    m.className = "vlc-sync-modal-overlay";
+    m.innerHTML = `
+      <div class="vlc-sync-modal-backdrop"></div>
+      <div class="vlc-sync-modal-card" role="dialog" aria-modal="true" aria-label="VLC Playback Live Sync">
+        <div class="vlc-modal-header">
+          <div class="vlc-modal-header-left">
+            <div class="vlc-modal-icon-badge">
+              <div class="vlc-live-pulse-dot"></div>
+              <i class="ph-bold ph-traffic-cone vlc-modal-cone"></i>
+            </div>
+            <div class="vlc-modal-header-info">
+              <div class="vlc-modal-app-name">VLC Media Player</div>
+              <div class="vlc-modal-badge-row">
+                <span class="vlc-modal-status-badge">Live Syncing</span>
+              </div>
+            </div>
           </div>
-          <div class="vlc-pill-bottom">
-            <span class="vlc-pill-time"></span>
-            <span class="vlc-pill-pct"></span>
+          <div class="vlc-modal-header-controls">
+            <button type="button" class="vlc-modal-ctrl-btn minimize" title="Minimize to floating pill" aria-label="Minimize">
+              <i class="ph-bold ph-minus"></i>
+            </button>
+            <button type="button" class="vlc-modal-ctrl-btn close" title="Stop VLC and close" aria-label="Close">
+              <i class="ph-bold ph-x"></i>
+            </button>
           </div>
-          <div class="vlc-pill-progress-bg">
-            <div class="vlc-pill-progress-bar"></div>
+        </div>
+
+        <div class="vlc-modal-body">
+          <div class="vlc-modal-title"></div>
+          <div class="vlc-modal-progress-section">
+            <div class="vlc-modal-progress-meta">
+              <span class="vlc-modal-progress-time">0:00 / 0:00</span>
+              <span class="vlc-modal-progress-pct">0%</span>
+            </div>
+            <div class="vlc-modal-progress-track">
+              <div class="vlc-modal-progress-bar" style="width: 0%"></div>
+            </div>
           </div>
-          <div class="vlc-pill-note">
-            <i class="ph-bold ph-info"></i> Tracking may be approximate
+          <div class="vlc-modal-tip">
+            <i class="ph-bold ph-broadcast"></i>
+            <span>Watching in VLC • Watch progress is recorded in real-time to your profile</span>
+          </div>
+        </div>
+
+        <div class="vlc-modal-footer">
+          <button type="button" class="vlc-modal-action-btn secondary btn-minimize-app" title="Minimize CapsStream window to taskbar">
+            <i class="ph-bold ph-browsers"></i>
+            <span>Minimize Window</span>
+          </button>
+          <div class="vlc-modal-footer-right">
+            <button type="button" class="vlc-modal-action-btn secondary btn-float-pill" title="Float in corner while browsing">
+              <i class="ph-bold ph-corners-in"></i>
+              <span>Float in Corner</span>
+            </button>
+            <button type="button" class="vlc-modal-action-btn danger btn-stop-vlc" title="Stop VLC playback and close">
+              <i class="ph-bold ph-stop"></i>
+              <span>Stop VLC</span>
+            </button>
           </div>
         </div>
       </div>
     `;
-    pill.title = "VLC progress is synced periodically in the background and may be approximate";
-    document.body.appendChild(pill);
+
+    // Intercept mouse wheel and touch gestures on overlay so background NEVER scrolls
+    m.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    }, { passive: false });
+
+    m.addEventListener("touchmove", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    }, { passive: false });
+
+    // Clicking the backdrop triggers an attention pulse and DOES NOT close the modal
+    const backdrop = m.querySelector(".vlc-sync-modal-backdrop");
+    const card = m.querySelector(".vlc-sync-modal-card");
+    if (backdrop && card) {
+      backdrop.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        card.classList.remove("pulse-alert");
+        void card.offsetWidth;
+        card.classList.add("pulse-alert");
+      });
+    }
+
+    // Header minimize and float button
+    const minBtn = m.querySelector(".vlc-modal-ctrl-btn.minimize");
+    const floatBtn = m.querySelector(".btn-float-pill");
+    const handleMin = (e) => {
+      e.stopPropagation();
+      vlcSyncState.minimized = true;
+      renderVlcSyncPill();
+    };
+    if (minBtn) minBtn.addEventListener("click", handleMin);
+    if (floatBtn) floatBtn.addEventListener("click", handleMin);
+
+    // Header close and stop button
+    const closeBtn = m.querySelector(".vlc-modal-ctrl-btn.close");
+    const stopBtn = m.querySelector(".btn-stop-vlc");
+    const handleStop = (e) => {
+      e.stopPropagation();
+      stopVlcPlaybackAndClose();
+    };
+    if (closeBtn) closeBtn.addEventListener("click", handleStop);
+    if (stopBtn) stopBtn.addEventListener("click", handleStop);
+
+    // Minimize web app window to taskbar
+    const minAppBtn = m.querySelector(".btn-minimize-app");
+    if (minAppBtn) {
+      minAppBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        minimizeAppWindow();
+      });
+    }
+
+    document.body.appendChild(m);
   }
 
-  const timeStr = _formatVlcTime(vlcSyncState.time);
-  const durStr = _formatVlcTime(vlcSyncState.duration);
-  const isPaused = vlcSyncState.state === "paused";
-
-  const titleEl = pill.querySelector(".vlc-pill-title");
-  const tagEl = pill.querySelector(".vlc-pill-tag");
-  const timeEl = pill.querySelector(".vlc-pill-time");
-  const pctEl = pill.querySelector(".vlc-pill-pct");
-  const barEl = pill.querySelector(".vlc-pill-progress-bar");
-  const dotEl = pill.querySelector(".vlc-live-pulse-dot");
+  const titleEl = m.querySelector(".vlc-modal-title");
+  const badgeEl = m.querySelector(".vlc-modal-status-badge");
+  const timeEl = m.querySelector(".vlc-modal-progress-time");
+  const pctEl = m.querySelector(".vlc-modal-progress-pct");
+  const barEl = m.querySelector(".vlc-modal-progress-bar");
+  const dotEl = m.querySelector(".vlc-live-pulse-dot");
 
   if (titleEl) {
-    const t = vlcSyncState.title || "Playing in VLC";
-    titleEl.textContent = t;
-    titleEl.title = t;
+    titleEl.textContent = displayTitle;
+    titleEl.title = displayTitle;
   }
-  if (tagEl) tagEl.textContent = isPaused ? "Paused" : "Live Syncing";
+  if (badgeEl) {
+    badgeEl.textContent = isPaused ? "Paused" : "Live Syncing";
+    if (isPaused) {
+      badgeEl.classList.add("paused");
+    } else {
+      badgeEl.classList.remove("paused");
+    }
+  }
   if (timeEl) timeEl.textContent = `${timeStr} / ${durStr}`;
   if (pctEl) pctEl.textContent = `${vlcSyncState.percent}%`;
   if (barEl) barEl.style.width = `${vlcSyncState.percent}%`;
@@ -1943,9 +2182,18 @@ async function openInDefaultPlayer(itemOrId, options = {}) {
         if (typeof addToast === "function") {
           addToast(`Playing in VLC with live progress sync${countStr}`, "success");
         }
+        vlcSyncState.minimized = false;
         if (typeof startVlcStatusPolling === "function") {
           startVlcStatusPolling(true);
         }
+        if (document.fullscreenElement && typeof document.exitFullscreen === "function") {
+          try { document.exitFullscreen(); } catch (e) {}
+        }
+        try {
+          if (typeof API !== "undefined" && API.post) {
+            API.post("/api/system/minimize-window");
+          }
+        } catch (e) {}
       } else if (res.method === "system") {
         if (typeof addToast === "function") {
           addToast(`Playing in default player (${res.file || title})`, "success");
@@ -5696,6 +5944,65 @@ const DetailPage = {
         </div>
       </div>
 
+      <!-- Playback Recovery Recommendation Modal -->
+      <div v-if="showRecoveryModal" class="recovery-recommend-modal-backdrop" @click.self="dismissRecoveryModal">
+        <div class="recovery-recommend-modal-card" role="dialog" aria-modal="true" aria-labelledby="recovery-modal-title">
+          <div class="recovery-recommend-header">
+            <div class="recovery-recommend-badge">
+              <i class="ph-bold ph-warning-circle"></i>
+            </div>
+            <button class="recovery-recommend-close-btn" @click="dismissRecoveryModal" title="Close" aria-label="Close">
+              <i class="ph-bold ph-x"></i>
+            </button>
+          </div>
+          
+          <div class="recovery-recommend-body">
+            <h3 id="recovery-modal-title" class="recovery-recommend-title">Playback Issue Detected</h3>
+            <p class="recovery-recommend-desc">
+              Web browser playback for <strong>{{ recoveryMediaData?.title || media?.title || 'this media' }}</strong>
+              <span v-if="recoveryMediaData?.season && recoveryMediaData?.episode"> (S{{ String(recoveryMediaData.season).padStart(2,'0') }}E{{ String(recoveryMediaData.episode).padStart(2,'0') }})</span>
+              failed repeatedly due to stream/decoder stalls.
+            </p>
+            <div class="recovery-recommend-tip-box">
+              <div class="recovery-tip-icon">
+                <i :class="hasVLC ? 'ph-bold ph-traffic-cone' : 'ph-bold ph-television'"></i>
+              </div>
+              <div class="recovery-tip-content">
+                <span class="recovery-tip-headline">Recommended Action</span>
+                <span class="recovery-tip-sub">
+                  We recommend playing this title with an external media player for smooth, hardware-accelerated playback with live progress syncing.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="recovery-recommend-actions">
+            <button type="button" class="btn btn-secondary recovery-btn-close" @click="dismissRecoveryModal">
+              Close
+            </button>
+            <button
+              v-if="isDesktop && canUseExternalPlayer"
+              type="button"
+              class="btn btn-primary recovery-btn-player"
+              :class="{ 'vlc-action-btn': hasVLC }"
+              @click="launchExternalFromRecovery"
+            >
+              <i :class="hasVLC ? 'ph-bold ph-traffic-cone' : 'ph-bold ph-arrow-square-out'"></i>
+              <span>{{ hasVLC ? 'Open with VLC' : 'Open in Default Player' }}</span>
+            </button>
+            <button
+              v-else
+              type="button"
+              class="btn btn-primary recovery-btn-player"
+              @click="launchExternalFromRecovery"
+            >
+              <i class="ph-bold ph-arrow-square-out"></i>
+              <span>Play in Default Player</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Skip Timestamps Editor Modal (per-episode) -->
       <skip-timestamps-modal
         v-if="showSkipModal"
@@ -6202,6 +6509,9 @@ const DetailPage = {
         } else {
           detailMoments.value = [];
         }
+
+        // Check if user was navigated back due to repeated player recovery failures
+        checkPlaybackRecoveryFailure(loadedMedia);
       } catch (e) {
         if (!media.value) {
           media.value = null;
@@ -6211,6 +6521,94 @@ const DetailPage = {
         loading.value = false;
         loadingSlow.value = false;
         loadingVerySlow.value = false;
+      }
+    }
+
+    // ─── Playback Recovery Failure Modal ─────────────────────────
+    const showRecoveryModal = ref(false);
+    const recoveryMediaData = ref(null);
+
+    function checkPlaybackRecoveryFailure(loadedMedia) {
+      try {
+        const stored = sessionStorage.getItem("capsstream_playback_recovery_failed");
+        if (!stored) return;
+        const parsed = JSON.parse(stored);
+        if (!parsed || !parsed.id) return;
+
+        // Verify that the failure belongs to the currently loaded media item or season episode
+        const currentId = loadedMedia?.id;
+        const currentTmdb = loadedMedia?.tmdb_id;
+        const matchesId = currentId && (String(currentId) === String(parsed.id));
+        const matchesTmdb = currentTmdb && (String(currentTmdb) === String(parsed.tmdb_id || parsed.id));
+        const matchesRoute = String(route.params.id) === String(parsed.id) || String(route.params.id) === String(parsed.tmdb_id);
+
+        let matchesEp = false;
+        if (!matchesId && loadedMedia?.seasons) {
+          for (const sKey of Object.keys(loadedMedia.seasons)) {
+            const eps = loadedMedia.seasons[sKey] || [];
+            if (eps.some(e => String(e.id) === String(parsed.id))) {
+              matchesEp = true;
+              break;
+            }
+          }
+        }
+
+        if (matchesId || matchesTmdb || matchesRoute || matchesEp) {
+          // Clear flag so modal only pops once
+          sessionStorage.removeItem("capsstream_playback_recovery_failed");
+          recoveryMediaData.value = parsed;
+          showRecoveryModal.value = true;
+        }
+      } catch (e) {
+        console.warn("[MediaDetails] Failed to inspect recovery flag:", e);
+      }
+    }
+
+    function dismissRecoveryModal() {
+      showRecoveryModal.value = false;
+      recoveryMediaData.value = null;
+      try {
+        sessionStorage.removeItem("capsstream_playback_recovery_failed");
+      } catch (e) {}
+    }
+
+    async function launchExternalFromRecovery() {
+      const recData = recoveryMediaData.value;
+      dismissRecoveryModal();
+
+      let targetItem = null;
+      if (recData?.id) {
+        if (media.value?.seasons) {
+          for (const sKey of Object.keys(media.value.seasons)) {
+            const eps = media.value.seasons[sKey] || [];
+            const found = eps.find(e => String(e.id) === String(recData.id));
+            if (found) {
+              targetItem = found;
+              break;
+            }
+          }
+        }
+        if (!targetItem && (String(media.value?.id) === String(recData.id) || !media.value?.seasons)) {
+          targetItem = media.value;
+        }
+      }
+
+      if (!targetItem) {
+        targetItem = media.value || { id: recData?.id || route.params.id, title: recData?.title || "Media" };
+      }
+
+      if (typeof openInDefaultPlayer === "function") {
+        await openInDefaultPlayer(targetItem, { mode: "resume" });
+      } else {
+        const targetId = targetItem?.id || route.params.id;
+        try {
+          const res = await API.post(`/api/media/${targetId}/open-default`, { mode: "resume" });
+          if (res && res.ok && res.method === "vlc") {
+            if (window.vlcSyncState) window.vlcSyncState.minimized = false;
+            if (typeof window.startVlcStatusPolling === "function") window.startVlcStatusPolling(true);
+            try { API.post("/api/system/minimize-window"); } catch (e) {}
+          }
+        } catch (e) {}
       }
     }
 
@@ -6867,6 +7265,10 @@ const DetailPage = {
       isThemeMusicMuted,
       toggleThemeMusicMute,
       resumeThemeMusic,
+      showRecoveryModal,
+      recoveryMediaData,
+      dismissRecoveryModal,
+      launchExternalFromRecovery,
     };
   },
 };
@@ -9425,102 +9827,336 @@ const SettingsPage = {
               </label>
             </div>
 
-            <!-- Preview Items Area -->
-            <div v-if="organizerPreviewItems.length > 0" style="margin-top:1.5rem">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-                <div style="font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px">
-                  <span class="unmatched-count-badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;border-color:rgba(56,189,248,0.3)">
-                    {{ organizerPreviewItems.length }} Ready to Organize
-                  </span>
-                  <button class="btn btn-ghost btn-sm" @click="toggleSelectAllOrganizer" style="font-size:0.78rem">
-                    {{ organizerSelectedIndices.size === organizerPreviewItems.length ? 'Deselect All' : 'Select All' }}
-                  </button>
+            <!-- Ready Items Banner in Settings -->
+            <div v-if="organizerPreviewItems.length > 0 && organizerUnmatchedItems.length === 0" style="margin-top:1.5rem">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.25);border-radius:12px;flex-wrap:wrap;gap:10px">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <i class="ph-bold ph-check-circle" style="color:#38bdf8;font-size:1.3rem"></i>
+                  <div>
+                    <div style="font-weight:700;color:var(--text-primary);font-size:0.92rem">
+                      {{ organizerPreviewItems.length }} Item{{ organizerPreviewItems.length === 1 ? '' : 's' }} Ready to Organize
+                    </div>
+                    <div style="font-size:0.78rem;color:var(--text-secondary)">
+                      All media matches verified with high confidence. Click to link and organize into your library.
+                    </div>
+                  </div>
                 </div>
                 <div style="display:flex;gap:8px">
-                  <button class="btn btn-secondary btn-sm" @click="organizerPreviewItems = []; organizerSelectedIndices.clear();">
+                  <button class="btn btn-secondary btn-sm" @click="organizerPreviewItems = []">
                     Dismiss
                   </button>
-                  <button class="btn btn-primary btn-sm" @click="executeOrganizer" :disabled="organizerExecuting || organizerSelectedIndices.size === 0">
+                  <button class="btn btn-primary btn-sm" @click="executeBatchOrganizer(organizerPreviewItems)" :disabled="organizerExecuting">
                     <i :class="organizerExecuting ? 'ph ph-circle-notch' : 'ph ph-check-circle'" :style="organizerExecuting ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
-                    {{ organizerExecuting ? 'Organizing Files...' : 'Organize Selected (' + organizerSelectedIndices.size + ')' }}
+                    {{ organizerExecuting ? 'Organizing...' : 'Organize All (' + organizerPreviewItems.length + ')' }}
                   </button>
                 </div>
               </div>
+            </div>
 
-              <!-- Interactive Review Table -->
-              <div class="unmatched-container recache-table-scrollable" style="max-height:420px;overflow-y:auto;margin-bottom:1.5rem">
-                <table class="unmatched-table">
-                  <thead>
-                    <tr>
-                      <th style="width:40px;text-align:center">
-                        <input type="checkbox" :checked="organizerSelectedIndices.size > 0 && organizerSelectedIndices.size === organizerPreviewItems.length" @change="toggleSelectAllOrganizer" />
-                      </th>
-                      <th>Original File &amp; Size</th>
-                      <th>Media Type</th>
-                      <th>Parsed Title &amp; Year</th>
-                      <th>Destination Path Preview</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="(item, idx) in organizerPreviewItems" :key="item.source_path">
-                      <td style="text-align:center">
-                        <input type="checkbox" :checked="organizerSelectedIndices.has(idx)" @change="toggleOrganizerItem(idx)" />
-                      </td>
-                      <td class="unmatched-title-cell" style="max-width:260px" :title="item.filename">
-                        <div style="font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ item.filename }}</div>
-                        <div style="font-size:0.75rem;color:var(--text-muted)">{{ formatFileSize(item.file_size || 0) }}</div>
-                      </td>
-                      <td>
-                        <button class="btn btn-ghost btn-sm" @click="item.editType = (item.editType === 'movie' ? 'tv' : (item.editType === 'tv' ? 'anime' : 'movie'))" style="font-size:0.75rem;padding:2px 8px;border-radius:6px" :style="item.editType === 'movie' ? 'background:rgba(56,189,248,0.15);color:#38bdf8' : (item.editType === 'anime' ? 'background:rgba(236,72,153,0.15);color:#f472b6' : 'background:rgba(168,85,247,0.15);color:#c084fc')">
-                          <i :class="item.editType === 'movie' ? 'ph ph-film-strip' : (item.editType === 'anime' ? 'ph ph-sparkle' : 'ph ph-television')" style="margin-right:4px"></i>
-                          {{ item.editType === 'movie' ? 'Movie' : (item.editType === 'anime' ? 'Anime' : 'TV Show') }}
-                        </button>
-                      </td>
-                      <td>
-                        <div style="display:flex;gap:6px;align-items:center">
-                          <input type="text" v-model="item.editTitle" class="form-input" style="font-size:0.8rem;padding:4px 8px;width:150px" />
-                          <input type="text" v-model="item.editYear" class="form-input" placeholder="Year" style="font-size:0.8rem;padding:4px 8px;width:60px" />
-                        </div>
-                      </td>
-                      <td style="font-size:0.78rem;color:var(--text-secondary);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="item.destination_path">
-                        {{ item.destination_path }}
-                        <span v-if="item.route_reason === 'local'" class="tag" style="margin-left:4px;font-size:0.68rem;padding:1px 5px;background:rgba(234,179,8,0.15);color:#eab308;border-color:rgba(234,179,8,0.3)" title="Routed to Local Region library">
-                          Local
-                        </span>
-                        <span v-if="item.subtitles?.length" class="tag" style="margin-left:4px;font-size:0.68rem;padding:1px 5px;background:rgba(34,197,94,0.15);color:#4ade80" :title="formatSubtitlePlanTooltip(item.subtitle_plan)">
-                          +{{ item.subtitles.length }} Sub
-                        </span>
-                      </td>
-                      <td>
-                        <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">
-                          <span v-if="item.confidence === 'low'" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 6px" title="Low match confidence (<70%). Review or edit title/year manually before organizing.">
-                            <i class="ph ph-warning" style="margin-right:2px"></i>Unrecognized
-                          </span>
-                          <span v-else-if="item.is_locked" class="server-status-pill error" style="font-size:0.7rem;padding:2px 6px" title="File is currently open, downloading, or locked by another process. Wait until download completes or release the lock.">
-                            <i class="ph ph-lock" style="margin-right:2px"></i>Locked
-                          </span>
-                          <span v-else-if="item.destination_exists" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 6px" title="Destination already exists. Organizing will replace or upgrade the destination file.">
-                            <i class="ph ph-arrows-clockwise" style="margin-right:2px"></i>Exists (Upgrade)
-                          </span>
-                          <span v-else class="server-status-pill success" style="font-size:0.7rem;padding:2px 6px" title="Ready to be linked or moved into your organized library folder.">
-                            <i class="ph ph-check" style="margin-right:2px"></i>Ready
-                          </span>
-
-                          <span v-if="item.is_locked" style="font-size:0.65rem;color:#f87171;line-height:1.1">
-                            In use / downloading
-                          </span>
-                          <span v-else-if="item.confidence === 'low'" style="font-size:0.65rem;color:#fbbf24;line-height:1.1">
-                            Check title &amp; year
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+            <!-- Unmatched Items Alert Banner in Settings (Opens Modal) -->
+            <div v-if="organizerUnmatchedItems.length > 0" style="margin-top:1.5rem">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.25);border-radius:12px;flex-wrap:wrap;gap:10px">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <i class="ph-bold ph-warning-circle" style="color:#facc15;font-size:1.3rem"></i>
+                  <div>
+                    <div style="font-weight:700;color:var(--text-primary);font-size:0.92rem">
+                      {{ organizerUnmatchedItems.length }} Item{{ organizerUnmatchedItems.length === 1 ? '' : 's' }} Require Review
+                    </div>
+                    <div style="font-size:0.78rem;color:var(--text-secondary)">
+                      Low match confidence or locked files detected. Review or edit before organizing.
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px">
+                  <button class="btn btn-secondary btn-sm" @click="organizerUnmatchedItems = []">
+                    Dismiss
+                  </button>
+                  <button class="btn btn-primary btn-sm" @click="organizerUnmatchedModal.show = true" style="background:#eab308;color:#000;border-color:#ca8a04">
+                    <i class="ph ph-cards" style="margin-right:4px"></i>
+                    Review Unmatched Items ({{ organizerUnmatchedItems.length }})
+                  </button>
+                </div>
               </div>
             </div>
           </div>
+
+          <!-- Dedicated Review & Preview Modal (Teleported to Body) -->
+          <teleport to="body">
+            <div class="organizer-review-modal-backdrop" v-if="organizerUnmatchedModal.show" @click.self="organizerUnmatchedModal.show = false">
+              <div class="organizer-review-modal-card" @click.stop>
+                <div class="organizer-review-modal-header">
+                  <div class="organizer-review-modal-title-row">
+                    <div class="organizer-progress-icon-wrap" :class="organizerReviewActiveTab === 'unmatched' && organizerUnmatchedItems.length > 0 ? 'warning' : 'detecting'" style="width:38px;height:38px;font-size:1.1rem;margin:0">
+                      <i :class="organizerReviewActiveTab === 'unmatched' && organizerUnmatchedItems.length > 0 ? 'ph-bold ph-warning' : 'ph-bold ph-film-slate'"></i>
+                    </div>
+                    <div>
+                      <h3 class="organizer-review-modal-title">Review Scanned Media</h3>
+                      <div class="organizer-review-modal-sub">
+                        Verify matched titles, fix unrecognized items with TMDb, and confirm before organizing.
+                      </div>
+                    </div>
+                  </div>
+                  <button class="modal-close-btn" @click="organizerUnmatchedModal.show = false" title="Close">
+                    <i class="ph ph-x"></i>
+                  </button>
+                </div>
+
+                <!-- Tabs: Unmatched / Issues vs Matched (Ready) -->
+                <div class="organizer-review-tabs">
+                  <button
+                    class="organizer-review-tab-btn"
+                    :class="{ active: organizerReviewActiveTab === 'unmatched' }"
+                    @click="organizerReviewActiveTab = 'unmatched'"
+                  >
+                    <i class="ph ph-warning-circle" style="color:#facc15"></i>
+                    <span>Unmatched / Issues</span>
+                    <span class="organizer-review-tab-badge warning">{{ organizerUnmatchedItems.length }}</span>
+                  </button>
+                  <button
+                    class="organizer-review-tab-btn"
+                    :class="{ active: organizerReviewActiveTab === 'ready' }"
+                    @click="organizerReviewActiveTab = 'ready'"
+                  >
+                    <i class="ph ph-check-circle" style="color:#4ade80"></i>
+                    <span>Matched (Ready)</span>
+                    <span class="organizer-review-tab-badge success">{{ organizerReadyItems.length }}</span>
+                  </button>
+                </div>
+
+                <!-- Controls: Select All & Count -->
+                <div class="organizer-review-modal-controls">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <button class="btn btn-ghost btn-sm" @click="toggleSelectAllActiveReviewTab" style="font-size:0.78rem">
+                      {{ (organizerReviewActiveTab === 'unmatched' ? organizerSelectedUnmatchedIndices.size === organizerUnmatchedItems.length : organizerSelectedReadyIndices.size === organizerReadyItems.length) ? 'Deselect All' : 'Select All' }}
+                    </button>
+                    <span style="font-size:0.75rem;color:var(--text-muted)">
+                      {{ organizerReviewActiveTab === 'unmatched' ? organizerSelectedUnmatchedIndices.size + ' of ' + organizerUnmatchedItems.length + ' selected' : organizerSelectedReadyIndices.size + ' of ' + organizerReadyItems.length + ' selected' }}
+                    </span>
+                  </div>
+                  <div style="font-size:0.75rem;color:var(--text-muted)">
+                    Showing 5 items max (scrollable)
+                  </div>
+                </div>
+
+                <!-- Cards Container (5 items max visible, rest scrollable) -->
+                <div class="organizer-unmatched-cards-container">
+                  <!-- Empty Tab State -->
+                  <div v-if="(organizerReviewActiveTab === 'unmatched' ? organizerUnmatchedItems.length : organizerReadyItems.length) === 0" style="padding:2.5rem 1rem;text-align:center;color:var(--text-muted)">
+                    <i :class="organizerReviewActiveTab === 'unmatched' ? 'ph ph-check-circle' : 'ph ph-folder-open'" style="font-size:2rem;color:var(--accent);margin-bottom:8px"></i>
+                    <div style="font-weight:600;color:var(--text-primary);font-size:0.9rem">
+                      {{ organizerReviewActiveTab === 'unmatched' ? 'No unmatched or failed items!' : 'No matched items yet.' }}
+                    </div>
+                    <div style="font-size:0.78rem;margin-top:2px">
+                      {{ organizerReviewActiveTab === 'unmatched' ? 'All candidate files have high-confidence matches.' : 'Check the Unmatched tab to review or fix files.' }}
+                    </div>
+                  </div>
+
+                  <!-- Cards List for Active Tab -->
+                  <div
+                    v-for="(item, idx) in (organizerReviewActiveTab === 'unmatched' ? organizerUnmatchedItems : organizerReadyItems)"
+                    :key="item.source_path"
+                    class="organizer-unmatched-card"
+                    :class="{ selected: (organizerReviewActiveTab === 'unmatched' ? organizerSelectedUnmatchedIndices.has(idx) : organizerSelectedReadyIndices.has(idx)) }"
+                  >
+                    <!-- Card Header: Checkbox, Filename, Size, Reason Pill -->
+                    <div class="organizer-card-header">
+                      <input
+                        type="checkbox"
+                        :checked="(organizerReviewActiveTab === 'unmatched' ? organizerSelectedUnmatchedIndices.has(idx) : organizerSelectedReadyIndices.has(idx))"
+                        @change="toggleReviewItemCheckbox(idx)"
+                        style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;flex-shrink:0"
+                      />
+                      <div class="organizer-card-title-group">
+                        <div class="organizer-card-filename" :title="item.filename">
+                          {{ item.filename }}
+                        </div>
+                        <div class="organizer-card-filesize">
+                          {{ formatFileSize(item.file_size || 0) }}
+                        </div>
+                      </div>
+
+                      <!-- Reason / Status badge -->
+                      <div style="flex-shrink:0">
+                        <span v-if="item.is_manually_matched" class="server-status-pill success" style="font-size:0.7rem;padding:2px 7px" title="Manually matched with TMDb">
+                          <i class="ph-bold ph-check" style="margin-right:2px"></i>Matched
+                        </span>
+                        <span v-else-if="item.confidence === 'low'" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 7px" title="Match confidence <70%">
+                          <i class="ph ph-warning" style="margin-right:2px"></i>Unrecognized
+                        </span>
+                        <span v-else-if="item.is_locked" class="server-status-pill error" style="font-size:0.7rem;padding:2px 7px" title="File in use or downloading">
+                          <i class="ph ph-lock" style="margin-right:2px"></i>Locked
+                        </span>
+                        <span v-else-if="item.destination_exists" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 7px" title="Destination already exists">
+                          <i class="ph ph-arrows-clockwise" style="margin-right:2px"></i>Exists
+                        </span>
+                        <span v-else class="server-status-pill success" style="font-size:0.7rem;padding:2px 7px" title="High confidence match">
+                          <i class="ph ph-check" style="margin-right:2px"></i>Ready
+                        </span>
+                      </div>
+                    </div>
+
+                    <!-- Card Body: Editable Title, Year, Type Toggle, and TMDb Search button -->
+                    <div class="organizer-card-inputs-row">
+                      <button
+                        class="btn btn-ghost btn-sm"
+                        @click="changeItemMediaType(item)"
+                        style="font-size:0.75rem;padding:3px 8px;border-radius:6px;flex-shrink:0"
+                        :style="item.editType === 'movie' ? 'background:rgba(56,189,248,0.15);color:#38bdf8' : (item.editType === 'anime' ? 'background:rgba(236,72,153,0.15);color:#f472b6' : 'background:rgba(168,85,247,0.15);color:#c084fc')"
+                      >
+                        <i :class="item.editType === 'movie' ? 'ph ph-film-strip' : (item.editType === 'anime' ? 'ph ph-sparkle' : 'ph ph-television')" style="margin-right:4px"></i>
+                        {{ item.editType === 'movie' ? 'Movie' : (item.editType === 'anime' ? 'Anime' : 'TV Show') }}
+                      </button>
+
+                      <input
+                        type="text"
+                        v-model="item.editTitle"
+                        @change="updateItemDestinationPreview(item)"
+                        class="form-input"
+                        placeholder="Title"
+                        style="font-size:0.8rem;padding:4px 8px;flex:1;min-width:130px"
+                      />
+
+                      <input
+                        type="text"
+                        v-model="item.editYear"
+                        @change="updateItemDestinationPreview(item)"
+                        class="form-input"
+                        placeholder="Year"
+                        style="font-size:0.8rem;padding:4px 8px;width:64px;flex-shrink:0"
+                      />
+
+                      <!-- Search TMDb Button -->
+                      <button
+                        class="btn btn-secondary btn-sm"
+                        @click="openTmdbSearchForCard(item)"
+                        title="Search TMDb for exact metadata"
+                        style="font-size:0.75rem;padding:4px 8px;flex-shrink:0;gap:4px"
+                      >
+                        <i class="ph ph-magnifying-glass"></i>
+                        <span>Search TMDb</span>
+                      </button>
+                    </div>
+
+                    <!-- Destination Path Preview -->
+                    <div class="organizer-card-dest-row">
+                      <i class="ph ph-arrow-bend-down-right" style="color:var(--text-muted);flex-shrink:0"></i>
+                      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" :title="item.destination_path">
+                        {{ item.destination_path }}
+                      </span>
+                      <span v-if="item.subtitles?.length" class="tag" style="font-size:0.65rem;padding:1px 5px;background:rgba(34,197,94,0.15);color:#4ade80;flex-shrink:0">
+                        +{{ item.subtitles.length }} Sub
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Modal Footer -->
+                <div class="organizer-review-modal-footer">
+                  <button class="btn btn-secondary btn-sm" @click="organizerUnmatchedModal.show = false">
+                    Close
+                  </button>
+                  <div style="display:flex;gap:8px">
+                    <button
+                      class="btn btn-secondary btn-sm"
+                      @click="executeSelectedReviewItems"
+                      :disabled="organizerExecuting || getSelectedReviewItemsCount() === 0"
+                    >
+                      <i :class="organizerExecuting ? 'ph ph-circle-notch' : 'ph ph-check'" :style="organizerExecuting ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                      Organize Selected ({{ getSelectedReviewItemsCount() }})
+                    </button>
+                    <button
+                      class="btn btn-primary btn-sm"
+                      @click="executeAllReviewItems"
+                      :disabled="organizerExecuting || (organizerUnmatchedItems.length + organizerReadyItems.length) === 0"
+                    >
+                      <i :class="organizerExecuting ? 'ph ph-circle-notch' : 'ph ph-check-circle'" :style="organizerExecuting ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                      Organize All ({{ organizerUnmatchedItems.length + organizerReadyItems.length }})
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TMDb Search & Pick Modal for Organizer Card -->
+            <div class="organizer-tmdb-search-backdrop" v-if="organizerTmdbModal.show" @click.self="organizerTmdbModal.show = false">
+              <div class="organizer-tmdb-search-card" @click.stop>
+                <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:10px">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <i class="ph ph-magnifying-glass" style="color:var(--accent);font-size:1.2rem"></i>
+                    <h3 style="margin:0;font-size:1.05rem;font-weight:700">Search TMDb</h3>
+                  </div>
+                  <button class="modal-close-btn" @click="organizerTmdbModal.show = false">
+                    <i class="ph ph-x"></i>
+                  </button>
+                </div>
+
+                <div style="display:flex;gap:8px;align-items:center">
+                  <input
+                    type="text"
+                    v-model="organizerTmdbModal.query"
+                    @keyup.enter="searchTmdbForCard"
+                    class="form-input"
+                    placeholder="Search movie or TV show title..."
+                    style="flex:1"
+                  />
+                  <select v-model="organizerTmdbModal.type" class="form-input" style="width:110px">
+                    <option value="movie">Movie</option>
+                    <option value="tv">TV Show</option>
+                  </select>
+                  <button class="btn btn-primary btn-sm" @click="searchTmdbForCard" :disabled="organizerTmdbModal.loading">
+                    <i :class="organizerTmdbModal.loading ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="organizerTmdbModal.loading ? 'animation:spin 1s linear infinite' : ''"></i>
+                  </button>
+                </div>
+
+                <!-- Results list -->
+                <div style="max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:2px">
+                  <div v-if="organizerTmdbModal.loading" style="padding:2rem;text-align:center;color:var(--text-muted)">
+                    <div class="loading-spinner" style="margin:0 auto 8px auto"></div>
+                    <span>Searching TMDb...</span>
+                  </div>
+
+                  <div v-else-if="organizerTmdbModal.searched && organizerTmdbModal.results.length === 0" style="padding:2rem;text-align:center;color:var(--text-muted)">
+                    <i class="ph ph-warning-circle" style="font-size:1.8rem;margin-bottom:6px"></i>
+                    <div>No results found on TMDb for "{{ organizerTmdbModal.query }}"</div>
+                  </div>
+
+                  <div
+                    v-for="res in organizerTmdbModal.results"
+                    :key="res.id"
+                    @click="applyTmdbMatchToCard(res)"
+                    style="display:flex;gap:12px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);cursor:pointer;transition:all 0.15s ease"
+                    onmouseover="this.style.background='rgba(255,255,255,0.08)';this.style.borderColor='rgba(255,255,255,0.2)'"
+                    onmouseout="this.style.background='rgba(255,255,255,0.03)';this.style.borderColor='rgba(255,255,255,0.08)'"
+                  >
+                    <img
+                      v-if="res.poster_path"
+                      :src="'https://image.tmdb.org/t/p/w92' + res.poster_path"
+                      style="width:40px;height:58px;object-fit:cover;border-radius:6px;flex-shrink:0"
+                    />
+                    <div v-else style="width:40px;height:58px;background:rgba(255,255,255,0.05);border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                      <i class="ph ph-film-strip" style="color:var(--text-muted)"></i>
+                    </div>
+
+                    <div style="display:flex;flex-direction:column;justify-content:center;overflow:hidden;flex:1">
+                      <div style="font-weight:600;font-size:0.88rem;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                        {{ res.title || res.name }}
+                      </div>
+                      <div style="font-size:0.75rem;color:var(--text-muted);display:flex;gap:8px;margin-top:2px">
+                        <span>{{ (res.release_date || res.first_air_date || '').slice(0, 4) || 'Unknown year' }}</span>
+                        <span>&bull;</span>
+                        <span style="text-transform:capitalize">{{ res.media_type || organizerTmdbModal.type }}</span>
+                        <span v-if="res.vote_average">&bull; &star; {{ res.vote_average.toFixed(1) }}</span>
+                      </div>
+                    </div>
+
+                    <div style="display:flex;align-items:center">
+                      <span class="btn btn-primary btn-sm" style="font-size:0.72rem;padding:3px 8px">Select</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </teleport>
 
           <!-- Organizer Detecting & Processing Status Modal (Teleported to Body for Global Overlay) -->
           <teleport to="body">
@@ -9545,9 +10181,24 @@ const SettingsPage = {
                 <h3 class="organizer-progress-title">{{ organizerProgressModal.title }}</h3>
                 <p class="organizer-progress-subtitle">{{ organizerProgressModal.subtitle }}</p>
 
-                <!-- Progress Bar when processing -->
-                <div class="organizer-modal-progress-wrap" v-if="organizerProgressModal.type === 'processing' || (organizerProgressModal.type === 'success' && organizerProgressModal.total)">
+                <!-- Progress Bar when processing or detecting -->
+                <div class="organizer-modal-progress-wrap" v-if="organizerProgressModal.type === 'processing' || (organizerProgressModal.type === 'detecting' && organizerProgressModal.total > 0) || (organizerProgressModal.type === 'success' && organizerProgressModal.total)">
                   <div class="organizer-modal-progress-bar" :style="{ width: (organizerProgressModal.percent || 0) + '%' }"></div>
+                </div>
+
+                <!-- Active Inspecting/Matching Card when detecting -->
+                <div class="organizer-detecting-active-card" v-if="organizerProgressModal.type === 'detecting' && organizerProgressModal.currentFile">
+                  <div class="organizer-detecting-file-row">
+                    <i class="ph ph-film-slate" style="color:var(--accent);font-size:1.1rem;flex-shrink:0"></i>
+                    <span class="organizer-detecting-filename" :title="organizerProgressModal.currentFile">{{ organizerProgressModal.currentFile }}</span>
+                    <span class="organizer-detecting-count-badge" v-if="organizerProgressModal.total > 0">
+                      {{ organizerProgressModal.current }} / {{ organizerProgressModal.total }}
+                    </span>
+                  </div>
+                  <div class="organizer-detecting-status-line">
+                    <i class="ph ph-magnifying-glass" style="color:#38bdf8;animation:spin 2s linear infinite"></i>
+                    <span>{{ organizerProgressModal.currentStatus || 'Inspecting tokens & metadata...' }}</span>
+                  </div>
                 </div>
 
                 <!-- Active Item Card when processing -->
@@ -9581,16 +10232,18 @@ const SettingsPage = {
                   </div>
                 </div>
 
-                <!-- Processed Activity Log (Recent items) -->
+                <!-- Processed Activity Log (Dedicated scrollable container) -->
                 <div class="organizer-modal-items-log" v-if="organizerProgressModal.processedItems && organizerProgressModal.processedItems.length > 0">
-                  <div style="font-size:0.7rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">
+                  <div style="font-size:0.7rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">
                     Activity Log ({{ organizerProgressModal.processedItems.length }})
                   </div>
-                  <div v-for="(pItem, pIdx) in organizerProgressModal.processedItems.slice().reverse().slice(0, 5)" :key="pIdx" class="organizer-log-entry">
-                    <i :class="pItem.status === 'ok' ? 'ph-bold ph-check' : 'ph-bold ph-warning'" :style="{ color: pItem.status === 'ok' ? '#4ade80' : '#f87171' }"></i>
-                    <span style="font-weight:600;color:var(--text-primary)">{{ pItem.title }}</span>
-                    <span class="organizer-path-code" style="max-width:180px" :title="pItem.destination">{{ getFileBasename(pItem.destination) }}</span>
-                    <span style="margin-left:auto;font-size:0.68rem;color:var(--text-muted)">{{ pItem.action }}</span>
+                  <div class="organizer-items-log-scroll">
+                    <div v-for="(pItem, pIdx) in organizerProgressModal.processedItems.slice().reverse()" :key="pIdx" class="organizer-log-entry" :class="{ failed: pItem.status !== 'ok' }">
+                      <i :class="pItem.status === 'ok' ? 'ph-bold ph-check' : 'ph-bold ph-warning'" :style="{ color: pItem.status === 'ok' ? '#4ade80' : '#f87171' }"></i>
+                      <span style="font-weight:600;color:var(--text-primary)">{{ pItem.title }}</span>
+                      <span class="organizer-path-code" style="max-width:180px" :title="pItem.destination">{{ getFileBasename(pItem.destination) }}</span>
+                      <span style="margin-left:auto;font-size:0.68rem;color:var(--text-muted)">{{ pItem.action }}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -11656,6 +12309,21 @@ const SettingsPage = {
     const organizerExecuting = ref(false);
     const organizerPreviewItems = ref([]);
     const organizerSelectedIndices = ref(new Set());
+    const organizerUnmatchedModal = ref({ show: false });
+    const organizerReviewActiveTab = ref("unmatched"); // "unmatched" | "ready"
+    const organizerUnmatchedItems = ref([]);
+    const organizerReadyItems = ref([]);
+    const organizerSelectedUnmatchedIndices = ref(new Set());
+    const organizerSelectedReadyIndices = ref(new Set());
+    const organizerTmdbModal = ref({
+      show: false,
+      loading: false,
+      searched: false,
+      query: "",
+      type: "movie",
+      targetItem: null,
+      results: []
+    });
     const organizerHistory = ref([]);
     const organizerHistoryOpen = ref(false);
     const organizerHistoryLoading = ref(false);
@@ -11667,6 +12335,11 @@ const SettingsPage = {
       title: "",
       subtitle: "",
       count: 0,
+      total: 0,
+      current: 0,
+      percent: 0,
+      currentFile: "",
+      currentStatus: "",
       detail: ""
     });
 
@@ -11732,48 +12405,448 @@ const SettingsPage = {
       organizerProgressModal.value = {
         show: true,
         type: "detecting",
-        title: "Detecting Media in Drop Folder...",
-        subtitle: "Scanning incoming files, inspecting media formats, and identifying titles with TMDb...",
+        title: "Detecting & Matching Media...",
+        subtitle: "Inspecting media signatures and querying TMDb in real-time...",
         count: 0,
+        total: 0,
+        current: 0,
+        percent: 0,
+        currentFile: "",
+        currentStatus: "Connecting to media scanner...",
         detail: organizerConfig.value.incoming_dir || "Incoming folder"
       };
+
       try {
-        const res = await fetch("/api/admin/organizer/preview", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ incoming_dir: organizerConfig.value.incoming_dir })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          organizerPreviewItems.value = (data.items || []).map(item => ({
-            ...item,
-            editTitle: item.canonical_title,
-            editYear: item.year || "",
-            editType: item.media_type
-          }));
-          organizerSelectedIndices.value = new Set(organizerPreviewItems.value.map((_, i) => i));
-          if (organizerPreviewItems.value.length === 0) {
-            if (data.cleaned_folders && data.cleaned_folders.length > 0) {
-              addToast(`No new media found. Cleaned ${data.cleaned_folders.length} empty subfolder(s) in Incoming.`, "info");
-            } else {
-              addToast("No new media found in incoming folder", "info");
+        let items = [];
+        let cleanedFolders = [];
+
+        // Try SSE preview-stream for live telemetry
+        try {
+          const streamRes = await fetch("/api/admin/organizer/preview-stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ incoming_dir: organizerConfig.value.incoming_dir })
+          });
+
+          if (streamRes.ok && streamRes.body) {
+            const reader = streamRes.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split("\n\n");
+              buffer = lines.pop() || "";
+
+              for (const block of lines) {
+                const line = block.trim();
+                if (!line.startsWith("data: ")) continue;
+                const jsonStr = line.slice(6).trim();
+                if (!jsonStr) continue;
+                try {
+                  const evt = JSON.parse(jsonStr);
+                  if (evt.step === "init") {
+                    organizerProgressModal.value.total = evt.total || 0;
+                    organizerProgressModal.value.current = 0;
+                    organizerProgressModal.value.percent = 0;
+                    organizerProgressModal.value.currentStatus = `Found ${evt.total || 0} media candidate(s)...`;
+                  } else if (evt.step === "inspecting") {
+                    organizerProgressModal.value.current = evt.current || 0;
+                    organizerProgressModal.value.total = evt.total || 0;
+                    organizerProgressModal.value.percent = evt.total ? Math.round((evt.current / evt.total) * 100) : 0;
+                    organizerProgressModal.value.currentFile = evt.file || "";
+                    organizerProgressModal.value.currentStatus = evt.status || "Inspecting tokens & metadata...";
+                  } else if (evt.step === "matching") {
+                    organizerProgressModal.value.current = evt.current || 0;
+                    organizerProgressModal.value.total = evt.total || 0;
+                    organizerProgressModal.value.percent = evt.total ? Math.round((evt.current / evt.total) * 100) : 0;
+                    organizerProgressModal.value.currentFile = evt.file || "";
+                    organizerProgressModal.value.currentStatus = evt.status || `Querying TMDb for '${evt.query || evt.file}'...`;
+                  } else if (evt.step === "done") {
+                    items = evt.items || [];
+                    cleanedFolders = evt.cleaned_folders || [];
+                  } else if (evt.step === "error") {
+                    throw new Error(evt.error || "Preview failed");
+                  }
+                } catch (pe) {
+                  if (pe.message && pe.message.includes("Preview failed")) throw pe;
+                }
+              }
             }
           } else {
-            let msg = `Identified ${organizerPreviewItems.value.length} media item(s)`;
-            if (data.cleaned_folders && data.cleaned_folders.length > 0) {
-              msg += ` (Cleaned ${data.cleaned_folders.length} empty folder(s))`;
-            }
-            addToast(msg, "success");
+            throw new Error("Stream unavailable, fallback to standard preview");
           }
+        } catch (streamErr) {
+          // Fallback to standard preview endpoint
+          const res = await fetch("/api/admin/organizer/preview", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ incoming_dir: organizerConfig.value.incoming_dir })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Failed to scan incoming folder");
+          items = data.items || [];
+          cleanedFolders = data.cleaned_folders || [];
+        }
+
+        const mappedItems = items.map(item => ({
+          ...item,
+          editTitle: item.canonical_title,
+          editYear: item.year || "",
+          editType: item.media_type
+        }));
+
+        if (mappedItems.length === 0) {
+          organizerProgressModal.value.show = false;
+          if (cleanedFolders && cleanedFolders.length > 0) {
+            addToast(`No new media found. Cleaned ${cleanedFolders.length} empty subfolder(s) in Incoming.`, "info");
+          } else {
+            addToast("No new media found in incoming folder", "info");
+          }
+          return;
+        }
+
+        // Separate into ready (matched) vs unmatched/locked candidates
+        const readyItems = [];
+        const unmatched = [];
+        for (const it of mappedItems) {
+          if (it.confidence === "low" || it.is_locked || it.destination_exists) {
+            unmatched.push(it);
+          } else {
+            readyItems.push(it);
+          }
+        }
+
+        organizerProgressModal.value.show = false;
+        organizerPreviewItems.value = mappedItems;
+        organizerSelectedIndices.value = new Set(mappedItems.map((_, i) => i));
+
+        organizerUnmatchedItems.value = unmatched;
+        organizerReadyItems.value = readyItems;
+        organizerSelectedUnmatchedIndices.value = new Set(unmatched.map((_, i) => i));
+        organizerSelectedReadyIndices.value = new Set(readyItems.map((_, i) => i));
+
+        // Always pop up the Review Modal so user can review matches or fix unmatched items
+        organizerReviewActiveTab.value = unmatched.length > 0 ? "unmatched" : "ready";
+        organizerUnmatchedModal.value.show = true;
+
+        if (unmatched.length > 0) {
+          addToast(`Found ${mappedItems.length} item(s): ${unmatched.length} need review, ${readyItems.length} ready`, "warning");
         } else {
-          addToast(data.error || "Failed to scan incoming folder", "error");
+          addToast(`Scanned ${mappedItems.length} item(s) &mdash; all matched! Review and click Organize to confirm.`, "success");
         }
       } catch (e) {
-        addToast("Error scanning incoming folder", "error");
+        addToast(e?.message || "Error scanning incoming folder", "error");
+        organizerProgressModal.value.show = false;
       } finally {
         organizerScanning.value = false;
-        organizerProgressModal.value.show = false;
       }
+    }
+
+    function toggleSelectAllActiveReviewTab() {
+      if (organizerReviewActiveTab.value === "unmatched") {
+        if (organizerSelectedUnmatchedIndices.value.size === organizerUnmatchedItems.value.length) {
+          organizerSelectedUnmatchedIndices.value.clear();
+        } else {
+          organizerSelectedUnmatchedIndices.value = new Set(organizerUnmatchedItems.value.map((_, i) => i));
+        }
+      } else {
+        if (organizerSelectedReadyIndices.value.size === organizerReadyItems.value.length) {
+          organizerSelectedReadyIndices.value.clear();
+        } else {
+          organizerSelectedReadyIndices.value = new Set(organizerReadyItems.value.map((_, i) => i));
+        }
+      }
+    }
+
+    function toggleReviewItemCheckbox(idx) {
+      if (organizerReviewActiveTab.value === "unmatched") {
+        if (organizerSelectedUnmatchedIndices.value.has(idx)) {
+          organizerSelectedUnmatchedIndices.value.delete(idx);
+        } else {
+          organizerSelectedUnmatchedIndices.value.add(idx);
+        }
+      } else {
+        if (organizerSelectedReadyIndices.value.has(idx)) {
+          organizerSelectedReadyIndices.value.delete(idx);
+        } else {
+          organizerSelectedReadyIndices.value.add(idx);
+        }
+      }
+    }
+
+    function getSelectedReviewItemsCount() {
+      if (organizerReviewActiveTab.value === "unmatched") {
+        return organizerSelectedUnmatchedIndices.value.size;
+      }
+      return organizerSelectedReadyIndices.value.size;
+    }
+
+    function changeItemMediaType(item) {
+      item.editType = (item.editType === 'movie' ? 'tv' : (item.editType === 'tv' ? 'anime' : 'movie'));
+      updateItemDestinationPreview(item);
+    }
+
+    function updateItemDestinationPreview(item) {
+      const ext = item.extension || (item.source_path ? item.source_path.slice(item.source_path.lastIndexOf('.')) : '.mkv');
+      const title = (item.editTitle || item.canonical_title || 'Media').trim();
+      const year = item.editYear ? String(item.editYear).trim() : '';
+      const yearStr = year ? ` (${year})` : '';
+      const roots = organizerConfig.value.library_roots || {};
+
+      if (item.editType === 'movie') {
+        const root = roots.movies || 'data/media/Movies';
+        item.destination_path = `${root}/${title}${yearStr}/${title}${yearStr}${ext}`;
+      } else if (item.editType === 'anime') {
+        const root = roots.anime || 'data/media/Anime';
+        const seasonStr = item.season ? String(item.season).padStart(2, '0') : '01';
+        const epStr = item.episode ? String(item.episode).padStart(2, '0') : '01';
+        item.destination_path = `${root}/${title}/Season ${seasonStr}/${title} - S${seasonStr}E${epStr}${ext}`;
+      } else {
+        const root = roots.tv || 'data/media/TV Shows';
+        const seasonStr = item.season ? String(item.season).padStart(2, '0') : '01';
+        const epStr = item.episode ? String(item.episode).padStart(2, '0') : '01';
+        item.destination_path = `${root}/${title}/Season ${seasonStr}/${title} - S${seasonStr}E${epStr}${ext}`;
+      }
+    }
+
+    function openTmdbSearchForCard(item) {
+      organizerTmdbModal.value = {
+        show: true,
+        loading: false,
+        searched: false,
+        query: item.editTitle || item.canonical_title || item.filename || "",
+        type: item.editType === "movie" ? "movie" : "tv",
+        targetItem: item,
+        results: []
+      };
+      if (organizerTmdbModal.value.query.trim()) {
+        searchTmdbForCard();
+      }
+    }
+
+    async function searchTmdbForCard() {
+      const q = (organizerTmdbModal.value.query || "").trim();
+      if (!q) return;
+      organizerTmdbModal.value.loading = true;
+      organizerTmdbModal.value.searched = true;
+      try {
+        const res = await fetch(`/api/tmdb/search?query=${encodeURIComponent(q)}&type=${organizerTmdbModal.value.type}`);
+        if (res.ok) {
+          organizerTmdbModal.value.results = await res.json();
+        } else {
+          organizerTmdbModal.value.results = [];
+        }
+      } catch (e) {
+        organizerTmdbModal.value.results = [];
+      } finally {
+        organizerTmdbModal.value.loading = false;
+      }
+    }
+
+    function applyTmdbMatchToCard(matchResult) {
+      const item = organizerTmdbModal.value.targetItem;
+      if (!item) return;
+
+      const title = matchResult.title || matchResult.name || "";
+      const year = (matchResult.release_date || matchResult.first_air_date || "").slice(0, 4);
+
+      item.editTitle = title;
+      item.canonical_title = title;
+      if (year) {
+        item.editYear = year;
+        item.year = parseInt(year, 10);
+      }
+      if (matchResult.media_type) {
+        item.editType = matchResult.media_type === "tv" ? "tv" : "movie";
+      }
+      item.confidence = "high";
+      item.is_manually_matched = true;
+      updateItemDestinationPreview(item);
+
+      organizerTmdbModal.value.show = false;
+      addToast(`Updated match to "${title}" (${year || 'N/A'})`, "success");
+    }
+
+    async function executeSelectedReviewItems() {
+      const activeList = organizerReviewActiveTab.value === "unmatched" ? organizerUnmatchedItems.value : organizerReadyItems.value;
+      const activeSet = organizerReviewActiveTab.value === "unmatched" ? organizerSelectedUnmatchedIndices.value : organizerSelectedReadyIndices.value;
+
+      const selected = activeList
+        .filter((_, idx) => activeSet.has(idx))
+        .map(it => ({
+          ...it,
+          canonical_title: it.editTitle || it.canonical_title,
+          year: it.editYear ? parseInt(it.editYear, 10) : it.year,
+          media_type: it.editType || it.media_type
+        }));
+
+      if (!selected.length) {
+        addToast("Please select at least one item to organize", "warning");
+        return;
+      }
+
+      organizerUnmatchedModal.value.show = false;
+      const succeededPaths = await executeBatchOrganizer(selected);
+
+      // Clean up succeeded items
+      if (succeededPaths && succeededPaths.size > 0) {
+        organizerUnmatchedItems.value = organizerUnmatchedItems.value.filter(it => !succeededPaths.has(it.source_path));
+        organizerReadyItems.value = organizerReadyItems.value.filter(it => !succeededPaths.has(it.source_path));
+        organizerSelectedUnmatchedIndices.value = new Set(organizerUnmatchedItems.value.map((_, i) => i));
+        organizerSelectedReadyIndices.value = new Set(organizerReadyItems.value.map((_, i) => i));
+      }
+
+      // Re-open if items remain
+      if ((organizerUnmatchedItems.value.length + organizerReadyItems.value.length) > 0) {
+        organizerUnmatchedModal.value.show = true;
+      }
+    }
+
+    async function executeAllReviewItems() {
+      const allItems = [...organizerUnmatchedItems.value, ...organizerReadyItems.value].map(it => ({
+        ...it,
+        canonical_title: it.editTitle || it.canonical_title,
+        year: it.editYear ? parseInt(it.editYear, 10) : it.year,
+        media_type: it.editType || it.media_type
+      }));
+
+      if (!allItems.length) {
+        addToast("No items available to organize", "warning");
+        return;
+      }
+
+      organizerUnmatchedModal.value.show = false;
+      const succeededPaths = await executeBatchOrganizer(allItems);
+
+      if (succeededPaths && succeededPaths.size > 0) {
+        organizerUnmatchedItems.value = organizerUnmatchedItems.value.filter(it => !succeededPaths.has(it.source_path));
+        organizerReadyItems.value = organizerReadyItems.value.filter(it => !succeededPaths.has(it.source_path));
+        organizerSelectedUnmatchedIndices.value = new Set(organizerUnmatchedItems.value.map((_, i) => i));
+        organizerSelectedReadyIndices.value = new Set(organizerReadyItems.value.map((_, i) => i));
+      }
+
+      if ((organizerUnmatchedItems.value.length + organizerReadyItems.value.length) > 0) {
+        organizerUnmatchedModal.value.show = true;
+      }
+    }
+
+    async function executeBatchOrganizer(itemsToOrganize) {
+      if (!itemsToOrganize || !itemsToOrganize.length) return new Set();
+
+      organizerExecuting.value = true;
+      const totalCount = itemsToOrganize.length;
+      const batchId = "batch_" + new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
+      let successCount = 0;
+      let totalOps = 0;
+      const processedItemsList = [];
+      const succeededSourcePaths = new Set();
+      const modeLabel = organizerConfig.value.mode === 'smart' ? 'Smart Mode (Hardlink / Move)' : (organizerConfig.value.mode === 'move' ? 'Move Only' : 'Copy Only');
+
+      organizerProgressModal.value = {
+        show: true,
+        type: "processing",
+        title: "Processing & Organizing Media...",
+        subtitle: `Relocating and linking ${totalCount} item${totalCount === 1 ? '' : 's'} into your library...`,
+        count: totalCount,
+        total: totalCount,
+        current: 0,
+        percent: 0,
+        currentItem: itemsToOrganize[0],
+        processedItems: [],
+        detail: `Mode: ${modeLabel}`
+      };
+
+      try {
+        for (let i = 0; i < itemsToOrganize.length; i++) {
+          const it = itemsToOrganize[i];
+          const isLast = (i === itemsToOrganize.length - 1);
+          const currentPercent = Math.round((i / totalCount) * 100);
+
+          organizerProgressModal.value = {
+            ...organizerProgressModal.value,
+            current: i + 1,
+            percent: currentPercent,
+            currentItem: it,
+            detail: `Processing item ${i + 1} of ${totalCount}: ${it.canonical_title || it.original_filename}`
+          };
+
+          try {
+            const res = await fetch("/api/admin/organizer/execute", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                items: [it],
+                mode: organizerConfig.value.mode,
+                batch_id: batchId,
+                prune_empty_dirs: isLast
+              })
+            });
+            const data = await res.json();
+            if (res.ok && data.success_count > 0) {
+              successCount += data.success_count;
+              totalOps += (data.operations?.length || 1);
+              succeededSourcePaths.add(it.source_path);
+              processedItemsList.push({
+                title: it.canonical_title || it.original_filename,
+                destination: it.destination_path,
+                action: data.operations?.[0]?.action || organizerConfig.value.mode,
+                status: "ok"
+              });
+            } else {
+              processedItemsList.push({
+                title: it.canonical_title || it.original_filename,
+                destination: it.destination_path,
+                action: "failed",
+                status: "error"
+              });
+            }
+          } catch (itemErr) {
+            processedItemsList.push({
+              title: it.canonical_title || it.original_filename,
+              destination: it.destination_path,
+              action: "network error",
+              status: "error"
+            });
+          }
+
+          organizerProgressModal.value.processedItems = [...processedItemsList];
+        }
+
+        const allOk = successCount === totalCount;
+        let detailMsg = `${totalOps} file operation(s) recorded in batch ${batchId} with 1-click rollback support`;
+
+        organizerProgressModal.value = {
+          show: true,
+          type: allOk ? "success" : (successCount > 0 ? "success" : "error"),
+          title: allOk ? "Organization Complete!" : (successCount > 0 ? "Partially Completed" : "Organization Failed"),
+          subtitle: `Successfully organized ${successCount} of ${totalCount} item(s) into your library folders.`,
+          count: successCount,
+          total: totalCount,
+          current: totalCount,
+          percent: 100,
+          currentItem: null,
+          processedItems: processedItemsList,
+          detail: detailMsg
+        };
+
+        if (successCount > 0) {
+          addToast(`Organized ${successCount} item(s) successfully!`, "success");
+        } else {
+          addToast("Failed to organize selected items", "error");
+        }
+      } catch (e) {
+        addToast("Error during media organization", "error");
+        organizerProgressModal.value.type = "error";
+        organizerProgressModal.value.title = "Process Encountered An Error";
+        organizerProgressModal.value.subtitle = e?.message || "Unknown error occurred";
+      } finally {
+        organizerExecuting.value = false;
+      }
+
+      return succeededSourcePaths;
     }
 
     function toggleSelectAllOrganizer() {
@@ -13181,8 +14254,25 @@ const SettingsPage = {
       saveOrganizerConfig,
       runOrganizerPreview,
       toggleSelectAllOrganizer,
-      toggleOrganizerItem,
       executeOrganizer,
+      executeBatchOrganizer,
+      organizerUnmatchedModal,
+      organizerReviewActiveTab,
+      organizerUnmatchedItems,
+      organizerReadyItems,
+      organizerSelectedUnmatchedIndices,
+      organizerSelectedReadyIndices,
+      organizerTmdbModal,
+      toggleSelectAllActiveReviewTab,
+      toggleReviewItemCheckbox,
+      getSelectedReviewItemsCount,
+      changeItemMediaType,
+      updateItemDestinationPreview,
+      openTmdbSearchForCard,
+      searchTmdbForCard,
+      applyTmdbMatchToCard,
+      executeSelectedReviewItems,
+      executeAllReviewItems,
       openOrganizerHistory,
       undoOrganizerBatch,
       organizerProgressModal,

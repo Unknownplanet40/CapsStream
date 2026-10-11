@@ -1,39 +1,34 @@
 # Handoff
 
 ## 1. Goal
-Implement Plex-Style TV & Movie Theme Audio Previews with local media folder auto-detection, server caching, AnimeThemes.moe online provider integration, RFC 7233 audio streaming, and ambient glassmorphic soundwave controls.
+Modernize the Automated Media Renamer & File Organizer UI and processing lifecycle with a global viewport teleported overlay, live real-time item processing telemetry (active source/destination card, progress bar, activity log), clear file status badges & tooltips (Locked/Unrecognized), and unified batch rollback support.
 
 ## 2. Current State
 - **Branch:** `main`
-- **Remote Status:** Remote has CI patch bump commit `d35cbea` (`chore(release): patch bump to 2.81.1.0 [skip ci]`). Rebase required before push.
-- **Release CI:** Next auto-release upon push will cut minor feature release (`feat(...)`).
-- **Tests:** 5/5 theme music unit and integration tests passing (`test_theme_music.py`); 48/48 regression tests passing (`test_route_media.py` and `test_streaming.py`).
-- **Working Tree:** All changes implemented, verified, and staged.
+- **Pushed Commit:** `76ac354` (`feat(organizer): modern global progress modal, live item tracking, and clear status tooltips`)
+- **Push Status:** Successfully pushed to `origin/main` (`921179b..76ac354`).
+- **Release CI:** GitHub Actions `.github/workflows/auto-release.yml` is triggered to auto-bump version and publish `v2.83.0.0` with release update zip and Android TV APK.
+- **Server Running Status:** Inactive / offline (no active instance on port 8000).
+- **Tests:** 22/22 organizer tests passing; 6/6 theme music tests passing; 48/48 media/streaming regression tests passing.
 
 ## 3. Active Files
-- `backend/theme_music.py`: Resolution hierarchy for local `theme.mp3`, cached audio, and AnimeThemes.moe API fetcher.
-- `backend/routes/streaming.py`: Added `GET /api/media/<id>/theme-music` and `GET /api/show/<tmdb_id>/theme-music`.
-- `backend/routes/media.py`: Added `has_theme_music` and `theme_music_url` metadata to `api_media_detail` and `api_show_detail`.
-- `backend/settings.py`: Added `enable_theme_music: True` configuration default.
-- `static/js/app.js`: Audio playback engine, volume fade-in, mute toggle, trailer pause/resume, and settings switch.
-- `static/css/main.css`: Floating `.theme-music-pill` and animated `@keyframes eq-bounce` equalizer.
-- `backend/tests/test_theme_music.py`: Unit and integration test suite.
-- `docs/prd.md`, `docs/architecture.md`, `PROJECT-LOG.md`: Living documentation.
+- `backend/organizer.py`: Updated `record_history()` to merge sequential operations into an existing `batch_id` for multi-item sequential execution and unified 1-click rollback.
+- `backend/routes/organizer.py`: Added client-provided `batch_id` and deferred `prune_empty_dirs` support in `api_organizer_execute()`.
+- `static/css/main.css`: Elevated `.organizer-progress-modal-backdrop` and `.organizer-history-modal-backdrop` to fixed full-screen overlay (`z-index: 9999999; backdrop-filter: blur(24px);`) with styling for active item card, progress bars, and activity logs.
+- `static/js/app.js`: Teleported organizer progress and history modals to `<body>`; updated preview table with descriptive status pills & tooltips; updated `executeOrganizer()` for live per-item progress tracking.
 
 ## 4. Changes Made
-- Auto-detects local `theme.mp3`, `theme.ogg`, `theme.wav`, `theme.m4a`, `theme.flac` in movie folders and show root folders (Plex-standard).
-- Integrated AnimeThemes.moe API for automatic fetching and local caching of anime opening themes.
-- Built RFC 7233 partial streaming endpoints with Kids Mode security guards.
-- Created floating glassmorphic soundwave pill on the Detail Page hero banner with animated visualizer bars.
-- Implemented smooth 1.5s volume fade-in (15% ambient default), seamless looping, and auto-pause on trailer/video start.
-- Added global user toggle in Settings -> Playback Defaults and persistent browser `localStorage` mute state.
+- Teleported the progress and history modals out of the nested `#settings-organizer-section` container directly onto `<body>` to ensure a true global overlay in front of all application UI.
+- Added live Active Item Card showing the item currently being organized: canonical title, year, source basename, file size (GB), destination folder, and companion subtitle/theme counts.
+- Added live progress bar (`%`) and activity log displaying completed/failed items with status icons.
+- Clarified status pills in the preview table with sub-text and tooltips explaining why a file is "Locked" (active torrent/download or locked by another process) or "Unrecognized" (low confidence match).
+- Supported sequential execution with continuous UI updates while coalescing all operations into a single rollback batch.
 
 ## 5. Failed Attempts
-- Direct `requests.head()` on AnimeThemes audio stream returned 403 Forbidden without browser user-agent and referer headers; resolved by sending standard browser headers.
-- Pytest `client` fixture was not defined globally; resolved by using standard Flask test client pattern matching existing test suites.
+- In-container modal positioning (`position: absolute`) was trapped by parent `#settings-organizer-section` styling (`overflow: hidden; position: relative`). Fixed cleanly by combining Vue 3 `<teleport to="body">` with `position: fixed` and `z-index: 9999999`.
+- Running bulk items in a single HTTP POST request prevented real-time per-item modal updates. Resolved by sending sequential requests sharing a generated `batch_id` and enabling backend batch merging.
 
 ## 6. Specific Next Steps
-1. Ask user for confirmation before executing `git push`.
-2. Commit changes using full conventional changelog message referencing issue `#26`.
-3. Rebase onto `origin/main` (`d35cbea`).
-4. Execute `git push` upon user approval and monitor automated CI release.
+1. Monitor GitHub Actions auto-release CI for `v2.83.0.0`.
+2. Start server via `start.bat` or `python app.py` when testing in browser.
+3. Test processing incoming files in Settings ➔ Organizer to visually confirm the teleported modal and live tracking.

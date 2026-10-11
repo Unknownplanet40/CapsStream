@@ -209,3 +209,23 @@ Architected a multi-tiered theme audio resolution system following Plex conventi
 - `docs/prd.md` & `docs/architecture.md`: Updated living documentation.
 
 ---
+## October 11 at 4:50 PM
+### Asked
+1. In the Automated Media Renamer & File Organizer, why are some files' ready-to-process status showing as locked?
+2. Update the processing status so the user knows what is actively being processed (source file, target path, title, year, size, companion files, percentage, activity log) instead of a generic static status in the modal.
+3. Make the progress modal popup outside the container in front of everything.
+
+### Decision
+1. Clarified why files show as Locked: Windows/CapsStream marks files locked when an external process (torrent client, download tool, or media player) has an active exclusive file write/read lock handle, protecting in-progress downloads from premature relocation or corruption.
+2. Solved modal container trapping by moving `.organizer-progress-modal-backdrop` and `.organizer-history-modal-backdrop` outside the settings card hierarchy using Vue 3 `<teleport to="body">` combined with `position: fixed; inset: 0; z-index: 9999999; backdrop-filter: blur(24px);`.
+3. Designed an interactive live execution interface with an Active Item Card (source path, destination path, file size, companion subtitles/themes), an animated progress percentage bar (`x of y items (z%)`), and a scrollable recent activity log.
+4. Upgraded `record_history()` and `execute_organization_plan()` in `backend/organizer.py` to support multi-operation batch merging so sequential frontend requests belong to a unified batch with 1-click rollback.
+>why: Eliminates container overflow clipping, gives users complete transparency into media file operations, and prevents data corruption by explicitly explaining locked files.
+
+### Shipped
+- `backend/organizer.py`: Added batch merging in `record_history()` and client `batch_id` parameter to `execute_organization_plan()`.
+- `backend/routes/organizer.py`: Updated `api_organizer_execute()` to forward `batch_id` and `prune_empty_dirs`.
+- `static/css/main.css`: Added global fixed overlay styling (`z-index: 9999999`), `.organizer-active-item-card`, `.organizer-modal-progress-wrap`, and `.organizer-modal-items-log`.
+- `static/js/app.js`: Teleported organizer modals to `<body>`, enriched preview table status column with tooltips and sub-labels, and updated `executeOrganizer()` to stream live progress updates per item.
+
+---

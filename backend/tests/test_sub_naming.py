@@ -101,7 +101,7 @@ class TestSubNaming(unittest.TestCase):
         self.assertEqual(display_label(parse_filename("Movie.en.hi.srt")), "English (HI)")
         self.assertEqual(display_label(parse_filename("Movie.en.2.srt")), "English (2)")
         self.assertEqual(display_label(parse_filename("Movie.en.forced.3.srt")), "English (Forced) (3)")
-        self.assertEqual(display_label(parse_filename("Anime.tl.srt")), "Tagalog")
+        self.assertEqual(display_label(parse_filename("Anime.tl.srt")), "Filipino")
 
         # Unknown language gracefully falls back to clean stem without crashing
         raw_label = display_label(parse_filename("Director.Commentary.Track.srt"))
