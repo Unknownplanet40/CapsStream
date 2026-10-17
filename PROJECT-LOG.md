@@ -312,3 +312,16 @@ Update `mood-card-img` in `SuggestModal`'s Recommended Matches grid to use `imgU
 - `static/js/app.js`: Updated Recommended Matches card image source to landscape `backdrop_path` with fallback to `poster_path`.
 
 ---
+## October 17 at 10:44 AM
+### Asked
+User reported: "when i click the mediacard it redirect to nothing / Title Not Found / Could not load details for this media item."
+
+### Decision
+Fix ID resolution order in `SuggestModal`: movies navigate by local `id` (`/title/movie/${item.id}`), while series navigate by `tmdb_id` (`/title/series/${item.tmdb_id}`). Also add TMDB ID fallback lookup in `api_media_detail` so any movie queried via its TMDB ID resolves to the matching media source instead of returning 404.
+>why: `DetailPage` calls `/api/media/${id}` for movies, which expects the SQLite primary key. Prioritizing `tmdb_id` caused 404s when the TMDB ID did not happen to match the internal auto-increment ID.
+
+### Shipped
+- `static/js/app.js`: Updated `viewDetails` and `playItem` in `SuggestModal` to prioritize `item.id` for movies.
+- `backend/routes/media.py`: Added fallback in `api_media_detail` to look up by `tmdb_id` if direct ID search yields no result.
+
+---
