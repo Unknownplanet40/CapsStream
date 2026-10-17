@@ -251,3 +251,37 @@ Architected a multi-tiered theme audio resolution system following Plex conventi
 
 ---
 
+## October 12 at 6:44 AM
+### Asked
+User requested synchronizing the interactive slash commands (`/create-issue`, `/new-feature`, `/fix-bug`, `/ui-redesign`) into CapsStream.
+
+### Decision
+Synchronized all workspace workflow skills from starter-project into `CapsStream/.agents/skills/` (`create-issue`, `issue`, `new-feature`, `add-feature`, `fix-bug`, `debug`, `ui-redesign`, `fix-ui`, `handoff-mode`, `handoff`, `project-log`, `commit-workflow`, `ponytail`, Caveman suite). Updated `AGENTS.md` Section 9.E and ran `tests/test_skills.py`.
+>why: Provides native slash command access in Antigravity chat for issue tracking, phased feature development, root-cause debugging, and UI design audits.
+
+### Shipped
+- Synchronized all workflow skills into `CapsStream\.agents\skills\`.
+- Added `.agents/rules/caveman.md` and `.caveman.json` to `CapsStream`.
+- Added `tests/test_skills.py` and validated with all checks passing.
+- Updated `AGENTS.md` with Issue Management (`/create-issue`, `/issue`) and caveman block.
+
+---
+
+## October 17 at 9:56 AM
+### Asked
+User requested a random suggestion button next to search that opens a modal with two tabs:
+1. Quick Pick: A random media card with play and details actions, plus a full-width "Roll Again" randomize button.
+2. Mood Match: Interactive questionnaire/chips to recommend titles matching the user's mood and preferences.
+
+### Decision
+Added a dice button (`#nav-suggest` / `#tv-nav-suggest`) next to the search button in desktop and TV navigation. Built `SuggestModal` component with Quick Pick (randomizer with animated dice roll and full-width reroll button) and Mood Match (chips for Laugh, Thrill, Relax, Mind-Bend, Emotional, Action-Packed, format filters, and unwatched toggle). Implemented `GET /api/media/suggest` and alias `/api/media/random` with mood, type, unwatched, exclude_id, and Kids mode profile filtering.
+>why: Eliminates decision paralysis directly from the top navigation while respecting Kids mode restrictions and profile history.
+
+### Shipped
+- `backend/routes/media.py`: Added `GET /api/media/suggest` and `GET /api/media/random` with mood genre mapping, unwatched progress check, and kids profile filtering.
+- `static/js/app.js`: Added `SuggestModal` component with Quick Pick & Mood Match tabs, registered globally, and added dice button to desktop and TV navbars.
+- `static/css/main.css`: Added responsive glassmorphic styles for `.suggest-modal-card`, `.suggest-featured-card`, `.suggest-full-roll-btn`, `.suggest-mood-chips`, and animations.
+- `docs/prd.md` & `docs/architecture.md`: Documented PRD and system architecture for Random Suggestion & Mood Match.
+- `backend/tests/test_route_suggest.py`: Created unit tests covering basic suggest, random alias, mood filters, type filters, unwatched filtering, kids mode, and ID exclusion.
+
+---

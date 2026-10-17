@@ -307,6 +307,87 @@ def api_top10():
     return jsonify(items)
 
 
+MOOD_GENRES = {
+    "laugh": ["comedy", "animation"],
+    "thrill": ["thriller", "mystery", "crime", "horror"],
+    "relax": ["documentary", "family", "animation", "romance", "music"],
+    "mind-bend": ["sci-fi", "science fiction", "mystery", "fantasy", "psychological"],
+    "cry": ["drama", "romance", "war"],
+    "action-packed": ["action", "adventure", "fantasy"],
+}
+
+
+@media_bp.route("/api/media/suggest", methods=["GET"])
+@media_bp.route("/api/media/random", methods=["GET"])
+def api_media_suggest():
+    """Return randomized media suggestions with optional mood, type, unwatched filtering."""
+    mtype = request.args.get("type")
+    if mtype in ("", "all", "null", "undefined"):
+        mtype = None
+    elif mtype not in ("movie", "series", "anime"):
+        mtype = None
+
+    mood = (request.args.get("mood") or "").strip().lower()
+    unwatched_only = request.args.get("unwatched") in ("1", "true", "yes")
+    exclude_raw = request.args.get("exclude_id") or ""
+    exclude_ids = set()
+    for part in exclude_raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            exclude_ids.add(int(part))
+
+    try:
+        limit = min(max(int(request.args.get("limit", 10)), 1), 50)
+    except (ValueError, TypeError):
+        limit = 10
+
+    # Fetch unique shows matching the requested media type
+    items = get_unique_shows(mtype)
+
+    # Filter for kids profile if active
+    if active_is_kids():
+        items = filter_for_profile(items)
+
+    # Mood filtering
+    if mood and mood in MOOD_GENRES:
+        target_genres = MOOD_GENRES[mood]
+        matched_items = []
+        for item in items:
+            item_genres = (item.get("genres") or "").lower()
+            if any(tg in item_genres for tg in target_genres):
+                matched_items.append(item)
+        items = matched_items
+
+    # Unwatched filtering
+    pid = current_profile()
+    if unwatched_only and pid and items:
+        progress_map = get_progress_for_media_items(pid, items)
+        unwatched_items = []
+        for item in items:
+            mid = item.get("id")
+            p = progress_map.get(mid)
+            if not p:
+                unwatched_items.append(item)
+            else:
+                completed = p.get("completed")
+                pos = p.get("position") or 0
+                dur = p.get("duration") or 0
+                ratio = (pos / dur) if dur > 0 else 0
+                if not completed and ratio < 0.90:
+                    unwatched_items.append(item)
+        items = unwatched_items
+
+    # Filter out exclude_ids if we have alternatives
+    eligible_items = [it for it in items if it.get("id") not in exclude_ids and it.get("tmdb_id") not in exclude_ids]
+    if not eligible_items and items:
+        eligible_items = items
+
+    import random
+    random.shuffle(eligible_items)
+
+    return jsonify(eligible_items[:limit])
+
+
 @media_bp.route("/api/library", methods=["GET"])
 def api_library():
     media_type = request.args.get("type")

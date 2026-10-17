@@ -74,3 +74,38 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_shared ON bookmarks(media_id, is_shared
   - `.theme-music-pill`: Floating glassmorphic soundwave pill with animated CSS equalizer bars and mute toggle.
   - Global toggle in Settings (`playback.enable_theme_music`) and localStorage mute preference.
 
+---
+
+# System Architecture: Random Suggestion & Mood Match
+
+## 1. Backend API (`backend/routes/media.py`)
+- `GET /api/media/suggest`:
+  - Query parameters:
+    - `mood`: optional mood filter (`laugh`, `thrill`, `relax`, `mind-bend`, `cry`, `action-packed`).
+    - `type`: optional type filter (`movie`, `series`, `anime`, or omit for all).
+    - `unwatched`: optional boolean (`1` / `true`) - excludes titles with progress >= 90%.
+    - `limit`: number of results (default 10, max 30).
+    - `exclude_id`: comma-separated media IDs to exclude to avoid duplicate rolls.
+  - Profile & Security:
+    - Enforces active profile Kids filtering (`active_is_kids()`, `filter_for_profile()`).
+    - Checks drive mount availability (`is_file_path_disabled`).
+
+## 2. Frontend Architecture (`static/js/app.js` & `static/css/main.css`)
+- **Navigation Trigger**:
+  - Adds Dice button (`#nav-suggest` / `#tv-nav-suggest`) next to search in desktop and TV navigation headers.
+  - Global reactive modal state `store.showSuggestModal`.
+- **Suggestion Modal Component**:
+  - Tab 1: **Quick Pick**:
+    - Animated dice-roll state with shimmering placeholder during fetch.
+    - Card preview with title, poster, year, rating badge, genres, and synopsis.
+    - Dual CTA: "Play Now" (routes directly to watch) and "Details" (routes to title page).
+    - Full-width "Roll Again" action button.
+  - Tab 2: **Mood Match**:
+    - Interactive mood chips mapped to genres.
+    - Media type chips (All, Movies, TV Shows, Anime).
+    - Unwatched only switch.
+    - Matching cards grid / randomized selection list.
+- **Styling**:
+  - Modern glassmorphic modal design matching CapsStream design system.
+  - Responsive layout down to 320px mobile viewports.
+

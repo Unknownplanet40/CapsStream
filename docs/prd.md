@@ -54,3 +54,18 @@ Plex-Style Theme Audio Previews bring ambient audio immersion to CapsStream. Whe
 - **Floating Soundwave Pill**: Glassmorphic pill in hero banner displaying animated 4-bar equalizer, mute indicator, and click-to-mute toggle.
 - **Global & Local Preferences**: Global toggle in Settings -> Playback Defaults; persistent mute state remembered in browser `localStorage`.
 
+---
+
+# Product Requirements Document (PRD): Random Suggestion & Mood Match
+
+## 1. Executive Summary
+Random Suggestion & Mood Match solves decision paralysis ("what should I watch tonight?") directly from the main navigation. Accessible via a dice button next to search, the feature opens a dual-tab modal:
+1. **Quick Pick**: Displays an immediate random title card with backdrop/poster, metadata, ratings, dual actions (Play Now and Details), and a full-width "Roll Again" randomize button.
+2. **Mood Match**: An interactive questionnaire using mood chips (Laugh, Thrill, Relax, Mind-bend, Cry, Action-packed), media type filters, and unwatched toggles to return tailored recommendations from the user's library.
+
+## 2. Core User Stories & Workflows
+- **One-Click Quick Pick**: User clicks the Dice button (`ph-dice-five`) next to search. An animated modal pops up with an instant recommendation. Clicking "Roll Again" randomly selects another eligible title with smooth transition.
+- **Direct Playback & Inspection**: The card features a primary "Play Now" button (starts streaming immediately) and a "More Details" button (opens full detail page).
+- **Mood Questionnaire**: User switches to "Mood Match" tab, selects their current vibe (e.g. "Laugh" or "Thrill"), optionally restricts to Movies/Anime or Unwatched, and clicks "Find Matches". Results display as interactive recommendation cards.
+- **Profile & Kids Mode Awareness**: In Kids mode, suggestions strictly filter out adult/restricted titles. Media stored on disconnected/unmounted drives is flagged or excluded.
+

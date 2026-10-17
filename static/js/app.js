@@ -14491,6 +14491,393 @@ const ShortcutsModal = {
   `
 };
 
+const SuggestModal = {
+  emits: ["close"],
+  setup(props, { emit }) {
+    const router = VueRouter.useRouter();
+    const activeTab = ref("quick"); // 'quick' | 'mood'
+    const loading = ref(false);
+    const rolling = ref(false);
+    const quickPick = ref(null);
+    const rollHistory = ref([]);
+
+    // Mood match state
+    const moods = [
+      { id: "laugh", label: "Laugh", emoji: "😂", desc: "Comedy & feel-good vibes" },
+      { id: "thrill", label: "Thrill", emoji: "⚡", desc: "Suspense, crime & mystery" },
+      { id: "relax", label: "Relax", emoji: "☕", desc: "Chill docs, family & romance" },
+      { id: "mind-bend", label: "Mind-Bend", emoji: "🌀", desc: "Sci-Fi, plot twists & fantasy" },
+      { id: "cry", label: "Emotional", emoji: "🥺", desc: "Heartfelt drama & romance" },
+      { id: "action-packed", label: "Action-Packed", emoji: "💥", desc: "High-octane blockbusters" },
+    ];
+    const selectedMood = ref("laugh");
+    const mediaTypes = [
+      { id: "all", label: "All Types" },
+      { id: "movie", label: "Movies" },
+      { id: "series", label: "TV Shows" },
+      { id: "anime", label: "Anime" },
+    ];
+    const selectedType = ref("all");
+    const unwatchedOnly = ref(false);
+    const moodMatches = ref([]);
+    const loadingMood = ref(false);
+    const hasSearchedMood = ref(false);
+
+    async function fetchQuickPick(isReroll = false) {
+      if (rolling.value) return;
+      if (isReroll) {
+        rolling.value = true;
+      } else {
+        loading.value = true;
+      }
+      try {
+        const excludeQuery = rollHistory.value.length ? `&exclude_id=${rollHistory.value.slice(-10).join(",")}` : "";
+        const res = await API.get(`/api/media/suggest?limit=1${excludeQuery}`);
+        const items = Array.isArray(res) ? res : [];
+        if (items.length > 0) {
+          quickPick.value = items[0];
+          const curId = items[0].id || items[0].tmdb_id;
+          if (curId && !rollHistory.value.includes(curId)) {
+            rollHistory.value.push(curId);
+          }
+        } else {
+          quickPick.value = null;
+        }
+      } catch (err) {
+        console.error("Failed to fetch random pick:", err);
+      } finally {
+        loading.value = false;
+        if (isReroll) {
+          setTimeout(() => {
+            rolling.value = false;
+          }, 400);
+        }
+      }
+    }
+
+    async function searchMoodMatches() {
+      loadingMood.value = true;
+      hasSearchedMood.value = true;
+      try {
+        const typeParam = selectedType.value !== "all" ? `&type=${selectedType.value}` : "";
+        const unwatchedParam = unwatchedOnly.value ? "&unwatched=1" : "";
+        const res = await API.get(`/api/media/suggest?mood=${selectedMood.value}${typeParam}${unwatchedParam}&limit=6`);
+        moodMatches.value = Array.isArray(res) ? res : [];
+      } catch (err) {
+        console.error("Failed to fetch mood matches:", err);
+        moodMatches.value = [];
+      } finally {
+        loadingMood.value = false;
+      }
+    }
+
+    function playItem(item) {
+      if (!item) return;
+      emit("close");
+      const mtype = item.type || "movie";
+      if (mtype === "movie") {
+        const mid = item.media_id || item.id;
+        if (mid) router.push(`/watch/${mid}`);
+      } else {
+        const targetId = item.tmdb_id || item.media_id || item.id;
+        if (targetId) router.push(`/title/${mtype}/${targetId}`);
+      }
+    }
+
+    function viewDetails(item) {
+      if (!item) return;
+      emit("close");
+      const mtype = item.type || "movie";
+      const targetId = item.tmdb_id || item.media_id || item.id;
+      if (targetId) router.push(`/title/${mtype}/${targetId}`);
+    }
+
+    function formatGenres(g) {
+      if (!g) return "";
+      if (Array.isArray(g)) return g.slice(0, 3).join(" • ");
+      return g.split(",").map(s => s.trim()).filter(Boolean).slice(0, 3).join(" • ");
+    }
+
+    function onKey(e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        emit("close");
+      }
+    }
+
+    onMounted(() => {
+      window.addEventListener("keydown", onKey);
+      fetchQuickPick(false);
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener("keydown", onKey);
+    });
+
+    return {
+      activeTab,
+      loading,
+      rolling,
+      quickPick,
+      fetchQuickPick,
+      moods,
+      selectedMood,
+      mediaTypes,
+      selectedType,
+      unwatchedOnly,
+      moodMatches,
+      loadingMood,
+      hasSearchedMood,
+      searchMoodMatches,
+      playItem,
+      viewDetails,
+      formatGenres,
+      imgUrl,
+    };
+  },
+  template: `
+    <div class="modal-backdrop suggest-modal-backdrop" @click.self="$emit('close')">
+      <div class="shortcuts-modal-card suggest-modal-card" @click.stop>
+        <div class="suggest-modal-inner">
+          <!-- Header -->
+          <div class="suggest-modal-header">
+            <div class="suggest-header-left">
+              <div class="suggest-header-icon">
+                <i class="ph-bold ph-dice-five"></i>
+              </div>
+              <div>
+                <div class="suggest-header-title">CapsStream Suggestions</div>
+                <div class="suggest-header-subtitle">Find your next favorite watch</div>
+              </div>
+            </div>
+            
+            <div class="suggest-header-tabs">
+              <button
+                class="suggest-tab-btn"
+                :class="{ active: activeTab === 'quick' }"
+                @click="activeTab = 'quick'"
+              >
+                <i class="ph-bold ph-shuffle"></i>
+                <span>Quick Pick</span>
+              </button>
+              <button
+                class="suggest-tab-btn"
+                :class="{ active: activeTab === 'mood' }"
+                @click="activeTab = 'mood'; if (!hasSearchedMood) searchMoodMatches()"
+              >
+                <i class="ph-bold ph-sparkle"></i>
+                <span>Mood Match</span>
+              </button>
+            </div>
+
+            <button class="shortcuts-close-btn" @click="$emit('close')" title="Close (Esc)">
+              <i class="ph ph-x"></i>
+            </button>
+          </div>
+
+          <!-- Body -->
+          <div class="suggest-modal-body">
+            <!-- TAB 1: QUICK PICK -->
+            <div v-if="activeTab === 'quick'" class="suggest-quick-tab">
+              <div v-if="loading && !quickPick" class="suggest-loading-card">
+                <div class="suggest-loading-spinner">
+                  <i class="ph-bold ph-dice-five spin-dice"></i>
+                </div>
+                <span>Finding something great...</span>
+              </div>
+
+              <div v-else-if="quickPick" class="suggest-card-container">
+                <div class="suggest-featured-card" :class="{ 'rolling-blur': rolling }">
+                  <div class="suggest-card-backdrop" v-if="quickPick.backdrop_path">
+                    <img :src="imgUrl(quickPick.backdrop_path)" alt="" />
+                    <div class="suggest-card-backdrop-overlay"></div>
+                  </div>
+                  
+                  <div class="suggest-card-content">
+                    <div class="suggest-card-poster-wrap">
+                      <img
+                        v-if="quickPick.poster_path"
+                        :src="imgUrl(quickPick.poster_path, 'poster')"
+                        :alt="quickPick.title"
+                        class="suggest-card-poster"
+                      />
+                      <div v-else class="suggest-card-poster-placeholder">
+                        <i class="ph-bold ph-film-strip"></i>
+                      </div>
+                    </div>
+
+                    <div class="suggest-card-info">
+                      <div class="suggest-card-badges">
+                        <span class="suggest-type-badge">{{ (quickPick.type || 'Movie').toUpperCase() }}</span>
+                        <span v-if="quickPick.year" class="suggest-year-badge">{{ quickPick.year }}</span>
+                        <span v-if="quickPick.rating" class="suggest-rating-badge">
+                          <i class="ph-fill ph-star" style="color:#f59e0b;font-size:0.8rem"></i>
+                          {{ Number(quickPick.rating).toFixed(1) }}
+                        </span>
+                      </div>
+
+                      <h3 class="suggest-card-title">{{ quickPick.title }}</h3>
+                      
+                      <div v-if="quickPick.genres" class="suggest-card-genres">
+                        {{ formatGenres(quickPick.genres) }}
+                      </div>
+
+                      <p class="suggest-card-overview">
+                        {{ quickPick.overview || 'No synopsis available for this title.' }}
+                      </p>
+
+                      <div class="suggest-card-actions">
+                        <button class="btn btn-primary suggest-play-btn" @click="playItem(quickPick)">
+                          <i class="ph-fill ph-play"></i>
+                          <span>Play Now</span>
+                        </button>
+                        <button class="btn btn-secondary suggest-details-btn" @click="viewDetails(quickPick)">
+                          <i class="ph-bold ph-info"></i>
+                          <span>More Details</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Full Width Roll Again Button -->
+                <button
+                  class="suggest-full-roll-btn"
+                  @click="fetchQuickPick(true)"
+                  :disabled="rolling"
+                  id="suggest-roll-btn"
+                >
+                  <i class="ph-bold ph-dice-five" :class="{ 'spin-dice': rolling }"></i>
+                  <span>{{ rolling ? 'Rolling the Dice...' : 'Roll Again' }}</span>
+                </button>
+              </div>
+
+              <div v-else class="suggest-empty-state">
+                <i class="ph ph-film-slate" style="font-size:2.5rem;color:var(--text-muted)"></i>
+                <p>No titles found in your media library to suggest.</p>
+              </div>
+            </div>
+
+            <!-- TAB 2: MOOD MATCH -->
+            <div v-if="activeTab === 'mood'" class="suggest-mood-tab">
+              <div class="suggest-mood-section">
+                <label class="suggest-section-label">1. How are you feeling tonight?</label>
+                <div class="suggest-mood-chips">
+                  <button
+                    v-for="m in moods"
+                    :key="m.id"
+                    class="suggest-mood-chip"
+                    :class="{ active: selectedMood === m.id }"
+                    @click="selectedMood = m.id; searchMoodMatches()"
+                  >
+                    <span class="mood-emoji">{{ m.emoji }}</span>
+                    <span class="mood-label">{{ m.label }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="suggest-filters-row">
+                <div class="suggest-filter-group">
+                  <label class="suggest-sublabel">Format</label>
+                  <div class="suggest-pill-filters">
+                    <button
+                      v-for="t in mediaTypes"
+                      :key="t.id"
+                      class="suggest-type-chip"
+                      :class="{ active: selectedType === t.id }"
+                      @click="selectedType = t.id; searchMoodMatches()"
+                    >
+                      {{ t.label }}
+                    </button>
+                  </div>
+                </div>
+
+                <div class="suggest-filter-group">
+                  <label class="suggest-sublabel">Filter</label>
+                  <label class="suggest-checkbox-label">
+                    <input
+                      type="checkbox"
+                      v-model="unwatchedOnly"
+                      @change="searchMoodMatches"
+                      class="suggest-checkbox"
+                    />
+                    <span>Unwatched only</span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Matches Results -->
+              <div class="suggest-mood-results">
+                <div v-if="loadingMood" class="suggest-loading-card" style="padding:2rem">
+                  <div class="suggest-loading-spinner">
+                    <i class="ph-bold ph-sparkle spin-dice"></i>
+                  </div>
+                  <span>Matching your mood...</span>
+                </div>
+
+                <div v-else-if="moodMatches.length > 0">
+                  <div class="suggest-results-header">
+                    <span class="suggest-results-count">{{ moodMatches.length }} Recommended Matches</span>
+                    <button class="suggest-refresh-link" @click="searchMoodMatches">
+                      <i class="ph-bold ph-arrows-clockwise"></i>
+                      <span>Shuffle</span>
+                    </button>
+                  </div>
+
+                  <div class="suggest-matches-grid">
+                    <div
+                      v-for="match in moodMatches"
+                      :key="match.id || match.tmdb_id"
+                      class="suggest-match-card"
+                      @click="viewDetails(match)"
+                    >
+                      <div class="suggest-match-poster-wrap">
+                        <img
+                          v-if="match.poster_path"
+                          :src="imgUrl(match.poster_path, 'poster')"
+                          :alt="match.title"
+                          class="suggest-match-poster"
+                          loading="lazy"
+                        />
+                        <div v-else class="suggest-match-placeholder">
+                          <i class="ph-bold ph-film-strip"></i>
+                        </div>
+                        <div class="suggest-match-overlay">
+                          <button class="suggest-match-play-btn" @click.stop="playItem(match)" title="Play Now">
+                            <i class="ph-fill ph-play"></i>
+                          </button>
+                        </div>
+                        <div v-if="match.rating" class="suggest-match-rating">
+                          ★ {{ Number(match.rating).toFixed(1) }}
+                        </div>
+                      </div>
+                      <div class="suggest-match-meta">
+                        <div class="suggest-match-title" :title="match.title">{{ match.title }}</div>
+                        <div class="suggest-match-sub">
+                          <span>{{ match.year || match.type }}</span>
+                          <span v-if="match.genres">• {{ formatGenres(match.genres) }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-else class="suggest-empty-state">
+                  <i class="ph ph-magnifying-glass" style="font-size:2.2rem;color:var(--text-muted)"></i>
+                  <p>No matching titles for this mood and filter.</p>
+                  <button class="btn btn-sm btn-secondary" @click="unwatchedOnly = false; selectedType = 'all'; searchMoodMatches()">
+                    Clear Filters
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `
+};
+
 // ─── Player Page ──────────────────────────────────────────────
 
 const PlayerPage = window.PlayerPage;
@@ -24567,6 +24954,127 @@ const RequestsPage = {
           </div>
         </div>
 
+        <!-- Automated Request Pipeline & Storage Infographic Card -->
+        <div class="requests-pipeline-card">
+          <div class="requests-pipeline-header">
+            <div class="requests-pipeline-header-title">
+              <div class="pipeline-header-icon-wrap">
+                <i class="ph-bold ph-lightning"></i>
+              </div>
+              <div>
+                <h2 class="pipeline-title">Automated Media Pipeline</h2>
+                <p class="pipeline-desc">End-to-end automation from source discovery to permanent drive storage.</p>
+              </div>
+            </div>
+            <div class="pipeline-status-badge">
+              <span class="pipeline-pulse-dot"></span>
+              <span>Fully Automated System</span>
+            </div>
+          </div>
+
+          <div class="requests-pipeline-steps">
+            <!-- Step 1 -->
+            <div class="pipeline-step">
+              <div class="pipeline-step-top">
+                <div class="pipeline-step-icon">
+                  <i class="ph-bold ph-paper-plane-tilt"></i>
+                </div>
+                <span class="pipeline-step-num">STEP 01</span>
+              </div>
+              <div class="pipeline-step-body">
+                <h4 class="pipeline-step-title">Request Queued</h4>
+                <p class="pipeline-step-text">Title is matched with TMDb metadata, verified, and placed into the priority processing queue.</p>
+              </div>
+            </div>
+
+            <div class="pipeline-connector">
+              <i class="ph-bold ph-arrow-right"></i>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="pipeline-step">
+              <div class="pipeline-step-top">
+                <div class="pipeline-step-icon">
+                  <i class="ph-bold ph-magnifying-glass"></i>
+                </div>
+                <span class="pipeline-step-num">STEP 02</span>
+              </div>
+              <div class="pipeline-step-body">
+                <h4 class="pipeline-step-title">Source Discovery</h4>
+                <p class="pipeline-step-text">Automated matching for movies; maintainer curates and selects optimal sources for series & anime.</p>
+              </div>
+            </div>
+
+            <div class="pipeline-connector">
+              <i class="ph-bold ph-arrow-right"></i>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="pipeline-step">
+              <div class="pipeline-step-top">
+                <div class="pipeline-step-icon">
+                  <i class="ph-bold ph-download-simple"></i>
+                </div>
+                <span class="pipeline-step-num">STEP 03</span>
+              </div>
+              <div class="pipeline-step-body">
+                <h4 class="pipeline-step-title">Automated Download</h4>
+                <p class="pipeline-step-text">Media is retrieved, integrity-checked, and packaged with audio tracks and subtitles.</p>
+              </div>
+            </div>
+
+            <div class="pipeline-connector">
+              <i class="ph-bold ph-arrow-right"></i>
+            </div>
+
+            <!-- Step 4 -->
+            <div class="pipeline-step pipeline-step-highlight">
+              <div class="pipeline-step-top">
+                <div class="pipeline-step-icon">
+                  <i class="ph-bold ph-hard-drive"></i>
+                </div>
+                <span class="pipeline-step-num">STEP 04</span>
+              </div>
+              <div class="pipeline-step-body">
+                <h4 class="pipeline-step-title">Organized & Stored to Drive</h4>
+                <p class="pipeline-step-text">Automatically organized into folders, saved to local storage drive, and cataloged for streaming.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- TV Series & Shows Semi-Manual Curation Notice -->
+          <div class="pipeline-series-notice">
+            <div class="series-notice-icon-wrap">
+              <i class="ph-bold ph-television"></i>
+            </div>
+            <div class="series-notice-content">
+              <div class="series-notice-header">
+                <span class="series-notice-title">TV Series & Shows: Semi-Manual Source Selection</span>
+                <span class="series-notice-pill">Curated Matching</span>
+              </div>
+              <p class="series-notice-text">
+                For TV shows and anime, the <strong>maintainer verifies and selects the right source releases</strong> to ensure complete season packs and correct episode ordering. Once the source is chosen, <strong>downloading, organizing into season folders, and storing to the hard drive is completely automated</strong>.
+              </p>
+            </div>
+          </div>
+
+          <!-- Active Processing & Deletion Policy Banner -->
+          <div class="pipeline-retention-banner">
+            <div class="retention-icon-wrap">
+              <i class="ph-fill ph-lock-key"></i>
+            </div>
+            <div class="retention-content">
+              <div class="retention-header-row">
+                <span class="retention-title">Active Processing & Storage Policy</span>
+                <span class="retention-tag">Non-Reversible Once Processing</span>
+              </div>
+              <p class="retention-desc">
+                Once media starts downloading or changes status to <strong>Processing / In Progress</strong>, the request cannot be cancelled or undone. Once completed and stored on the hard drive, content becomes a permanent library addition and <strong>cannot be deleted by viewers</strong> — media storage and file deletion are strictly managed by the <strong>server maintainer</strong>.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <!-- Request Submission Form -->
         <div class="request-form-card">
           <div class="request-form-header">
@@ -25396,6 +25904,13 @@ const RequestsPage = {
                   >
                     <i class="ph ph-trash"></i>
                   </button>
+                  <div
+                    v-else
+                    class="req-action-icon-btn req-btn-icon req-locked-icon"
+                    :title="req.status === 'in_progress' ? 'Currently processing/downloading — request cannot be undone or cancelled' : 'Stored permanently on hard drive — only the server maintainer can remove this title'"
+                  >
+                    <i class="ph-fill ph-lock-key"></i>
+                  </div>
                 </div>
               </div>
             </div>
@@ -27014,7 +27529,7 @@ const ScanProgressWidget = {
 // ─── Root App ─────────────────────────────────────────────────
 
 const App = {
-  components: { MediaCard, TvContentRow, ScanProgressWidget, ShortcutsModal },
+  components: { MediaCard, TvContentRow, ScanProgressWidget, ShortcutsModal, SuggestModal },
   template: `
     <!-- Loading screen -->
     <div class="loading-screen" v-if="appLoading">
@@ -27139,6 +27654,11 @@ const App = {
             <i class="ph-bold ph-magnifying-glass"></i>
           </button>
 
+          <!-- Random Suggestion button -->
+          <button class="tv-nav-btn" @click="openSuggestModal" id="tv-nav-suggest" title="Random Suggestion & Mood Match">
+            <i class="ph-bold ph-dice-five"></i>
+          </button>
+
           <!-- Pill Navigation -->
           <div class="tv-nav-pills">
             <button
@@ -27192,6 +27712,11 @@ const App = {
           <div class="nav-spacer"></div>
 
           <div class="nav-actions">
+            <!-- Random Suggestion button -->
+            <div class="nav-search-btn" @click="openSuggestModal" id="nav-suggest" data-tooltip="Random Suggestion & Mood Match">
+              <i class="ph ph-dice-five" style="font-size:1.15rem"></i>
+            </div>
+
             <div class="nav-search-btn" @click="router.push('/search')" id="nav-search" data-tooltip="Search">
               <i class="ph ph-magnifying-glass" style="font-size:1.1rem"></i>
             </div>
@@ -27455,6 +27980,9 @@ const App = {
 
       <!-- Shortcuts Modal -->
       <shortcuts-modal v-if="showShortcuts" @close="showShortcuts = false" />
+
+      <!-- Random Suggestion Modal -->
+      <suggest-modal v-if="showSuggestModal" @close="showSuggestModal = false" />
 
       <!-- Global Join Watch Party Modal -->
       <div v-if="showGlobalWtModal" class="wt-modal-backdrop" @click.self="showGlobalWtModal = false" style="z-index:999999">
@@ -28340,6 +28868,7 @@ const App = {
     const isMobileNavHidden = ref(false);
     const showProfileMenu = ref(false);
     const showShortcuts = ref(false);
+    const showSuggestModal = ref(false);
     const appLoading = ref(true);
     const showBackToTop = ref(false);
 
@@ -29544,6 +30073,11 @@ const App = {
       showShortcuts.value = true;
     }
 
+    function openSuggestModal() {
+      showProfileMenu.value = false;
+      showSuggestModal.value = true;
+    }
+
     const showGlobalWtModal = ref(false);
     const globalWtJoinCode = ref("");
     const globalWtJoining = ref(false);
@@ -29826,6 +30360,7 @@ const App = {
       navScrolled,
       showProfileMenu,
       showShortcuts,
+      showSuggestModal,
       appLoading,
       showNav,
       isBottomNavVisible,
@@ -29852,6 +30387,7 @@ const App = {
       goRequests,
       goStats,
       openShortcuts,
+      openSuggestModal,
       showGlobalWtModal,
       globalWtJoinCode,
       globalWtJoining,
@@ -30578,6 +31114,7 @@ const app = createApp(App);
 app.config.globalProperties.unlockAchievement = unlockAchievement;
 app.config.globalProperties.imgUrl = imgUrl;
 app.component("shortcuts-modal", ShortcutsModal);
+app.component("suggest-modal", SuggestModal);
 app.component("skip-timestamps-modal", SkipTimestampsModal);
 app.component("fix-match-modal", FixMatchModal);
 app.component("wrapped-story-modal", WrappedStoryModal);

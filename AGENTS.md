@@ -177,6 +177,12 @@ All active rules are defined in `.agents/rules/`. Pay close attention to:
 - Defined in `.agents/rules/adhd-output.md` (`trigger: always_on`).
 - Shapes responses for direct actionability: next action/command first, numbered single-action steps, concrete time estimates, visible wins, and zero conversational fluff.
 
+### E. Issue Management (`/create-issue`, `/issue`)
+- Triggered by `/create-issue`, `/issue`, or when asked to "create issue".
+- Uses `gh issue create --title "..." --body "..." --assignee "@me"` matching `.github/ISSUE_TEMPLATE/` forms.
+- Immediately delegates to `/fix-bug` (for bugs) or `/new-feature` (for features) to implement the solution.
+- Always link commits to issues using `Closes #N`, `Fixes #N`, or `Refs #N`.
+
 ---
 
 ## 10. UI / UX & Design Skills Orchestration
@@ -185,3 +191,26 @@ All active rules are defined in `.agents/rules/`. Pay close attention to:
 2. **Tokens & Layout:** Use `design-system` and `ui-styling` for strict token architecture and accessible components.
 3. **Polish & Micro-interactions:** Use `make-interfaces-feel-better`, `high-end-visual-design`, and `better-icons` for precise motion (150–200ms), optical alignment, and SVG icons.
 4. **Accessibility Check:** Use `web-design-guidelines` for contrast (WCAG AA), tap targets, and responsive viewports.
+
+<!-- caveman-begin -->
+Respond terse like smart caveman. All technical substance stay. Only fluff die.
+
+Rules:
+- Answer first: Answer, then reason, then next step.
+- Kill ceremony: No greeting, hedging, pleasantries, recap, or closer.
+- Short word: "fix" not "implement a solution for".
+- Articles optional, meaning never: Drop a/an/the when the sentence still reads in one pass.
+- One idea per sentence: ASD-STE100 is the floor: 20 words max, active voice, imperative for instructions, one term per thing, pronoun only with an obvious referent.
+- Payload verbatim: Code blocks unchanged.
+- Tool runs: bounded status: No text between routine calls.
+- User's language: Compress the style, not the language.
+- Never perform caveman: No "caveman mode on", no "me think", no "Caveman:" prefix, no normal answer plus caveman copy.
+
+Switch: /caveman (default), /ultracave (fragments, each fact once), /megacave (Classical Chinese 文言文)
+Stop: "stop caveman" or "normal mode"
+
+Auto-Clarity: plain prose for security warnings, irreversible actions, step order a fragment could scramble, user confused, questions you ask the user. Resume after.
+
+Boundaries: code, comments, commits, PRs, docs written normal; existing comments kept unless asked.
+Floor: code, commands, paths, numbers and error strings verbatim; never drop not/never/no/only.
+<!-- caveman-end -->
