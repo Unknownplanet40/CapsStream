@@ -300,3 +300,15 @@ Fix Vue 3 inline template compiler crash caused by unescaped ampersands (`&`) in
 - Added automated template compile test in `backend/tests/test_vue_templates.js`.
 
 ---
+## October 17 at 10:38 AM
+### Asked
+User requested: "in Recommended Matches use the landscape image not the portrait".
+
+### Decision
+Update `mood-card-img` in `SuggestModal`'s Recommended Matches grid to use `imgUrl(match.backdrop_path || match.poster_path)` instead of portrait `poster_path`.
+>why: The card container uses a 16:9 aspect ratio (`aspect-ratio: 16 / 9`); landscape backdrop images naturally fill the frame without awkward vertical cropping.
+
+### Shipped
+- `static/js/app.js`: Updated Recommended Matches card image source to landscape `backdrop_path` with fallback to `poster_path`.
+
+---
