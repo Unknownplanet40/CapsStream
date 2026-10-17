@@ -15225,10 +15225,10 @@ const SuggestModal = {
       emit("close");
       const mtype = item.type || "movie";
       if (mtype === "movie") {
-        const mid = item.media_id || item.id;
+        const mid = item.id || item.media_id;
         if (mid) router.push(`/watch/${mid}`);
       } else {
-        const targetId = item.tmdb_id || item.media_id || item.id;
+        const targetId = item.tmdb_id || item.id || item.media_id;
         if (targetId) router.push(`/title/${mtype}/${targetId}`);
       }
     }
@@ -15237,8 +15237,13 @@ const SuggestModal = {
       if (!item) return;
       emit("close");
       const mtype = item.type || "movie";
-      const targetId = item.tmdb_id || item.media_id || item.id;
-      if (targetId) router.push(`/title/${mtype}/${targetId}`);
+      if (mtype === "movie") {
+        const mid = item.id || item.media_id || item.tmdb_id;
+        if (mid) router.push(`/title/movie/${mid}`);
+      } else {
+        const targetId = item.tmdb_id || item.id || item.media_id;
+        if (targetId) router.push(`/title/${mtype}/${targetId}`);
+      }
     }
 
     function formatGenres(g) {
