@@ -14491,14 +14491,663 @@ const ShortcutsModal = {
   `
 };
 
+function ensureSuggestStyles() {
+  if (typeof document === "undefined" || document.getElementById("suggest-modal-styles")) return;
+  const style = document.createElement("style");
+  style.id = "suggest-modal-styles";
+  style.textContent = `
+    .suggest-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 9999999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(4, 5, 12, 0.88);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      animation: suggestFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      padding: 1.25rem;
+      overflow-y: auto;
+    }
+    @keyframes suggestFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .suggest-modal-card {
+      position: relative;
+      width: 100%;
+      max-width: 680px;
+      max-height: min(88vh, 760px);
+      display: flex;
+      flex-direction: column;
+      background: #0d0f18;
+      background: linear-gradient(180deg, #131726 0%, #0d0f18 100%);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 24px;
+      box-shadow:
+        0 28px 80px rgba(0, 0, 0, 0.95),
+        0 0 50px rgba(229, 9, 20, 0.22);
+      overflow: hidden;
+      animation: suggestCardPop 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.2);
+    }
+    @keyframes suggestCardPop {
+      from { opacity: 0; transform: scale(0.94) translateY(12px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .suggest-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 1.15rem 1.4rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.02);
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .suggest-header-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .suggest-header-badge {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(229, 9, 20, 0.25), rgba(249, 115, 22, 0.2));
+      border: 1px solid rgba(229, 9, 20, 0.45);
+      color: #e50914;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.35rem;
+      box-shadow: 0 0 20px rgba(229, 9, 20, 0.3);
+    }
+    .suggest-title {
+      font-size: 1.2rem;
+      font-weight: 800;
+      color: #fff;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      margin: 0;
+    }
+    .suggest-subtitle {
+      font-size: 0.76rem;
+      color: #94a3b8;
+      margin-top: 2px;
+    }
+    .suggest-tabs {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 999px;
+      padding: 3px;
+      gap: 3px;
+    }
+    .suggest-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 15px;
+      border-radius: 999px;
+      border: none;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.18s ease;
+    }
+    .suggest-tab:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .suggest-tab.active {
+      color: #fff;
+      background: #e50914;
+      box-shadow: 0 2px 12px rgba(229, 9, 20, 0.4);
+    }
+    .suggest-close-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.04);
+      color: #94a3b8;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-size: 1.1rem;
+    }
+    .suggest-close-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    .suggest-body {
+      padding: 1.25rem 1.4rem 1.4rem;
+      overflow-y: auto;
+      max-height: calc(88vh - 80px);
+    }
+    .quick-pick-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .quick-pick-card {
+      position: relative;
+      border-radius: 18px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: #141724;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+      transition: all 0.25s ease;
+    }
+    .quick-pick-card.is-rolling {
+      opacity: 0.55;
+      transform: scale(0.985);
+      filter: blur(1.5px);
+    }
+    .quick-backdrop-img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.28;
+      filter: blur(10px);
+      transform: scale(1.1);
+    }
+    .quick-backdrop-overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(13, 15, 24, 0.95) 0%, rgba(13, 15, 24, 0.8) 50%, rgba(13, 15, 24, 0.92) 100%);
+    }
+    .quick-card-inner {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      gap: 18px;
+      padding: 20px;
+    }
+    .quick-poster-wrap {
+      width: 130px;
+      flex-shrink: 0;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      aspect-ratio: 2 / 3;
+      background: #090a10;
+    }
+    .quick-poster-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .quick-poster-fallback {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.2rem;
+      color: #64748b;
+      background: #0f121d;
+    }
+    .quick-details {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .quick-badges {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 6px;
+    }
+    .quick-badge-type {
+      font-size: 0.68rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: rgba(229, 9, 20, 0.2);
+      border: 1px solid rgba(229, 9, 20, 0.45);
+      color: #ff5252;
+      padding: 2px 7px;
+      border-radius: 6px;
+    }
+    .quick-badge-year {
+      font-size: 0.72rem;
+      color: #cbd5e1;
+      background: rgba(255, 255, 255, 0.08);
+      padding: 2px 7px;
+      border-radius: 6px;
+    }
+    .quick-badge-rating {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #fbbf24;
+      background: rgba(251, 191, 36, 0.15);
+      border: 1px solid rgba(251, 191, 36, 0.35);
+      padding: 2px 7px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .quick-title {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #fff;
+      line-height: 1.25;
+      letter-spacing: -0.015em;
+      margin: 0 0 4px 0;
+    }
+    .quick-genres {
+      font-size: 0.76rem;
+      color: #94a3b8;
+      margin-bottom: 8px;
+    }
+    .quick-overview {
+      font-size: 0.82rem;
+      line-height: 1.5;
+      color: #cbd5e1;
+      margin: 0 0 14px 0;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .quick-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .quick-btn-play {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: #e50914;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 8px 16px;
+      font-size: 0.84rem;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(229, 9, 20, 0.4);
+      transition: all 0.18s ease;
+    }
+    .quick-btn-play:hover {
+      background: #f40612;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(229, 9, 20, 0.55);
+    }
+    .quick-btn-details {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #e2e8f0;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      padding: 8px 14px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.18s ease;
+    }
+    .quick-btn-details:hover {
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+    .quick-roll-all-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 13px 20px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.03) 100%);
+      color: #fff;
+      font-size: 0.94rem;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .quick-roll-all-btn:hover:not(:disabled) {
+      background: linear-gradient(135deg, rgba(229, 9, 20, 0.3) 0%, rgba(255, 255, 255, 0.08) 100%);
+      border-color: rgba(229, 9, 20, 0.5);
+      box-shadow: 0 6px 24px rgba(229, 9, 20, 0.3);
+      transform: translateY(-1px);
+    }
+    .quick-roll-all-btn:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+    .dice-icon-spin {
+      animation: diceRollAnim 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes diceRollAnim {
+      0% { transform: rotate(0deg) scale(0.85); }
+      50% { transform: rotate(180deg) scale(1.25); }
+      100% { transform: rotate(360deg) scale(1); }
+    }
+    .mood-tab-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .mood-section-title {
+      font-size: 0.86rem;
+      font-weight: 800;
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .mood-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .mood-card-chip {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 10px 12px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .mood-card-chip:hover {
+      background: rgba(255, 255, 255, 0.07);
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-1px);
+    }
+    .mood-card-chip.active {
+      background: rgba(229, 9, 20, 0.15);
+      border-color: #e50914;
+      box-shadow: 0 0 16px rgba(229, 9, 20, 0.25);
+    }
+    .mood-chip-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .mood-chip-emoji {
+      font-size: 1.15rem;
+      line-height: 1;
+    }
+    .mood-chip-name {
+      font-size: 0.8rem;
+      font-weight: 800;
+      color: #fff;
+    }
+    .mood-chip-desc {
+      font-size: 0.68rem;
+      color: #94a3b8;
+      line-height: 1.3;
+    }
+    .mood-filter-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 12px;
+      flex-wrap: wrap;
+    }
+    .mood-pill-group {
+      display: inline-flex;
+      gap: 4px;
+      background: rgba(0, 0, 0, 0.35);
+      padding: 3px;
+      border-radius: 8px;
+    }
+    .mood-format-pill {
+      border: none;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 0.74rem;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .mood-format-pill:hover {
+      color: #fff;
+    }
+    .mood-format-pill.active {
+      background: #e50914;
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(229, 9, 20, 0.4);
+    }
+    .mood-toggle-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #cbd5e1;
+      cursor: pointer;
+    }
+    .mood-checkbox {
+      accent-color: #e50914;
+      width: 15px;
+      height: 15px;
+      cursor: pointer;
+    }
+    .mood-matches-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 4px;
+    }
+    .mood-matches-count {
+      font-size: 0.8rem;
+      font-weight: 800;
+      color: #cbd5e1;
+    }
+    .mood-shuffle-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #ff5252;
+      background: rgba(229, 9, 20, 0.1);
+      border: 1px solid rgba(229, 9, 20, 0.3);
+      padding: 4px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .mood-shuffle-btn:hover {
+      background: rgba(229, 9, 20, 0.2);
+      color: #fff;
+    }
+    .mood-matches-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+    .mood-card {
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+    }
+    .mood-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(255, 255, 255, 0.25);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.7);
+    }
+    .mood-card-poster {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      overflow: hidden;
+    }
+    .mood-card-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.3s ease;
+    }
+    .mood-card:hover .mood-card-img {
+      transform: scale(1.08);
+    }
+    .mood-card-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    .mood-card:hover .mood-card-overlay {
+      opacity: 1;
+    }
+    .mood-card-play-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #e50914;
+      color: #fff;
+      border: none;
+      font-size: 1.15rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
+      cursor: pointer;
+      transition: transform 0.15s ease;
+    }
+    .mood-card-play-btn:hover {
+      transform: scale(1.15);
+    }
+    .mood-card-rating {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      font-size: 0.7rem;
+      font-weight: 800;
+      background: rgba(0, 0, 0, 0.8);
+      color: #fbbf24;
+      padding: 2px 7px;
+      border-radius: 6px;
+      backdrop-filter: blur(4px);
+    }
+    .mood-card-info {
+      padding: 9px 12px;
+    }
+    .mood-card-title {
+      font-size: 0.84rem;
+      font-weight: 800;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 2px;
+    }
+    .mood-card-sub {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .suggest-loading-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 4rem 1rem;
+      color: #94a3b8;
+      font-weight: 700;
+      font-size: 0.95rem;
+    }
+    .suggest-empty-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 3rem 1rem;
+      gap: 12px;
+      color: #94a3b8;
+    }
+    @media (max-width: 640px) {
+      .suggest-modal-card {
+        width: 96% !important;
+        max-height: 92dvh !important;
+        border-radius: 20px !important;
+      }
+      .quick-card-inner {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 14px;
+        padding: 16px;
+      }
+      .quick-poster-wrap {
+        width: 110px;
+      }
+      .quick-badges, .quick-actions {
+        justify-content: center;
+      }
+      .mood-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .mood-matches-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 const SuggestModal = {
   emits: ["close"],
   setup(props, { emit }) {
+    ensureSuggestStyles();
     const router = VueRouter.useRouter();
     const activeTab = ref("quick"); // 'quick' | 'mood'
     const loading = ref(false);
     const rolling = ref(false);
     const quickPick = ref(null);
+    const isInitialLoading = computed(() => loading.value && !quickPick.value);
     const rollHistory = ref([]);
 
     // Mood match state
@@ -14595,7 +15244,8 @@ const SuggestModal = {
     function formatGenres(g) {
       if (!g) return "";
       if (Array.isArray(g)) return g.slice(0, 3).join(" • ");
-      return g.split(",").map(s => s.trim()).filter(Boolean).slice(0, 3).join(" • ");
+      if (typeof g === "string") return g.split(",").map(s => s.trim()).filter(Boolean).slice(0, 3).join(" • ");
+      return "";
     }
 
     function onKey(e) {
@@ -14632,678 +15282,13 @@ const SuggestModal = {
       playItem,
       viewDetails,
       formatGenres,
+      isInitialLoading,
       imgUrl,
     };
   },
   template: `
     <div class="suggest-modal-backdrop" @click.self="$emit('close')">
       <div class="suggest-modal-card" @click.stop>
-        <style>
-          .suggest-modal-backdrop {
-            position: fixed;
-            inset: 0;
-            z-index: 9999999;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(4, 5, 12, 0.88);
-            backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
-            animation: suggestFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-            padding: 1.25rem;
-            overflow-y: auto;
-          }
-          @keyframes suggestFadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-          }
-          .suggest-modal-card {
-            position: relative;
-            width: 100%;
-            max-width: 680px;
-            max-height: min(88vh, 760px);
-            display: flex;
-            flex-direction: column;
-            background: #0d0f18;
-            background: linear-gradient(180deg, #131726 0%, #0d0f18 100%);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 24px;
-            box-shadow:
-              0 28px 80px rgba(0, 0, 0, 0.95),
-              0 0 50px rgba(229, 9, 20, 0.22);
-            overflow: hidden;
-            animation: suggestCardPop 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.2);
-          }
-          @keyframes suggestCardPop {
-            from { opacity: 0; transform: scale(0.94) translateY(12px); }
-            to { opacity: 1; transform: scale(1) translateY(0); }
-          }
-          .suggest-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            padding: 1.15rem 1.4rem 1rem;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.02);
-            flex-shrink: 0;
-            flex-wrap: wrap;
-          }
-          .suggest-header-title-wrap {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-          }
-          .suggest-header-badge {
-            width: 40px;
-            height: 40px;
-            border-radius: 12px;
-            background: linear-gradient(135deg, rgba(229, 9, 20, 0.25), rgba(249, 115, 22, 0.2));
-            border: 1px solid rgba(229, 9, 20, 0.45);
-            color: #e50914;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.35rem;
-            box-shadow: 0 0 20px rgba(229, 9, 20, 0.3);
-          }
-          .suggest-title {
-            font-size: 1.2rem;
-            font-weight: 800;
-            color: #fff;
-            line-height: 1.2;
-            letter-spacing: -0.02em;
-            margin: 0;
-          }
-          .suggest-subtitle {
-            font-size: 0.76rem;
-            color: #94a3b8;
-            margin-top: 2px;
-          }
-          .suggest-tabs {
-            display: inline-flex;
-            align-items: center;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 999px;
-            padding: 3px;
-            gap: 3px;
-          }
-          .suggest-tab {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 7px 15px;
-            border-radius: 999px;
-            border: none;
-            background: transparent;
-            color: #94a3b8;
-            font-size: 0.82rem;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.18s ease;
-          }
-          .suggest-tab:hover {
-            color: #fff;
-            background: rgba(255, 255, 255, 0.08);
-          }
-          .suggest-tab.active {
-            background: #e50914;
-            color: #fff;
-            box-shadow: 0 4px 14px rgba(229, 9, 20, 0.45);
-          }
-          .suggest-close-btn {
-            width: 32px;
-            height: 32px;
-            border-radius: 10px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.05);
-            color: #cbd5e1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.15s ease;
-          }
-          .suggest-close-btn:hover {
-            background: rgba(229, 9, 20, 0.2);
-            border-color: rgba(229, 9, 20, 0.4);
-            color: #fff;
-            transform: rotate(90deg);
-          }
-          .suggest-body {
-            padding: 1.25rem 1.4rem 1.4rem;
-            overflow-y: auto;
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-          }
-          /* Quick Pick Card */
-          .quick-pick-wrap {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-            width: 100%;
-          }
-          .quick-pick-card {
-            position: relative;
-            background: rgba(255, 255, 255, 0.035);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 18px;
-            overflow: hidden;
-            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
-          }
-          .quick-pick-card.is-rolling {
-            filter: blur(2px);
-            opacity: 0.6;
-            transform: scale(0.99);
-          }
-          .quick-backdrop-img {
-            position: absolute;
-            inset: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            opacity: 0.22;
-            filter: blur(12px) saturate(1.3);
-            transform: scale(1.08);
-            pointer-events: none;
-          }
-          .quick-backdrop-overlay {
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(180deg, rgba(13, 15, 24, 0.4) 0%, rgba(13, 15, 24, 0.95) 85%);
-            pointer-events: none;
-          }
-          .quick-card-inner {
-            position: relative;
-            z-index: 1;
-            display: flex;
-            gap: 20px;
-            padding: 20px;
-          }
-          .quick-poster-wrap {
-            flex-shrink: 0;
-            width: 135px;
-            aspect-ratio: 2 / 3;
-            border-radius: 14px;
-            overflow: hidden;
-            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.85);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            background: #000;
-            position: relative;
-          }
-          .quick-poster-img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            display: block;
-          }
-          .quick-poster-fallback {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(255, 255, 255, 0.05);
-            color: #64748b;
-            font-size: 2.2rem;
-          }
-          .quick-details {
-            flex: 1;
-            min-width: 0;
-            display: flex;
-            flex-direction: column;
-          }
-          .quick-badges {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-            margin-bottom: 8px;
-          }
-          .quick-badge-type {
-            font-size: 0.68rem;
-            font-weight: 800;
-            letter-spacing: 0.06em;
-            padding: 3px 8px;
-            border-radius: 6px;
-            background: rgba(229, 9, 20, 0.2);
-            color: #ff4757;
-            border: 1px solid rgba(229, 9, 20, 0.4);
-          }
-          .quick-badge-year {
-            font-size: 0.72rem;
-            font-weight: 700;
-            padding: 3px 8px;
-            border-radius: 6px;
-            background: rgba(255, 255, 255, 0.08);
-            color: #cbd5e1;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-          }
-          .quick-badge-rating {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            font-size: 0.74rem;
-            font-weight: 800;
-            padding: 3px 8px;
-            border-radius: 6px;
-            background: rgba(245, 158, 11, 0.18);
-            color: #fbbf24;
-            border: 1px solid rgba(245, 158, 11, 0.35);
-          }
-          .quick-title {
-            font-size: 1.45rem;
-            font-weight: 900;
-            color: #fff;
-            line-height: 1.25;
-            letter-spacing: -0.02em;
-            margin: 0 0 6px 0;
-          }
-          .quick-genres {
-            font-size: 0.8rem;
-            color: #94a3b8;
-            font-weight: 600;
-            margin-bottom: 10px;
-          }
-          .quick-overview {
-            font-size: 0.85rem;
-            color: #cbd5e1;
-            line-height: 1.55;
-            margin: 0 0 16px 0;
-            display: -webkit-box;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-          }
-          .quick-actions {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-top: auto;
-            flex-wrap: wrap;
-          }
-          .quick-btn-play {
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-            padding: 10px 22px;
-            border-radius: 12px;
-            background: linear-gradient(135deg, #e50914, #ff3838);
-            color: #fff;
-            font-size: 0.9rem;
-            font-weight: 800;
-            border: none;
-            cursor: pointer;
-            box-shadow: 0 6px 20px rgba(229, 9, 20, 0.45);
-            transition: all 0.18s ease;
-          }
-          .quick-btn-play:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 26px rgba(229, 9, 20, 0.6);
-            filter: brightness(1.08);
-          }
-          .quick-btn-details {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 10px 18px;
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            color: #fff;
-            font-size: 0.88rem;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.18s ease;
-          }
-          .quick-btn-details:hover {
-            background: rgba(255, 255, 255, 0.14);
-            border-color: rgba(255, 255, 255, 0.28);
-            transform: translateY(-2px);
-          }
-          /* Full Width Roll Button */
-          .quick-roll-all-btn {
-            width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
-            padding: 14px 24px;
-            border-radius: 16px;
-            background: linear-gradient(135deg, #e50914 0%, #ea580c 100%);
-            border: 1px solid rgba(255, 255, 255, 0.25);
-            color: #fff;
-            font-size: 1.02rem;
-            font-weight: 900;
-            letter-spacing: 0.02em;
-            cursor: pointer;
-            box-shadow:
-              0 6px 25px rgba(229, 9, 20, 0.45),
-              inset 0 1px 1px rgba(255, 255, 255, 0.4);
-            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-          }
-          .quick-roll-all-btn:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow:
-              0 10px 32px rgba(229, 9, 20, 0.6),
-              inset 0 1px 1px rgba(255, 255, 255, 0.6);
-            filter: brightness(1.08);
-          }
-          .quick-roll-all-btn:active:not(:disabled) {
-            transform: translateY(1px);
-          }
-          .quick-roll-all-btn:disabled {
-            opacity: 0.7;
-            cursor: not-allowed;
-          }
-          .dice-icon-spin {
-            font-size: 1.45rem;
-            animation: spinDiceAnim 0.75s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-          }
-          @keyframes spinDiceAnim {
-            0% { transform: rotate(0deg) scale(1); }
-            50% { transform: rotate(180deg) scale(1.2); }
-            100% { transform: rotate(360deg) scale(1); }
-          }
-          /* Mood Tab */
-          .mood-tab-wrap {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-          }
-          .mood-section-title {
-            font-size: 0.88rem;
-            font-weight: 800;
-            color: #fff;
-            letter-spacing: -0.01em;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-          }
-          .mood-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-          }
-          .mood-card-chip {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            padding: 12px 14px;
-            border-radius: 14px;
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: #cbd5e1;
-            cursor: pointer;
-            transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-            text-align: left;
-          }
-          .mood-card-chip:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.2);
-            transform: translateY(-2px);
-            color: #fff;
-          }
-          .mood-card-chip.active {
-            background: rgba(229, 9, 20, 0.16);
-            border-color: #e50914;
-            color: #fff;
-            box-shadow: 0 0 20px rgba(229, 9, 20, 0.32);
-            transform: translateY(-2px);
-          }
-          .mood-chip-top {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-          }
-          .mood-chip-emoji {
-            font-size: 1.35rem;
-            line-height: 1;
-          }
-          .mood-chip-name {
-            font-size: 0.9rem;
-            font-weight: 800;
-            color: #fff;
-          }
-          .mood-chip-desc {
-            font-size: 0.72rem;
-            color: #94a3b8;
-            line-height: 1.3;
-          }
-          .mood-filter-bar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 14px;
-            padding: 10px 14px;
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 14px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            flex-wrap: wrap;
-          }
-          .mood-pill-group {
-            display: inline-flex;
-            gap: 6px;
-          }
-          .mood-format-pill {
-            padding: 5px 12px;
-            border-radius: 8px;
-            font-size: 0.76rem;
-            font-weight: 700;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background: transparent;
-            color: #94a3b8;
-            cursor: pointer;
-            transition: all 0.15s ease;
-          }
-          .mood-format-pill:hover {
-            color: #fff;
-            background: rgba(255, 255, 255, 0.08);
-          }
-          .mood-format-pill.active {
-            background: #e50914;
-            color: #fff;
-            border-color: #e50914;
-          }
-          .mood-toggle-label {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 0.82rem;
-            font-weight: 700;
-            color: #cbd5e1;
-            cursor: pointer;
-            user-select: none;
-          }
-          .mood-checkbox {
-            accent-color: #e50914;
-            width: 16px;
-            height: 16px;
-            cursor: pointer;
-          }
-          .mood-matches-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-top: 4px;
-          }
-          .mood-matches-count {
-            font-size: 0.84rem;
-            font-weight: 800;
-            color: #fff;
-          }
-          .mood-shuffle-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            color: #e50914;
-            background: rgba(229, 9, 20, 0.1);
-            border: 1px solid rgba(229, 9, 20, 0.25);
-            padding: 5px 12px;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.15s ease;
-          }
-          .mood-shuffle-btn:hover {
-            background: rgba(229, 9, 20, 0.2);
-            color: #fff;
-          }
-          .mood-matches-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
-          }
-          .mood-card {
-            background: rgba(255, 255, 255, 0.035);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 14px;
-            overflow: hidden;
-            cursor: pointer;
-            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-            display: flex;
-            flex-direction: column;
-          }
-          .mood-card:hover {
-            transform: translateY(-4px);
-            border-color: rgba(255, 255, 255, 0.25);
-            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.7);
-          }
-          .mood-card-poster {
-            position: relative;
-            width: 100%;
-            aspect-ratio: 16 / 9;
-            background: #000;
-            overflow: hidden;
-          }
-          .mood-card-img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transition: transform 0.3s ease;
-          }
-          .mood-card:hover .mood-card-img {
-            transform: scale(1.08);
-          }
-          .mood-card-overlay {
-            position: absolute;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.45);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-          }
-          .mood-card:hover .mood-card-overlay {
-            opacity: 1;
-          }
-          .mood-card-play-btn {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: #e50914;
-            color: #fff;
-            border: none;
-            font-size: 1.15rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
-            cursor: pointer;
-            transition: transform 0.15s ease;
-          }
-          .mood-card-play-btn:hover {
-            transform: scale(1.15);
-          }
-          .mood-card-rating {
-            position: absolute;
-            top: 6px;
-            right: 6px;
-            font-size: 0.7rem;
-            font-weight: 800;
-            background: rgba(0, 0, 0, 0.8);
-            color: #fbbf24;
-            padding: 2px 7px;
-            border-radius: 6px;
-            backdrop-filter: blur(4px);
-          }
-          .mood-card-info {
-            padding: 9px 12px;
-          }
-          .mood-card-title {
-            font-size: 0.84rem;
-            font-weight: 800;
-            color: #fff;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            margin-bottom: 2px;
-          }
-          .mood-card-sub {
-            font-size: 0.72rem;
-            color: #94a3b8;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }
-          .suggest-loading-box {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
-            padding: 4rem 1rem;
-            color: #94a3b8;
-            font-weight: 700;
-            font-size: 0.95rem;
-          }
-          .suggest-empty-box {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            padding: 3rem 1rem;
-            gap: 12px;
-            color: #94a3b8;
-          }
-          /* Responsive */
-          @media (max-width: 640px) {
-            .suggest-modal-card {
-              width: 96% !important;
-              max-height: 92dvh !important;
-              border-radius: 20px !important;
-            }
-            .quick-card-inner {
-              flex-direction: column;
-              align-items: center;
-              text-align: center;
-              gap: 14px;
-              padding: 16px;
-            }
-            .quick-poster-wrap {
-              width: 110px;
-            }
-            .quick-badges, .quick-actions {
-              justify-content: center;
-            }
-            .mood-grid {
-              grid-template-columns: repeat(2, 1fr);
-            }
-            .mood-matches-grid {
-              grid-template-columns: repeat(2, 1fr);
-              gap: 8px;
-            }
-          }
-        </style>
-
         <!-- Header -->
         <div class="suggest-header">
           <div class="suggest-header-title-wrap">
@@ -15312,7 +15297,7 @@ const SuggestModal = {
             </div>
             <div>
               <h3 class="suggest-title">What to Watch</h3>
-              <div class="suggest-subtitle">Instant randomizer & mood recommendations</div>
+              <div class="suggest-subtitle">Instant randomizer and mood recommendations</div>
             </div>
           </div>
           
@@ -15344,7 +15329,7 @@ const SuggestModal = {
         <div class="suggest-body">
           <!-- TAB 1: QUICK PICK -->
           <div v-if="activeTab === 'quick'" class="quick-pick-wrap">
-            <div v-if="loading && !quickPick" class="suggest-loading-box">
+            <div v-if="isInitialLoading" class="suggest-loading-box">
               <i class="ph-bold ph-dice-five dice-icon-spin" style="font-size:2.8rem;color:#e50914"></i>
               <span>Rolling through your library...</span>
             </div>
@@ -28324,7 +28309,7 @@ const App = {
           </button>
 
           <!-- Random Suggestion button -->
-          <button class="tv-nav-btn" @click="openSuggestModal" id="tv-nav-suggest" title="Random Suggestion & Mood Match">
+          <button class="tv-nav-btn" @click="openSuggestModal" id="tv-nav-suggest" title="Random Suggestion and Mood Match">
             <i class="ph-bold ph-dice-five"></i>
           </button>
 
@@ -28382,7 +28367,7 @@ const App = {
 
           <div class="nav-actions">
             <!-- Random Suggestion button -->
-            <div class="nav-search-btn" @click="openSuggestModal" id="nav-suggest" data-tooltip="Random Suggestion & Mood Match">
+            <div class="nav-search-btn" @click="openSuggestModal" id="nav-suggest" data-tooltip="Random Suggestion and Mood Match">
               <i class="ph ph-dice-five" style="font-size:1.15rem"></i>
             </div>
 
