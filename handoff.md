@@ -1,37 +1,34 @@
 # Handoff
 
 ## 1. Goal
-Implement graceful player recovery loop exit (navigating back to Media Details with external player recommendation modal upon repeated playback stalls) and modernize Media Organizer with a dedicated review modal and SSE progress telemetry.
+Implement a random suggestion dice button next to the search button in the navigation header, opening a dual-tab modal with Quick Pick (immediate media card with full-width roll again action) and Mood Match (interactive questionnaire/chips for tailored mood recommendations), ensuring zero Vue template compile errors and reliable style injection.
 
 ## 2. Current State
 - **Branch:** `main`
-- **Pushed Commit:** `79e854a` (`feat(player): auto-redirect to details on playback stalls with external player recommendation`)
-- **Push Status:** Successfully pushed to `origin/main` (`f674fad..79e854a`).
-- **Release CI:** GitHub Actions `.github/workflows/auto-release.yml` triggered for auto-bump to `v2.84.0.0` with release update zip and Android TV APK.
-- **Server Running Status:** Server verified on port `8700`.
-- **Tests:** All 39 relevant test suites passing (`test_route_media.py`, `test_route_organizer.py`, `test_sub_naming.py`).
+- **Committed Hash:** `75cfdea` (`fix(ui): resolve template entity syntax error and inject suggestion styles`)
+- **Push Status:** Committed locally (ahead of origin by 3 commits: `c56b24b`, `b38e584`, `75cfdea`); awaiting user confirmation before `git push`.
+- **Release CI:** Push will trigger `.github/workflows/auto-release.yml` with minor bump (`feat:` -> `v2.85.0.0`) publishing release update zip and Android TV APK.
+- **Server Running Status:** Server tests passing; port 8700.
+- **Tests:** All 469 backend tests passing (including 7 in `test_route_suggest.py`), plus new automated in-browser template compiler test in `backend/tests/test_vue_templates.js` passing (100%).
 
 ## 3. Active Files
-- `static/js/player.js`: FreezeGuard recovery loop logic (`executeFreezeRecovery`, `triggerRecoveryFailureExit`, `swapStream`, `enableCompatPlayback`, `checkPlaybackStall`).
-- `static/js/app.js`: `MediaDetailsPage` recovery failure modal lifecycle check (`checkPlaybackRecoveryFailure`) and external player launcher integration (`launchExternalFromRecovery`). Organizer Review modal with filter tabs.
-- `static/css/main.css`: Styles for `.recovery-recommend-modal-*` and organizer review modal.
-- `backend/external_player.py`: Win32 window minimization and external player process lifecycle management.
-- `backend/organizer.py`: SSE telemetry stream and review scan isolation.
+- `static/js/app.js`: Extracted inline `<style>` to `ensureSuggestStyles()`, fixed template ampersand entity errors, computed `isInitialLoading`, and guarded `formatGenres`.
+- `backend/tests/test_vue_templates.js`: Automated regression test verifying `SuggestModal` and `App` templates compile cleanly in Vue 3 runtime.
+- `backend/routes/media.py`: Suggestion endpoints (`GET /api/media/suggest` and `GET /api/media/random`) with mood, type, unwatched, exclude_id, and Kids mode filtering.
+- `static/css/main.css`: Styles for `.suggest-modal-card`, `.suggest-featured-card`, `.suggest-full-roll-btn`, `.suggest-mood-chips`, and `@keyframes diceRoll`.
 - `PROJECT-LOG.md`: Permanent historical session record.
 
 ## 4. Changes Made
-- Added `triggerRecoveryFailureExit()` in `static/js/player.js` to tear down the HTML5 video element cleanly, set `capsstream_playback_recovery_failed` in `sessionStorage`, and call `goBack()`.
-- Fixed counter reset regression in `swapStream()` and `enableCompatPlayback()` by introducing `preserveRecoveryCounter`, ensuring FreezeGuard reaches `MAX_RECOVERY_ATTEMPTS` without getting trapped in an infinite retry loop.
-- Added "Playback Issue Detected" modal in `MediaDetailsPage` on `static/js/app.js` with 1-click external player launch (`Open with VLC` / `Open in Default Player`).
-- Activated VLC live sync tracking modal and native window minimization via `/api/system/minimize-window`.
-- Upgraded Media Organizer to separate preview scans from execution, preventing premature auto-renaming, and isolated scrollbars to `.organizer-items-log-scroll`.
-- Cleaned up temporary corrupt test files and verified zero regressions.
+- Fixed root cause of dice button click doing nothing: unescaped ampersands (`&`) in `title` and `data-tooltip` on navigation buttons, `v-if="loading && !quickPick"`, and text in `SuggestModal.template` crashed Vue 3's in-browser entity decoder (`TypeError: Cannot read properties of undefined (reading '0')` / `(reading 'length')`).
+- Replaced attribute ampersands with "and" and introduced `isInitialLoading = computed(...)`.
+- Extracted inline `<style>` out of `SuggestModal.template` into `ensureSuggestStyles()` helper dynamically appended to `document.head`, preventing Vue template compiler syntax interference and bypassing browser/PWA CSS caching.
+- Guarded `formatGenres` in `SuggestModal` against non-string/non-array edge cases.
+- Created regression test `backend/tests/test_vue_templates.js` proving both templates compile cleanly without throwing.
 
 ## 5. Failed Attempts
-- Resetting `consecutiveRecoveryAttempts` inside `swapStream()` and `enableCompatPlayback()` reset the retry count during recovery, creating an endless "Stream buffer stalled — auto-recovering..." toast loop. Fixed by adding `preserveRecoveryCounter: true` to recovery callers.
-- In-page player error banner did not automatically guide the user to external players. Solved by returning to Media Details and rendering the centered recommendation modal with 1-click VLC launch.
+- Embedding `<style>` directly inside Vue 3 inline component template failed because Vue compiler expects pure element trees without raw stylesheets or entity decode issues. Resolved by moving styles to `ensureSuggestStyles()` attached to `document.head`.
 
 ## 6. Specific Next Steps
-1. Verify GitHub Actions auto-release workflow run for `v2.84.0.0`.
-2. Test real unplayable/corrupted media or network stream drops in production.
-3. Verify Android TV companion client playback fallback on unplayable codecs.
+1. Request user confirmation to execute `git push origin main`.
+2. Push commits to GitHub.
+3. Monitor `.github/workflows/auto-release.yml` automated release for `v2.85.0.0` and Android TV APK compilation.

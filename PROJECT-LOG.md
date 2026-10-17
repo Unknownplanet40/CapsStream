@@ -285,3 +285,18 @@ Added a dice button (`#nav-suggest` / `#tv-nav-suggest`) next to the search butt
 - `backend/tests/test_route_suggest.py`: Created unit tests covering basic suggest, random alias, mood filters, type filters, unwatched filtering, kids mode, and ID exclusion.
 
 ---
+## October 17 at 10:33 AM
+### Asked
+User reported: "still same issue the Random Suggestion & Mood Match it not working and when click nothing happen" and "no modal showing when clicking the dice, the randomsuggest modal has n Design etc".
+
+### Decision
+Fix Vue 3 inline template compiler crash caused by unescaped ampersands (`&`) in attributes and text, and logical `&&` in `v-if`. Extract inline `<style>` out of template into `ensureSuggestStyles()` helper injecting into `document.head` to eliminate template compiler errors and bypass browser/PWA CSS caching.
+>why: Vue's client-side template compiler in production (`vue.global.prod.js`) treats unescaped ampersands as HTML entity starts, crashing entity decoding when encountering raw strings or `&&` inside attributes. Moving styles to a head injector avoids template parser side-effects while guaranteeing instant styling.
+
+### Shipped
+- Fixed navigation template attribute strings (`Random Suggestion and Mood Match`).
+- Replaced `v-if="loading && !quickPick"` with computed `isInitialLoading` property.
+- Extracted `<style>` block to `ensureSuggestStyles()` in `static/js/app.js`.
+- Added automated template compile test in `backend/tests/test_vue_templates.js`.
+
+---
