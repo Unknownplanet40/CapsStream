@@ -14503,12 +14503,12 @@ const SuggestModal = {
 
     // Mood match state
     const moods = [
-      { id: "laugh", label: "Laugh", emoji: "😂", desc: "Comedy & feel-good vibes" },
-      { id: "thrill", label: "Thrill", emoji: "⚡", desc: "Suspense, crime & mystery" },
-      { id: "relax", label: "Relax", emoji: "☕", desc: "Chill docs, family & romance" },
-      { id: "mind-bend", label: "Mind-Bend", emoji: "🌀", desc: "Sci-Fi, plot twists & fantasy" },
-      { id: "cry", label: "Emotional", emoji: "🥺", desc: "Heartfelt drama & romance" },
-      { id: "action-packed", label: "Action-Packed", emoji: "💥", desc: "High-octane blockbusters" },
+      { id: "laugh", label: "Laugh Out Loud", emoji: "😂", desc: "Comedy & feel-good animated fun" },
+      { id: "thrill", label: "Thrill & Chills", emoji: "⚡", desc: "Suspense, crime & psychological thrillers" },
+      { id: "relax", label: "Chill & Cozy", emoji: "☕", desc: "Comfort movies, family & documentaries" },
+      { id: "mind-bend", label: "Mind-Bending", emoji: "🌀", desc: "Sci-Fi, plot twists & rich fantasy" },
+      { id: "cry", label: "Emotional / Tearjerker", emoji: "🥺", desc: "Deep character drama & romance" },
+      { id: "action-packed", label: "Adrenaline Rush", emoji: "💥", desc: "Explosive blockbusters & action" },
     ];
     const selectedMood = ref("laugh");
     const mediaTypes = [
@@ -14550,7 +14550,7 @@ const SuggestModal = {
         if (isReroll) {
           setTimeout(() => {
             rolling.value = false;
-          }, 400);
+          }, 350);
         }
       }
     }
@@ -14636,239 +14636,908 @@ const SuggestModal = {
     };
   },
   template: `
-    <div class="modal-backdrop suggest-modal-backdrop" @click.self="$emit('close')">
-      <div class="shortcuts-modal-card suggest-modal-card" @click.stop>
-        <div class="suggest-modal-inner">
-          <!-- Header -->
-          <div class="suggest-modal-header">
-            <div class="suggest-header-left">
-              <div class="suggest-header-icon">
-                <i class="ph-bold ph-dice-five"></i>
-              </div>
-              <div>
-                <div class="suggest-header-title">CapsStream Suggestions</div>
-                <div class="suggest-header-subtitle">Find your next favorite watch</div>
-              </div>
-            </div>
-            
-            <div class="suggest-header-tabs">
-              <button
-                class="suggest-tab-btn"
-                :class="{ active: activeTab === 'quick' }"
-                @click="activeTab = 'quick'"
-              >
-                <i class="ph-bold ph-shuffle"></i>
-                <span>Quick Pick</span>
-              </button>
-              <button
-                class="suggest-tab-btn"
-                :class="{ active: activeTab === 'mood' }"
-                @click="activeTab = 'mood'; if (!hasSearchedMood) searchMoodMatches()"
-              >
-                <i class="ph-bold ph-sparkle"></i>
-                <span>Mood Match</span>
-              </button>
-            </div>
+    <div class="suggest-modal-backdrop" @click.self="$emit('close')">
+      <div class="suggest-modal-card" @click.stop>
+        <style>
+          .suggest-modal-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 9999999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(4, 5, 12, 0.88);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            animation: suggestFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+            padding: 1.25rem;
+            overflow-y: auto;
+          }
+          @keyframes suggestFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+          .suggest-modal-card {
+            position: relative;
+            width: 100%;
+            max-width: 680px;
+            max-height: min(88vh, 760px);
+            display: flex;
+            flex-direction: column;
+            background: #0d0f18;
+            background: linear-gradient(180deg, #131726 0%, #0d0f18 100%);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 24px;
+            box-shadow:
+              0 28px 80px rgba(0, 0, 0, 0.95),
+              0 0 50px rgba(229, 9, 20, 0.22);
+            overflow: hidden;
+            animation: suggestCardPop 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.2);
+          }
+          @keyframes suggestCardPop {
+            from { opacity: 0; transform: scale(0.94) translateY(12px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+          }
+          .suggest-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 1.15rem 1.4rem 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.02);
+            flex-shrink: 0;
+            flex-wrap: wrap;
+          }
+          .suggest-header-title-wrap {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+          }
+          .suggest-header-badge {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(229, 9, 20, 0.25), rgba(249, 115, 22, 0.2));
+            border: 1px solid rgba(229, 9, 20, 0.45);
+            color: #e50914;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.35rem;
+            box-shadow: 0 0 20px rgba(229, 9, 20, 0.3);
+          }
+          .suggest-title {
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: #fff;
+            line-height: 1.2;
+            letter-spacing: -0.02em;
+            margin: 0;
+          }
+          .suggest-subtitle {
+            font-size: 0.76rem;
+            color: #94a3b8;
+            margin-top: 2px;
+          }
+          .suggest-tabs {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 999px;
+            padding: 3px;
+            gap: 3px;
+          }
+          .suggest-tab {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 15px;
+            border-radius: 999px;
+            border: none;
+            background: transparent;
+            color: #94a3b8;
+            font-size: 0.82rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.18s ease;
+          }
+          .suggest-tab:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.08);
+          }
+          .suggest-tab.active {
+            background: #e50914;
+            color: #fff;
+            box-shadow: 0 4px 14px rgba(229, 9, 20, 0.45);
+          }
+          .suggest-close-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+            color: #cbd5e1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+          }
+          .suggest-close-btn:hover {
+            background: rgba(229, 9, 20, 0.2);
+            border-color: rgba(229, 9, 20, 0.4);
+            color: #fff;
+            transform: rotate(90deg);
+          }
+          .suggest-body {
+            padding: 1.25rem 1.4rem 1.4rem;
+            overflow-y: auto;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+          }
+          /* Quick Pick Card */
+          .quick-pick-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            width: 100%;
+          }
+          .quick-pick-card {
+            position: relative;
+            background: rgba(255, 255, 255, 0.035);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 18px;
+            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+          }
+          .quick-pick-card.is-rolling {
+            filter: blur(2px);
+            opacity: 0.6;
+            transform: scale(0.99);
+          }
+          .quick-backdrop-img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.22;
+            filter: blur(12px) saturate(1.3);
+            transform: scale(1.08);
+            pointer-events: none;
+          }
+          .quick-backdrop-overlay {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, rgba(13, 15, 24, 0.4) 0%, rgba(13, 15, 24, 0.95) 85%);
+            pointer-events: none;
+          }
+          .quick-card-inner {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+          }
+          .quick-poster-wrap {
+            flex-shrink: 0;
+            width: 135px;
+            aspect-ratio: 2 / 3;
+            border-radius: 14px;
+            overflow: hidden;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            background: #000;
+            position: relative;
+          }
+          .quick-poster-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+          }
+          .quick-poster-fallback {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.05);
+            color: #64748b;
+            font-size: 2.2rem;
+          }
+          .quick-details {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+          }
+          .quick-badges {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+          }
+          .quick-badge-type {
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: rgba(229, 9, 20, 0.2);
+            color: #ff4757;
+            border: 1px solid rgba(229, 9, 20, 0.4);
+          }
+          .quick-badge-year {
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.08);
+            color: #cbd5e1;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+          }
+          .quick-badge-rating {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.74rem;
+            font-weight: 800;
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: rgba(245, 158, 11, 0.18);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.35);
+          }
+          .quick-title {
+            font-size: 1.45rem;
+            font-weight: 900;
+            color: #fff;
+            line-height: 1.25;
+            letter-spacing: -0.02em;
+            margin: 0 0 6px 0;
+          }
+          .quick-genres {
+            font-size: 0.8rem;
+            color: #94a3b8;
+            font-weight: 600;
+            margin-bottom: 10px;
+          }
+          .quick-overview {
+            font-size: 0.85rem;
+            color: #cbd5e1;
+            line-height: 1.55;
+            margin: 0 0 16px 0;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+          }
+          .quick-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: auto;
+            flex-wrap: wrap;
+          }
+          .quick-btn-play {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 10px 22px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #e50914, #ff3838);
+            color: #fff;
+            font-size: 0.9rem;
+            font-weight: 800;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 6px 20px rgba(229, 9, 20, 0.45);
+            transition: all 0.18s ease;
+          }
+          .quick-btn-play:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 26px rgba(229, 9, 20, 0.6);
+            filter: brightness(1.08);
+          }
+          .quick-btn-details {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 18px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #fff;
+            font-size: 0.88rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.18s ease;
+          }
+          .quick-btn-details:hover {
+            background: rgba(255, 255, 255, 0.14);
+            border-color: rgba(255, 255, 255, 0.28);
+            transform: translateY(-2px);
+          }
+          /* Full Width Roll Button */
+          .quick-roll-all-btn {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 14px 24px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #e50914 0%, #ea580c 100%);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            color: #fff;
+            font-size: 1.02rem;
+            font-weight: 900;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            box-shadow:
+              0 6px 25px rgba(229, 9, 20, 0.45),
+              inset 0 1px 1px rgba(255, 255, 255, 0.4);
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+          }
+          .quick-roll-all-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow:
+              0 10px 32px rgba(229, 9, 20, 0.6),
+              inset 0 1px 1px rgba(255, 255, 255, 0.6);
+            filter: brightness(1.08);
+          }
+          .quick-roll-all-btn:active:not(:disabled) {
+            transform: translateY(1px);
+          }
+          .quick-roll-all-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+          }
+          .dice-icon-spin {
+            font-size: 1.45rem;
+            animation: spinDiceAnim 0.75s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+          }
+          @keyframes spinDiceAnim {
+            0% { transform: rotate(0deg) scale(1); }
+            50% { transform: rotate(180deg) scale(1.2); }
+            100% { transform: rotate(360deg) scale(1); }
+          }
+          /* Mood Tab */
+          .mood-tab-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+          }
+          .mood-section-title {
+            font-size: 0.88rem;
+            font-weight: 800;
+            color: #fff;
+            letter-spacing: -0.01em;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+          }
+          .mood-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+          }
+          .mood-card-chip {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #cbd5e1;
+            cursor: pointer;
+            transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+            text-align: left;
+          }
+          .mood-card-chip:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+            color: #fff;
+          }
+          .mood-card-chip.active {
+            background: rgba(229, 9, 20, 0.16);
+            border-color: #e50914;
+            color: #fff;
+            box-shadow: 0 0 20px rgba(229, 9, 20, 0.32);
+            transform: translateY(-2px);
+          }
+          .mood-chip-top {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+          }
+          .mood-chip-emoji {
+            font-size: 1.35rem;
+            line-height: 1;
+          }
+          .mood-chip-name {
+            font-size: 0.9rem;
+            font-weight: 800;
+            color: #fff;
+          }
+          .mood-chip-desc {
+            font-size: 0.72rem;
+            color: #94a3b8;
+            line-height: 1.3;
+          }
+          .mood-filter-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            padding: 10px 14px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            flex-wrap: wrap;
+          }
+          .mood-pill-group {
+            display: inline-flex;
+            gap: 6px;
+          }
+          .mood-format-pill {
+            padding: 5px 12px;
+            border-radius: 8px;
+            font-size: 0.76rem;
+            font-weight: 700;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: transparent;
+            color: #94a3b8;
+            cursor: pointer;
+            transition: all 0.15s ease;
+          }
+          .mood-format-pill:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.08);
+          }
+          .mood-format-pill.active {
+            background: #e50914;
+            color: #fff;
+            border-color: #e50914;
+          }
+          .mood-toggle-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: #cbd5e1;
+            cursor: pointer;
+            user-select: none;
+          }
+          .mood-checkbox {
+            accent-color: #e50914;
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+          }
+          .mood-matches-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 4px;
+          }
+          .mood-matches-count {
+            font-size: 0.84rem;
+            font-weight: 800;
+            color: #fff;
+          }
+          .mood-shuffle-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #e50914;
+            background: rgba(229, 9, 20, 0.1);
+            border: 1px solid rgba(229, 9, 20, 0.25);
+            padding: 5px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+          }
+          .mood-shuffle-btn:hover {
+            background: rgba(229, 9, 20, 0.2);
+            color: #fff;
+          }
+          .mood-matches-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+          }
+          .mood-card {
+            background: rgba(255, 255, 255, 0.035);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+          }
+          .mood-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(255, 255, 255, 0.25);
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.7);
+          }
+          .mood-card-poster {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #000;
+            overflow: hidden;
+          }
+          .mood-card-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.3s ease;
+          }
+          .mood-card:hover .mood-card-img {
+            transform: scale(1.08);
+          }
+          .mood-card-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+          }
+          .mood-card:hover .mood-card-overlay {
+            opacity: 1;
+          }
+          .mood-card-play-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #e50914;
+            color: #fff;
+            border: none;
+            font-size: 1.15rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
+            cursor: pointer;
+            transition: transform 0.15s ease;
+          }
+          .mood-card-play-btn:hover {
+            transform: scale(1.15);
+          }
+          .mood-card-rating {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            font-size: 0.7rem;
+            font-weight: 800;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fbbf24;
+            padding: 2px 7px;
+            border-radius: 6px;
+            backdrop-filter: blur(4px);
+          }
+          .mood-card-info {
+            padding: 9px 12px;
+          }
+          .mood-card-title {
+            font-size: 0.84rem;
+            font-weight: 800;
+            color: #fff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 2px;
+          }
+          .mood-card-sub {
+            font-size: 0.72rem;
+            color: #94a3b8;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .suggest-loading-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 4rem 1rem;
+            color: #94a3b8;
+            font-weight: 700;
+            font-size: 0.95rem;
+          }
+          .suggest-empty-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 3rem 1rem;
+            gap: 12px;
+            color: #94a3b8;
+          }
+          /* Responsive */
+          @media (max-width: 640px) {
+            .suggest-modal-card {
+              width: 96% !important;
+              max-height: 92dvh !important;
+              border-radius: 20px !important;
+            }
+            .quick-card-inner {
+              flex-direction: column;
+              align-items: center;
+              text-align: center;
+              gap: 14px;
+              padding: 16px;
+            }
+            .quick-poster-wrap {
+              width: 110px;
+            }
+            .quick-badges, .quick-actions {
+              justify-content: center;
+            }
+            .mood-grid {
+              grid-template-columns: repeat(2, 1fr);
+            }
+            .mood-matches-grid {
+              grid-template-columns: repeat(2, 1fr);
+              gap: 8px;
+            }
+          }
+        </style>
 
-            <button class="shortcuts-close-btn" @click="$emit('close')" title="Close (Esc)">
-              <i class="ph ph-x"></i>
+        <!-- Header -->
+        <div class="suggest-header">
+          <div class="suggest-header-title-wrap">
+            <div class="suggest-header-badge">
+              <i class="ph-bold ph-dice-five"></i>
+            </div>
+            <div>
+              <h3 class="suggest-title">What to Watch</h3>
+              <div class="suggest-subtitle">Instant randomizer & mood recommendations</div>
+            </div>
+          </div>
+          
+          <div class="suggest-tabs">
+            <button
+              class="suggest-tab"
+              :class="{ active: activeTab === 'quick' }"
+              @click="activeTab = 'quick'"
+            >
+              <i class="ph-bold ph-shuffle"></i>
+              <span>Quick Pick</span>
+            </button>
+            <button
+              class="suggest-tab"
+              :class="{ active: activeTab === 'mood' }"
+              @click="activeTab = 'mood'; if (!hasSearchedMood) searchMoodMatches()"
+            >
+              <i class="ph-bold ph-sparkle"></i>
+              <span>Mood Match</span>
             </button>
           </div>
 
-          <!-- Body -->
-          <div class="suggest-modal-body">
-            <!-- TAB 1: QUICK PICK -->
-            <div v-if="activeTab === 'quick'" class="suggest-quick-tab">
-              <div v-if="loading && !quickPick" class="suggest-loading-card">
-                <div class="suggest-loading-spinner">
-                  <i class="ph-bold ph-dice-five spin-dice"></i>
+          <button class="suggest-close-btn" @click="$emit('close')" title="Close (Esc)">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+
+        <!-- Body -->
+        <div class="suggest-body">
+          <!-- TAB 1: QUICK PICK -->
+          <div v-if="activeTab === 'quick'" class="quick-pick-wrap">
+            <div v-if="loading && !quickPick" class="suggest-loading-box">
+              <i class="ph-bold ph-dice-five dice-icon-spin" style="font-size:2.8rem;color:#e50914"></i>
+              <span>Rolling through your library...</span>
+            </div>
+
+            <div v-else-if="quickPick" class="quick-pick-wrap">
+              <div class="quick-pick-card" :class="{ 'is-rolling': rolling }">
+                <img
+                  v-if="quickPick.backdrop_path"
+                  :src="imgUrl(quickPick.backdrop_path)"
+                  alt=""
+                  class="quick-backdrop-img"
+                />
+                <div class="quick-backdrop-overlay"></div>
+                
+                <div class="quick-card-inner">
+                  <div class="quick-poster-wrap">
+                    <img
+                      v-if="quickPick.poster_path"
+                      :src="imgUrl(quickPick.poster_path, 'poster')"
+                      :alt="quickPick.title"
+                      class="quick-poster-img"
+                    />
+                    <div v-else class="quick-poster-fallback">
+                      <i class="ph-bold ph-film-strip"></i>
+                    </div>
+                  </div>
+
+                  <div class="quick-details">
+                    <div class="quick-badges">
+                      <span class="quick-badge-type">{{ (quickPick.type || 'Movie').toUpperCase() }}</span>
+                      <span v-if="quickPick.year" class="quick-badge-year">{{ quickPick.year }}</span>
+                      <span v-if="quickPick.certification" class="quick-badge-year">{{ quickPick.certification }}</span>
+                      <span v-if="quickPick.rating" class="quick-badge-rating">
+                        <i class="ph-fill ph-star"></i>
+                        {{ Number(quickPick.rating).toFixed(1) }}
+                      </span>
+                    </div>
+
+                    <h2 class="quick-title">{{ quickPick.title }}</h2>
+                    
+                    <div v-if="quickPick.genres" class="quick-genres">
+                      {{ formatGenres(quickPick.genres) }}
+                    </div>
+
+                    <p class="quick-overview">
+                      {{ quickPick.overview || 'No synopsis available for this title.' }}
+                    </p>
+
+                    <div class="quick-actions">
+                      <button class="quick-btn-play" @click="playItem(quickPick)">
+                        <i class="ph-fill ph-play"></i>
+                        <span>Play Now</span>
+                      </button>
+                      <button class="quick-btn-details" @click="viewDetails(quickPick)">
+                        <i class="ph-bold ph-info"></i>
+                        <span>More Details</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <span>Finding something great...</span>
               </div>
 
-              <div v-else-if="quickPick" class="suggest-card-container">
-                <div class="suggest-featured-card" :class="{ 'rolling-blur': rolling }">
-                  <div class="suggest-card-backdrop" v-if="quickPick.backdrop_path">
-                    <img :src="imgUrl(quickPick.backdrop_path)" alt="" />
-                    <div class="suggest-card-backdrop-overlay"></div>
-                  </div>
-                  
-                  <div class="suggest-card-content">
-                    <div class="suggest-card-poster-wrap">
-                      <img
-                        v-if="quickPick.poster_path"
-                        :src="imgUrl(quickPick.poster_path, 'poster')"
-                        :alt="quickPick.title"
-                        class="suggest-card-poster"
-                      />
-                      <div v-else class="suggest-card-poster-placeholder">
-                        <i class="ph-bold ph-film-strip"></i>
-                      </div>
-                    </div>
+              <!-- Full Width Roll Again Button -->
+              <button
+                class="quick-roll-all-btn"
+                @click="fetchQuickPick(true)"
+                :disabled="rolling"
+                id="suggest-roll-btn"
+              >
+                <i class="ph-bold ph-dice-five" :class="{ 'dice-icon-spin': rolling }"></i>
+                <span>{{ rolling ? 'Rolling the Dice...' : 'Roll Again (Randomize)' }}</span>
+              </button>
+            </div>
 
-                    <div class="suggest-card-info">
-                      <div class="suggest-card-badges">
-                        <span class="suggest-type-badge">{{ (quickPick.type || 'Movie').toUpperCase() }}</span>
-                        <span v-if="quickPick.year" class="suggest-year-badge">{{ quickPick.year }}</span>
-                        <span v-if="quickPick.rating" class="suggest-rating-badge">
-                          <i class="ph-fill ph-star" style="color:#f59e0b;font-size:0.8rem"></i>
-                          {{ Number(quickPick.rating).toFixed(1) }}
-                        </span>
-                      </div>
+            <div v-else class="suggest-empty-box">
+              <i class="ph ph-film-slate" style="font-size:2.8rem;color:#64748b"></i>
+              <p>No titles found in your media library to suggest.</p>
+            </div>
+          </div>
 
-                      <h3 class="suggest-card-title">{{ quickPick.title }}</h3>
-                      
-                      <div v-if="quickPick.genres" class="suggest-card-genres">
-                        {{ formatGenres(quickPick.genres) }}
-                      </div>
-
-                      <p class="suggest-card-overview">
-                        {{ quickPick.overview || 'No synopsis available for this title.' }}
-                      </p>
-
-                      <div class="suggest-card-actions">
-                        <button class="btn btn-primary suggest-play-btn" @click="playItem(quickPick)">
-                          <i class="ph-fill ph-play"></i>
-                          <span>Play Now</span>
-                        </button>
-                        <button class="btn btn-secondary suggest-details-btn" @click="viewDetails(quickPick)">
-                          <i class="ph-bold ph-info"></i>
-                          <span>More Details</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Full Width Roll Again Button -->
+          <!-- TAB 2: MOOD MATCH -->
+          <div v-if="activeTab === 'mood'" class="mood-tab-wrap">
+            <div>
+              <div class="mood-section-title">
+                <i class="ph-bold ph-sparkle" style="color:#e50914"></i>
+                <span>1. What's the vibe tonight?</span>
+              </div>
+              <div class="mood-grid">
                 <button
-                  class="suggest-full-roll-btn"
-                  @click="fetchQuickPick(true)"
-                  :disabled="rolling"
-                  id="suggest-roll-btn"
+                  v-for="m in moods"
+                  :key="m.id"
+                  class="mood-card-chip"
+                  :class="{ active: selectedMood === m.id }"
+                  @click="selectedMood = m.id; searchMoodMatches()"
                 >
-                  <i class="ph-bold ph-dice-five" :class="{ 'spin-dice': rolling }"></i>
-                  <span>{{ rolling ? 'Rolling the Dice...' : 'Roll Again' }}</span>
+                  <div class="mood-chip-top">
+                    <span class="mood-chip-emoji">{{ m.emoji }}</span>
+                    <span class="mood-chip-name">{{ m.label }}</span>
+                  </div>
+                  <span class="mood-chip-desc">{{ m.desc }}</span>
                 </button>
-              </div>
-
-              <div v-else class="suggest-empty-state">
-                <i class="ph ph-film-slate" style="font-size:2.5rem;color:var(--text-muted)"></i>
-                <p>No titles found in your media library to suggest.</p>
               </div>
             </div>
 
-            <!-- TAB 2: MOOD MATCH -->
-            <div v-if="activeTab === 'mood'" class="suggest-mood-tab">
-              <div class="suggest-mood-section">
-                <label class="suggest-section-label">1. How are you feeling tonight?</label>
-                <div class="suggest-mood-chips">
+            <div class="mood-filter-bar">
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font-size:0.75rem;font-weight:800;text-transform:uppercase;color:#94a3b8">Format</span>
+                <div class="mood-pill-group">
                   <button
-                    v-for="m in moods"
-                    :key="m.id"
-                    class="suggest-mood-chip"
-                    :class="{ active: selectedMood === m.id }"
-                    @click="selectedMood = m.id; searchMoodMatches()"
+                    v-for="t in mediaTypes"
+                    :key="t.id"
+                    class="mood-format-pill"
+                    :class="{ active: selectedType === t.id }"
+                    @click="selectedType = t.id; searchMoodMatches()"
                   >
-                    <span class="mood-emoji">{{ m.emoji }}</span>
-                    <span class="mood-label">{{ m.label }}</span>
+                    {{ t.label }}
                   </button>
                 </div>
               </div>
 
-              <div class="suggest-filters-row">
-                <div class="suggest-filter-group">
-                  <label class="suggest-sublabel">Format</label>
-                  <div class="suggest-pill-filters">
-                    <button
-                      v-for="t in mediaTypes"
-                      :key="t.id"
-                      class="suggest-type-chip"
-                      :class="{ active: selectedType === t.id }"
-                      @click="selectedType = t.id; searchMoodMatches()"
-                    >
-                      {{ t.label }}
-                    </button>
-                  </div>
-                </div>
+              <div>
+                <label class="mood-toggle-label">
+                  <input
+                    type="checkbox"
+                    v-model="unwatchedOnly"
+                    @change="searchMoodMatches"
+                    class="mood-checkbox"
+                  />
+                  <span>Unwatched only</span>
+                </label>
+              </div>
+            </div>
 
-                <div class="suggest-filter-group">
-                  <label class="suggest-sublabel">Filter</label>
-                  <label class="suggest-checkbox-label">
-                    <input
-                      type="checkbox"
-                      v-model="unwatchedOnly"
-                      @change="searchMoodMatches"
-                      class="suggest-checkbox"
-                    />
-                    <span>Unwatched only</span>
-                  </label>
-                </div>
+            <!-- Matches Results -->
+            <div>
+              <div v-if="loadingMood" class="suggest-loading-box" style="padding:2.5rem">
+                <i class="ph-bold ph-sparkle dice-icon-spin" style="font-size:2.4rem;color:#e50914"></i>
+                <span>Finding titles for your mood...</span>
               </div>
 
-              <!-- Matches Results -->
-              <div class="suggest-mood-results">
-                <div v-if="loadingMood" class="suggest-loading-card" style="padding:2rem">
-                  <div class="suggest-loading-spinner">
-                    <i class="ph-bold ph-sparkle spin-dice"></i>
-                  </div>
-                  <span>Matching your mood...</span>
+              <div v-else-if="moodMatches.length > 0">
+                <div class="mood-matches-header">
+                  <span class="mood-matches-count">{{ moodMatches.length }} Recommended Matches</span>
+                  <button class="mood-shuffle-btn" @click="searchMoodMatches">
+                    <i class="ph-bold ph-arrows-clockwise"></i>
+                    <span>Shuffle</span>
+                  </button>
                 </div>
 
-                <div v-else-if="moodMatches.length > 0">
-                  <div class="suggest-results-header">
-                    <span class="suggest-results-count">{{ moodMatches.length }} Recommended Matches</span>
-                    <button class="suggest-refresh-link" @click="searchMoodMatches">
-                      <i class="ph-bold ph-arrows-clockwise"></i>
-                      <span>Shuffle</span>
-                    </button>
-                  </div>
-
-                  <div class="suggest-matches-grid">
-                    <div
-                      v-for="match in moodMatches"
-                      :key="match.id || match.tmdb_id"
-                      class="suggest-match-card"
-                      @click="viewDetails(match)"
-                    >
-                      <div class="suggest-match-poster-wrap">
-                        <img
-                          v-if="match.poster_path"
-                          :src="imgUrl(match.poster_path, 'poster')"
-                          :alt="match.title"
-                          class="suggest-match-poster"
-                          loading="lazy"
-                        />
-                        <div v-else class="suggest-match-placeholder">
-                          <i class="ph-bold ph-film-strip"></i>
-                        </div>
-                        <div class="suggest-match-overlay">
-                          <button class="suggest-match-play-btn" @click.stop="playItem(match)" title="Play Now">
-                            <i class="ph-fill ph-play"></i>
-                          </button>
-                        </div>
-                        <div v-if="match.rating" class="suggest-match-rating">
-                          ★ {{ Number(match.rating).toFixed(1) }}
-                        </div>
+                <div class="mood-matches-grid" style="margin-top:10px">
+                  <div
+                    v-for="match in moodMatches"
+                    :key="match.id || match.tmdb_id"
+                    class="mood-card"
+                    @click="viewDetails(match)"
+                  >
+                    <div class="mood-card-poster">
+                      <img
+                        v-if="match.poster_path"
+                        :src="imgUrl(match.poster_path, 'poster')"
+                        :alt="match.title"
+                        class="mood-card-img"
+                        loading="lazy"
+                      />
+                      <div v-else class="quick-poster-fallback">
+                        <i class="ph-bold ph-film-strip"></i>
                       </div>
-                      <div class="suggest-match-meta">
-                        <div class="suggest-match-title" :title="match.title">{{ match.title }}</div>
-                        <div class="suggest-match-sub">
-                          <span>{{ match.year || match.type }}</span>
-                          <span v-if="match.genres">• {{ formatGenres(match.genres) }}</span>
-                        </div>
+                      <div class="mood-card-overlay">
+                        <button class="mood-card-play-btn" @click.stop="playItem(match)" title="Play Now">
+                          <i class="ph-fill ph-play"></i>
+                        </button>
+                      </div>
+                      <div v-if="match.rating" class="mood-card-rating">
+                        ★ {{ Number(match.rating).toFixed(1) }}
+                      </div>
+                    </div>
+                    <div class="mood-card-info">
+                      <div class="mood-card-title" :title="match.title">{{ match.title }}</div>
+                      <div class="mood-card-sub">
+                        <span>{{ match.year || match.type }}</span>
+                        <span v-if="match.genres">• {{ formatGenres(match.genres) }}</span>
                       </div>
                     </div>
                   </div>
                 </div>
+              </div>
 
-                <div v-else class="suggest-empty-state">
-                  <i class="ph ph-magnifying-glass" style="font-size:2.2rem;color:var(--text-muted)"></i>
-                  <p>No matching titles for this mood and filter.</p>
-                  <button class="btn btn-sm btn-secondary" @click="unwatchedOnly = false; selectedType = 'all'; searchMoodMatches()">
-                    Clear Filters
-                  </button>
-                </div>
+              <div v-else class="suggest-empty-box">
+                <i class="ph ph-magnifying-glass" style="font-size:2.4rem;color:#64748b"></i>
+                <p style="margin:0;font-size:0.9rem">No matching titles for this mood and format.</p>
+                <button class="quick-btn-details" @click="unwatchedOnly = false; selectedType = 'all'; searchMoodMatches()" style="margin-top:6px">
+                  Reset Filters
+                </button>
               </div>
             </div>
           </div>
