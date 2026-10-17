@@ -15488,8 +15488,8 @@ const SuggestModal = {
                   >
                     <div class="mood-card-poster">
                       <img
-                        v-if="match.poster_path"
-                        :src="imgUrl(match.poster_path, 'poster')"
+                        v-if="match.backdrop_path || match.poster_path"
+                        :src="imgUrl(match.backdrop_path || match.poster_path)"
                         :alt="match.title"
                         class="mood-card-img"
                         loading="lazy"
