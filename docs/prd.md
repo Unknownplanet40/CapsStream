@@ -69,3 +69,18 @@ Random Suggestion & Mood Match solves decision paralysis ("what should I watch t
 - **Mood Questionnaire**: User switches to "Mood Match" tab, selects their current vibe (e.g. "Laugh" or "Thrill"), optionally restricts to Movies/Anime or Unwatched, and clicks "Find Matches". Results display as interactive recommendation cards.
 - **Profile & Kids Mode Awareness**: In Kids mode, suggestions strictly filter out adult/restricted titles. Media stored on disconnected/unmounted drives is flagged or excluded.
 
+---
+
+# Product Requirements Document (PRD): Animated Preset Profile Avatars
+
+## 1. Executive Summary
+Animated Preset Profile Avatars allow users to personalize their household profiles with 10 built-in animated GIF avatars (`static/img/Profile_Assets/Profile 1.gif` through `Profile 10.gif`) directly during profile creation and editing.
+
+## 2. Core User Stories & Workflows
+- **3-Tab Avatar Picker (`Animated` | `Icons` | `Upload`)**:
+  - Displayed in the left column of both **Add Profile** (`viewMode === 'create'`) and **Edit Profile** (`viewMode === 'edit'`).
+  - **Animated Tab**: Renders a 5x2 grid of the 10 animated GIF avatars with active ring selection.
+  - **Icons Tab**: Renders the 4-column Phosphor icon grid (`avatars` array), clearing `custom_avatar_url` when selected.
+  - **Upload Tab**: Provides custom image upload (`png`, `jpg`, `webp`, `gif`) and removal controls in both Create and Edit flows.
+- **Smart Default Selection**:
+  - Opening "Add Profile" automatically pre-selects the first unused animated preset avatar (falling back to `Profile 1.gif` if all 10 are in use) so new profiles immediately have a vibrant animated avatar.

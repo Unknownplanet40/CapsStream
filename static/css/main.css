@@ -12211,6 +12211,84 @@ body.kids-mode-theme .card-badge {
   border-color: rgba(255, 255, 255, 0.4);
 }
 
+/* 3-Tab Avatar Picker & Animated Preset Avatars Grid */
+.avatar-picker-section {
+  margin-top: 14px;
+  width: 210px;
+  max-width: 100%;
+}
+
+.avatar-picker-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 10px;
+}
+
+.avatar-picker-tab {
+  background: transparent;
+  border: none;
+  color: #a3a3a3;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 6px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.avatar-picker-tab:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.avatar-picker-tab.active {
+  background: var(--accent, #e50914);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(229, 9, 20, 0.35);
+}
+
+.preset-avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.preset-avatar-item {
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+  position: relative;
+}
+
+.preset-avatar-item:hover {
+  transform: scale(1.08);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.preset-avatar-item.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px var(--accent, #e50914), 0 4px 12px rgba(229, 9, 20, 0.45);
+  transform: scale(1.06);
+}
+
+.preset-avatar-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 /* Maturity & Genre Selector UI */
 .maturity-pill-selector {
   display: grid;

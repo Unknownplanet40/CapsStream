@@ -109,3 +109,19 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_shared ON bookmarks(media_id, is_shared
   - Modern glassmorphic modal design matching CapsStream design system.
   - Responsive layout down to 320px mobile viewports.
 
+---
+
+# System Architecture: Animated Preset Profile Avatars
+
+## 1. Static Assets & Persistence (`static/img/Profile_Assets/` & `backend/routes/profiles.py`)
+- **Asset Directory**: `static/img/Profile_Assets/` containing 10 animated GIFs:
+  - `Profile 1.gif`, `Profile 2.gif`, `Profile 3.gif`, `Profile 4.gif`, `profile 5.gif`, `Profile 6.gif`, `Profile 7.gif`, `Profile 8.gif`, `Profile 9.gif`, `Profile 10.gif`.
+- **Persistence**: Selected preset URLs (e.g. `/static/img/Profile_Assets/Profile 1.gif`) are stored directly in the `profiles.custom_avatar_url` column via `POST /api/profiles` and `PUT /api/profiles/<id>`.
+- **URL Resolution**: `imgUrl()` in `static/js/app.js` passes `/static/...` paths through unchanged, enabling all existing avatar views (Profile Switcher, Navbar, TV Mode, PIN Modals) to display animated GIFs without schema changes.
+
+## 2. Frontend Component (`ProfilesPage` in `static/js/app.js`)
+- `presetAvatars`: Array of the 10 `/static/img/Profile_Assets/...` paths.
+- `avatarPickerTab`: Reactive ref (`'animated' | 'icons' | 'upload'`) controlling the active tab in Create and Edit forms.
+- `openCreateView()`: Sets `avatarPickerTab = 'animated'` and selects the first preset avatar not currently used by existing profiles.
+- `openEditView(profile)`: Automatically opens the tab matching the profile's current avatar (`'animated'` if `custom_avatar_url` is in `presetAvatars`, `'upload'` if custom uploaded photo, otherwise `'icons'`).
+- `onNewAvatarSelected(e)`: Previews uploaded file in Create Profile via object/data URL and uploads to `POST /api/profiles/<id>/avatar` upon creation if a file was staged.

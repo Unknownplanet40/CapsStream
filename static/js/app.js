@@ -18331,36 +18331,71 @@ const ProfilesPage = {
               <span v-else style="font-size:3.5rem">{{ editProfile.avatar || '🎬' }}</span>
             </div>
 
-            <!-- Custom Avatar Upload Controls -->
-            <div class="netflix-avatar-upload-wrap">
-              <input type="file" ref="editAvatarFileInput" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" @change="onEditAvatarSelected" />
-              <button class="netflix-avatar-upload-btn" @click="$refs.editAvatarFileInput.click()">
-                <i class="ph-bold ph-camera"></i> Upload Photo
-              </button>
-              <button v-if="editProfile.custom_avatar_url" class="netflix-avatar-upload-btn" style="color:#ef4444" @click="editProfile.custom_avatar_url = ''">
-                <i class="ph-bold ph-trash"></i> Remove Photo
-              </button>
-            </div>
+            <!-- 3-Tab Avatar Picker (Animated, Icons, Upload) -->
+            <div class="avatar-picker-section">
+              <div class="avatar-picker-tabs" role="tablist" aria-label="Avatar Type">
+                <button
+                  type="button"
+                  class="avatar-picker-tab"
+                  :class="{ active: avatarPickerTab === 'animated' }"
+                  @click="avatarPickerTab = 'animated'"
+                >Animated</button>
+                <button
+                  type="button"
+                  class="avatar-picker-tab"
+                  :class="{ active: avatarPickerTab === 'icons' }"
+                  @click="avatarPickerTab = 'icons'"
+                >Icons</button>
+                <button
+                  type="button"
+                  class="avatar-picker-tab"
+                  :class="{ active: avatarPickerTab === 'upload' }"
+                  @click="avatarPickerTab = 'upload'"
+                >Upload</button>
+              </div>
 
-            <!-- Avatar Choices Grid (Icons) -->
-            <div style="margin-top:14px;max-width:140px">
-              <div style="font-size:0.75rem;color:#808080;margin-bottom:6px;font-weight:600">ICON</div>
-              <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
+              <!-- Tab 1: Animated Preset Avatars (5x2 Grid) -->
+              <div v-if="avatarPickerTab === 'animated'" class="preset-avatar-grid">
+                <div
+                  v-for="(presetUrl, idx) in presetAvatars"
+                  :key="presetUrl"
+                  class="preset-avatar-item"
+                  :class="{ active: editProfile.custom_avatar_url === presetUrl }"
+                  :title="'Animated Avatar ' + (idx + 1)"
+                  @click="editProfile.custom_avatar_url = presetUrl"
+                >
+                  <img :src="imgUrl(presetUrl)" :alt="'Animated Avatar ' + (idx + 1)" loading="lazy" />
+                </div>
+              </div>
+
+              <!-- Tab 2: Icons Grid -->
+              <div v-else-if="avatarPickerTab === 'icons'" style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
                 <div
                   v-for="a in avatars"
                   :key="a"
                   @click="editProfile.avatar = a; editProfile.custom_avatar_url = ''"
-                  style="cursor:pointer;font-size:1.3rem;padding:4px;border-radius:4px;text-align:center;transition:background 0.2s"
-                  :style="editProfile.avatar === a && !editProfile.custom_avatar_url ? { background: 'rgba(255,255,255,0.2)' } : {}"
+                  style="cursor:pointer;font-size:1.3rem;padding:6px;border-radius:6px;text-align:center;transition:background 0.2s"
+                  :style="editProfile.avatar === a && !editProfile.custom_avatar_url ? { background: 'rgba(255,255,255,0.22)', boxShadow: '0 0 0 1px rgba(255,255,255,0.4)' } : {}"
                 >
                   <i v-if="a.startsWith('ph-')" :class="'ph-bold ' + a"></i>
                   <span v-else>{{ a }}</span>
                 </div>
               </div>
+
+              <!-- Tab 3: Custom Upload -->
+              <div v-else-if="avatarPickerTab === 'upload'" class="netflix-avatar-upload-wrap" style="margin-top:0">
+                <input type="file" ref="editAvatarFileInput" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" @change="onEditAvatarSelected" />
+                <button type="button" class="netflix-avatar-upload-btn" @click="$refs.editAvatarFileInput.click()">
+                  <i class="ph-bold ph-camera"></i> Upload Photo
+                </button>
+                <button v-if="editProfile.custom_avatar_url" type="button" class="netflix-avatar-upload-btn" style="color:#ef4444" @click="editProfile.custom_avatar_url = ''">
+                  <i class="ph-bold ph-trash"></i> Remove Photo
+                </button>
+              </div>
             </div>
 
             <!-- Color Palette -->
-            <div style="margin-top:14px;max-width:140px">
+            <div style="margin-top:14px;width:210px;max-width:100%">
               <div style="font-size:0.75rem;color:#808080;margin-bottom:6px;font-weight:600">COLOR</div>
               <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
                 <div
@@ -18652,29 +18687,76 @@ const ProfilesPage = {
                 border: '3px solid ' + newProfile.color
               }"
             >
-              <i v-if="newProfile.avatar && newProfile.avatar.startsWith('ph-')" :class="'ph-bold ' + newProfile.avatar" style="font-size:3.5rem"></i>
+              <img v-if="newProfile.custom_avatar_url" :src="imgUrl(newProfile.custom_avatar_url)" class="netflix-avatar-img" style="border-radius:4px" />
+              <i v-else-if="newProfile.avatar && newProfile.avatar.startsWith('ph-')" :class="'ph-bold ' + newProfile.avatar" style="font-size:3.5rem"></i>
               <span v-else style="font-size:3.5rem">{{ newProfile.avatar || '🎬' }}</span>
             </div>
 
-            <!-- Avatar Choices Grid -->
-            <div style="margin-top:14px;max-width:140px">
-              <div style="font-size:0.75rem;color:#808080;margin-bottom:6px;font-weight:600">ICON</div>
-              <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
+            <!-- 3-Tab Avatar Picker (Animated, Icons, Upload) -->
+            <div class="avatar-picker-section">
+              <div class="avatar-picker-tabs" role="tablist" aria-label="Avatar Type">
+                <button
+                  type="button"
+                  class="avatar-picker-tab"
+                  :class="{ active: avatarPickerTab === 'animated' }"
+                  @click="avatarPickerTab = 'animated'"
+                >Animated</button>
+                <button
+                  type="button"
+                  class="avatar-picker-tab"
+                  :class="{ active: avatarPickerTab === 'icons' }"
+                  @click="avatarPickerTab = 'icons'"
+                >Icons</button>
+                <button
+                  type="button"
+                  class="avatar-picker-tab"
+                  :class="{ active: avatarPickerTab === 'upload' }"
+                  @click="avatarPickerTab = 'upload'"
+                >Upload</button>
+              </div>
+
+              <!-- Tab 1: Animated Preset Avatars (5x2 Grid) -->
+              <div v-if="avatarPickerTab === 'animated'" class="preset-avatar-grid">
+                <div
+                  v-for="(presetUrl, idx) in presetAvatars"
+                  :key="presetUrl"
+                  class="preset-avatar-item"
+                  :class="{ active: newProfile.custom_avatar_url === presetUrl }"
+                  :title="'Animated Avatar ' + (idx + 1)"
+                  @click="newProfile.custom_avatar_url = presetUrl; newAvatarPendingFile = null"
+                >
+                  <img :src="imgUrl(presetUrl)" :alt="'Animated Avatar ' + (idx + 1)" loading="lazy" />
+                </div>
+              </div>
+
+              <!-- Tab 2: Icons Grid -->
+              <div v-else-if="avatarPickerTab === 'icons'" style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
                 <div
                   v-for="a in avatars"
                   :key="a"
-                  @click="newProfile.avatar = a"
-                  style="cursor:pointer;font-size:1.3rem;padding:4px;border-radius:4px;text-align:center;transition:background 0.2s"
-                  :style="newProfile.avatar === a ? { background: 'rgba(255,255,255,0.2)' } : {}"
+                  @click="newProfile.avatar = a; newProfile.custom_avatar_url = ''; newAvatarPendingFile = null"
+                  style="cursor:pointer;font-size:1.3rem;padding:6px;border-radius:6px;text-align:center;transition:background 0.2s"
+                  :style="newProfile.avatar === a && !newProfile.custom_avatar_url ? { background: 'rgba(255,255,255,0.22)', boxShadow: '0 0 0 1px rgba(255,255,255,0.4)' } : {}"
                 >
                   <i v-if="a.startsWith('ph-')" :class="'ph-bold ' + a"></i>
                   <span v-else>{{ a }}</span>
                 </div>
               </div>
+
+              <!-- Tab 3: Custom Upload -->
+              <div v-else-if="avatarPickerTab === 'upload'" class="netflix-avatar-upload-wrap" style="margin-top:0">
+                <input type="file" ref="newAvatarFileInput" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" @change="onNewAvatarSelected" />
+                <button type="button" class="netflix-avatar-upload-btn" @click="$refs.newAvatarFileInput.click()">
+                  <i class="ph-bold ph-camera"></i> Upload Photo
+                </button>
+                <button v-if="newProfile.custom_avatar_url" type="button" class="netflix-avatar-upload-btn" style="color:#ef4444" @click="newProfile.custom_avatar_url = ''; newAvatarPendingFile = null">
+                  <i class="ph-bold ph-trash"></i> Remove Photo
+                </button>
+              </div>
             </div>
 
             <!-- Color Palette -->
-            <div style="margin-top:14px;max-width:140px">
+            <div style="margin-top:14px;width:210px;max-width:100%">
               <div style="font-size:0.75rem;color:#808080;margin-bottom:6px;font-weight:600">COLOR</div>
               <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
                 <div
@@ -19205,6 +19287,22 @@ const ProfilesPage = {
     const showVirtualKeypad = ref(false);
 
     const editAvatarFileInput = ref(null);
+    const newAvatarFileInput = ref(null);
+    const newAvatarPendingFile = ref(null);
+    const avatarPickerTab = ref("animated");
+
+    const presetAvatars = [
+      "/static/img/Profile_Assets/Profile 1.gif",
+      "/static/img/Profile_Assets/Profile 2.gif",
+      "/static/img/Profile_Assets/Profile 3.gif",
+      "/static/img/Profile_Assets/Profile 4.gif",
+      "/static/img/Profile_Assets/profile 5.gif",
+      "/static/img/Profile_Assets/Profile 6.gif",
+      "/static/img/Profile_Assets/Profile 7.gif",
+      "/static/img/Profile_Assets/Profile 8.gif",
+      "/static/img/Profile_Assets/Profile 9.gif",
+      "/static/img/Profile_Assets/Profile 10.gif",
+    ];
 
     const availableGenres = [
       "Action", "Adventure", "Animation", "Comedy", "Crime",
@@ -19362,6 +19460,19 @@ const ProfilesPage = {
       } catch (err) {
         addToast("Failed to upload avatar image", "error");
       }
+    }
+
+    function onNewAvatarSelected(e) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      newAvatarPendingFile.value = file;
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          newProfile.custom_avatar_url = reader.result;
+        }
+      };
+      reader.readAsDataURL(file);
     }
 
     async function moveProfile(index, delta) {
@@ -19529,6 +19640,13 @@ const ProfilesPage = {
       editProfile.is_kids = !!profile.is_kids;
       editProfile.is_admin = !!profile.is_admin;
       editProfile.custom_avatar_url = profile.custom_avatar_url || "";
+      if (editProfile.custom_avatar_url && presetAvatars.includes(editProfile.custom_avatar_url)) {
+        avatarPickerTab.value = "animated";
+      } else if (editProfile.custom_avatar_url) {
+        avatarPickerTab.value = "upload";
+      } else {
+        avatarPickerTab.value = "animated";
+      }
       editTarget.value = { ...profile, totp_enabled: !!profile.totp_enabled };
       totpEnrollment.value = null;
       totpSetupCode.value = "";
@@ -19559,7 +19677,11 @@ const ProfilesPage = {
         newProfile.pin = "";
         newProfile.is_kids = false;
         newProfile.is_admin = false;
-        newProfile.custom_avatar_url = "";
+        const usedAvatars = new Set((profiles.value || []).map((p) => p.custom_avatar_url).filter(Boolean));
+        const nextUnusedPreset = presetAvatars.find((url) => !usedAvatars.has(url)) || presetAvatars[0];
+        newProfile.custom_avatar_url = nextUnusedPreset;
+        newAvatarPendingFile.value = null;
+        avatarPickerTab.value = "animated";
         newProfile.maturity_rating = "All";
         newProfile.blocked_genres_list = [];
         newProfile.default_audio_lang = "";
@@ -19906,6 +20028,7 @@ const ProfilesPage = {
         return;
       }
       try {
+        const initialAvatarUrl = newAvatarPendingFile.value ? "" : newProfile.custom_avatar_url;
         const p = await API.post("/api/profiles", {
           name: newProfile.name.trim(),
           pin: newProfile.pin.trim() || "",
@@ -19914,7 +20037,7 @@ const ProfilesPage = {
           theme: newProfile.theme || "crimson",
           is_kids: newProfile.is_kids,
           is_admin: newProfile.is_admin,
-          custom_avatar_url: newProfile.custom_avatar_url,
+          custom_avatar_url: initialAvatarUrl,
           maturity_rating: newProfile.maturity_rating,
           blocked_genres: newProfile.blocked_genres_list.join(","),
           default_audio_lang: newProfile.default_audio_lang,
@@ -19925,6 +20048,28 @@ const ProfilesPage = {
           bedtime_curfew: newProfile.bedtime_curfew,
           admin_pin: currentAdminPin.value,
         });
+        if (newAvatarPendingFile.value && p?.id) {
+          try {
+            const formData = new FormData();
+            formData.append("avatar", newAvatarPendingFile.value);
+            if (currentAdminPin.value) {
+              formData.append("admin_pin", currentAdminPin.value);
+            }
+            const headers = currentAdminPin.value ? { "X-Admin-PIN": currentAdminPin.value } : {};
+            const resp = await fetch(`/api/profiles/${p.id}/avatar`, {
+              method: "POST",
+              headers: headers,
+              body: formData,
+            });
+            const upRes = await resp.json();
+            if (resp.ok && upRes.custom_avatar_url) {
+              p.custom_avatar_url = upRes.custom_avatar_url;
+            }
+          } catch (uploadErr) {
+            /* ignore upload fallback */
+          }
+          newAvatarPendingFile.value = null;
+        }
         currentAdminPin.value = "";
         profiles.value.push(p);
         viewMode.value = "select";
@@ -20062,10 +20207,15 @@ const ProfilesPage = {
       editProfile,
       newProfile,
       avatars,
+      presetAvatars,
+      avatarPickerTab,
       colors,
       availableGenres,
       editAvatarFileInput,
+      newAvatarFileInput,
+      newAvatarPendingFile,
       onEditAvatarSelected,
+      onNewAvatarSelected,
       toggleBlockedGenre,
       moveProfile,
       onProfileClick,

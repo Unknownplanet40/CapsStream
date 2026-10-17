@@ -60,3 +60,17 @@ console.log('Compiling App template...');
 const appRender = ctx.Vue.compile(appTemplate);
 assert.strictEqual(typeof appRender, 'function', 'App.template compiles to a render function');
 console.log('PASS: App template compiled successfully.');
+
+// Test 3: ProfilesPage template
+const profilesMatch = appJs.match(/const ProfilesPage = \{([\s\S]*?)\r?\n\};\r?\n\r?\n\/\/ ─── Setup Wizard Page/);
+assert(profilesMatch, 'ProfilesPage definition found in app.js');
+
+vm.runInContext('window.ProfilesPage = {' + profilesMatch[1] + '};', ctx);
+const profilesTemplate = ctx.window.ProfilesPage.template;
+assert(profilesTemplate, 'ProfilesPage has template string');
+assert(profilesTemplate.includes('presetAvatars'), 'ProfilesPage template includes presetAvatars grid');
+
+console.log('Compiling ProfilesPage template...');
+const profilesRender = ctx.Vue.compile(profilesTemplate);
+assert.strictEqual(typeof profilesRender, 'function', 'ProfilesPage.template compiles to a render function');
+console.log('PASS: ProfilesPage template compiled successfully.');

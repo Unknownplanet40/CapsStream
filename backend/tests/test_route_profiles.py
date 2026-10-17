@@ -101,6 +101,41 @@ class TestRouteProfiles(unittest.TestCase):
         self.assertEqual(prof_after.get("has_completed_tour"), 1)
         self.assertEqual(prof_after.get("default_speed"), 1.25)
 
+    @patch("backend.routes.profiles.require_admin")
+    @patch("backend.routes.profiles.is_admin")
+    @patch("backend.routes.profiles.current_profile")
+    def test_api_create_and_update_profile_preset_animated_avatar(self, mock_curr, mock_is_admin, mock_req_admin):
+        """Verify POST /api/profiles and PUT /api/profiles/<id> persist animated preset custom_avatar_url."""
+        mock_is_admin.return_value = True
+        mock_curr.return_value = 1
+
+        preset_url_1 = "/static/img/Profile_Assets/Profile 1.gif"
+        preset_url_5 = "/static/img/Profile_Assets/profile 5.gif"
+
+        resp_create = self.client.post("/api/profiles", json={
+            "name": "Animated User",
+            "avatar": "ph-film-strip",
+            "color": "#e50914",
+            "custom_avatar_url": preset_url_1,
+        })
+        self.assertEqual(resp_create.status_code, 201)
+        created = resp_create.get_json()
+        self.assertEqual(created.get("custom_avatar_url"), preset_url_1)
+
+        pid = created["id"]
+        resp_update = self.client.put(f"/api/profiles/{pid}", json={
+            "name": "Animated User",
+            "avatar": "ph-film-strip",
+            "color": "#e50914",
+            "custom_avatar_url": preset_url_5,
+        })
+        self.assertEqual(resp_update.status_code, 200)
+        updated = resp_update.get_json()
+        self.assertEqual(updated.get("custom_avatar_url"), preset_url_5)
+
+        prof_db = get_profile(pid)
+        self.assertEqual(prof_db.get("custom_avatar_url"), preset_url_5)
+
     def test_heartbeat_does_not_falsely_evict_after_api_me(self):
         """Verify that heartbeat does not evict after /api/profiles/me initializes presence."""
         pid = create_profile(name="Test User", pin_hash=None, is_admin=False)
