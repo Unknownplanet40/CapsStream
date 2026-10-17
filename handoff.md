@@ -1,34 +1,37 @@
 # Handoff
 
 ## 1. Goal
-Implement a random suggestion dice button next to the search button in the navigation header, opening a dual-tab modal with Quick Pick (immediate media card with full-width roll again action) and Mood Match (interactive questionnaire/chips for tailored mood recommendations), ensuring zero Vue template compile errors, reliable style injection, landscape imagery, and accurate details navigation.
+Integrate the 10 animated GIF preset avatars (`static/img/Profile_Assets/Profile 1.gif` through `Profile 10.gif`) into a 3-tab avatar picker (`Animated`, `Icons`, `Upload`) in both the Add Profile and Edit Profile screens, with smart default selection for new profiles, alongside the completed Random Suggestion & Mood Match modal (`#27`).
 
 ## 2. Current State
 - **Branch:** `main`
-- **Committed Hash:** `771294f` (`fix(media): resolve movie details route ID resolution and add tmdb fallback`)
-- **Push Status:** Committed locally (ahead of origin by 5 commits); awaiting user confirmation before `git push`.
+- **Committed Hash:** `66315c3` (`feat(profiles): add animated preset avatars gallery to profile creation and editor`, `Closes #28`)
+- **Push Status:** Committed locally (`main` ahead of `origin/main`); awaiting user confirmation before `git push`.
 - **Release CI:** Push will trigger `.github/workflows/auto-release.yml` with minor bump (`feat:` -> `v2.85.0.0`) publishing release update zip and Android TV APK.
 - **Server Running Status:** Server tests passing; port 8700.
-- **Tests:** All 469 backend tests passing (including 7 in `test_route_suggest.py`), plus new automated in-browser template compiler test in `backend/tests/test_vue_templates.js` passing (100%).
+- **Tests:** All 9 profile route tests in `backend/tests/test_route_profiles.py` passing (`100%`) and all 3 Vue runtime template compilation checks (`SuggestModal`, `App`, `ProfilesPage`) in `backend/tests/test_vue_templates.js` passing (`100%`).
 
 ## 3. Active Files
-- `static/js/app.js`: SuggestModal with landscape backdrop images, dynamic style injection, template ampersand fixes, and proper movie/series ID routing.
-- `backend/routes/media.py`: Added TMDB ID fallback to `api_media_detail` so requests resolve correctly by either primary key or TMDB ID.
-- `backend/tests/test_vue_templates.js`: Automated regression test verifying `SuggestModal` and `App` templates compile cleanly in Vue 3 runtime.
-- `static/css/main.css`: Styles for `.suggest-modal-card`, `.suggest-featured-card`, `.suggest-full-roll-btn`, `.suggest-mood-chips`, and `@keyframes diceRoll`.
-- `PROJECT-LOG.md`: Permanent historical session record.
+- `static/img/Profile_Assets/`: 10 animated GIF avatars (`Profile 1.gif` through `Profile 10.gif`, with `profile 5.gif` lowercase `p`).
+- `static/js/app.js`: `ProfilesPage` updated with `presetAvatars`, `avatarPickerTab`, 3-tab selector (`Animated`, `Icons`, `Upload`), 5x2 animated GIF grid, smart default preset selection in `openCreateView()`, and custom upload support in Create Profile (`onNewAvatarSelected`).
+- `static/css/main.css`: Styles for `.avatar-picker-section`, `.avatar-picker-tabs`, `.avatar-picker-tab`, `.preset-avatar-grid`, and `.preset-avatar-item`.
+- `backend/tests/test_route_profiles.py`: Added `test_api_create_and_update_profile_preset_animated_avatar`.
+- `backend/tests/test_vue_templates.js`: Added `ProfilesPage` template compilation verification.
+- `docs/prd.md` & `docs/architecture.md`: Added Animated Preset Profile Avatars documentation.
+- `PROJECT-LOG.md`: Appended historical decision and shipping log.
 
 ## 4. Changes Made
-- Fixed "Title Not Found" on card click: `viewDetails` in `SuggestModal` previously selected `item.tmdb_id` for movies, which caused `DetailPage` to query `/api/media/:tmdb_id` instead of `/api/media/:id`.
-- Updated `viewDetails` and `playItem` to prioritize `item.id` for movies (`/title/movie/${item.id}`) and `item.tmdb_id` for series (`/title/${type}/${targetId}`).
-- Hardened `api_media_detail` in `backend/routes/media.py` with a fallback query by `tmdb_id` so any movie requested by TMDB ID still resolves cleanly without a 404.
-- Changed Recommended Matches cards to use landscape imagery (`match.backdrop_path || match.poster_path`) instead of portrait posters.
-- Resolved template compilation errors caused by unescaped ampersands and inline `<style>` blocks.
+- Created GitHub Issue `#28` (`feat(profiles): add animated preset avatars gallery to profile creation and editor`).
+- Added 3-tab avatar selector (`Animated`, `Icons`, `Upload`) to both Add Profile and Edit Profile forms in `ProfilesPage` (`static/js/app.js`).
+- Added `<img>` preview support to the Add Profile live preview box so animated GIFs and uploaded photos render immediately.
+- Configured `openCreateView()` to automatically pre-select the first unused animated preset avatar (or `Profile 1.gif` fallback) in `newProfile.custom_avatar_url`.
+- Added `onNewAvatarSelected` in Create Profile so users can also upload a custom image file during profile creation.
+- Verified backend persistence and Vue 3 runtime template compilation with automated tests.
 
 ## 5. Failed Attempts
-- None. Routing now strictly follows the established conventions across `HomePage`, `BrowsePage`, and `MediaCard`.
+- None.
 
 ## 6. Specific Next Steps
 1. Request user confirmation to execute `git push origin main`.
-2. Push commits to GitHub.
-3. Monitor `.github/workflows/auto-release.yml` automated release for `v2.85.0.0` and Android TV APK compilation.
+2. Push commits to GitHub once approved.
+3. Verify `.github/workflows/auto-release.yml` cuts the next automated release.

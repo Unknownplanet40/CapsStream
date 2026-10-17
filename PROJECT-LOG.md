@@ -325,3 +325,19 @@ Fix ID resolution order in `SuggestModal`: movies navigate by local `id` (`/titl
 - `backend/routes/media.py`: Added fallback in `api_media_detail` to look up by `tmdb_id` if direct ID search yields no result.
 
 ---
+## October 17 at 11:09 AM
+### Asked
+User requested: `/new-feature I added @[static/img/Profile_Assets] can you add it in the profile creation so user can choice default profiles if` and approved Phase 1 discovery decisions (`proceed`).
+
+### Decision
+Implement a 3-tab avatar picker (`Animated`, `Icons`, `Upload`) in both Create Profile and Edit Profile inside `ProfilesPage` (`static/js/app.js`), storing the selected `/static/img/Profile_Assets/...` GIF path in `custom_avatar_url` and auto-selecting the first unused preset avatar when opening Add Profile.
+>why: Storing `/static/img/Profile_Assets/<filename>` in `custom_avatar_url` works across all existing avatar surfaces via `imgUrl()` without requiring a SQLite schema migration, while the 3-tab layout keeps the form compact and exposes all 10 animated GIFs alongside icons and custom uploads.
+
+### Shipped
+- Created GitHub Issue `#28` (`feat(profiles): add animated preset avatars gallery to profile creation and editor`).
+- Added 10 animated GIF preset avatars in `static/img/Profile_Assets/`.
+- Added 3-tab avatar selector (`Animated`, `Icons`, `Upload`) and 5x2 animated preset grid in `static/js/app.js` and `static/css/main.css`.
+- Added automated test coverage in `backend/tests/test_route_profiles.py` and `backend/tests/test_vue_templates.js`.
+- Updated `docs/prd.md` and `docs/architecture.md`.
+
+---
