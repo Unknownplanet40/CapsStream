@@ -341,3 +341,20 @@ Implement a 3-tab avatar picker (`Animated`, `Icons`, `Upload`) in both Create P
 - Updated `docs/prd.md` and `docs/architecture.md`.
 
 ---
+
+## October 22 at 12:05 PM
+### Asked
+User reported: "i tried playing visionquest but it keep saying Failed to load resource and i dont know why can you check it so see what the problem :8700/api/media/3630:1 Failed to load resource: the server responded with a status of 500 (INTERNAL SERVER ERROR)" and requested "/fix-ui fix the items in the request media page i dont like the layout if the user put notes".
+
+### Decision
+>why: In `backend/routes/media.py` `api_media_detail`, a redundant conditional import `from backend.db.media_repository import get_media_by_tmdb` shadowed the global module import, causing `UnboundLocalError` when fetching episode seasons for TV series.
+>why: In the request media card, user notes and server responses were wrapped in bulky, disconnected full-width boxes that inflated card height, caused awkward empty space on the right action toolbar, and hid the author avatar/name for single requester notes. Redesigning as a unified `.req-dialogue-thread` with responsive glassmorphic pills and a subtle connector line restores visual balance, hierarchy, and context.
+
+### Shipped
+- Fixed TV series episode retrieval in `backend/routes/media.py` by eliminating the shadowed import.
+- Added regression test `test_media_detail_series_resolves_episodes` in `backend/tests/test_route_media.py`.
+- Modernized request notes into `.req-dialogue-thread` in `static/js/app.js` with author avatar/name and paired `.req-thread-admin` pill with connector branch.
+- Added responsive styling in `static/css/main.css` for dialogue threads and glassmorphic note pills.
+- Added automated `RequestsPage` compilation test in `backend/tests/test_vue_templates.js`.
+
+---
