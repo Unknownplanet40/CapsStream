@@ -554,6 +554,28 @@ class TestRouteMedia(unittest.TestCase):
         mock_minimize.assert_called_once()
 
 
+    @patch("backend.routes.media.get_best_media_source")
+    @patch("backend.routes.media.kids_guard_media", return_value=None)
+    @patch("backend.routes.media.get_media_by_tmdb")
+    @patch("backend.matcher.get_show_seasons_list", return_value=[1])
+    def test_media_detail_series_resolves_episodes(self, mock_seasons, mock_get_tmdb, mock_kids, mock_media):
+        """Verify series detail resolves get_media_by_tmdb without UnboundLocalError."""
+        mock_media.return_value = {
+            "id": 99,
+            "title": "Test Show",
+            "type": "series",
+            "tmdb_id": 9999,
+            "file_path": "",
+            "duration": 1800,
+            "backdrop_path": None,
+        }
+        mock_get_tmdb.return_value = []
+        resp = self.client.get("/api/media/99")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data.get("title"), "Test Show")
+        mock_get_tmdb.assert_called_with(9999, "series")
+
 if __name__ == "__main__":
     unittest.main()
 

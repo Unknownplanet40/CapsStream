@@ -74,3 +74,17 @@ console.log('Compiling ProfilesPage template...');
 const profilesRender = ctx.Vue.compile(profilesTemplate);
 assert.strictEqual(typeof profilesRender, 'function', 'ProfilesPage.template compiles to a render function');
 console.log('PASS: ProfilesPage template compiled successfully.');
+
+// Test 4: RequestsPage template
+const requestsMatch = appJs.match(/const RequestsPage = \{([\s\S]*?)\r?\n\};\r?\n\r?\n\/\/ ─── Router/);
+assert(requestsMatch, 'RequestsPage definition found in app.js');
+
+vm.runInContext('window.RequestsPage = {' + requestsMatch[1] + '};', ctx);
+const requestsTemplate = ctx.window.RequestsPage.template;
+assert(requestsTemplate, 'RequestsPage has template string');
+assert(requestsTemplate.includes('req-dialogue-thread'), 'RequestsPage template includes req-dialogue-thread container');
+
+console.log('Compiling RequestsPage template...');
+const requestsRender = ctx.Vue.compile(requestsTemplate);
+assert.strictEqual(typeof requestsRender, 'function', 'RequestsPage.template compiles to a render function');
+console.log('PASS: RequestsPage template compiled successfully.');

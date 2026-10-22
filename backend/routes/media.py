@@ -464,7 +464,6 @@ def api_detect_anime_status():
 def api_media_detail(media_id):
     media = get_best_media_source(media_id)
     if not media:
-        from backend.db.media_repository import get_media_by_tmdb
         tmdb_rows = get_media_by_tmdb(media_id, "movie")
         if tmdb_rows:
             media = get_best_media_source(tmdb_rows[0]["id"])

@@ -25745,90 +25745,179 @@ body:has(.settings-save-fab) .back-to-top-btn,
   text-wrap: pretty;
 }
 
-/* Notes & Speech Bubbles */
+/* Notes & Dialogue Speech Bubbles */
 
-.req-speech-note {
+.req-dialogue-thread,
+.req-episode-notes-container {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 7px 11px;
-  border-radius: var(--radius-sm, 8px);
-  font-size: 0.79rem;
-  line-height: 1.4;
-  word-break: break-word;
-}
-
-.req-speech-note i {
-  font-size: 0.95rem;
-  margin-top: 1px;
-  flex-shrink: 0;
-}
-
-.req-user-note {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  color: var(--text-secondary);
-}
-
-.req-user-note i {
-  color: var(--text-muted);
-}
-
-.req-server-response {
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.10) 0%, rgba(99, 102, 241, 0.08) 100%);
-  border: 1px solid rgba(56, 189, 248, 0.25);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  border-radius: var(--radius-sm, 8px);
-  color: #e0f2fe;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  margin: 3px 0 5px;
   width: 100%;
   box-sizing: border-box;
 }
 
-.req-server-response i {
-  color: #38bdf8;
-  font-size: 1rem;
-  margin-top: 2px;
+.req-thread-msg,
+.req-speech-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm, 10px);
+  position: relative;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
 }
 
+.req-thread-avatar {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  color: #fff;
+  flex-shrink: 0;
+  margin-top: 1px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.req-thread-avatar .req-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.req-thread-content,
 .req-note-body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  flex: 1;
+  gap: 2px;
   min-width: 0;
+  flex: 1;
 }
 
-.req-note-tag {
-  font-size: 0.68rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #38bdf8;
-  display: inline-flex;
+.req-thread-header {
+  display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  line-height: 1.25;
 }
 
-.req-note-text {
-  color: rgba(255, 255, 255, 0.92);
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.45;
-}
-
-.req-note-avatar {
-  width: 20px;
-  height: 20px;
-  font-size: 0.65rem;
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-
+.req-thread-author,
 .req-note-author {
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   font-weight: 600;
   color: var(--text-primary, #ffffff);
-  margin-bottom: 1px;
+  letter-spacing: -0.01em;
+}
+
+.req-thread-badge,
+.req-note-tag {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill, 10px);
+  line-height: 1.25;
+  display: inline-flex;
+  align-items: center;
+}
+
+.req-thread-badge-user {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted, #94a3b8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.req-thread-badge-admin,
+.req-note-tag {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.req-thread-text,
+.req-note-text {
+  margin: 0;
+  font-size: 0.81rem;
+  line-height: 1.42;
+  color: rgba(255, 255, 255, 0.9);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* User Note: subtle glassmorphic pill */
+.req-thread-user,
+.req-user-note {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.req-thread-user:hover,
+.req-user-note:hover {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.13);
+}
+
+/* Admin Server Response: paired and threaded */
+.req-thread-admin,
+.req-server-response {
+  margin-left: 14px;
+  background: rgba(56, 189, 248, 0.055);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.req-thread-admin:hover,
+.req-server-response:hover {
+  background: rgba(56, 189, 248, 0.085);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.req-thread-admin-avatar {
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.32);
+}
+
+.req-thread-admin-avatar i {
+  font-size: 0.74rem;
+}
+
+.req-thread-admin-name {
+  color: #38bdf8;
+}
+
+/* Thread connector line between user note and admin response */
+.req-thread-connector {
+  position: absolute;
+  left: -9px;
+  top: -8px;
+  width: 8px;
+  height: 20px;
+  border-left: 1.5px solid rgba(255, 255, 255, 0.14);
+  border-bottom: 1.5px solid rgba(255, 255, 255, 0.14);
+  border-bottom-left-radius: 6px;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .req-thread-admin,
+  .req-server-response {
+    margin-left: 10px;
+  }
+  .req-thread-connector {
+    left: -7px;
+    width: 6px;
+  }
 }
 
 /* ── Card Requester Meta Row ── */

@@ -26510,32 +26510,40 @@ const RequestsPage = {
                   {{ req.overview }}
                 </p>
 
-                <!-- Speech Bubble Notes -->
-                <div class="req-episode-notes-container" v-if="getRequesterNotes(req).length > 0 || getCleanAdminNote(req.admin_note)">
+                <!-- Dialogue Thread Notes -->
+                <div class="req-dialogue-thread" v-if="getRequesterNotes(req).length > 0 || getCleanAdminNote(req.admin_note)">
                   <!-- Requester Notes -->
                   <div
                     v-for="(nItem, nIdx) in getRequesterNotes(req)"
                     :key="'note-' + nIdx"
-                    class="req-speech-note req-user-note"
+                    class="req-thread-msg req-thread-user"
                   >
-                    <div v-if="getRequesterNotes(req).length > 1 || (req.requesters && req.requesters.length > 1)" class="req-avatar req-note-avatar" :style="{ background: nItem.color || '#e50914' }">
+                    <div class="req-thread-avatar" :style="{ background: nItem.color || '#e50914' }">
                       <img v-if="nItem.custom_avatar_url" :src="imgUrl(nItem.custom_avatar_url)" class="req-avatar-img" :alt="nItem.name" />
                       <i v-else-if="nItem.avatar && nItem.avatar.startsWith('ph-')" :class="'ph-bold ' + nItem.avatar"></i>
                       <span v-else>{{ nItem.avatar || '🎬' }}</span>
                     </div>
-                    <i v-else class="ph-fill ph-chat-circle-dots"></i>
-                    <div class="req-note-body">
-                      <span v-if="getRequesterNotes(req).length > 1 || (req.requesters && req.requesters.length > 1)" class="req-note-author">{{ nItem.name }}</span>
-                      <span class="req-note-text">“{{ nItem.notes }}”</span>
+                    <div class="req-thread-content">
+                      <div class="req-thread-header">
+                        <span class="req-thread-author">{{ nItem.name }}</span>
+                        <span class="req-thread-badge req-thread-badge-user">Note</span>
+                      </div>
+                      <p class="req-thread-text">“{{ nItem.notes }}”</p>
                     </div>
                   </div>
 
-                  <!-- Admin Note -->
-                  <div v-if="getCleanAdminNote(req.admin_note)" class="req-speech-note req-server-response">
-                    <i class="ph-bold ph-chats-circle"></i>
-                    <div class="req-note-body">
-                      <span class="req-note-tag">Server Response</span>
-                      <span class="req-note-text">{{ getCleanAdminNote(req.admin_note) }}</span>
+                  <!-- Admin / Server Response Note -->
+                  <div v-if="getCleanAdminNote(req.admin_note)" class="req-thread-msg req-thread-admin">
+                    <div class="req-thread-connector" aria-hidden="true"></div>
+                    <div class="req-thread-avatar req-thread-admin-avatar">
+                      <i class="ph-bold ph-shield-check"></i>
+                    </div>
+                    <div class="req-thread-content">
+                      <div class="req-thread-header">
+                        <span class="req-thread-author req-thread-admin-name">Server Response</span>
+                        <span class="req-thread-badge req-thread-badge-admin">Admin</span>
+                      </div>
+                      <p class="req-thread-text">{{ getCleanAdminNote(req.admin_note) }}</p>
                     </div>
                   </div>
                 </div>
