@@ -374,3 +374,22 @@ Switched working branch back to `main`, synced with `origin/main` (`94664e7`), d
 - Deleted remote `origin/feature/experimental` branch.
 
 ---
+
+## October 23 at 11:43 AM
+### Asked
+User requested: "/new-feature add new button in the media details to delete the item in db and in the files etc".
+
+### Decision
+Implement direct media and episode deletion with native OS Recycle Bin / Trash integration, protected by Admin profile and Admin PIN verification. Add preview endpoint `POST /api/media/delete/preview` to calculate affected files on disk (including companion subtitle and metadata files) and delete endpoint `POST /api/media/delete`. On the frontend, add red quick action delete button in Media Details, per-episode trash button on episode cards, and a glassmorphic danger confirmation modal.
+>why: Moving media files safely to the OS Recycle Bin instead of hard deleting prevents irreversible accidental data loss while allowing users to clean up storage and library entries directly from the CapsStream UI.
+
+### Shipped
+- Created GitHub Issue `#29` (`feat: delete media from database and disk to Recycle Bin`).
+- Created `backend/trash.py` with native Windows Shell API (`SHFileOperationW` with `FOF_ALLOWUNDO`) and cross-platform trash fallback.
+- Added `POST /api/media/delete/preview` and `POST /api/media/delete` in `backend/routes/media.py` with Admin auth, DB cascade cleanup, and cache invalidation.
+- Added `detail-delete-btn` in `detail-quick-actions` and `ep-delete-btn` on episode rows in `static/js/app.js`.
+- Added danger confirmation modal in `static/js/app.js` and responsive styling in `static/css/main.css`.
+- Added automated test suite `backend/tests/test_media_deletion.py` (4/4 tests passing).
+- Updated `docs/prd.md` and `docs/architecture.md`.
+
+---
