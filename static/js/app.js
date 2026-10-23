@@ -5139,6 +5139,10 @@ const DetailPage = {
                 <div class="detail-action-icon"><i :class="recaching ? 'ph ph-circle-notch' : 'ph ph-database'" :style="{ animation: recaching ? 'spin 1s linear infinite' : 'none' }"></i></div>
                 <span class="detail-action-label">Re-cache</span>
               </button>
+              <button v-if="!store.profile?.is_kids" class="detail-action-circle detail-delete-action" @click="openDeleteMediaModal" id="detail-delete-btn" title="Delete Media (Send to Recycle Bin)">
+                <div class="detail-action-icon"><i class="ph-bold ph-trash" style="color:var(--danger, #ef4444)"></i></div>
+                <span class="detail-action-label" style="color:var(--danger, #ef4444)">Delete</span>
+              </button>
             </div>
           </div>
 
@@ -5828,6 +5832,16 @@ const DetailPage = {
                         >
                           <i class="ph ph-timer"></i>
                         </button>
+
+                        <!-- Per-episode delete button -->
+                        <button
+                          v-if="ep.id && !store.profile?.is_kids && ep.is_local !== false"
+                          class="episode-skip-btn ep-delete-btn"
+                          @click.stop="openDeleteEpisodeModal(ep)"
+                          :title="'Delete S' + activeSeason.toString().padStart(2,'0') + 'E' + (ep.episode || '?').toString().padStart(2,'0') + ' (Recycle Bin)'"
+                        >
+                          <i class="ph-bold ph-trash" style="color:var(--danger, #ef4444)"></i>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -5840,6 +5854,106 @@ const DetailPage = {
           </div>
         </div>
       </div>
+
+      <!-- Media Deletion Danger Modal -->
+      <transition name="fade">
+        <div class="modal-backdrop media-delete-modal-backdrop" v-if="deleteModalState.show" @click.self="closeDeleteMediaModal">
+          <div class="modal-card media-delete-modal-card" role="dialog" aria-modal="true" aria-labelledby="del-modal-title">
+            <div class="media-delete-header">
+              <div class="media-delete-icon-pulse">
+                <i class="ph-bold ph-trash"></i>
+              </div>
+              <div class="media-delete-header-text">
+                <h3 id="del-modal-title" class="media-delete-title">Delete {{ deleteModalState.isEpisode ? 'Episode' : (deleteModalState.mediaType === 'series' || deleteModalState.mediaType === 'anime' ? 'Series' : 'Movie') }}</h3>
+                <p class="media-delete-subtitle">Items will be moved to the OS Recycle Bin</p>
+              </div>
+              <button class="modal-close-btn" @click="closeDeleteMediaModal" :disabled="deleteModalState.isDeleting" aria-label="Close">
+                <i class="ph ph-x"></i>
+              </button>
+            </div>
+
+            <div class="media-delete-body">
+              <div class="media-delete-target-banner">
+                <div class="media-delete-target-info">
+                  <span class="media-delete-target-chip">{{ deleteModalState.isEpisode ? 'EPISODE' : (deleteModalState.mediaType || 'MEDIA').toUpperCase() }}</span>
+                  <strong class="media-delete-target-name">{{ deleteModalState.title }}</strong>
+                </div>
+                <div class="media-delete-stats-row">
+                  <div class="media-delete-stat">
+                    <i class="ph-fill ph-file-video"></i>
+                    <span><strong>{{ deleteModalState.fileCount }}</strong> {{ deleteModalState.fileCount === 1 ? 'file' : 'files' }} on disk</span>
+                  </div>
+                  <div class="media-delete-stat" v-if="!deleteModalState.isEpisode && media?.seasons">
+                    <i class="ph-fill ph-television-simple"></i>
+                    <span>All seasons & episodes</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- List of preview files if any -->
+              <div class="media-delete-files-preview" v-if="deleteModalState.files && deleteModalState.files.length">
+                <div class="media-delete-files-label">Files moving to Recycle Bin:</div>
+                <div class="media-delete-files-list">
+                  <div v-for="(f, fIdx) in deleteModalState.files" :key="'del-file-' + fIdx" class="media-delete-file-item">
+                    <i class="ph ph-trash-simple"></i>
+                    <span :title="f">{{ f }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Option: Send to recycle bin vs DB only -->
+              <label class="media-delete-checkbox-label">
+                <input type="checkbox" v-model="deleteModalState.deleteFilesFromDisk" :disabled="deleteModalState.isDeleting" />
+                <span>Move media video and subtitle files to OS Recycle Bin</span>
+              </label>
+
+              <!-- Admin PIN verification input if required -->
+              <div class="media-delete-pin-group" v-if="deleteModalState.requiresPin">
+                <label for="delete-admin-pin" class="media-delete-pin-label">
+                  <i class="ph-bold ph-lock-key"></i>
+                  <span>Admin PIN Required:</span>
+                </label>
+                <input
+                  id="delete-admin-pin"
+                  type="password"
+                  maxlength="8"
+                  placeholder="Enter Admin PIN"
+                  v-model="deleteModalState.adminPin"
+                  class="form-input media-delete-pin-input"
+                  :disabled="deleteModalState.isDeleting"
+                  @keyup.enter="executeMediaDelete"
+                  autofocus
+                />
+              </div>
+
+              <!-- Error Alert -->
+              <div class="media-delete-error" v-if="deleteModalState.errorMessage">
+                <i class="ph-bold ph-warning-circle"></i>
+                <span>{{ deleteModalState.errorMessage }}</span>
+              </div>
+            </div>
+
+            <div class="media-delete-footer">
+              <button
+                class="btn btn-secondary"
+                @click="closeDeleteMediaModal"
+                :disabled="deleteModalState.isDeleting"
+              >
+                Cancel
+              </button>
+              <button
+                class="btn btn-danger media-delete-confirm-btn"
+                @click="executeMediaDelete"
+                :disabled="deleteModalState.isDeleting || deleteModalState.isLoading"
+              >
+                <i v-if="deleteModalState.isDeleting" class="ph ph-circle-notch" style="animation:spin 1s linear infinite"></i>
+                <i v-else class="ph-bold ph-trash"></i>
+                <span>{{ deleteModalState.isDeleting ? 'Deleting...' : (deleteModalState.deleteFilesFromDisk ? 'Move to Recycle Bin' : 'Remove from Library') }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
 
       <!-- Add to Collection Modal -->
       <div class="modal-backdrop" v-if="showCollectionModal" @click.self="showCollectionModal = false">
@@ -6612,6 +6726,168 @@ const DetailPage = {
       }
     }
 
+    // ── Media Deletion & Recycle Bin Logic ──
+    const deleteModalState = reactive({
+      show: false,
+      isEpisode: false,
+      targetEpisode: null,
+      targetMedia: null,
+      title: '',
+      mediaType: '',
+      fileCount: 0,
+      files: [],
+      requiresPin: false,
+      adminPin: '',
+      deleteFilesFromDisk: true,
+      isLoading: false,
+      isDeleting: false,
+      errorMessage: '',
+    });
+
+    async function openDeleteMediaModal() {
+      if (!media.value) return;
+      deleteModalState.show = true;
+      deleteModalState.isEpisode = false;
+      deleteModalState.targetEpisode = null;
+      deleteModalState.targetMedia = media.value;
+      deleteModalState.title = media.value.title || 'Media Item';
+      deleteModalState.mediaType = media.value.type || 'movie';
+      deleteModalState.fileCount = 1;
+      deleteModalState.files = [];
+      deleteModalState.requiresPin = false;
+      deleteModalState.adminPin = '';
+      deleteModalState.deleteFilesFromDisk = true;
+      deleteModalState.isLoading = true;
+      deleteModalState.isDeleting = false;
+      deleteModalState.errorMessage = '';
+
+      try {
+        const payload = media.value.tmdb_id
+          ? { tmdb_id: media.value.tmdb_id, media_type: media.value.type }
+          : (media.value.id ? { media_id: media.value.id } : { title: media.value.title, media_type: media.value.type });
+        const res = await fetch('/api/media/delete/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const d = await res.json();
+        if (d.ok) {
+          deleteModalState.title = d.title || deleteModalState.title;
+          deleteModalState.fileCount = d.file_count;
+          deleteModalState.files = d.files || [];
+          deleteModalState.requiresPin = !!d.requires_pin;
+        }
+      } catch (err) {
+        console.warn('[DeleteModal] Preview failed:', err);
+      } finally {
+        deleteModalState.isLoading = false;
+      }
+    }
+
+    async function openDeleteEpisodeModal(ep) {
+      if (!ep || !ep.id) return;
+      deleteModalState.show = true;
+      deleteModalState.isEpisode = true;
+      deleteModalState.targetEpisode = ep;
+      deleteModalState.targetMedia = media.value;
+      const epNum = (ep.episode || '?').toString().padStart(2, '0');
+      const sNum = (activeSeason.value || 1).toString().padStart(2, '0');
+      const epName = ep.ep_title || ep.title || 'Episode';
+      deleteModalState.title = `${media.value?.title || 'Show'} S${sNum}E${epNum}: ${epName}`;
+      deleteModalState.mediaType = 'episode';
+      deleteModalState.fileCount = 1;
+      deleteModalState.files = [];
+      deleteModalState.requiresPin = false;
+      deleteModalState.adminPin = '';
+      deleteModalState.deleteFilesFromDisk = true;
+      deleteModalState.isLoading = true;
+      deleteModalState.isDeleting = false;
+      deleteModalState.errorMessage = '';
+
+      try {
+        const res = await fetch('/api/media/delete/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ media_id: ep.id })
+        });
+        const d = await res.json();
+        if (d.ok) {
+          deleteModalState.fileCount = d.file_count;
+          deleteModalState.files = d.files || [];
+          deleteModalState.requiresPin = !!d.requires_pin;
+        }
+      } catch (err) {
+        console.warn('[DeleteModal] Preview failed:', err);
+      } finally {
+        deleteModalState.isLoading = false;
+      }
+    }
+
+    async function executeMediaDelete() {
+      if (deleteModalState.isDeleting) return;
+      if (deleteModalState.requiresPin && !deleteModalState.adminPin.trim()) {
+        deleteModalState.errorMessage = 'Please enter your Admin PIN to confirm.';
+        return;
+      }
+      deleteModalState.isDeleting = true;
+      deleteModalState.errorMessage = '';
+
+      try {
+        let payload = {
+          admin_pin: deleteModalState.adminPin.trim(),
+          delete_files: deleteModalState.deleteFilesFromDisk,
+        };
+        if (deleteModalState.isEpisode && deleteModalState.targetEpisode) {
+          payload.media_id = deleteModalState.targetEpisode.id;
+        } else if (media.value) {
+          if (media.value.tmdb_id) {
+            payload.tmdb_id = media.value.tmdb_id;
+            payload.media_type = media.value.type;
+          } else if (media.value.id) {
+            payload.media_id = media.value.id;
+          } else {
+            payload.title = media.value.title;
+            payload.media_type = media.value.type;
+          }
+        }
+
+        const res = await fetch('/api/media/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const d = await res.json();
+        if (!res.ok || !d.ok) {
+          deleteModalState.errorMessage = d.error || 'Failed to delete media.';
+          deleteModalState.isDeleting = false;
+          return;
+        }
+
+        deleteModalState.show = false;
+        addToast(`"${deleteModalState.title}" sent to Recycle Bin`, 'success');
+
+        if (deleteModalState.isEpisode && deleteModalState.targetEpisode) {
+          // Remove deleted episode locally from activeSeason list
+          const epId = deleteModalState.targetEpisode.id;
+          if (media.value?.seasons && media.value.seasons[activeSeason.value]) {
+            media.value.seasons[activeSeason.value] = media.value.seasons[activeSeason.value].filter(e => e.id !== epId);
+          }
+        } else {
+          // Entire media deleted — navigate back to library
+          router.push('/library');
+        }
+      } catch (err) {
+        deleteModalState.errorMessage = 'An error occurred while deleting: ' + (err.message || err);
+      } finally {
+        deleteModalState.isDeleting = false;
+      }
+    }
+
+    function closeDeleteMediaModal() {
+      if (deleteModalState.isDeleting) return;
+      deleteModalState.show = false;
+    }
+
     onMounted(() => {
       load();
       window.addEventListener("scroll", onScroll, { passive: true });
@@ -7269,6 +7545,11 @@ const DetailPage = {
       recoveryMediaData,
       dismissRecoveryModal,
       launchExternalFromRecovery,
+      deleteModalState,
+      openDeleteMediaModal,
+      openDeleteEpisodeModal,
+      executeMediaDelete,
+      closeDeleteMediaModal,
     };
   },
 };

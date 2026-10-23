@@ -84,3 +84,25 @@ Animated Preset Profile Avatars allow users to personalize their household profi
   - **Upload Tab**: Provides custom image upload (`png`, `jpg`, `webp`, `gif`) and removal controls in both Create and Edit flows.
 - **Smart Default Selection**:
   - Opening "Add Profile" automatically pre-selects the first unused animated preset avatar (falling back to `Profile 1.gif` if all 10 are in use) so new profiles immediately have a vibrant animated avatar.
+
+---
+
+# Product Requirements Document (PRD): Media Deletion & Recycle Bin Integration
+
+## 1. Executive Summary
+Media Deletion empowers users and administrators to clean up unwanted media directly from the CapsStream web UI without navigating disk directories manually. Users can delete individual movie entries, complete TV series/anime, or specific episodes. All media video files on disk are safely sent to the operating system's Recycle Bin / Trash (via native Windows Shell APIs), SQLite database records are removed with cascading cleanup, and home/library caches are invalidated immediately.
+
+## 2. Core User Stories & Workflows
+- **Full Media Deletion in Media Details**:
+  - The Media Details view includes a dedicated red "Delete" action button (`detail-delete-btn`) in quick actions.
+  - Clicking "Delete" opens a danger confirmation modal displaying the target media title, type, and total count of files that will be moved to the Recycle Bin.
+  - If Admin profiles have a PIN configured, entering the correct Admin PIN is required to proceed.
+  - On confirmation, files are sent to the OS Recycle Bin, database rows and foreign key cascades are deleted, and the UI returns smoothly to the library view with a success toast.
+- **Granular Episode Deletion**:
+  - In TV Shows and Anime, each local episode row provides a per-episode trash button (`ep-delete-btn`).
+  - Clicking this triggers an episode-specific danger modal showing the season, episode number, episode title, and file path.
+  - Confirming moves only that specific episode's video file to the Recycle Bin, removes the database record, and removes the episode card from the season list.
+- **Security & Kids Guard**:
+  - Deletion controls are hidden from Kids profiles.
+  - Verification enforces Admin profile session and/or Admin PIN verification.
+

@@ -11,8 +11,9 @@ from flask import Blueprint, jsonify, request, current_app, send_file
 
 from .middleware import (
     current_profile, active_is_kids, kids_guard_media,
-    filter_for_profile, require_admin,
+    filter_for_profile, require_admin, is_admin, verify_admin_pin, get_admin_profiles,
 )
+from backend.trash import send_to_trash
 from backend.db import (
     get_all_media, get_media_by_id, get_media_by_tmdb, get_best_media_source,
     get_media_quality_options, search_media as db_search_media, get_unique_shows,
@@ -1509,3 +1510,183 @@ def api_get_bookmark_thumb(bookmark_id):
     mime = "image/webp" if thumb_path.lower().endswith(".webp") else "image/jpeg"
     return send_file(thumb_path, mimetype=mime, max_age=86400)
 
+
+
+# ─── Media Deletion & Recycle Bin Endpoints ─────────────────────────────────
+
+def _find_companion_files(video_path: str):
+    """Find sidecar subtitles, metadata and poster files beside a video file."""
+    if not video_path or not os.path.isfile(video_path):
+        return []
+    parent = os.path.dirname(video_path)
+    base_name = os.path.splitext(os.path.basename(video_path))[0]
+    companions = []
+    try:
+        if os.path.isdir(parent):
+            for fname in os.listdir(parent):
+                if fname.startswith(base_name) and fname != os.path.basename(video_path):
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in ('.srt', '.vtt', '.sub', '.idx', '.ass', '.ssa', '.nfo', '.txt'):
+                        companions.append(os.path.join(parent, fname))
+    except Exception:
+        pass
+    return companions
+
+
+def _get_deletion_targets(data: dict):
+    """
+    Resolves targets (media rows, title, affected video files, and companion files).
+    """
+    from backend.db import get_conn
+    media_id = data.get("media_id")
+    tmdb_id = data.get("tmdb_id")
+    media_type = data.get("media_type")
+    title = data.get("title")
+
+    rows = []
+    display_title = ""
+
+    if media_id:
+        m = get_media_by_id(int(media_id))
+        if m:
+            rows = [m]
+            if m.get("season") is not None and m.get("episode") is not None:
+                ep_name = m.get("ep_title") or m.get("title") or "Episode"
+                display_title = f"{m.get('title')} - S{int(m.get('season')):02d}E{int(m.get('episode')):02d}: {ep_name}"
+            else:
+                display_title = m.get("title") or "Movie"
+            media_type = m.get("type") or media_type
+    elif tmdb_id and media_type:
+        conn = get_conn()
+        cur = conn.execute("SELECT * FROM media WHERE tmdb_id=? AND type=?", (int(tmdb_id), media_type))
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        if rows:
+            display_title = rows[0].get("title") or "Title"
+    elif title and media_type:
+        conn = get_conn()
+        cur = conn.execute("SELECT * FROM media WHERE title=? AND type=?", (title, media_type))
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        if rows:
+            display_title = title
+
+    files = []
+    for r in rows:
+        p = r.get("path")
+        if p and os.path.exists(p) and p not in files:
+            files.append(p)
+            for c in _find_companion_files(p):
+                if c not in files:
+                    files.append(c)
+
+    return {
+        "rows": rows,
+        "display_title": display_title or title or "Media Item",
+        "media_type": media_type or "movie",
+        "files": files,
+    }
+
+
+def _check_admin_auth_for_deletion(data: dict):
+    """
+    Verifies admin permission or Admin PIN.
+    Returns (ok: bool, error_msg: str, status_code: int).
+    """
+    pin = data.get("admin_pin")
+    if pin is not None and str(pin).strip() != "":
+        ok, err, code = verify_admin_pin(str(pin).strip())
+        return ok, err, code
+
+    if is_admin():
+        return True, "", 200
+
+    admins = get_admin_profiles()
+    has_any_pin = any(a.get("has_pin") for a in admins)
+    if has_any_pin:
+        return False, "Admin PIN is required to delete media", 401
+    return True, "", 200
+
+
+@media_bp.route("/api/media/delete/preview", methods=["POST"])
+def api_media_delete_preview():
+    """
+    Returns preview information about what files and database records
+    will be affected prior to confirmation.
+    """
+    data = request.get_json(silent=True) or {}
+    targets = _get_deletion_targets(data)
+
+    admins = get_admin_profiles()
+    requires_pin = any(a.get("has_pin") for a in admins) and not is_admin()
+
+    return jsonify({
+        "ok": True,
+        "title": targets["display_title"],
+        "media_type": targets["media_type"],
+        "row_count": len(targets["rows"]),
+        "file_count": len(targets["files"]),
+        "files": [os.path.basename(f) for f in targets["files"]],
+        "requires_pin": requires_pin,
+    })
+
+
+@media_bp.route("/api/media/delete", methods=["POST"])
+def api_media_delete():
+    """
+    Deletes media from the database and sends associated video/companion files
+    to the OS Recycle Bin / Trash.
+    """
+    data = request.get_json(silent=True) or {}
+    ok, err, code = _check_admin_auth_for_deletion(data)
+    if not ok:
+        return jsonify({"error": err or "Admin authentication required"}), code
+
+    targets = _get_deletion_targets(data)
+    rows = targets["rows"]
+    files = targets["files"]
+
+    if not rows and not files:
+        return jsonify({"error": "No matching media found to delete"}), 404
+
+    # 1. Send files to Recycle Bin if delete_files is requested (default True)
+    delete_files = data.get("delete_files", True)
+    trashed_files = []
+    file_errors = []
+
+    if delete_files:
+        for fpath in files:
+            try:
+                if os.path.exists(fpath):
+                    success = send_to_trash(fpath)
+                    if success:
+                        trashed_files.append(fpath)
+                    else:
+                        file_errors.append(f"Could not trash {os.path.basename(fpath)}")
+            except Exception as e:
+                file_errors.append(f"{os.path.basename(fpath)}: {str(e)}")
+
+    # 2. Delete database rows
+    media_id = data.get("media_id")
+    tmdb_id = data.get("tmdb_id")
+    media_type = data.get("media_type")
+    title = data.get("title")
+
+    deleted_rows_count = 0
+    if media_id:
+        deleted_rows_count = delete_media_by_id(int(media_id))
+    elif tmdb_id and media_type:
+        deleted_rows_count = delete_media_by_tmdb(int(tmdb_id), media_type)
+    elif title and media_type:
+        deleted_rows_count = delete_media_by_title_and_type(title, media_type)
+
+    # Invalidate home & library caches
+    bust_home_cache()
+
+    return jsonify({
+        "ok": True,
+        "title": targets["display_title"],
+        "deleted_rows": deleted_rows_count,
+        "trashed_files_count": len(trashed_files),
+        "file_errors": file_errors,
+    })

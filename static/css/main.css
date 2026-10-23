@@ -38890,8 +38890,294 @@ div.easter-egg-modal-card {
   }
 }
 
+/* ─── Media Deletion & Recycle Bin Danger Styling ──────────────────────────── */
 
+.detail-delete-action:hover .detail-action-icon {
+  background: rgba(239, 68, 68, 0.18) !important;
+  border-color: rgba(239, 68, 68, 0.45) !important;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.3) !important;
+  transform: translateY(-2px);
+}
 
+.ep-delete-btn {
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+}
 
+.ep-delete-btn:hover {
+  color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.14) !important;
+  border-color: rgba(239, 68, 68, 0.4) !important;
+  transform: scale(1.05);
+}
 
+.media-delete-modal-backdrop {
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(10px);
+}
 
+.media-delete-modal-card {
+  width: 92%;
+  max-width: 490px;
+  background: rgba(16, 16, 24, 0.97);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.75), 0 0 32px rgba(239, 68, 68, 0.12);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalEnter 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.media-delete-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 22px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.media-delete-icon-pulse {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
+  flex-shrink: 0;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.25);
+}
+
+.media-delete-header-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.media-delete-title {
+  margin: 0;
+  font-size: 1.18rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.media-delete-subtitle {
+  margin: 3px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.media-delete-body {
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.media-delete-target-banner {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.media-delete-target-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.media-delete-target-chip {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.media-delete-target-name {
+  font-size: 0.98rem;
+  color: #fff;
+  word-break: break-word;
+}
+
+.media-delete-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.media-delete-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.media-delete-stat i {
+  color: #ef4444;
+  font-size: 1rem;
+}
+
+.media-delete-files-preview {
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 10px 14px;
+  max-height: 110px;
+  overflow-y: auto;
+}
+
+.media-delete-files-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.media-delete-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.media-delete-file-item {
+  font-size: 0.78rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.media-delete-file-item i {
+  color: #f87171;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.media-delete-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.media-delete-checkbox-label input[type="checkbox"] {
+  accent-color: #ef4444;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.media-delete-pin-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(239, 68, 68, 0.07);
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.media-delete-pin-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #f87171;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.media-delete-pin-input {
+  background: rgba(0, 0, 0, 0.45) !important;
+  border: 1px solid rgba(239, 68, 68, 0.35) !important;
+  color: #fff !important;
+  font-size: 1rem !important;
+  letter-spacing: 0.15em;
+  padding: 8px 12px !important;
+  border-radius: 8px !important;
+}
+
+.media-delete-pin-input:focus {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.35) !important;
+  outline: none !important;
+}
+
+.media-delete-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.32);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  color: #fca5a5;
+}
+
+.media-delete-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 22px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.media-delete-confirm-btn {
+  background: #dc2626 !important;
+  border-color: #ef4444 !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.media-delete-confirm-btn:hover:not(:disabled) {
+  background: #b91c1c !important;
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.4) !important;
+  transform: translateY(-1px);
+}
+
+@media (max-width: 640px) {
+  .media-delete-modal-card {
+    width: 95%;
+  }
+  .media-delete-header {
+    padding: 16px 18px;
+  }
+  .media-delete-body {
+    padding: 16px 18px;
+  }
+  .media-delete-footer {
+    padding: 14px 18px;
+  }
+}

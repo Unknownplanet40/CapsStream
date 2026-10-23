@@ -125,3 +125,31 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_shared ON bookmarks(media_id, is_shared
 - `openCreateView()`: Sets `avatarPickerTab = 'animated'` and selects the first preset avatar not currently used by existing profiles.
 - `openEditView(profile)`: Automatically opens the tab matching the profile's current avatar (`'animated'` if `custom_avatar_url` is in `presetAvatars`, `'upload'` if custom uploaded photo, otherwise `'icons'`).
 - `onNewAvatarSelected(e)`: Previews uploaded file in Create Profile via object/data URL and uploads to `POST /api/profiles/<id>/avatar` upon creation if a file was staged.
+
+---
+
+# System Architecture: Media Deletion & Recycle Bin Integration
+
+## 1. Native Recycle Bin Utility (`backend/trash.py`)
+- Standardizes cross-platform recycling without external dependencies:
+  - Windows: Uses `ctypes.windll.shell32.SHFileOperationW` with `FO_DELETE (0x0003)` and `FOF_ALLOWUNDO (0x0040)` to move files/directories into the Windows Recycle Bin so users can undo accidental deletions.
+  - Fallback / Other OS: Delegates to `send2trash` if installed or `os.remove`.
+- Includes directory cleanup if an empty series/show folder remains after deleting all media files.
+
+## 2. API Endpoints (`backend/routes/media.py`)
+- `POST /api/media/delete`:
+  - Enforces Admin authentication (`require_admin` / PIN verification).
+  - Accepts `{ media_id, tmdb_id, media_type, title, delete_files, admin_pin }`.
+  - Determines affected file paths via repository lookups (`get_media_by_id`, `get_all_sources_for_media`, or `get_conn()`).
+  - Calls `send_to_trash(file_path)` for each file.
+  - Removes SQLite database rows (`delete_media_by_id`, `delete_media_by_tmdb`, `delete_media_by_title_and_type`).
+  - Cascades foreign keys automatically (progress, favorites, bookmarks).
+  - Invalidates home and library caches via `bust_home_cache()`.
+- `POST /api/media/delete/preview`:
+  - Returns `{ title, file_count, files, requires_pin }` to populate the danger confirmation modal before user execution.
+
+## 3. Frontend Component (`DetailPage` in `static/js/app.js`)
+- `detail-delete-btn`: Action circle button in `detail-quick-actions` (hidden from Kids profiles).
+- `ep-delete-btn`: Trash button in `episode-action-btns` for individual episodes.
+- `deleteMediaModal`: Danger confirmation dialog with glassmorphic red styling, summary of items/files to delete, PIN entry if required, and double-confirmation CTA.
+
