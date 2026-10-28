@@ -5865,7 +5865,7 @@ const DetailPage = {
               </div>
               <div class="media-delete-header-text">
                 <h3 id="del-modal-title" class="media-delete-title">Delete {{ deleteModalState.isEpisode ? 'Episode' : (deleteModalState.mediaType === 'series' || deleteModalState.mediaType === 'anime' ? 'Series' : 'Movie') }}</h3>
-                <p class="media-delete-subtitle">Items will be moved to the OS Recycle Bin</p>
+                <p class="media-delete-subtitle">{{ deleteModalState.deleteFilesFromDisk ? 'Items will be moved to the OS Recycle Bin' : 'Item will only be removed from CapsStream library' }}</p>
               </div>
               <button class="modal-close-btn" @click="closeDeleteMediaModal" :disabled="deleteModalState.isDeleting" aria-label="Close">
                 <i class="ph ph-x"></i>
@@ -5880,8 +5880,10 @@ const DetailPage = {
                 </div>
                 <div class="media-delete-stats-row">
                   <div class="media-delete-stat">
-                    <i class="ph-fill ph-file-video"></i>
-                    <span><strong>{{ deleteModalState.fileCount }}</strong> {{ deleteModalState.fileCount === 1 ? 'file' : 'files' }} on disk</span>
+                    <i v-if="deleteModalState.isLoading" class="ph ph-circle-notch" style="animation:spin 1s linear infinite;color:#ef4444"></i>
+                    <i v-else class="ph-fill ph-file-video"></i>
+                    <span v-if="deleteModalState.isLoading">Checking files on disk...</span>
+                    <span v-else><strong>{{ deleteModalState.fileCount }}</strong> {{ deleteModalState.fileCount === 1 ? 'file' : 'files' }} on disk</span>
                   </div>
                   <div class="media-delete-stat" v-if="!deleteModalState.isEpisode && media?.seasons">
                     <i class="ph-fill ph-television-simple"></i>
@@ -5899,6 +5901,10 @@ const DetailPage = {
                     <span :title="f">{{ f }}</span>
                   </div>
                 </div>
+              </div>
+              <div class="media-delete-files-empty" v-else-if="!deleteModalState.isLoading && deleteModalState.deleteFilesFromDisk">
+                <i class="ph ph-info"></i>
+                <span>No local disk files located (database record will be removed).</span>
               </div>
 
               <!-- Option: Send to recycle bin vs DB only -->
@@ -6752,7 +6758,7 @@ const DetailPage = {
       deleteModalState.targetMedia = media.value;
       deleteModalState.title = media.value.title || 'Media Item';
       deleteModalState.mediaType = media.value.type || 'movie';
-      deleteModalState.fileCount = 1;
+      deleteModalState.fileCount = 0;
       deleteModalState.files = [];
       deleteModalState.requiresPin = false;
       deleteModalState.adminPin = '';
@@ -6795,7 +6801,7 @@ const DetailPage = {
       const epName = ep.ep_title || ep.title || 'Episode';
       deleteModalState.title = `${media.value?.title || 'Show'} S${sNum}E${epNum}: ${epName}`;
       deleteModalState.mediaType = 'episode';
-      deleteModalState.fileCount = 1;
+      deleteModalState.fileCount = 0;
       deleteModalState.files = [];
       deleteModalState.requiresPin = false;
       deleteModalState.adminPin = '';
@@ -6812,6 +6818,7 @@ const DetailPage = {
         });
         const d = await res.json();
         if (d.ok) {
+          deleteModalState.title = d.title || deleteModalState.title;
           deleteModalState.fileCount = d.file_count;
           deleteModalState.files = d.files || [];
           deleteModalState.requiresPin = !!d.requires_pin;
@@ -6864,6 +6871,7 @@ const DetailPage = {
         }
 
         deleteModalState.show = false;
+        API.clearCache();
         addToast(`"${deleteModalState.title}" sent to Recycle Bin`, 'success');
 
         if (deleteModalState.isEpisode && deleteModalState.targetEpisode) {
@@ -6874,7 +6882,10 @@ const DetailPage = {
           }
         } else {
           // Entire media deleted — navigate back to library
-          router.push('/library');
+          const targetType = deleteModalState.mediaType === 'series' || deleteModalState.mediaType === 'anime'
+            ? deleteModalState.mediaType
+            : 'movie';
+          router.replace(`/browse?type=${targetType}`);
         }
       } catch (err) {
         deleteModalState.errorMessage = 'An error occurred while deleting: ' + (err.message || err);
@@ -7402,6 +7413,13 @@ const DetailPage = {
       }
     }
     function _handleEpJumpKey(e) {
+      if (deleteModalState.show) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          closeDeleteMediaModal();
+          return;
+        }
+      }
       if (!route.path.startsWith("/title/")) return;
       if (["INPUT","TEXTAREA","SELECT"].includes(e.target?.tagName || "")) return;
       if (e.key === "g" || e.key === "G") {
@@ -28129,6 +28147,7 @@ const router = createRouter({
     { path: "/setup", component: SetupPage },
     { path: "/profiles", component: ProfilesPage },
     { path: "/browse", component: BrowsePage },
+    { path: "/library", redirect: "/browse" },
     { path: "/search", component: SearchPage },
     { path: "/title/:type/:id", alias: "/detail/:type/:id", component: DetailPage },
     { path: "/watch/:id", component: PlayerPage },
@@ -29305,7 +29324,7 @@ const App = {
           <div class="shortcuts-modal-inner" style="text-align:left">
             <div class="shortcuts-modal-header" style="margin-bottom:1rem;border-bottom:1px solid rgba(255,255,255,0.1)">
               <div class="shortcuts-header-title" style="color:var(--text-primary);display:flex;align-items:center;gap:10px;font-size:1.15rem;font-weight:800">
-                <i :class="confirmState.icon || 'ph ph-question'" style="color:var(--accent);font-size:1.4rem"></i>
+                <i :class="confirmState.icon || 'ph ph-question'" :style="{ color: confirmState.danger ? 'var(--danger, #ef4444)' : 'var(--accent)', fontSize: '1.4rem' }"></i>
                 <span>{{ confirmState.title || 'Confirmation Required' }}</span>
               </div>
               <button class="shortcuts-close-btn" @click="handleConfirmCancel">
@@ -29321,7 +29340,7 @@ const App = {
               <button class="btn btn-ghost" @click="handleConfirmCancel" id="confirm-modal-cancel-btn">
                 {{ confirmState.cancelText || 'Cancel' }}
               </button>
-              <button class="btn" :class="confirmState.danger ? 'btn-primary danger' : 'btn-primary'" @click="handleConfirmOk" id="confirm-modal-ok-btn">
+              <button class="btn" :class="confirmState.danger ? 'btn-danger' : 'btn-primary'" @click="handleConfirmOk" id="confirm-modal-ok-btn">
                 {{ confirmState.okText || 'Confirm' }}
               </button>
             </div>
@@ -30426,6 +30445,19 @@ const App = {
     );
 
     function handleGlobalShortcutsKey(e) {
+      if (confirmState.show) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          handleConfirmCancel();
+          return;
+        }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          handleConfirmOk();
+          return;
+        }
+      }
+
       const tag = (e.target && e.target.tagName) || "";
       if (["INPUT", "TEXTAREA", "SELECT"].includes(tag)) return;
 

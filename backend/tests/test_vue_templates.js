@@ -88,3 +88,18 @@ console.log('Compiling RequestsPage template...');
 const requestsRender = ctx.Vue.compile(requestsTemplate);
 assert.strictEqual(typeof requestsRender, 'function', 'RequestsPage.template compiles to a render function');
 console.log('PASS: RequestsPage template compiled successfully.');
+
+// Test 5: DetailPage template with delete confirmation modal
+const detailMatch = appJs.match(/const DetailPage = \{([\s\S]*?)\r?\n\};\r?\n\r?\n\/\/ ─── Settings Search Index/);
+assert(detailMatch, 'DetailPage definition found in app.js');
+
+vm.runInContext('const TrailerModal = {}; window.DetailPage = {' + detailMatch[1] + '};', ctx);
+const detailTemplate = ctx.window.DetailPage.template;
+assert(detailTemplate, 'DetailPage has template string');
+assert(detailTemplate.includes('media-delete-modal-card'), 'DetailPage template includes media-delete-modal-card');
+assert(detailTemplate.includes('media-delete-files-empty'), 'DetailPage template includes media-delete-files-empty');
+
+console.log('Compiling DetailPage template...');
+const detailRender = ctx.Vue.compile(detailTemplate);
+assert.strictEqual(typeof detailRender, 'function', 'DetailPage.template compiles to a render function');
+console.log('PASS: DetailPage template compiled successfully.');

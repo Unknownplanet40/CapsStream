@@ -54,7 +54,7 @@ class TestMediaDeletion(unittest.TestCase):
             "id": 101,
             "title": "Inception",
             "type": "movie",
-            "path": vid_path,
+            "file_path": vid_path,
         }
 
         resp = self.client.post("/api/media/delete/preview", json={"media_id": 101})

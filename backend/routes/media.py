@@ -1558,14 +1558,18 @@ def _get_deletion_targets(data: dict):
             media_type = m.get("type") or media_type
     elif tmdb_id and media_type:
         conn = get_conn()
-        cur = conn.execute("SELECT * FROM media WHERE tmdb_id=? AND type=?", (int(tmdb_id), media_type))
+        types = ('series', 'anime') if media_type in ('series', 'anime') else (media_type,)
+        placeholders = ','.join(['?'] * len(types))
+        cur = conn.execute(f"SELECT * FROM media WHERE tmdb_id=? AND type IN ({placeholders})", (int(tmdb_id), *types))
         rows = [dict(r) for r in cur.fetchall()]
         conn.close()
         if rows:
             display_title = rows[0].get("title") or "Title"
     elif title and media_type:
         conn = get_conn()
-        cur = conn.execute("SELECT * FROM media WHERE title=? AND type=?", (title, media_type))
+        types = ('series', 'anime') if media_type in ('series', 'anime') else (media_type,)
+        placeholders = ','.join(['?'] * len(types))
+        cur = conn.execute(f"SELECT * FROM media WHERE title=? AND type IN ({placeholders})", (title, *types))
         rows = [dict(r) for r in cur.fetchall()]
         conn.close()
         if rows:
@@ -1573,7 +1577,7 @@ def _get_deletion_targets(data: dict):
 
     files = []
     for r in rows:
-        p = r.get("path")
+        p = r.get("file_path") or r.get("path")
         if p and os.path.exists(p) and p not in files:
             files.append(p)
             for c in _find_companion_files(p):
@@ -1676,9 +1680,11 @@ def api_media_delete():
     if media_id:
         deleted_rows_count = delete_media_by_id(int(media_id))
     elif tmdb_id and media_type:
-        deleted_rows_count = delete_media_by_tmdb(int(tmdb_id), media_type)
+        db_type = "series" if media_type in ("series", "anime") else media_type
+        deleted_rows_count = delete_media_by_tmdb(int(tmdb_id), db_type)
     elif title and media_type:
-        deleted_rows_count = delete_media_by_title_and_type(title, media_type)
+        db_type = "series" if media_type in ("series", "anime") else media_type
+        deleted_rows_count = delete_media_by_title_and_type(title, db_type)
 
     # Invalidate home & library caches
     bust_home_cache()

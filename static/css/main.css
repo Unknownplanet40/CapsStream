@@ -14549,7 +14549,7 @@ body.kids-mode-theme .suggestion-tag:hover {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-outer, 16px);
   padding: 1.5rem;
-  width: 92%;
+  width: 92% !important;
   max-width: 560px;
   min-width: 380px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9);
@@ -38030,6 +38030,8 @@ div.easter-egg-modal-card {
   font-size: 0.82rem;
   color: var(--text-secondary);
   max-width: 360px;
+}
+
 /* ─── Post-Credits & Mid-Credits Scene Indicators & Player Alert ─── */
 .credit-scene-meta-badge {
   display: inline-flex;
@@ -38920,8 +38922,9 @@ div.easter-egg-modal-card {
   backdrop-filter: blur(10px);
 }
 
-.media-delete-modal-card {
-  width: 92%;
+.media-delete-modal-card,
+.media-delete-modal-backdrop > .media-delete-modal-card {
+  width: 92% !important;
   max-width: 490px;
   background: rgba(16, 16, 24, 0.97);
   backdrop-filter: blur(20px);
@@ -39168,7 +39171,8 @@ div.easter-egg-modal-card {
 }
 
 @media (max-width: 640px) {
-  .media-delete-modal-card {
+  .media-delete-modal-card,
+.media-delete-modal-backdrop > .media-delete-modal-card {
     width: 95%;
   }
   .media-delete-header {
@@ -39179,5 +39183,69 @@ div.easter-egg-modal-card {
   }
   .media-delete-footer {
     padding: 14px 18px;
+  }
+}
+
+.media-delete-modal-card .modal-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #94a3b8);
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.media-delete-modal-card .modal-close-btn:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.media-delete-files-empty {
+  font-size: 0.8rem;
+  color: var(--text-muted, #94a3b8);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+
+.media-delete-files-empty i {
+  color: var(--warning, #f59e0b);
+  font-size: 1rem;
+}
+
+.btn-danger,
+.btn.danger,
+.btn-primary.danger {
+  background: var(--danger, #ef4444) !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  color: #fff !important;
+}
+
+.btn-danger:hover:not(:disabled),
+.btn.danger:hover:not(:disabled),
+.btn-primary.danger:hover:not(:disabled) {
+  background: #dc2626 !important;
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.4) !important;
+  transform: translateY(-1px);
+}
+
+@keyframes modalEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
   }
 }
