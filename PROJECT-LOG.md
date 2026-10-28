@@ -393,3 +393,20 @@ Implement direct media and episode deletion with native OS Recycle Bin / Trash i
 - Updated `docs/prd.md` and `docs/architecture.md`.
 
 ---
+
+## October 28 at 12:43 PM
+### Asked
+User requested to commit and push changes for media deletion target resolution, navigation routing, and modal keybindings.
+
+### Decision
+Resolved series and anime media deletion target lookup queries to match both `series` and `anime` types, handled `file_path` fallbacks, redirected `/library` to `/browse`, and enhanced keyboard shortcuts (Escape and Enter) on confirmation and deletion modals.
+>why: Series in database can be tagged as either `series` or `anime`. When deleting by TMDb ID or title, querying only one type caused missed episodes on disk or in the database. Adding Enter/Escape keybindings and smooth router redirection ensures keyboard accessibility and navigation consistency.
+
+### Shipped
+- `backend/routes/media.py`: Updated `_get_deletion_targets` and `api_media_delete` to query both `series` and `anime` types for TV shows, and added `file_path` fallback.
+- `static/js/app.js`: Added `/library` redirect to `/browse`, replaced URL on media deletion to `/browse?type=...`, added Escape/Enter listeners to confirmation and delete modals.
+- `static/css/main.css`: Polished `.media-delete-modal-card` styling, close button layout, and danger dialog buttons.
+- `backend/tests/test_vue_templates.js`: Added automated test checking DetailPage delete confirmation modal compilation.
+- Pushed commits through `a6658b4` closing Issue #29 and triggering automated release.
+
+---
