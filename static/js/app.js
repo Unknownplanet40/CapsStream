@@ -147,6 +147,9 @@ const store = reactive({
   offlineDriveLetters: [],
   drivesStatus: [],
   hideOfflineMedia: typeof localStorage !== "undefined" ? (localStorage.getItem("caps_hide_offline") !== null ? localStorage.getItem("caps_hide_offline") === "true" : true) : true,
+  seasonalBannersEnabled: typeof localStorage !== "undefined" ? (localStorage.getItem("cs_seasonal_banners_enabled") !== "false") : true,
+  seasonalEffectsEnabled: typeof localStorage !== "undefined" ? (localStorage.getItem("cs_seasonal_effects_enabled") !== "false") : true,
+  seasonalBannerPreview: typeof localStorage !== "undefined" ? (localStorage.getItem("cs_seasonal_banner_preview") || "auto") : "auto",
   updateInfo: null,      // set when an update is available
   pendingScanAfterCacheCleared: false, // triggers auto-scan when returning home after cache clear
   pendingUpdateCheck: false,           // triggers auto-check for updates when Settings opens from the banner
@@ -4016,6 +4019,757 @@ const TrailerModal = {
   `
 };
 
+// ─── Seasonal / Promotional Banners Configuration & Logic ─────
+
+const SEASONAL_CONFIGS = [
+  {
+    id: "halloween",
+    name: "Halloween",
+    // October 1 - October 31
+    startMonth: 10,
+    startDay: 1,
+    endMonth: 10,
+    endDay: 31,
+    badgeText: "Halloween Special",
+    badgeIcon: "ph-fill ph-ghost",
+    decorativeEmblem: "🎃",
+    title: "A little fright for tonight.",
+    subtitle: "Find your next horror, mystery, or supernatural watch.",
+    primaryCtaText: "Explore Horror",
+    primaryGenre: "Horror",
+    includeGenres: ["horror", "mystery", "thriller"],
+    excludeGenres: ["family", "animation", "kids"],
+    accentColor: "#f97316",
+    secondaryColor: "#7c3aed",
+    themeClass: "seasonal-halloween",
+  },
+  {
+    id: "christmas",
+    name: "Holiday & Christmas",
+    // December 1 - December 26
+    startMonth: 12,
+    startDay: 1,
+    endMonth: 12,
+    endDay: 26,
+    badgeText: "Holiday Season",
+    badgeIcon: "ph-fill ph-sparkle",
+    decorativeEmblem: "❄️",
+    title: "Cozy season is here.",
+    subtitle: "Holiday classics, family animations, and heartwarming winter stories.",
+    primaryCtaText: "Explore Holiday & Family",
+    primaryGenre: "Family",
+    includeGenres: ["family", "animation", "holiday", "christmas"],
+    excludeGenres: ["horror", "thriller", "crime", "war"],
+    accentColor: "#ef4444",
+    secondaryColor: "#10b981",
+    themeClass: "seasonal-christmas",
+  },
+  {
+    id: "newyear",
+    name: "New Year Celebration",
+    // December 27 - January 7
+    startMonth: 12,
+    startDay: 27,
+    endMonth: 1,
+    endDay: 7,
+    badgeText: "New Year Spotlight",
+    badgeIcon: "ph-fill ph-confetti",
+    decorativeEmblem: "✨",
+    title: "A fresh year, endless stories.",
+    subtitle: "Epic blockbusters, crowd-pleasing comedies, and triumphant watches.",
+    primaryCtaText: "Explore Blockbusters",
+    primaryGenre: "Action",
+    includeGenres: ["action", "adventure", "comedy", "science fiction", "sci-fi"],
+    excludeGenres: ["horror", "tragedy"],
+    accentColor: "#f59e0b",
+    secondaryColor: "#38bdf8",
+    themeClass: "seasonal-newyear",
+  },
+  {
+    id: "valentines",
+    name: "Valentine's Day",
+    // February 1 - February 14
+    startMonth: 2,
+    startDay: 1,
+    endMonth: 2,
+    endDay: 14,
+    badgeText: "Valentine's Spotlight",
+    badgeIcon: "ph-fill ph-heart",
+    decorativeEmblem: "💖",
+    title: "Love is in the stream.",
+    subtitle: "Rom-coms, timeless romance, and feel-good date night picks.",
+    primaryCtaText: "Explore Romance",
+    primaryGenre: "Romance",
+    includeGenres: ["romance"],
+    excludeGenres: ["horror", "war", "thriller"],
+    accentColor: "#ec4899",
+    secondaryColor: "#8b5cf6",
+    themeClass: "seasonal-valentines",
+  },
+  {
+    id: "easter",
+    name: "Easter & Spring",
+    // March 20 - April 15
+    startMonth: 3,
+    startDay: 20,
+    endMonth: 4,
+    endDay: 15,
+    badgeText: "Spring & Easter",
+    badgeIcon: "ph-fill ph-plant",
+    decorativeEmblem: "🌸",
+    title: "Bloom into new adventures.",
+    subtitle: "Charming family tales, whimsical fantasies, and uplifting comedies.",
+    primaryCtaText: "Explore Family & Fantasy",
+    primaryGenre: "Fantasy",
+    includeGenres: ["family", "fantasy", "animation", "adventure"],
+    excludeGenres: ["horror", "thriller", "crime"],
+    accentColor: "#a855f7",
+    secondaryColor: "#10b981",
+    themeClass: "seasonal-easter",
+  },
+  {
+    id: "summer",
+    name: "Summer Blockbusters",
+    // June 1 - August 31
+    startMonth: 6,
+    startDay: 1,
+    endMonth: 8,
+    endDay: 31,
+    badgeText: "Summer Hits",
+    badgeIcon: "ph-fill ph-sun",
+    decorativeEmblem: "☀️",
+    title: "Action-packed summer nights.",
+    subtitle: "High-octane blockbusters, summer adventures, and epic sci-fi.",
+    primaryCtaText: "Explore Action & Sci-Fi",
+    primaryGenre: "Action",
+    includeGenres: ["action", "adventure", "sci-fi", "science fiction"],
+    excludeGenres: ["holiday", "christmas"],
+    accentColor: "#06b6d4",
+    secondaryColor: "#f59e0b",
+    themeClass: "seasonal-summer",
+  },
+];
+
+function getActiveSeason(override = "auto", customDate = null) {
+  if (override && override !== "auto") {
+    const matched = SEASONAL_CONFIGS.find((s) => s.id === override);
+    if (matched) return matched;
+  }
+  const now = customDate ? new Date(customDate) : new Date();
+  const month = now.getMonth() + 1; // 1-indexed (1 - 12)
+  const day = now.getDate();
+
+  for (const s of SEASONAL_CONFIGS) {
+    if (s.startMonth === s.endMonth) {
+      if (month === s.startMonth && day >= s.startDay && day <= s.endDay) {
+        return s;
+      }
+    } else if (s.startMonth < s.endMonth) {
+      if (
+        (month === s.startMonth && day >= s.startDay) ||
+        (month === s.endMonth && day <= s.endDay) ||
+        (month > s.startMonth && month < s.endMonth)
+      ) {
+        return s;
+      }
+    } else {
+      // Year wrap-around (e.g. Dec 27 -> Jan 7)
+      if (
+        (month === s.startMonth && day >= s.startDay) ||
+        (month === s.endMonth && day <= s.endDay) ||
+        (month > s.startMonth || month < s.endMonth)
+      ) {
+        return s;
+      }
+    }
+  }
+  return null;
+}
+
+// ─── Seasonal Banner Component ─────────────────────────────────
+
+const SeasonalBanner = {
+  props: {
+    season: { type: Object, required: true },
+    items: { type: Array, default: () => [] },
+  },
+  emits: ["play", "detail", "explore", "shuffle"],
+  setup(props, { emit }) {
+    const isMobile = ref(typeof window !== "undefined" ? window.innerWidth < 768 : false);
+    const canvasRef = ref(null);
+    const activeHoverItem = ref(null);
+    let animFrameId = null;
+    let particles = [];
+    let fireworks = [];
+    let spider = { x: 40, y: 30, targetY: 110, dir: 1, speed: 0.35 };
+    let canvasWidth = 0;
+    let canvasHeight = 0;
+    let lastFireworkTime = 0;
+
+    const effectsActive = computed(() => {
+      return !!(store.seasonalEffectsEnabled && !store.perfLiteMode);
+    });
+
+    const displayPosters = computed(() => {
+      if (!props.items || !props.items.length) return [];
+      return props.items.slice(0, 5);
+    });
+
+    const focusedItem = computed(() => {
+      return activeHoverItem.value || (displayPosters.value.length ? displayPosters.value[0] : null);
+    });
+
+    const activeBackdropUrl = computed(() => {
+      const target = activeHoverItem.value || (props.items && props.items.find((i) => i.backdrop_path));
+      return target?.backdrop_path ? imgUrl(target.backdrop_path) : null;
+    });
+
+    function initParticles() {
+      if (!canvasRef.value) return;
+      const canvas = canvasRef.value;
+      const rect = canvas.getBoundingClientRect();
+      canvasWidth = canvas.width = rect.width || canvas.offsetWidth || 1200;
+      canvasHeight = canvas.height = rect.height || canvas.offsetHeight || 520;
+      particles = [];
+      fireworks = [];
+
+      const seasonId = props.season?.id || "halloween";
+      const count = seasonId === "christmas" ? 50 : (seasonId === "halloween" ? 32 : (seasonId === "newyear" ? 15 : 24));
+
+      for (let i = 0; i < count; i++) {
+        particles.push(createParticle(seasonId, true));
+      }
+    }
+
+    function createParticle(seasonId, randomizeY = false, customX = null, customY = null) {
+      const y = customY !== null ? customY : (randomizeY ? Math.random() * canvasHeight : (seasonId === "valentines" || seasonId === "summer" ? canvasHeight + 10 : -10));
+      const x = customX !== null ? customX : Math.random() * canvasWidth;
+      return {
+        x: x,
+        y: y,
+        size: seasonId === "christmas" ? Math.random() * 3 + 1.2 : (seasonId === "valentines" ? Math.random() * 8 + 8 : Math.random() * 4 + 2),
+        speedY: seasonId === "christmas" ? Math.random() * 1.3 + 0.6 : (seasonId === "valentines" ? -(Math.random() * 0.9 + 0.4) : (seasonId === "halloween" ? -(Math.random() * 0.7 + 0.2) : (Math.random() * 0.9 - 0.45))),
+        speedX: (Math.random() - 0.5) * 0.9,
+        opacity: Math.random() * 0.55 + 0.25,
+        rotation: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random() - 0.5) * 0.04,
+        wobble: Math.random() * Math.PI * 2,
+        wobbleSpeed: Math.random() * 0.04 + 0.02,
+        life: 1,
+        isInteractive: customX !== null,
+      };
+    }
+
+    function spawnFireworkRocket(targetX = null, targetY = null) {
+      const sx = targetX !== null ? targetX : Math.random() * (canvasWidth * 0.7) + canvasWidth * 0.15;
+      const ty = targetY !== null ? targetY : Math.random() * (canvasHeight * 0.45) + canvasHeight * 0.15;
+      fireworks.push({
+        type: 'rocket',
+        x: sx,
+        y: canvasHeight + 10,
+        targetY: ty,
+        speedY: -(Math.random() * 3 + 5.5),
+        color: ['#fbbf24', '#38bdf8', '#ec4899', '#4ade80', '#f43f5e', '#a855f7'][Math.floor(Math.random() * 6)],
+        trail: [],
+      });
+    }
+
+    function explodeFirework(x, y, color) {
+      const count = 38;
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.2;
+        const speed = Math.random() * 3.8 + 1.2;
+        fireworks.push({
+          type: 'spark',
+          x: x,
+          y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          gravity: 0.05,
+          alpha: 1,
+          decay: Math.random() * 0.02 + 0.015,
+          size: Math.random() * 2.5 + 1.2,
+          color: color,
+        });
+      }
+    }
+
+    function renderCanvas() {
+      if (!canvasRef.value || !effectsActive.value) {
+        if (animFrameId) cancelAnimationFrame(animFrameId);
+        return;
+      }
+      const ctx = canvasRef.value.getContext("2d");
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+      const seasonId = props.season?.id || "halloween";
+
+      // ─── Halloween: Gossamer Webs + Wandering Silk Spider ───
+      if (seasonId === "halloween") {
+        drawSpiderweb(ctx, 0, 0, 160);
+        drawSpiderweb(ctx, canvasWidth, 0, 140, true);
+        // Animate suspended spider
+        spider.y += spider.dir * spider.speed;
+        if (spider.y > spider.targetY) spider.dir = -1;
+        if (spider.y < 35) {
+          spider.dir = 1;
+          spider.targetY = Math.random() * 80 + 70;
+        }
+        drawSpider(ctx, spider.x, spider.y);
+      }
+
+      // ─── New Year: Fireworks Rocket & Burst Simulation ───
+      if (seasonId === "newyear") {
+        const now = Date.now();
+        if (now - lastFireworkTime > 1600 && fireworks.filter(f => f.type === 'rocket').length < 2) {
+          spawnFireworkRocket();
+          lastFireworkTime = now;
+        }
+
+        for (let i = fireworks.length - 1; i >= 0; i--) {
+          const f = fireworks[i];
+          if (f.type === 'rocket') {
+            f.trail.push({ x: f.x, y: f.y });
+            if (f.trail.length > 6) f.trail.shift();
+            f.y += f.speedY;
+
+            ctx.strokeStyle = f.color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let t = 0; t < f.trail.length; t++) {
+              if (t === 0) ctx.moveTo(f.trail[t].x, f.trail[t].y);
+              else ctx.lineTo(f.trail[t].x, f.trail[t].y);
+            }
+            ctx.stroke();
+
+            if (f.y <= f.targetY) {
+              explodeFirework(f.x, f.y, f.color);
+              fireworks.splice(i, 1);
+            }
+          } else if (f.type === 'spark') {
+            f.x += f.vx;
+            f.y += f.vy;
+            f.vy += f.gravity;
+            f.alpha -= f.decay;
+
+            if (f.alpha <= 0) {
+              fireworks.splice(i, 1);
+            } else {
+              ctx.save();
+              ctx.globalAlpha = Math.max(0, f.alpha);
+              ctx.fillStyle = f.color;
+              ctx.shadowColor = f.color;
+              ctx.shadowBlur = 6;
+              ctx.beginPath();
+              ctx.arc(f.x, f.y, f.size, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.restore();
+            }
+          }
+        }
+      }
+
+      // ─── Ambient Particles per Season ───
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.wobble += p.wobbleSpeed;
+        p.x += p.speedX + Math.sin(p.wobble) * 0.6;
+        p.y += p.speedY;
+        p.rotation += p.rotSpeed;
+
+        if (p.isInteractive) {
+          p.life -= 0.015;
+          if (p.life <= 0) {
+            particles.splice(i, 1);
+            continue;
+          }
+        }
+
+        const alpha = p.opacity * (p.isInteractive ? p.life : 1);
+
+        if (seasonId === "christmas") {
+          // Soft snowflakes with subtle radial glare
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+          ctx.shadowBlur = 4;
+          ctx.shadowColor = "rgba(255, 255, 255, 0.8)";
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          if (p.y > canvasHeight + 10) Object.assign(p, createParticle(seasonId));
+        } else if (seasonId === "valentines") {
+          // Drifting soft hearts
+          drawHeart(ctx, p.x, p.y, p.size, alpha, p.rotation);
+          if (p.y < -20) Object.assign(p, createParticle(seasonId));
+        } else if (seasonId === "halloween") {
+          // Eerie glowing amber & violet ember sparks
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          const color = i % 2 === 0 ? "249, 115, 22" : "168, 85, 247";
+          ctx.fillStyle = `rgba(${color}, ${alpha})`;
+          ctx.shadowBlur = 7;
+          ctx.shadowColor = `rgba(${color}, 0.9)`;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          if (p.y < -15) Object.assign(p, createParticle(seasonId));
+        } else if (seasonId === "newyear") {
+          // Falling golden and sapphire confetti ribbons
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rotation);
+          const color = i % 2 === 0 ? "245, 158, 11" : "56, 189, 248";
+          ctx.fillStyle = `rgba(${color}, ${alpha})`;
+          ctx.fillRect(-p.size, -p.size * 0.4, p.size * 2, p.size * 0.8);
+          ctx.restore();
+          if (p.y > canvasHeight + 10) Object.assign(p, createParticle(seasonId));
+        } else if (seasonId === "easter") {
+          // Drifting cherry blossom petals
+          drawPetal(ctx, p.x, p.y, p.size, alpha, p.rotation);
+          if (p.y > canvasHeight + 10) Object.assign(p, createParticle(seasonId));
+        } else {
+          // Summer ambient warm solar motes
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(253, 224, 71, ${alpha * 0.7})`;
+          ctx.shadowBlur = 8;
+          ctx.shadowColor = "rgba(250, 204, 21, 0.8)";
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          if (p.y < -10) Object.assign(p, createParticle(seasonId));
+        }
+      }
+
+      animFrameId = requestAnimationFrame(renderCanvas);
+    }
+
+    function handleBannerClick(e) {
+      if (!effectsActive.value || !canvasRef.value) return;
+      const rect = canvasRef.value.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+      const seasonId = props.season?.id || "halloween";
+
+      if (seasonId === "newyear") {
+        explodeFirework(clickX, clickY, ['#fbbf24', '#38bdf8', '#ec4899', '#4ade80', '#f43f5e'][Math.floor(Math.random() * 5)]);
+      } else {
+        // Spawn 8 burst particles at click point
+        for (let i = 0; i < 8; i++) {
+          const p = createParticle(seasonId, false, clickX + (Math.random() - 0.5) * 30, clickY + (Math.random() - 0.5) * 30);
+          p.speedX = (Math.random() - 0.5) * 3;
+          p.speedY = (Math.random() - 0.5) * 3;
+          particles.push(p);
+        }
+      }
+    }
+
+    function drawSpiderweb(ctx, ox, oy, radius, flipped = false) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
+      ctx.lineWidth = 1;
+      const spokes = 5;
+      for (let i = 0; i <= spokes; i++) {
+        const angle = (i / spokes) * (Math.PI / 2);
+        const targetX = flipped ? ox - Math.cos(angle) * radius : ox + Math.cos(angle) * radius;
+        const targetY = oy + Math.sin(angle) * radius;
+        ctx.beginPath();
+        ctx.moveTo(ox, oy);
+        ctx.lineTo(targetX, targetY);
+        ctx.stroke();
+      }
+      for (let r = 25; r <= radius; r += 25) {
+        ctx.beginPath();
+        for (let i = 0; i <= spokes; i++) {
+          const angle = (i / spokes) * (Math.PI / 2);
+          const px = flipped ? ox - Math.cos(angle) * r : ox + Math.cos(angle) * r;
+          const py = oy + Math.sin(angle) * r;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawSpider(ctx, x, y) {
+      ctx.save();
+      // Silk line
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+
+      // Spider body
+      ctx.fillStyle = "#1e1b2e";
+      ctx.strokeStyle = "#a855f7";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 6, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Head
+      ctx.beginPath();
+      ctx.arc(x, y + 6, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Glowing eyes
+      ctx.fillStyle = "#f97316";
+      ctx.beginPath();
+      ctx.arc(x - 1.5, y + 6.5, 1, 0, Math.PI * 2);
+      ctx.arc(x + 1.5, y + 6.5, 1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Legs
+      ctx.strokeStyle = "#a855f7";
+      ctx.lineWidth = 1;
+      const legAngles = [-0.6, -0.2, 0.2, 0.6];
+      for (const a of legAngles) {
+        ctx.beginPath();
+        ctx.moveTo(x - 4, y);
+        ctx.lineTo(x - 12, y + Math.sin(a) * 10);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(x + 4, y);
+        ctx.lineTo(x + 12, y + Math.sin(a) * 10);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawHeart(ctx, x, y, size, opacity, rotation) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation * 0.3);
+      ctx.scale(size / 12, size / 12);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(-6, -6, -12, 2, 0, 10);
+      ctx.bezierCurveTo(12, 2, 6, -6, 0, 0);
+      ctx.fillStyle = `rgba(244, 114, 182, ${opacity})`;
+      ctx.shadowBlur = 6;
+      ctx.shadowColor = "rgba(244, 114, 182, 0.75)";
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawPetal(ctx, x, y, size, opacity, rotation) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, size * 1.5, size * 0.8, 0, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(244, 114, 182, ${opacity * 0.7})`;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function onResize() {
+      isMobile.value = window.innerWidth < 768;
+      initParticles();
+    }
+
+    onMounted(() => {
+      window.addEventListener("resize", onResize, { passive: true });
+      nextTick(() => {
+        initParticles();
+        if (effectsActive.value) {
+          animFrameId = requestAnimationFrame(renderCanvas);
+        }
+      });
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener("resize", onResize);
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+    });
+
+    watch(effectsActive, (active) => {
+      if (active) {
+        initParticles();
+        animFrameId = requestAnimationFrame(renderCanvas);
+      } else {
+        if (animFrameId) cancelAnimationFrame(animFrameId);
+        if (canvasRef.value) {
+          const ctx = canvasRef.value.getContext("2d");
+          if (ctx) ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        }
+      }
+    });
+
+    watch(() => props.season?.id, () => {
+      initParticles();
+    });
+
+    function getFanTransform(idx, total) {
+      if (isMobile.value) return {};
+      const center = (total - 1) / 2;
+      const offset = idx - center;
+      const stepX = total <= 3 ? 120 : (total === 4 ? 90 : 78);
+      const translateX = offset * stepX;
+      const deg = offset * 6.5;
+      const translateY = Math.pow(Math.abs(offset), 1.4) * 10;
+      const zIndex = total - Math.abs(offset);
+      return {
+        '--card-tx': `${translateX}px`,
+        '--card-ty': `${translateY}px`,
+        '--card-rot': `${deg}deg`,
+        zIndex: zIndex,
+      };
+    }
+
+    return {
+      store,
+      imgUrl,
+      displayPosters,
+      focusedItem,
+      activeHoverItem,
+      activeBackdropUrl,
+      getFanTransform,
+      isMobile,
+      canvasRef,
+      effectsActive,
+      handleBannerClick,
+    };
+  },
+  template: `
+    <section
+      class="seasonal-banner"
+      :class="[season.themeClass, { 'seasonal-banner-mobile': isMobile, 'has-hovered-item': !!activeHoverItem }]"
+      :style="{
+        '--seasonal-accent': season.accentColor,
+        '--seasonal-secondary': season.secondaryColor
+      }"
+      id="seasonal-library-banner"
+      @click="handleBannerClick"
+    >
+      <!-- Atmospheric Dynamic Crossfading Backdrop -->
+      <div class="seasonal-banner-backdrop-wrap">
+        <transition name="fade">
+          <div
+            v-if="activeBackdropUrl"
+            :key="activeBackdropUrl"
+            class="seasonal-banner-backdrop"
+            :style="{ backgroundImage: 'url(' + activeBackdropUrl + ')' }"
+          ></div>
+        </transition>
+        <div class="seasonal-banner-aurora"></div>
+        <div class="seasonal-banner-vignette"></div>
+      </div>
+
+      <!-- Ambient Interactive Canvas Layer -->
+      <canvas
+        v-if="effectsActive"
+        ref="canvasRef"
+        class="seasonal-banner-canvas"
+        aria-hidden="true"
+      ></canvas>
+
+      <!-- Main Content Grid -->
+      <div class="seasonal-banner-container">
+        <!-- Left: Copy & Actions with Live Hover Spotlight -->
+        <div class="seasonal-banner-text-col">
+          <div class="seasonal-badge-row">
+            <div class="seasonal-badge">
+              <span class="seasonal-emblem" aria-hidden="true">{{ season.decorativeEmblem }}</span>
+              <i :class="season.badgeIcon" class="seasonal-badge-icon"></i>
+              <span class="seasonal-badge-label">{{ season.badgeText }}</span>
+            </div>
+            <span class="seasonal-live-tag">
+              <span class="seasonal-live-dot"></span> Special Event
+            </span>
+          </div>
+
+          <h1 class="seasonal-banner-title">{{ season.title }}</h1>
+          <p class="seasonal-banner-subtitle">{{ season.subtitle }}</p>
+
+          <!-- Spotlight Pill for Focused/Hovered Title -->
+          <div class="seasonal-focused-spotlight" v-if="focusedItem">
+            <span class="seasonal-spotlight-label">FEATURED PICK</span>
+            <span class="seasonal-spotlight-title">{{ focusedItem.title }}</span>
+            <span v-if="focusedItem.rating" class="seasonal-spotlight-rating">
+              <i class="ph-fill ph-star"></i> {{ Number(focusedItem.rating).toFixed(1) }}
+            </span>
+            <span v-if="focusedItem.year" class="seasonal-spotlight-year">{{ focusedItem.year }}</span>
+          </div>
+
+          <div class="seasonal-banner-actions">
+            <button
+              class="btn btn-primary btn-lg seasonal-cta-primary"
+              @click.stop="$emit('explore', season)"
+              id="seasonal-explore-btn"
+            >
+              <i class="ph-bold ph-compass"></i>
+              <span>{{ season.primaryCtaText }}</span>
+            </button>
+
+            <button
+              class="btn btn-secondary btn-lg seasonal-cta-shuffle"
+              @click.stop="$emit('shuffle')"
+              title="Shuffle seasonal recommendations"
+              id="seasonal-shuffle-btn"
+            >
+              <i class="ph-bold ph-shuffle"></i>
+              <span>Shuffle picks</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Right: Interactive Fanned Posters Showcase -->
+        <div class="seasonal-banner-posters-col" v-if="displayPosters.length">
+          <div class="seasonal-posters-fan">
+            <div
+              v-for="(item, idx) in displayPosters"
+              :key="item.id || item.tmdb_id || idx"
+              class="seasonal-poster-card"
+              :class="{ 'is-card-hovered': activeHoverItem && activeHoverItem.id === item.id }"
+              :style="getFanTransform(idx, displayPosters.length)"
+              @mouseenter="activeHoverItem = item"
+              @mouseleave="activeHoverItem = null"
+              @click.stop="$emit('detail', item)"
+              :title="item.title"
+            >
+              <div class="seasonal-poster-inner">
+                <img
+                  v-if="item.poster_path"
+                  :src="imgUrl(item.poster_path)"
+                  :alt="item.title"
+                  class="seasonal-poster-img"
+                  loading="lazy"
+                />
+                <div v-else class="seasonal-poster-placeholder">
+                  <i class="ph ph-film-strip"></i>
+                  <span>{{ item.title }}</span>
+                </div>
+
+                <div class="seasonal-poster-overlay">
+                  <button
+                    class="seasonal-poster-play-btn"
+                    @click.stop="$emit('play', item)"
+                    title="Play"
+                  >
+                    <i class="ph-fill ph-play"></i>
+                  </button>
+                  <div class="seasonal-poster-meta">
+                    <span class="seasonal-poster-title">{{ item.title }}</span>
+                    <span v-if="item.rating" class="seasonal-poster-rating">
+                      <i class="ph-fill ph-star"></i> {{ Number(item.rating).toFixed(1) }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  `,
+};
+
 // ─── Hero Banner Component ────────────────────────────────────
 
 const HeroBanner = {
@@ -4476,7 +5230,7 @@ const HeroBanner = {
 // ─── Home Page ────────────────────────────────────────────────
 
 const HomePage = {
-  components: { HeroBanner, ContentRow, TvContentRow, MediaCard, TrailerModal },
+  components: { SeasonalBanner, HeroBanner, ContentRow, TvContentRow, MediaCard, TrailerModal },
   template: `
     <div>
       <trailer-modal
@@ -4486,13 +5240,26 @@ const HomePage = {
         @close="trailerModalUrl = null"
       />
 
-      <hero-banner
-        v-if="heroItems && heroItems.length"
-        :items="heroItems"
-        @play="handlePlay"
-        @detail="handleDetail"
-        @trailer="handleTrailer"
-      />
+      <transition name="fade" mode="out-in">
+        <seasonal-banner
+          v-if="activeSeason && store.seasonalBannersEnabled && seasonalItems && seasonalItems.length"
+          :key="activeSeason.id"
+          :season="activeSeason"
+          :items="seasonalItems"
+          @play="handlePlay"
+          @detail="handleDetail"
+          @explore="handleExploreSeason"
+          @shuffle="shuffleSeasonalItems"
+        />
+        <hero-banner
+          v-else-if="heroItems && heroItems.length"
+          key="default-hero"
+          :items="heroItems"
+          @play="handlePlay"
+          @detail="handleDetail"
+          @trailer="handleTrailer"
+        />
+      </transition>
 
       <!-- Kids Mode active indicator -->
       <div v-if="store.profile?.is_kids" class="kids-mode-banner" id="kids-mode-banner">
@@ -4902,6 +5669,81 @@ const HomePage = {
       }
     }
 
+    const activeSeason = computed(() => {
+      if (!store.seasonalBannersEnabled) return null;
+      return getActiveSeason(store.seasonalBannerPreview);
+    });
+
+    const seasonalPicksPool = ref([]);
+    const seasonalItems = ref([]);
+
+    function updateSeasonalPicks() {
+      const season = activeSeason.value;
+      if (!season || !rows.value || !rows.value.length) {
+        seasonalItems.value = [];
+        seasonalPicksPool.value = [];
+        return;
+      }
+      const allItems = [];
+      const seen = new Set();
+      for (const r of rows.value) {
+        for (const item of (r?.items || [])) {
+          if (store.hideOfflineMedia && item?.is_mounted === false) continue;
+          const key = item?.tmdb_id || item?.id || item?.title;
+          if (key && !seen.has(key)) {
+            seen.add(key);
+            allItems.push(item);
+          }
+        }
+      }
+
+      // Filter strictly by season includeGenres and excludeGenres
+      const includes = (season.includeGenres || season.filterGenres || [season.primaryGenre.toLowerCase()]).map(g => g.toLowerCase());
+      const excludes = (season.excludeGenres || []).map(g => g.toLowerCase());
+
+      const matching = allItems.filter(item => {
+        const itemGenres = ((item.genres || '') + ' ' + (item.genre_names || '')).toLowerCase();
+        const hasInclude = includes.some(g => itemGenres.includes(g));
+        const hasExclude = excludes.some(g => itemGenres.includes(g));
+        return hasInclude && !hasExclude;
+      });
+
+      // Strict safety: if matching library items exist, use only them.
+      // If none exist, filter library by excluding unwanted genres first so horror never appears in Christmas
+      let pool = matching;
+      if (pool.length < 3) {
+        const safeFallback = allItems.filter(item => {
+          const itemGenres = ((item.genres || '') + ' ' + (item.genre_names || '')).toLowerCase();
+          return !excludes.some(g => itemGenres.includes(g));
+        });
+        pool = safeFallback.length >= 3 ? safeFallback : matching;
+      }
+
+      seasonalPicksPool.value = pool;
+      shuffleSeasonalItems();
+    }
+
+    function shuffleSeasonalItems() {
+      const pool = seasonalPicksPool.value || [];
+      if (!pool.length) {
+        seasonalItems.value = heroItems.value ? heroItems.value.slice(0, 5) : [];
+        return;
+      }
+      // Shuffle array copy and take 5
+      const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      seasonalItems.value = shuffled.slice(0, 5);
+    }
+
+    function handleExploreSeason(season) {
+      if (!season) return;
+      const genre = season.primaryGenre || 'Horror';
+      router.push(`/browse?type=all&genre=${encodeURIComponent(genre)}`);
+    }
+
+    watch([() => rows.value, () => activeSeason.value], () => {
+      updateSeasonalPicks();
+    }, { immediate: true });
+
     return {
       store,
       router,
@@ -4909,6 +5751,10 @@ const HomePage = {
       displayRows,
       loading,
       heroItems,
+      activeSeason,
+      seasonalItems,
+      shuffleSeasonalItems,
+      handleExploreSeason,
       trailerModalUrl,
       trailerModalTitle,
       handleCardClick,
@@ -8615,6 +9461,63 @@ const SettingsPage = {
             <span>Appearance & Theme Presets</span>
           </div>
           <div class="settings-group">
+            <!-- Holiday & Special Event Banners Card -->
+            <div class="settings-card-container" id="setting-seasonal-banners" style="margin-bottom: 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-inner, 10px); overflow: hidden;">
+              <!-- Main Toggle Row -->
+              <div class="settings-row" style="align-items: center; padding: 14px 18px; gap: 20px;">
+                <div class="settings-label-container" style="flex: 1; min-width: 0;">
+                  <div class="settings-label" style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.95rem;">
+                    <i class="ph-fill ph-sparkle" style="color: #f59e0b; font-size: 1.15rem;"></i>
+                    <span>Holiday & Special Event Banners</span>
+                  </div>
+                  <div class="settings-desc" style="margin-top: 4px; color: var(--text-muted); font-size: 0.82rem; line-height: 1.4;">
+                    Show special banners during holidays and seasonal events (Halloween, Christmas, Valentine's Day) instead of the default banner.
+                  </div>
+                </div>
+                <label class="toggle-switch" style="flex-shrink: 0;">
+                  <input type="checkbox" :checked="store.seasonalBannersEnabled" @change="toggleSeasonalBanners($event.target.checked)" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
+              <!-- Nested Sub-Options Panel (Only when Main Toggle is ON) -->
+              <div v-if="store.seasonalBannersEnabled" style="background: rgba(0, 0, 0, 0.2); border-top: 1px solid rgba(255, 255, 255, 0.06); padding: 14px 18px; display: flex; flex-direction: column; gap: 14px;">
+                <!-- Ambient Effects Sub-Row -->
+                <div class="settings-row" style="padding: 0; align-items: center; gap: 20px;">
+                  <div class="settings-label-container" style="flex: 1; min-width: 0;">
+                    <div class="settings-label" style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+                      <i class="ph ph-magic-wand" style="color: #38bdf8;"></i>
+                      <span>Ambient Seasonal Effects</span>
+                    </div>
+                    <div class="settings-desc" style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
+                      Atmospheric animations (falling snow, drifting hearts, webs, sparks) inside seasonal banners.
+                    </div>
+                  </div>
+                  <label class="toggle-switch" style="flex-shrink: 0;">
+                    <input type="checkbox" :checked="store.seasonalEffectsEnabled" @change="toggleSeasonalEffects($event.target.checked)" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+
+                <!-- Preview Dropdown Sub-Row -->
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.06);">
+                  <div style="font-size: 0.82rem; color: var(--text-secondary); font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                    <i class="ph ph-eye" style="color: var(--accent);"></i>
+                    <span>Preview Holiday Season:</span>
+                  </div>
+                  <select :value="store.seasonalBannerPreview" @change="setSeasonalBannerPreview($event.target.value)" class="form-input" style="font-size: 0.82rem; padding: 6px 12px; width: auto; min-width: 200px;">
+                    <option value="auto">Auto (Active Date Window)</option>
+                    <option value="halloween">🎃 Halloween (Oct 1–31)</option>
+                    <option value="christmas">❄️ Christmas & Holiday (Dec 1–26)</option>
+                    <option value="newyear">✨ New Year (Dec 27–Jan 7)</option>
+                    <option value="valentines">💖 Valentine's Day (Feb 1–14)</option>
+                    <option value="easter">🌸 Easter & Spring (Mar 20–Apr 15)</option>
+                    <option value="summer">☀️ Summer Blockbusters (Jun 1–Aug 31)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <!-- Interface Layout Mode (Standard vs TV Layout) -->
             <div class="settings-label-container" id="setting-layout-mode" style="margin-bottom:12px">
               <div class="settings-label">Interface Layout Mode</div>
@@ -14372,7 +15275,33 @@ const SettingsPage = {
       }
     }
 
+    function toggleSeasonalBanners(enabled) {
+      store.seasonalBannersEnabled = !!enabled;
+      try {
+        localStorage.setItem("cs_seasonal_banners_enabled", enabled ? "true" : "false");
+      } catch (e) {}
+      addToast(enabled ? "Seasonal banners enabled" : "Seasonal banners disabled", "info");
+    }
+
+    function toggleSeasonalEffects(enabled) {
+      store.seasonalEffectsEnabled = !!enabled;
+      try {
+        localStorage.setItem("cs_seasonal_effects_enabled", enabled ? "true" : "false");
+      } catch (e) {}
+      addToast(enabled ? "Seasonal banner effects enabled" : "Seasonal banner effects disabled", "info");
+    }
+
+    function setSeasonalBannerPreview(val) {
+      store.seasonalBannerPreview = val;
+      try {
+        localStorage.setItem("cs_seasonal_banner_preview", val);
+      } catch (e) {}
+    }
+
     return {
+      toggleSeasonalBanners,
+      toggleSeasonalEffects,
+      setSeasonalBannerPreview,
       isAdmin,
       duplicateReport,
       duplicateReportLoading,

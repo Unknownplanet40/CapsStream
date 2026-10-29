@@ -39249,3 +39249,584 @@ div.easter-egg-modal-card {
     transform: scale(1) translateY(0);
   }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════
+   Seasonal / Promotional Banner System
+   ═══════════════════════════════════════════════════════════════════ */
+
+.seasonal-banner {
+  position: relative;
+  width: 100%;
+  min-height: 480px;
+  max-height: 640px;
+  margin-bottom: var(--space-xl, 2rem);
+  padding: 3.5rem 4.5rem;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: #09090e;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 20px 40px -15px rgba(0, 0, 0, 0.7);
+}
+
+/* Ambient glow accent line at top border */
+.seasonal-banner::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--seasonal-accent, #6366f1), var(--seasonal-secondary, #ec4899), transparent);
+  opacity: 0.8;
+  z-index: 2;
+  pointer-events: none;
+  filter: drop-shadow(0 0 6px var(--seasonal-accent, #6366f1));
+}
+
+/* Atmospheric Backdrop */
+.seasonal-banner-backdrop-wrap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.seasonal-banner-backdrop {
+  position: absolute;
+  inset: -10%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(48px) saturate(1.4) brightness(0.35);
+  transform: scale(1.1);
+  opacity: 0.6;
+}
+
+.seasonal-banner-aurora {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 75% 30%, var(--seasonal-accent, #7c3aed) 0%, transparent 60%),
+              radial-gradient(circle at 20% 80%, var(--seasonal-secondary, #ec4899) 0%, transparent 55%);
+  opacity: 0.35;
+  mix-blend-mode: screen;
+  filter: blur(40px);
+}
+
+.seasonal-banner-vignette {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(9, 9, 14, 0.95) 0%, rgba(9, 9, 14, 0.75) 50%, rgba(9, 9, 14, 0.9) 100%),
+              linear-gradient(180deg, rgba(9, 9, 14, 0.4) 0%, rgba(9, 9, 14, 0.98) 100%);
+}
+
+.seasonal-banner-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Theme-specific custom gradient overlays */
+.seasonal-banner.seasonal-halloween {
+  background: linear-gradient(135deg, #09050d 0%, #15091a 50%, #0d0607 100%);
+}
+.seasonal-banner.seasonal-halloween .seasonal-banner-aurora {
+  background: radial-gradient(circle at 70% 30%, rgba(249, 115, 22, 0.35) 0%, transparent 55%),
+              radial-gradient(circle at 25% 65%, rgba(124, 58, 237, 0.45) 0%, transparent 60%);
+}
+
+.seasonal-banner.seasonal-christmas {
+  background: linear-gradient(135deg, #050d0a 0%, #0a1714 50%, #0e0708 100%);
+}
+.seasonal-banner.seasonal-christmas .seasonal-banner-aurora {
+  background: radial-gradient(circle at 70% 30%, rgba(16, 185, 129, 0.35) 0%, transparent 55%),
+              radial-gradient(circle at 30% 70%, rgba(239, 68, 68, 0.4) 0%, transparent 60%);
+}
+
+.seasonal-banner.seasonal-valentines {
+  background: linear-gradient(135deg, #0f050b 0%, #190915 50%, #140510 100%);
+}
+.seasonal-banner.seasonal-valentines .seasonal-banner-aurora {
+  background: radial-gradient(circle at 70% 35%, rgba(236, 72, 153, 0.38) 0%, transparent 55%),
+              radial-gradient(circle at 20% 70%, rgba(139, 92, 246, 0.35) 0%, transparent 60%);
+}
+
+.seasonal-banner.seasonal-newyear {
+  background: linear-gradient(135deg, #0d0a04 0%, #181206 50%, #060d16 100%);
+}
+.seasonal-banner.seasonal-newyear .seasonal-banner-aurora {
+  background: radial-gradient(circle at 70% 30%, rgba(245, 158, 11, 0.4) 0%, transparent 55%),
+              radial-gradient(circle at 25% 70%, rgba(56, 189, 248, 0.35) 0%, transparent 60%);
+}
+
+.seasonal-banner.seasonal-easter {
+  background: linear-gradient(135deg, #0d0612 0%, #150a1d 50%, #05120a 100%);
+}
+.seasonal-banner.seasonal-easter .seasonal-banner-aurora {
+  background: radial-gradient(circle at 70% 30%, rgba(168, 85, 247, 0.38) 0%, transparent 55%),
+              radial-gradient(circle at 25% 70%, rgba(16, 185, 129, 0.32) 0%, transparent 60%);
+}
+
+.seasonal-banner.seasonal-summer {
+  background: linear-gradient(135deg, #040d12 0%, #08171f 50%, #171104 100%);
+}
+.seasonal-banner.seasonal-summer .seasonal-banner-aurora {
+  background: radial-gradient(circle at 70% 30%, rgba(6, 182, 212, 0.4) 0%, transparent 55%),
+              radial-gradient(circle at 25% 70%, rgba(245, 158, 11, 0.35) 0%, transparent 60%);
+}
+
+/* Content Container */
+.seasonal-banner-container {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  align-items: center;
+  gap: 3rem;
+}
+
+/* Left Column */
+.seasonal-banner-text-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 620px;
+}
+
+.seasonal-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.seasonal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  border-radius: 9999px;
+  background: rgba(16, 16, 24, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.seasonal-live-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+
+.seasonal-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--seasonal-accent, #10b981);
+  box-shadow: 0 0 8px var(--seasonal-accent, #10b981);
+  animation: seasonalPulse 2s infinite ease-in-out;
+}
+
+@keyframes seasonalPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+/* Focused Spotlight Pill */
+.seasonal-focused-spotlight {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+  margin-bottom: 1.75rem;
+  max-width: 100%;
+}
+
+.seasonal-spotlight-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--seasonal-accent, #6366f1);
+  color: #ffffff;
+  letter-spacing: 0.5px;
+}
+
+.seasonal-spotlight-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+.seasonal-spotlight-rating {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--gold, #fbbf24);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.seasonal-spotlight-year {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.seasonal-emblem {
+  font-size: 1.25rem;
+  line-height: 1;
+  filter: drop-shadow(0 0 10px var(--seasonal-accent, #f59e0b));
+  animation: seasonalEmblemFloat 3s ease-in-out infinite;
+}
+
+@keyframes seasonalEmblemFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px) scale(1.05); }
+}
+
+.seasonal-emblem {
+  font-size: 1.15rem;
+  line-height: 1;
+  filter: drop-shadow(0 0 8px var(--seasonal-accent, #f59e0b));
+}
+
+.seasonal-badge-icon {
+  font-size: 1rem;
+  color: var(--seasonal-accent, #f59e0b);
+}
+
+.seasonal-badge-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-primary, #ffffff);
+}
+
+.seasonal-banner-title {
+  font-size: 2.85rem;
+  font-weight: 900;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  color: #ffffff;
+  margin: 0 0 1rem;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+}
+
+.seasonal-banner-subtitle {
+  font-size: 1.12rem;
+  line-height: 1.5;
+  color: var(--text-secondary, #cbd5e1);
+  margin: 0 0 2rem;
+  max-width: 540px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+
+.seasonal-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.seasonal-cta-primary {
+  background: var(--seasonal-accent, var(--accent, #6366f1)) !important;
+  border-color: var(--seasonal-accent, var(--accent, #6366f1)) !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  padding: 12px 24px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 20px -4px var(--seasonal-accent, rgba(99, 102, 241, 0.5));
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.seasonal-cta-primary:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5), 0 0 28px -2px var(--seasonal-accent, rgba(99, 102, 241, 0.7));
+  filter: brightness(1.1);
+}
+
+.seasonal-cta-shuffle {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  padding: 12px 20px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  backdrop-filter: blur(12px);
+  transition: all 0.2s ease;
+}
+
+.seasonal-cta-shuffle:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  transform: translateY(-2px);
+}
+
+/* Right Column: Fanned Posters Stack */
+.seasonal-banner-posters-col {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  position: relative;
+  min-height: 380px;
+}
+
+.seasonal-posters-fan {
+  display: flex;
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  min-width: 440px;
+  height: 330px;
+  justify-content: center;
+  align-items: center;
+}
+
+.seasonal-poster-card {
+  position: absolute;
+  width: 175px;
+  height: 255px;
+  border-radius: 14px;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.75), 0 4px 12px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transform: translateX(var(--card-tx, 0px)) translateY(var(--card-ty, 0px)) rotate(var(--card-rot, 0deg));
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, z-index 0s;
+  perspective: 1000px;
+  user-select: none;
+  transform-origin: center bottom;
+}
+
+.seasonal-poster-card:hover {
+  transform: translateX(var(--card-tx, 0px)) translateY(calc(var(--card-ty, 0px) - 20px)) rotate(var(--card-rot, 0deg)) scale(1.1) !important;
+  z-index: 99 !important;
+  box-shadow: 0 28px 56px rgba(0, 0, 0, 0.95), 0 0 32px var(--seasonal-accent, rgba(255, 255, 255, 0.25));
+}
+
+.seasonal-poster-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: #14141e;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.seasonal-poster-inner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  pointer-events: none;
+  transition: border-color 0.3s ease;
+}
+
+.seasonal-poster-card:hover .seasonal-poster-inner::after {
+  border-color: var(--seasonal-accent, rgba(255, 255, 255, 0.4));
+}
+
+.seasonal-poster-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.4s ease;
+}
+
+.seasonal-poster-card:hover .seasonal-poster-img {
+  transform: scale(1.05);
+}
+
+.seasonal-poster-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  gap: 8px;
+}
+
+.seasonal-poster-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 40%, rgba(0, 0, 0, 0.95) 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 12px;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.seasonal-poster-card:hover .seasonal-poster-overlay {
+  opacity: 1;
+}
+
+.seasonal-poster-play-btn {
+  align-self: center;
+  margin-top: auto;
+  margin-bottom: auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--seasonal-accent, #ffffff);
+  border: none;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.5);
+  transform: scale(0.85);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease;
+}
+
+.seasonal-poster-play-btn:hover {
+  transform: scale(1.05);
+  filter: brightness(1.15);
+}
+
+.seasonal-poster-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.seasonal-poster-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.seasonal-poster-rating {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--gold, #fbbf24);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Responsive Breakpoints */
+@media (max-width: 1024px) {
+  .seasonal-banner {
+    padding: 2.5rem 2rem;
+    min-height: auto;
+  }
+  .seasonal-banner-container {
+    gap: 2rem;
+  }
+  .seasonal-banner-title {
+    font-size: 2.2rem;
+  }
+  .seasonal-poster-card {
+    width: 145px;
+    height: 215px;
+  }
+}
+
+@media (max-width: 768px) {
+  .seasonal-banner {
+    padding: 2rem 1.25rem;
+    max-height: none;
+  }
+  .seasonal-banner-container {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+  .seasonal-banner-text-col {
+    max-width: 100%;
+    align-items: center;
+    text-align: center;
+  }
+  .seasonal-banner-subtitle {
+    font-size: 0.95rem;
+    margin-bottom: 1.5rem;
+  }
+  .seasonal-banner-actions {
+    justify-content: center;
+    width: 100%;
+  }
+  .seasonal-cta-primary,
+  .seasonal-cta-shuffle {
+    width: 100%;
+    justify-content: center;
+  }
+  .seasonal-banner-posters-col {
+    min-height: auto;
+    overflow-x: auto;
+    width: 100%;
+    justify-content: flex-start;
+    padding-bottom: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .seasonal-posters-fan {
+    position: static;
+    display: flex;
+    flex-direction: row;
+    width: auto;
+    height: auto;
+    gap: 12px;
+    padding: 4px 4px 10px;
+  }
+  .seasonal-poster-card {
+    position: static;
+    width: 130px;
+    height: 190px;
+    flex-shrink: 0;
+    transform: none !important;
+  }
+  .seasonal-poster-overlay {
+    opacity: 1;
+    background: linear-gradient(180deg, transparent 50%, rgba(0, 0, 0, 0.9) 100%);
+  }
+  .seasonal-poster-play-btn {
+    display: none;
+  }
+}
+
