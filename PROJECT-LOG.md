@@ -410,3 +410,43 @@ Resolved series and anime media deletion target lookup queries to match both `se
 - Pushed commits through `a6658b4` closing Issue #29 and triggering automated release.
 
 ---
+
+
+## October 29 at 11:03 AM
+### Asked
+Implement a seasonal and promotional banner system for the media library with date detection, extensible holiday configs (Halloween, Christmas, Valentine's Day, New Year, Easter, Summer), strict genre filtering, atmospheric canvas effects (spiderwebs, descending spider, realistic fireworks, snow, hearts, sparks), interactive click particle bursts, live hover backdrop crossfades, and persistent Settings toggles.
+
+### Decision
+Created a modular `SeasonalBanner` component and `SEASONAL_CONFIGS` registry. Replaced default hero-banner on Home view (`type = all`) when enabled and within an active date window or when overridden via Settings. Sourced posters dynamically from library items with strict `includeGenres` and `excludeGenres` to eliminate genre pollution (e.g. no horror in Christmas). Developed a performant 2D canvas particle engine supporting realistic firework launch trajectories and explosions, gossamer spiderwebs with hanging animated spider, falling snowflakes, and rising hearts with interactive click responses. Solved poster fanning hover glitch by passing card positions through CSS custom variables. Built clean settings UI with master banner switch, ambient effects toggle, and instant season preview dropdown.
+>why: Brings high-end cinematic seasonal atmosphere to CapsStream without bogging down rendering performance, polluting genres, or breaking standard layout.
+
+### Shipped
+- Implemented `SEASONAL_CONFIGS` and `getActiveSeason()` in `static/js/app.js` supporting 6 holidays and year wrap-around.
+- Built `SeasonalBanner` with 2D canvas particle engine, interactive click bursts, live backdrop crossfade, and "FEATURED PICK" spotlight.
+- Integrated `SeasonalBanner` in `HomePage` with `<transition name="fade">` between default hero and seasonal banner.
+- Added strict include and exclude genre filtering in `updateSeasonalPicks()`.
+- Added Settings toggle card under Appearance with sub-panel for Ambient Effects switch and Season Preview dropdown.
+- Fixed poster spread coordinates via `--card-tx`, `--card-ty`, and `--card-rot` to prevent hover flicker loops.
+- Added test suite `backend/tests/test_seasonal_banner.js` (7/7 tests passing).
+- Verified with full pytest test suite (475 passed in 61s).
+
+---
+
+## November 19 at 9:21 PM
+### Asked
+Trigger automatic library scan and home rows refresh when media organization batches are executed or reverted so new files show up immediately without manual intervention.
+
+### Decision
+Added `_LAST_ORGANIZER_COMPLETED_AT` timestamp tracking in `backend/organizer.py` and exposed it through `/api/scan/status` in `backend/routes/admin.py`. Updated `trigger_post_processing` to launch an internal background library scan immediately upon completing organizer operations. Enhanced frontend in `static/js/app.js` with `pendingRefreshAfterOrganize` flags, organizer toast notifications, `homeScanCheckTimer` polling on `HomePage`, and automated row reloading when scans complete.
+>why: Eliminates friction where users organize media files in Settings but have to manually trigger a library scan and reload the home screen to see newly organized titles.
+
+### Shipped
+- Implemented `get_last_organizer_completed()` and direct background scanning thread in `backend/organizer.py`.
+- Added `last_organizer_completed` timestamp field to `/api/scan/status` in `backend/routes/admin.py`.
+- Added unit test in `backend/tests/test_route_organizer.py` verifying post-organize scan trigger and timestamp update.
+- Updated `SettingsPage` in `static/js/app.js` to dispatch library scan and set refresh intent on batch execute and batch revert.
+- Added periodic scan status check on `HomePage` to auto-trigger scan and refresh rows when an organizer batch completes.
+- Resumed active scan status polling in `App` upon reconnect if a scan is already running.
+
+---
+

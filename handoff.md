@@ -1,40 +1,38 @@
 # Handoff
 
 ## 1. Goal
-Add direct media and episode deletion workflow in Media Details to remove records from SQLite DB and safely move media video/companion files on disk to the OS Recycle Bin, with robust series/anime type queries, keybindings, and smooth route redirection.
+Automatically trigger background library scan and refresh home rows when media organization batches are executed or undone so newly organized media appears instantly without manual scan intervention.
 
 ## 2. Current State
-- **Branch:** `main` (synced with `origin/main` at `a6658b4`)
-- **Pushed Commit Hash:** `a6658b4` (`fix(media): resolve series deletion targets, route redirects, and modal keybindings`)
-- **Push Status:** Successfully pushed to `origin/main`.
-- **Release CI:** Auto-release workflow triggered on GitHub Actions (cuts `v2.87.0.0` minor release with update zip and Android TV APK).
+- **Branch:** `main` (ahead of `origin/main` by 1 commit)
+- **Pushed Commit Hash:** `40a32a7` (`feat(organizer): trigger automatic library scan and home refresh on media organization`)
+- **Push Status:** Unpushed.
+- **Release CI:** Auto-release workflow ready on push to `main`.
 - **Server Running Status:** Server idle / ready.
-- **Tests:** 31/31 passed in `backend/tests/test_route_media.py` & `backend/tests/test_media_deletion.py`, 5/5 Vue template compiler tests passed.
+- **Tests:** 8/8 passed in `backend/tests/test_route_organizer.py`.
 
 ## 3. Active Files
-- `backend/trash.py` (native Windows Shell API Recycle Bin utility)
-- `backend/routes/media.py` (`/api/media/delete/preview` and `/api/media/delete` with series/anime cross-type resolution)
-- `static/js/app.js` (`DetailPage` deletion modal state, action button, episode trash button, Enter/Escape modal shortcuts, `/library` redirect)
-- `static/css/main.css` (danger modal, glowing badges, close buttons, and responsive styling)
-- `backend/tests/test_media_deletion.py` (unit and integration tests)
-- `backend/tests/test_vue_templates.js` (Vue template compilation tests)
-- `docs/prd.md` & `docs/architecture.md` (living feature documentation)
+- `backend/organizer.py` (timestamp tracking and direct post-organize scan trigger)
+- `backend/routes/admin.py` (`/api/scan/status` endpoint surfacing `last_organizer_completed`)
+- `backend/tests/test_route_organizer.py` (test coverage for post-organize scan and timestamp)
+- `static/js/app.js` (`HomePage` scan check polling, `SettingsPage` organizer toast and refresh trigger, `App` reconnect scan status polling)
+- `PROJECT-LOG.md` (append-only log updated)
+- `handoff.md` (active context snapshot)
 
 ## 4. Changes Made
-- Created `backend/trash.py` with native `SHFileOperationW` (`FOF_ALLOWUNDO`) for Windows Recycle Bin moves with fallback to `send2trash` or `os.remove`.
-- Implemented `/api/media/delete/preview` to calculate total files on disk (including `.srt`, `.vtt`, `.nfo` sidecars) and PIN requirement.
-- Implemented `/api/media/delete` with Admin profile & PIN verification, cascading SQLite deletion, and home cache busting.
-- Enhanced `_get_deletion_targets` and `api_media_delete` to query both `series` and `anime` tags interchangeably for shows.
-- Added red `Delete` button in `detail-quick-actions` on `DetailPage` and per-episode trash button on episode cards.
-- Built dark glassmorphic danger modal with file preview list, Admin PIN prompt, checkbox for disk files, and toast feedback.
-- Added keyboard shortcuts: Escape to dismiss delete and confirm modals, Enter to confirm dialogs.
-- Redirected `/library` to `/browse`, and updated delete navigation to `replace` route directly with query type.
-- Added comprehensive unit tests in `backend/tests/test_media_deletion.py` and Vue compiler checks in `backend/tests/test_vue_templates.js`.
+- Added `_LAST_ORGANIZER_COMPLETED_AT` timestamp in `backend/organizer.py` and getter `get_last_organizer_completed()`.
+- Updated `trigger_post_processing` in `backend/organizer.py` to trigger a direct background thread running `scan_library()`, `bust_home_cache()`, and `start_background_enrichment()`.
+- Exposed `last_organizer_completed` in `/api/scan/status` within `backend/routes/admin.py`.
+- Updated `SettingsPage` in `static/js/app.js` to dispatch library scan, toast user that media is refreshing, and flag pending refresh on batch execute and revert.
+- Added 6-second polling check on `HomePage` in `static/js/app.js` to detect organizer completion and automatically trigger scans and row reloads.
+- Updated `App` reconnect logic to resume scan status polling if server is running a scan.
+- Added `test_post_organize_triggers_scan_and_timestamp` in `backend/tests/test_route_organizer.py`.
 
 ## 5. Failed Attempts
 - None.
 
 ## 6. Specific Next Steps
-- Verify GitHub Actions release workflow finishes and publishes `v2.87.0.0`.
-- Verify Android TV Companion APK build asset attaches to the new release.
-- Test in-browser deletion on a test show or episode when live server starts.
+- Commit changes with conventional changelog commit message.
+- Rebase onto `origin/main` (which has `b91e5b8 chore(release): minor bump to 2.88.0.0 [skip ci]`).
+- Request confirmation to push to `origin/main`.
+- Verify GitHub Actions auto-release workflow cuts new release.

@@ -191,6 +191,22 @@ class TestRouteOrganizer(unittest.TestCase):
             self.assertIn("data:", text)
             self.assertIn('"step": "done"', text)
 
+    def test_post_organize_triggers_scan_and_timestamp(self):
+        from backend.organizer import trigger_post_processing, get_last_organizer_completed
+        initial_ts = get_last_organizer_completed()
+        batch_result = {
+            "batch_id": "test_batch_123",
+            "success_count": 1,
+            "failed_count": 0,
+            "operations": [{"action": "move", "destination": "some/path.mkv"}]
+        }
+        with patch("backend.scanner.scan_library") as mock_scan:
+            with patch("backend.scanner.get_scan_status", return_value={"running": False}):
+                trigger_post_processing(batch_result)
+        new_ts = get_last_organizer_completed()
+        self.assertGreaterEqual(new_ts, initial_ts)
+        self.assertGreater(new_ts, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

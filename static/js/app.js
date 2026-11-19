@@ -1231,6 +1231,9 @@ async function pollScanStatus() {
         if (ne.length > 3) {
           addToast(`…and ${ne.reduce((s, n) => s + n.added, 0) - ne.slice(0, 3).reduce((s, n) => s + n.added, 0)} more new episodes across other shows`, "info", 6000);
         }
+        if (typeof window.refreshHomeRows === "function") {
+          window.refreshHomeRows(true);
+        }
       }
     } catch (e) {
       clearInterval(scanPollTimer);
@@ -5515,13 +5518,52 @@ const HomePage = {
       }
     }
 
+    let homeScanCheckTimer = null;
+    let lastSeenOrganizerCompleted = 0;
+
+    async function checkHomeOrganizeAndScan() {
+      if (!store.profile) return;
+      try {
+        const status = await API.get("/api/scan/status");
+        if (status) {
+          if (status.running && !store.scanRunning) {
+            store.scanRunning = true;
+            pollScanStatus();
+          }
+          if (status.last_organizer_completed && status.last_organizer_completed > lastSeenOrganizerCompleted) {
+            const isInitial = (lastSeenOrganizerCompleted === 0);
+            lastSeenOrganizerCompleted = status.last_organizer_completed;
+            if (!isInitial) {
+              if (!status.running && !store.scanRunning) {
+                await startLibraryScan(true);
+              }
+              loadHome(true);
+            }
+          }
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    }
+
     onMounted(() => {
       loadHome();
       checkOnboardingTrigger();
+      if (store.pendingRefreshAfterOrganize) {
+        store.pendingRefreshAfterOrganize = false;
+        if (!store.scanRunning) {
+          startLibraryScan(true);
+        }
+      }
       window.refreshHomeRows = (silent = true) => loadHome(silent);
+      homeScanCheckTimer = setInterval(checkHomeOrganizeAndScan, 6000);
     });
 
     onUnmounted(() => {
+      if (homeScanCheckTimer) {
+        clearInterval(homeScanCheckTimer);
+        homeScanCheckTimer = null;
+      }
       if (window.refreshHomeRows) {
         window.refreshHomeRows = null;
       }
@@ -5538,6 +5580,13 @@ const HomePage = {
           if (store.pendingScanAfterCacheCleared) {
             store.pendingScanAfterCacheCleared = false;
             startLibraryScan(true);
+          }
+          if (store.pendingRefreshAfterOrganize) {
+            store.pendingRefreshAfterOrganize = false;
+            if (!store.scanRunning) {
+              startLibraryScan(true);
+            }
+            loadHome(true);
           }
         }
       },
@@ -14035,7 +14084,12 @@ const SettingsPage = {
         };
 
         if (successCount > 0) {
-          addToast(`Organized ${successCount} item(s) successfully!`, "success");
+          addToast(`Organized ${successCount} item(s) successfully! Refreshing media...`, "success");
+          store.pendingRefreshAfterOrganize = true;
+          startLibraryScan(true);
+          if (typeof window.refreshHomeRows === "function") {
+            window.refreshHomeRows(true);
+          }
         } else {
           addToast("Failed to organize selected items", "error");
         }
@@ -14178,9 +14232,14 @@ const SettingsPage = {
         };
 
         if (successCount > 0) {
-          addToast(`Organized ${successCount} item(s) successfully!`, "success");
+          addToast(`Organized ${successCount} item(s) successfully! Refreshing media...`, "success");
           organizerPreviewItems.value = organizerPreviewItems.value.filter((_, idx) => !organizerSelectedIndices.value.has(idx));
           organizerSelectedIndices.value.clear();
+          store.pendingRefreshAfterOrganize = true;
+          startLibraryScan(true);
+          if (typeof window.refreshHomeRows === "function") {
+            window.refreshHomeRows(true);
+          }
         } else {
           addToast("Failed to organize selected items", "error");
         }
@@ -14221,7 +14280,12 @@ const SettingsPage = {
         });
         const data = await res.json();
         if (res.ok && data.success) {
-          addToast(`Batch reverted (${data.reverted_count} items restored)`, "success");
+          addToast(`Batch reverted (${data.reverted_count} items restored). Refreshing media...`, "success");
+          store.pendingRefreshAfterOrganize = true;
+          startLibraryScan(true);
+          if (typeof window.refreshHomeRows === "function") {
+            window.refreshHomeRows(true);
+          }
           await openOrganizerHistory();
         } else {
           addToast(data.error || "Failed to undo batch", "error");
@@ -32060,6 +32124,15 @@ const App = {
             if (store.serverOnline === false) {
               store.serverOnline = true;
               addToast("Server Reconnected", "success", 4000);
+            }
+            if (store.profile && !store.scanRunning) {
+              try {
+                const scanStatus = await API.get("/api/scan/status");
+                if (scanStatus && scanStatus.running) {
+                  store.scanRunning = true;
+                  pollScanStatus();
+                }
+              } catch (scanErr) {}
             }
           } else {
             if (store.serverOnline !== false) {

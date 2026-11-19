@@ -1585,12 +1585,27 @@ def _cleanup_empty_and_clutter(directory: str):
 
 # ─── Post-Processing Downstream Trigger ────────────────────────────────────────
 
+_LAST_ORGANIZER_COMPLETED_AT: float = 0.0
+
+
+def get_last_organizer_completed() -> float:
+    """Return the unix timestamp of the last successful media organization run."""
+    return _LAST_ORGANIZER_COMPLETED_AT
+
+
 def trigger_post_processing(executed_batch: Dict[str, Any]):
     """
     Trigger downstream CapsStream actions:
     1. Update data/requests.json if any matching request IDs are present.
-    2. Request incremental library scan via localhost HTTP API if server is up.
+    2. Mark timestamp of completed organization run.
+    3. Trigger internal library scan to index newly added media files.
     """
+    global _LAST_ORGANIZER_COMPLETED_AT
+    success_count = executed_batch.get("success_count", 0)
+    has_ops = bool(executed_batch.get("operations"))
+    if success_count > 0 or has_ops:
+        _LAST_ORGANIZER_COMPLETED_AT = time.time()
+
     req_ids = [op.get("request_id") for op in executed_batch.get("operations", []) if op.get("request_id")]
     if req_ids and os.path.exists(REQUESTS_FILE):
         try:
@@ -1610,7 +1625,29 @@ def trigger_post_processing(executed_batch: Dict[str, Any]):
         except Exception as e:
             logger.warning(f"Failed to auto-fulfill requests: {e}")
 
-    # Ping CapsStream server to trigger library scan
+    # Trigger CapsStream library scan directly if media was organized
+    if success_count > 0 or has_ops:
+        try:
+            from backend.scanner import scan_library, get_scan_status
+            status = get_scan_status()
+            if not status.get("running"):
+                def _run_post_organize_scan():
+                    try:
+                        from backend.routes.media import bust_home_cache
+                        from backend.kids_filter import start_background_enrichment
+                        scan_library()
+                        bust_home_cache()
+                        start_background_enrichment()
+                    except Exception as scan_err:
+                        logger.warning(f"Error during post-organizer scan: {scan_err}")
+
+                scan_t = threading.Thread(target=_run_post_organize_scan, name="OrganizerPostScan", daemon=True)
+                scan_t.start()
+                logger.info("Triggered CapsStream library scan directly after organization")
+        except Exception as e:
+            logger.warning(f"Failed to start direct scan after organization: {e}")
+
+    # Fallback ping CapsStream server if scanner couldn't be invoked directly
     try:
         import urllib.request
         cfg_file = os.path.join(BASE_DIR, "config.json")

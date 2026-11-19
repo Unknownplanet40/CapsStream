@@ -573,7 +573,13 @@ def api_scan():
 @admin_bp.route("/api/scan/status", methods=["GET"])
 def api_scan_status():
     from backend.scanner import get_scan_status
-    return jsonify(get_scan_status())
+    st = get_scan_status()
+    try:
+        from backend.organizer import get_last_organizer_completed
+        st["last_organizer_completed"] = get_last_organizer_completed()
+    except Exception:
+        st["last_organizer_completed"] = 0.0
+    return jsonify(st)
 
 
 # ─── Backup & Restore ─────────────────────────────────────────────────────────
