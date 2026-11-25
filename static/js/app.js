@@ -176,6 +176,8 @@ const store = reactive({
   whatsNewLoading: false,   // Loading state for changelog fetch
   updateState: { status: "idle", current: "", latest: "", changelog: "", last_checked: "", message: "" }, // persisted across nav
   layoutMode: localStorage.getItem("capsstream_layout_mode") || "standard",
+  ui2Enabled: typeof localStorage !== "undefined" ? localStorage.getItem("cs_ui2_enabled") === "true" : false,
+  ui2Loaded: false,
   perfLiteMode: (() => {
     const saved = typeof localStorage !== "undefined" ? localStorage.getItem("cs_perf_mode") : null;
     if (saved !== null) return saved === "true";
@@ -9275,6 +9277,690 @@ const SettingsPage = {
           <div v-else class="settings-desc" style="margin-top:8px">{{ duplicateReportLoaded ? 'No duplicate source groups found.' : 'Run a scan to compare sources.' }}</div>
         </section>
 
+        <!-- ══════ Media Renamer & Organizer Section ══════ -->
+        <div class="settings-section settings-desktop-only" id="settings-organizer-section" v-if="isAdmin && !isMobileScreen">
+          <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
+              <span>Automated Media Renamer &amp; File Organizer</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-secondary btn-sm" @click="openOrganizerHistory" :disabled="organizerHistoryLoading" id="btn-organizer-history">
+                <i class="ph ph-clock-counter-clockwise" style="margin-right:4px"></i> History &amp; Rollback
+              </button>
+              <button class="btn btn-primary btn-sm" @click="runOrganizerPreview" :disabled="organizerScanning || organizerExecuting" id="btn-organizer-preview">
+                <i :class="organizerScanning ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="organizerScanning ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                {{ organizerScanning ? 'Scanning Incoming...' : 'Scan &amp; Preview Incoming' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-desc" style="margin-bottom:1rem">
+              Automatically cleans release scene clutter, normalizes titles to standard Plex/CapsStream formats (<code>Movies/Title (Year)</code> and <code>TV Shows/Title/Season SS/Title - SxxExx</code>), and organizes files into your library using zero-cost NTFS hardlinks.
+            </div>
+
+            <!-- Configuration Rows -->
+            <div class="settings-row" id="setting-organizer-folder">
+              <div class="settings-label-container">
+                <div class="settings-label">Incoming / Downloads Drop Folder</div>
+                <div class="settings-desc">Source directory where completed downloads, torrents, or unorganized media arrive.</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
+                <input type="text" v-model="organizerConfig.incoming_dir" class="form-input" placeholder="e.g. D:/Downloads or data/incoming" style="flex:1" />
+                <button class="btn btn-secondary btn-sm" @click="saveOrganizerConfig" :disabled="organizerSaving">
+                  {{ organizerSaving ? 'Saving...' : 'Save' }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Destination Target Folders -->
+            <div class="settings-row" id="setting-organizer-target-movies">
+              <div class="settings-label-container">
+                <div class="settings-label">Target Movies Folder</div>
+                <div class="settings-desc">Destination library folder for organized Movies. Selected from configured Media Scanner paths.</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
+                <select v-if="(form.media_paths?.movies || organizerConfig.available_paths?.movies || []).length" v-model="organizerConfig.target_movies_path" @change="saveOrganizerConfig" class="form-input" style="flex:1">
+                  <option v-for="p in (form.media_paths?.movies || organizerConfig.available_paths?.movies || [])" :key="p" :value="p">{{ p }}</option>
+                  <option v-if="organizerConfig.target_movies_path && !(form.media_paths?.movies || organizerConfig.available_paths?.movies || []).includes(organizerConfig.target_movies_path)" :value="organizerConfig.target_movies_path">{{ organizerConfig.target_movies_path }}</option>
+                </select>
+                <input v-else type="text" v-model="organizerConfig.target_movies_path" class="form-input" placeholder="e.g. data/media/Movies" style="flex:1" @change="saveOrganizerConfig" />
+              </div>
+            </div>
+
+            <div class="settings-row" id="setting-organizer-target-series">
+              <div class="settings-label-container">
+                <div class="settings-label">Target TV Series Folder</div>
+                <div class="settings-desc">Destination library folder for organized TV Shows. Selected from configured Media Scanner paths.</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
+                <select v-if="(form.media_paths?.series || organizerConfig.available_paths?.series || []).length" v-model="organizerConfig.target_series_path" @change="saveOrganizerConfig" class="form-input" style="flex:1">
+                  <option v-for="p in (form.media_paths?.series || organizerConfig.available_paths?.series || [])" :key="p" :value="p">{{ p }}</option>
+                  <option v-if="organizerConfig.target_series_path && !(form.media_paths?.series || organizerConfig.available_paths?.series || []).includes(organizerConfig.target_series_path)" :value="organizerConfig.target_series_path">{{ organizerConfig.target_series_path }}</option>
+                </select>
+                <input v-else type="text" v-model="organizerConfig.target_series_path" class="form-input" placeholder="e.g. data/media/TV Shows" style="flex:1" @change="saveOrganizerConfig" />
+              </div>
+            </div>
+
+            <div class="settings-row" id="setting-organizer-target-anime">
+              <div class="settings-label-container">
+                <div class="settings-label">Target Anime Folder</div>
+                <div class="settings-desc">Destination library folder for organized Anime series and films.</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
+                <select v-if="(form.media_paths?.anime || organizerConfig.available_paths?.anime || []).length" v-model="organizerConfig.target_anime_path" @change="saveOrganizerConfig" class="form-input" style="flex:1">
+                  <option v-for="p in (form.media_paths?.anime || organizerConfig.available_paths?.anime || [])" :key="p" :value="p">{{ p }}</option>
+                  <option v-if="organizerConfig.target_anime_path && !(form.media_paths?.anime || organizerConfig.available_paths?.anime || []).includes(organizerConfig.target_anime_path)" :value="organizerConfig.target_anime_path">{{ organizerConfig.target_anime_path }}</option>
+                </select>
+                <input v-else type="text" v-model="organizerConfig.target_anime_path" class="form-input" placeholder="e.g. data/media/Anime" style="flex:1" @change="saveOrganizerConfig" />
+              </div>
+            </div>
+
+            <div class="settings-row" id="setting-organizer-local-region">
+              <div class="settings-label-container">
+                <div class="settings-label">Local Region Routing</div>
+                <div class="settings-desc">Route media originating from a specific country to designated local library folders instead of standard roots. Anime always uses the anime root.</div>
+              </div>
+              <select v-model="organizerConfig.local_region" @change="saveOrganizerConfig" class="form-input" style="width:260px">
+                <option value="">Disabled (None)</option>
+                <option v-for="(name, code) in (organizerConfig.regions || {})" :key="code" :value="code">{{ name }} ({{ code }})</option>
+              </select>
+            </div>
+
+            <!-- Target Local Folders (Visible when Local Region is enabled) -->
+            <div v-if="organizerConfig.local_region" class="settings-row" id="setting-organizer-target-local-movies">
+              <div class="settings-label-container">
+                <div class="settings-label">Target Local Movies Folder</div>
+                <div class="settings-desc">Destination library folder for localized Movies (e.g. T:/Local/Movie).</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
+                <input type="text" v-model="organizerConfig.target_local_movies_path" class="form-input" placeholder="e.g. T:/Local/Movie" style="flex:1" @change="saveOrganizerConfig" />
+              </div>
+            </div>
+
+            <div v-if="organizerConfig.local_region" class="settings-row" id="setting-organizer-target-local-series">
+              <div class="settings-label-container">
+                <div class="settings-label">Target Local TV Series Folder</div>
+                <div class="settings-desc">Destination library folder for localized TV Shows (e.g. T:/Local/Series).</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
+                <input type="text" v-model="organizerConfig.target_local_series_path" class="form-input" placeholder="e.g. T:/Local/Series" style="flex:1" @change="saveOrganizerConfig" />
+              </div>
+            </div>
+
+            <div class="settings-row" id="setting-organizer-collision-policy">
+              <div class="settings-label-container">
+                <div class="settings-label">Video Collision Policy</div>
+                <div class="settings-desc">Action when destination media file already exists. Subtitles always disambiguate with numeric suffixes without overwriting.</div>
+              </div>
+              <select v-model="organizerConfig.collision_policy" @change="saveOrganizerConfig" class="form-input" style="width:260px">
+                <option value="skip">Skip Existing (Do not overwrite)</option>
+                <option value="suffix">Auto-Suffix Duplicates (2, 3)</option>
+              </select>
+            </div>
+
+            <div class="settings-row" id="setting-organizer-mode">
+              <div class="settings-label-container">
+                <div class="settings-label">File Organization Mode</div>
+                <div class="settings-desc">Smart Mode creates NTFS hardlinks on the same drive (preserves torrent seeding with 0 extra disk space), falling back to Move across drives.</div>
+              </div>
+              <select v-model="organizerConfig.mode" @change="saveOrganizerConfig" class="form-input" style="width:260px">
+                <option value="smart">Smart Mode (Hardlink / Move)</option>
+                <option value="move">Move Only (Relocates files)</option>
+                <option value="copy">Copy Only (Duplicates files)</option>
+              </select>
+            </div>
+
+            <div class="settings-row" id="setting-organizer-autowatch">
+              <div class="settings-label-container">
+                <div class="settings-label">Background Folder Watcher</div>
+                <div class="settings-desc">Periodically checks the incoming folder in the background. Complete, settled downloads without locks are organized automatically.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" v-model="organizerConfig.auto_watch" @change="saveOrganizerConfig" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <!-- Ready Items Banner in Settings -->
+            <div v-if="organizerPreviewItems.length > 0 && organizerUnmatchedItems.length === 0" style="margin-top:1.5rem">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.25);border-radius:12px;flex-wrap:wrap;gap:10px">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <i class="ph-bold ph-check-circle" style="color:#38bdf8;font-size:1.3rem"></i>
+                  <div>
+                    <div style="font-weight:700;color:var(--text-primary);font-size:0.92rem">
+                      {{ organizerPreviewItems.length }} Item{{ organizerPreviewItems.length === 1 ? '' : 's' }} Ready to Organize
+                    </div>
+                    <div style="font-size:0.78rem;color:var(--text-secondary)">
+                      All media matches verified with high confidence. Click to link and organize into your library.
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px">
+                  <button class="btn btn-secondary btn-sm" @click="organizerPreviewItems = []">
+                    Dismiss
+                  </button>
+                  <button class="btn btn-primary btn-sm" @click="executeBatchOrganizer(organizerPreviewItems)" :disabled="organizerExecuting">
+                    <i :class="organizerExecuting ? 'ph ph-circle-notch' : 'ph ph-check-circle'" :style="organizerExecuting ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                    {{ organizerExecuting ? 'Organizing...' : 'Organize All (' + organizerPreviewItems.length + ')' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Unmatched Items Alert Banner in Settings (Opens Modal) -->
+            <div v-if="organizerUnmatchedItems.length > 0" style="margin-top:1.5rem">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.25);border-radius:12px;flex-wrap:wrap;gap:10px">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <i class="ph-bold ph-warning-circle" style="color:#facc15;font-size:1.3rem"></i>
+                  <div>
+                    <div style="font-weight:700;color:var(--text-primary);font-size:0.92rem">
+                      {{ organizerUnmatchedItems.length }} Item{{ organizerUnmatchedItems.length === 1 ? '' : 's' }} Require Review
+                    </div>
+                    <div style="font-size:0.78rem;color:var(--text-secondary)">
+                      Low match confidence or locked files detected. Review or edit before organizing.
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px">
+                  <button class="btn btn-secondary btn-sm" @click="organizerUnmatchedItems = []">
+                    Dismiss
+                  </button>
+                  <button class="btn btn-primary btn-sm" @click="organizerUnmatchedModal.show = true" style="background:#eab308;color:#000;border-color:#ca8a04">
+                    <i class="ph ph-cards" style="margin-right:4px"></i>
+                    Review Unmatched Items ({{ organizerUnmatchedItems.length }})
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dedicated Review & Preview Modal (Teleported to Body) -->
+          <teleport to="body">
+            <div class="organizer-review-modal-backdrop" v-if="organizerUnmatchedModal.show" @click.self="organizerUnmatchedModal.show = false">
+              <div class="organizer-review-modal-card" @click.stop>
+                <div class="organizer-review-modal-header">
+                  <div class="organizer-review-modal-title-row">
+                    <div class="organizer-progress-icon-wrap" :class="organizerReviewActiveTab === 'unmatched' && organizerUnmatchedItems.length > 0 ? 'warning' : 'detecting'" style="width:38px;height:38px;font-size:1.1rem;margin:0">
+                      <i :class="organizerReviewActiveTab === 'unmatched' && organizerUnmatchedItems.length > 0 ? 'ph-bold ph-warning' : 'ph-bold ph-film-slate'"></i>
+                    </div>
+                    <div>
+                      <h3 class="organizer-review-modal-title">Review Scanned Media</h3>
+                      <div class="organizer-review-modal-sub">
+                        Verify matched titles, fix unrecognized items with TMDb, and confirm before organizing.
+                      </div>
+                    </div>
+                  </div>
+                  <button class="modal-close-btn" @click="organizerUnmatchedModal.show = false" title="Close">
+                    <i class="ph ph-x"></i>
+                  </button>
+                </div>
+
+                <!-- Tabs: Unmatched / Issues vs Matched (Ready) -->
+                <div class="organizer-review-tabs">
+                  <button
+                    class="organizer-review-tab-btn"
+                    :class="{ active: organizerReviewActiveTab === 'unmatched' }"
+                    @click="organizerReviewActiveTab = 'unmatched'"
+                  >
+                    <i class="ph ph-warning-circle" style="color:#facc15"></i>
+                    <span>Unmatched / Issues</span>
+                    <span class="organizer-review-tab-badge warning">{{ organizerUnmatchedItems.length }}</span>
+                  </button>
+                  <button
+                    class="organizer-review-tab-btn"
+                    :class="{ active: organizerReviewActiveTab === 'ready' }"
+                    @click="organizerReviewActiveTab = 'ready'"
+                  >
+                    <i class="ph ph-check-circle" style="color:#4ade80"></i>
+                    <span>Matched (Ready)</span>
+                    <span class="organizer-review-tab-badge success">{{ organizerReadyItems.length }}</span>
+                  </button>
+                </div>
+
+                <!-- Controls: Select All & Count -->
+                <div class="organizer-review-modal-controls">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <button class="btn btn-ghost btn-sm" @click="toggleSelectAllActiveReviewTab" style="font-size:0.78rem">
+                      {{ (organizerReviewActiveTab === 'unmatched' ? organizerSelectedUnmatchedIndices.size === organizerUnmatchedItems.length : organizerSelectedReadyIndices.size === organizerReadyItems.length) ? 'Deselect All' : 'Select All' }}
+                    </button>
+                    <span style="font-size:0.75rem;color:var(--text-muted)">
+                      {{ organizerReviewActiveTab === 'unmatched' ? organizerSelectedUnmatchedIndices.size + ' of ' + organizerUnmatchedItems.length + ' selected' : organizerSelectedReadyIndices.size + ' of ' + organizerReadyItems.length + ' selected' }}
+                    </span>
+                  </div>
+                  <div style="font-size:0.75rem;color:var(--text-muted)">
+                    Showing 5 items max (scrollable)
+                  </div>
+                </div>
+
+                <!-- Cards Container (5 items max visible, rest scrollable) -->
+                <div class="organizer-unmatched-cards-container">
+                  <!-- Empty Tab State -->
+                  <div v-if="(organizerReviewActiveTab === 'unmatched' ? organizerUnmatchedItems.length : organizerReadyItems.length) === 0" style="padding:2.5rem 1rem;text-align:center;color:var(--text-muted)">
+                    <i :class="organizerReviewActiveTab === 'unmatched' ? 'ph ph-check-circle' : 'ph ph-folder-open'" style="font-size:2rem;color:var(--accent);margin-bottom:8px"></i>
+                    <div style="font-weight:600;color:var(--text-primary);font-size:0.9rem">
+                      {{ organizerReviewActiveTab === 'unmatched' ? 'No unmatched or failed items!' : 'No matched items yet.' }}
+                    </div>
+                    <div style="font-size:0.78rem;margin-top:2px">
+                      {{ organizerReviewActiveTab === 'unmatched' ? 'All candidate files have high-confidence matches.' : 'Check the Unmatched tab to review or fix files.' }}
+                    </div>
+                  </div>
+
+                  <!-- Cards List for Active Tab -->
+                  <div
+                    v-for="(item, idx) in (organizerReviewActiveTab === 'unmatched' ? organizerUnmatchedItems : organizerReadyItems)"
+                    :key="item.source_path"
+                    class="organizer-unmatched-card"
+                    :class="{ selected: (organizerReviewActiveTab === 'unmatched' ? organizerSelectedUnmatchedIndices.has(idx) : organizerSelectedReadyIndices.has(idx)) }"
+                  >
+                    <!-- Card Header: Checkbox, Filename, Size, Reason Pill -->
+                    <div class="organizer-card-header">
+                      <input
+                        type="checkbox"
+                        :checked="(organizerReviewActiveTab === 'unmatched' ? organizerSelectedUnmatchedIndices.has(idx) : organizerSelectedReadyIndices.has(idx))"
+                        @change="toggleReviewItemCheckbox(idx)"
+                        style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;flex-shrink:0"
+                      />
+                      <div class="organizer-card-title-group">
+                        <div class="organizer-card-filename" :title="item.filename">
+                          {{ item.filename }}
+                        </div>
+                        <div class="organizer-card-filesize">
+                          {{ formatFileSize(item.file_size || 0) }}
+                        </div>
+                      </div>
+
+                      <!-- Reason / Status badge -->
+                      <div style="flex-shrink:0">
+                        <span v-if="item.is_manually_matched" class="server-status-pill success" style="font-size:0.7rem;padding:2px 7px" title="Manually matched with TMDb">
+                          <i class="ph-bold ph-check" style="margin-right:2px"></i>Matched
+                        </span>
+                        <span v-else-if="item.confidence === 'low'" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 7px" title="Match confidence <70%">
+                          <i class="ph ph-warning" style="margin-right:2px"></i>Unrecognized
+                        </span>
+                        <span v-else-if="item.is_locked" class="server-status-pill error" style="font-size:0.7rem;padding:2px 7px" title="File in use or downloading">
+                          <i class="ph ph-lock" style="margin-right:2px"></i>Locked
+                        </span>
+                        <span v-else-if="item.destination_exists" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 7px" title="Destination already exists">
+                          <i class="ph ph-arrows-clockwise" style="margin-right:2px"></i>Exists
+                        </span>
+                        <span v-else class="server-status-pill success" style="font-size:0.7rem;padding:2px 7px" title="High confidence match">
+                          <i class="ph ph-check" style="margin-right:2px"></i>Ready
+                        </span>
+                      </div>
+                    </div>
+
+                    <!-- Card Body: Editable Title, Year, Type Toggle, and TMDb Search button -->
+                    <div class="organizer-card-inputs-row">
+                      <button
+                        class="btn btn-ghost btn-sm"
+                        @click="changeItemMediaType(item)"
+                        style="font-size:0.75rem;padding:3px 8px;border-radius:6px;flex-shrink:0"
+                        :style="item.editType === 'movie' ? 'background:rgba(56,189,248,0.15);color:#38bdf8' : (item.editType === 'anime' ? 'background:rgba(236,72,153,0.15);color:#f472b6' : 'background:rgba(168,85,247,0.15);color:#c084fc')"
+                      >
+                        <i :class="item.editType === 'movie' ? 'ph ph-film-strip' : (item.editType === 'anime' ? 'ph ph-sparkle' : 'ph ph-television')" style="margin-right:4px"></i>
+                        {{ item.editType === 'movie' ? 'Movie' : (item.editType === 'anime' ? 'Anime' : 'TV Show') }}
+                      </button>
+
+                      <input
+                        type="text"
+                        v-model="item.editTitle"
+                        @change="updateItemDestinationPreview(item)"
+                        class="form-input"
+                        placeholder="Title"
+                        style="font-size:0.8rem;padding:4px 8px;flex:1;min-width:130px"
+                      />
+
+                      <input
+                        type="text"
+                        v-model="item.editYear"
+                        @change="updateItemDestinationPreview(item)"
+                        class="form-input"
+                        placeholder="Year"
+                        style="font-size:0.8rem;padding:4px 8px;width:64px;flex-shrink:0"
+                      />
+
+                      <!-- Search TMDb Button -->
+                      <button
+                        class="btn btn-secondary btn-sm"
+                        @click="openTmdbSearchForCard(item)"
+                        title="Search TMDb for exact metadata"
+                        style="font-size:0.75rem;padding:4px 8px;flex-shrink:0;gap:4px"
+                      >
+                        <i class="ph ph-magnifying-glass"></i>
+                        <span>Search TMDb</span>
+                      </button>
+                    </div>
+
+                    <!-- Destination Path Preview -->
+                    <div class="organizer-card-dest-row">
+                      <i class="ph ph-arrow-bend-down-right" style="color:var(--text-muted);flex-shrink:0"></i>
+                      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" :title="item.destination_path">
+                        {{ item.destination_path }}
+                      </span>
+                      <span v-if="item.subtitles?.length" class="tag" style="font-size:0.65rem;padding:1px 5px;background:rgba(34,197,94,0.15);color:#4ade80;flex-shrink:0">
+                        +{{ item.subtitles.length }} Sub
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Modal Footer -->
+                <div class="organizer-review-modal-footer">
+                  <button class="btn btn-secondary btn-sm" @click="organizerUnmatchedModal.show = false">
+                    Close
+                  </button>
+                  <div style="display:flex;gap:8px">
+                    <button
+                      class="btn btn-secondary btn-sm"
+                      @click="executeSelectedReviewItems"
+                      :disabled="organizerExecuting || getSelectedReviewItemsCount() === 0"
+                    >
+                      <i :class="organizerExecuting ? 'ph ph-circle-notch' : 'ph ph-check'" :style="organizerExecuting ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                      Organize Selected ({{ getSelectedReviewItemsCount() }})
+                    </button>
+                    <button
+                      class="btn btn-primary btn-sm"
+                      @click="executeAllReviewItems"
+                      :disabled="organizerExecuting || (organizerUnmatchedItems.length + organizerReadyItems.length) === 0"
+                    >
+                      <i :class="organizerExecuting ? 'ph ph-circle-notch' : 'ph ph-check-circle'" :style="organizerExecuting ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
+                      Organize All ({{ organizerUnmatchedItems.length + organizerReadyItems.length }})
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TMDb Search & Pick Modal for Organizer Card -->
+            <div class="organizer-tmdb-search-backdrop" v-if="organizerTmdbModal.show" @click.self="organizerTmdbModal.show = false">
+              <div class="organizer-tmdb-search-card" @click.stop>
+                <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:10px">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <i class="ph ph-magnifying-glass" style="color:var(--accent);font-size:1.2rem"></i>
+                    <h3 style="margin:0;font-size:1.05rem;font-weight:700">Search TMDb</h3>
+                  </div>
+                  <button class="modal-close-btn" @click="organizerTmdbModal.show = false">
+                    <i class="ph ph-x"></i>
+                  </button>
+                </div>
+
+                <div style="display:flex;gap:8px;align-items:center">
+                  <input
+                    type="text"
+                    v-model="organizerTmdbModal.query"
+                    @keyup.enter="searchTmdbForCard"
+                    class="form-input"
+                    placeholder="Search movie or TV show title..."
+                    style="flex:1"
+                  />
+                  <select v-model="organizerTmdbModal.type" class="form-input" style="width:110px">
+                    <option value="movie">Movie</option>
+                    <option value="tv">TV Show</option>
+                  </select>
+                  <button class="btn btn-primary btn-sm" @click="searchTmdbForCard" :disabled="organizerTmdbModal.loading">
+                    <i :class="organizerTmdbModal.loading ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="organizerTmdbModal.loading ? 'animation:spin 1s linear infinite' : ''"></i>
+                  </button>
+                </div>
+
+                <!-- Results list -->
+                <div style="max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:2px">
+                  <div v-if="organizerTmdbModal.loading" style="padding:2rem;text-align:center;color:var(--text-muted)">
+                    <div class="loading-spinner" style="margin:0 auto 8px auto"></div>
+                    <span>Searching TMDb...</span>
+                  </div>
+
+                  <div v-else-if="organizerTmdbModal.searched && organizerTmdbModal.results.length === 0" style="padding:2rem;text-align:center;color:var(--text-muted)">
+                    <i class="ph ph-warning-circle" style="font-size:1.8rem;margin-bottom:6px"></i>
+                    <div>No results found on TMDb for "{{ organizerTmdbModal.query }}"</div>
+                  </div>
+
+                  <div
+                    v-for="res in organizerTmdbModal.results"
+                    :key="res.id"
+                    @click="applyTmdbMatchToCard(res)"
+                    style="display:flex;gap:12px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);cursor:pointer;transition:all 0.15s ease"
+                    onmouseover="this.style.background='rgba(255,255,255,0.08)';this.style.borderColor='rgba(255,255,255,0.2)'"
+                    onmouseout="this.style.background='rgba(255,255,255,0.03)';this.style.borderColor='rgba(255,255,255,0.08)'"
+                  >
+                    <img
+                      v-if="res.poster_path"
+                      :src="'https://image.tmdb.org/t/p/w92' + res.poster_path"
+                      style="width:40px;height:58px;object-fit:cover;border-radius:6px;flex-shrink:0"
+                    />
+                    <div v-else style="width:40px;height:58px;background:rgba(255,255,255,0.05);border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                      <i class="ph ph-film-strip" style="color:var(--text-muted)"></i>
+                    </div>
+
+                    <div style="display:flex;flex-direction:column;justify-content:center;overflow:hidden;flex:1">
+                      <div style="font-weight:600;font-size:0.88rem;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                        {{ res.title || res.name }}
+                      </div>
+                      <div style="font-size:0.75rem;color:var(--text-muted);display:flex;gap:8px;margin-top:2px">
+                        <span>{{ (res.release_date || res.first_air_date || '').slice(0, 4) || 'Unknown year' }}</span>
+                        <span>&bull;</span>
+                        <span style="text-transform:capitalize">{{ res.media_type || organizerTmdbModal.type }}</span>
+                        <span v-if="res.vote_average">&bull; &star; {{ res.vote_average.toFixed(1) }}</span>
+                      </div>
+                    </div>
+
+                    <div style="display:flex;align-items:center">
+                      <span class="btn btn-primary btn-sm" style="font-size:0.72rem;padding:3px 8px">Select</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </teleport>
+
+          <!-- Organizer Detecting & Processing Status Modal (Teleported to Body for Global Overlay) -->
+          <teleport to="body">
+            <div class="organizer-progress-modal-backdrop" v-if="organizerProgressModal.show" @click.self="organizerProgressModal.type === 'success' || organizerProgressModal.type === 'error' ? (organizerProgressModal.show = false) : null">
+              <div class="organizer-progress-modal-card" @click.stop>
+                <div class="organizer-progress-icon-wrap" :class="organizerProgressModal.type">
+                  <i v-if="organizerProgressModal.type === 'detecting'" class="ph ph-magnifying-glass" style="animation:spin 1.8s linear infinite"></i>
+                  <i v-else-if="organizerProgressModal.type === 'processing'" class="ph ph-arrows-clockwise" style="animation:spin 1.2s linear infinite"></i>
+                  <i v-else-if="organizerProgressModal.type === 'success'" class="ph-bold ph-check"></i>
+                  <i v-else-if="organizerProgressModal.type === 'error'" class="ph-bold ph-warning"></i>
+                </div>
+
+                <div class="organizer-progress-badge" :class="organizerProgressModal.type">
+                  <span v-if="organizerProgressModal.type === 'detecting'">Detecting &amp; Matching Media</span>
+                  <span v-else-if="organizerProgressModal.type === 'processing'">
+                    Processing {{ organizerProgressModal.current || 0 }} of {{ organizerProgressModal.total || organizerProgressModal.count }} Item{{ (organizerProgressModal.total || organizerProgressModal.count) === 1 ? '' : 's' }} ({{ organizerProgressModal.percent || 0 }}%)
+                  </span>
+                  <span v-else-if="organizerProgressModal.type === 'success'">Completed Successfully</span>
+                  <span v-else-if="organizerProgressModal.type === 'error'">Operation Encountered Errors</span>
+                </div>
+
+                <h3 class="organizer-progress-title">{{ organizerProgressModal.title }}</h3>
+                <p class="organizer-progress-subtitle">{{ organizerProgressModal.subtitle }}</p>
+
+                <!-- Progress Bar when processing or detecting -->
+                <div class="organizer-modal-progress-wrap" v-if="organizerProgressModal.type === 'processing' || (organizerProgressModal.type === 'detecting' && organizerProgressModal.total > 0) || (organizerProgressModal.type === 'success' && organizerProgressModal.total)">
+                  <div class="organizer-modal-progress-bar" :style="{ width: (organizerProgressModal.percent || 0) + '%' }"></div>
+                </div>
+
+                <!-- Active Inspecting/Matching Card when detecting -->
+                <div class="organizer-detecting-active-card" v-if="organizerProgressModal.type === 'detecting' && organizerProgressModal.currentFile">
+                  <div class="organizer-detecting-file-row">
+                    <i class="ph ph-film-slate" style="color:var(--accent);font-size:1.1rem;flex-shrink:0"></i>
+                    <span class="organizer-detecting-filename" :title="organizerProgressModal.currentFile">{{ organizerProgressModal.currentFile }}</span>
+                    <span class="organizer-detecting-count-badge" v-if="organizerProgressModal.total > 0">
+                      {{ organizerProgressModal.current }} / {{ organizerProgressModal.total }}
+                    </span>
+                  </div>
+                  <div class="organizer-detecting-status-line">
+                    <i class="ph ph-magnifying-glass" style="color:#38bdf8;animation:spin 2s linear infinite"></i>
+                    <span>{{ organizerProgressModal.currentStatus || 'Inspecting tokens & metadata...' }}</span>
+                  </div>
+                </div>
+
+                <!-- Active Item Card when processing -->
+                <div class="organizer-active-item-card" v-if="organizerProgressModal.type === 'processing' && organizerProgressModal.currentItem">
+                  <div class="organizer-active-item-title">
+                    <i class="ph ph-film-slate" style="color:var(--accent)"></i>
+                    <span>Currently Organizing: <strong>{{ organizerProgressModal.currentItem.canonical_title || organizerProgressModal.currentItem.original_filename }}</strong></span>
+                    <span v-if="organizerProgressModal.currentItem.year" style="color:var(--text-muted);font-size:0.75rem">({{ organizerProgressModal.currentItem.year }})</span>
+                  </div>
+
+                  <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:3px;display:flex;align-items:center;gap:4px">
+                    <i class="ph ph-file-arrow-up"></i>
+                    <span>Source:</span>
+                    <span class="organizer-path-code" :title="organizerProgressModal.currentItem.source_path">{{ getFileBasename(organizerProgressModal.currentItem.source_path) }}</span>
+                    <span v-if="organizerProgressModal.currentItem.file_size" style="margin-left:auto;color:var(--text-secondary)">{{ (organizerProgressModal.currentItem.file_size / (1024*1024*1024)).toFixed(2) }} GB</span>
+                  </div>
+
+                  <div style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
+                    <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
+                    <span>Destination:</span>
+                    <span class="organizer-path-code" :title="organizerProgressModal.currentItem.destination_path">{{ organizerProgressModal.currentItem.destination_path }}</span>
+                  </div>
+
+                  <div v-if="organizerProgressModal.currentItem.subtitles?.length || organizerProgressModal.currentItem.extras?.length" style="display:flex;align-items:center;gap:6px;margin-top:6px">
+                    <span v-if="organizerProgressModal.currentItem.subtitles?.length" class="tag" style="font-size:0.68rem;padding:1px 5px;background:rgba(34,197,94,0.15);color:#4ade80">
+                      +{{ organizerProgressModal.currentItem.subtitles.length }} companion subtitle(s)
+                    </span>
+                    <span v-if="organizerProgressModal.currentItem.extras?.length" class="tag" style="font-size:0.68rem;padding:1px 5px;background:rgba(59,130,246,0.15);color:#60a5fa">
+                      +{{ organizerProgressModal.currentItem.extras.length }} theme/extra(s)
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Processed Activity Log (Dedicated scrollable container) -->
+                <div class="organizer-modal-items-log" v-if="organizerProgressModal.processedItems && organizerProgressModal.processedItems.length > 0">
+                  <div style="font-size:0.7rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">
+                    Activity Log ({{ organizerProgressModal.processedItems.length }})
+                  </div>
+                  <div class="organizer-items-log-scroll">
+                    <div v-for="(pItem, pIdx) in organizerProgressModal.processedItems.slice().reverse()" :key="pIdx" class="organizer-log-entry" :class="{ failed: pItem.status !== 'ok' }">
+                      <i :class="pItem.status === 'ok' ? 'ph-bold ph-check' : 'ph-bold ph-warning'" :style="{ color: pItem.status === 'ok' ? '#4ade80' : '#f87171' }"></i>
+                      <span style="font-weight:600;color:var(--text-primary)">{{ pItem.title }}</span>
+                      <span class="organizer-path-code" style="max-width:180px" :title="pItem.destination">{{ getFileBasename(pItem.destination) }}</span>
+                      <span style="margin-left:auto;font-size:0.68rem;color:var(--text-muted)">{{ pItem.action }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="organizer-progress-details" v-if="organizerProgressModal.detail">
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <i class="ph ph-info" style="color:var(--accent)"></i>
+                    <span style="font-weight:600;color:var(--text-primary)">{{ organizerProgressModal.type === 'detecting' ? 'Target Folder:' : 'Operation Details:' }}</span>
+                  </div>
+                  <div style="word-break:break-all;color:var(--text-secondary)">{{ organizerProgressModal.detail }}</div>
+                </div>
+
+                <div v-if="organizerProgressModal.type === 'detecting'" style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin-top:2px">
+                  <i class="ph ph-shield-check" style="color:#4ade80"></i>
+                  <span>Read-only inspection. Files remain untouched until confirmed.</span>
+                </div>
+
+                <div v-else-if="organizerProgressModal.type === 'processing'" style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin-top:2px">
+                  <i class="ph ph-warning-circle" style="color:#fbbf24"></i>
+                  <span>Please keep server running while links/moves are executed.</span>
+                </div>
+
+                <button v-if="organizerProgressModal.type === 'success' || organizerProgressModal.type === 'error'" class="btn btn-primary btn-sm" @click="organizerProgressModal.show = false" style="margin-top:6px;width:100%">
+                  Done
+                </button>
+              </div>
+            </div>
+
+            <!-- History & Rollback Modal (Teleported to Body for Global Overlay) -->
+            <div class="organizer-history-modal-backdrop" v-if="organizerHistoryOpen" @click.self="organizerHistoryOpen = false">
+              <div class="organizer-history-modal-card" @click.stop>
+                <div class="organizer-history-header">
+                  <div class="organizer-history-header-left">
+                    <div class="organizer-history-icon-badge">
+                      <i class="ph ph-clock-counter-clockwise"></i>
+                    </div>
+                    <div class="organizer-history-title-wrap">
+                      <h3>Organizer History &amp; Rollback</h3>
+                      <div class="organizer-history-subtitle">Review past runs or revert organized files to their original state</div>
+                    </div>
+                  </div>
+                  <button class="modal-close-btn" @click="organizerHistoryOpen = false" title="Close">
+                    <i class="ph ph-x"></i>
+                  </button>
+                </div>
+
+                <div class="organizer-history-body">
+                  <div v-if="organizerHistoryLoading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3rem 1.5rem;gap:12px">
+                    <div class="loading-spinner"></div>
+                    <span style="font-size:0.85rem;color:var(--text-muted)">Loading organization history...</span>
+                  </div>
+
+                  <div v-else-if="organizerHistory.length === 0" class="organizer-history-empty">
+                    <div class="organizer-history-empty-icon">
+                      <i class="ph ph-tray"></i>
+                    </div>
+                    <div style="font-weight:700;font-size:0.95rem;color:var(--text-primary);margin-bottom:4px">No Past Batches Recorded</div>
+                    <div style="font-size:0.8rem;color:var(--text-muted);max-width:380px;margin:0 auto">
+                      Files processed automatically or organized from preview will appear here with one-click rollback.
+                    </div>
+                  </div>
+
+                  <div v-else style="display:flex;flex-direction:column;gap:12px">
+                    <div v-for="batch in organizerHistory" :key="batch.batch_id" class="organizer-batch-card">
+                      <div class="organizer-batch-top">
+                        <div class="organizer-batch-meta">
+                          <span class="organizer-batch-id-pill" :title="batch.batch_id">{{ batch.batch_id }}</span>
+                          <span class="organizer-batch-date">
+                            <i class="ph ph-calendar-blank"></i>
+                            {{ new Date(batch.timestamp).toLocaleString() }}
+                          </span>
+                          <span class="organizer-batch-count">
+                            <i class="ph ph-files" style="margin-right:2px"></i>
+                            {{ batch.count }} file{{ batch.count === 1 ? '' : 's' }}
+                          </span>
+                        </div>
+
+                        <button class="organizer-batch-btn-revert" @click="undoOrganizerBatch(batch.batch_id)" :disabled="organizerRevertingBatch === batch.batch_id" title="Revert files in this batch">
+                          <i :class="organizerRevertingBatch === batch.batch_id ? 'ph ph-circle-notch' : 'ph ph-arrow-u-up-left'" :style="organizerRevertingBatch === batch.batch_id ? 'animation:spin 1s linear infinite' : ''"></i>
+                          <span>{{ organizerRevertingBatch === batch.batch_id ? 'Reverting...' : 'Revert Batch' }}</span>
+                        </button>
+                      </div>
+
+                      <!-- Operation details -->
+                      <div v-if="batch.operations && batch.operations.length > 0" class="organizer-batch-ops">
+                        <div v-for="(op, opIdx) in batch.operations.slice(0, organizerExpandedBatches.has(batch.batch_id) ? undefined : 3)" :key="opIdx" class="organizer-op-row">
+                          <div class="organizer-op-file-flow">
+                            <span class="organizer-op-src" :title="op.source">
+                              <i class="ph ph-file-arrow-up" style="margin-right:3px"></i>
+                              {{ getFileBasename(op.source) }}
+                            </span>
+                            <i class="ph ph-arrow-right organizer-op-arrow"></i>
+                            <span class="organizer-op-dst" :title="op.destination">
+                              <i class="ph ph-folder" style="margin-right:3px;color:var(--accent)"></i>
+                              {{ op.destination }}
+                            </span>
+                          </div>
+                          <span class="organizer-op-badge" :class="op.action || 'smart'">
+                            {{ op.action || 'smart' }}
+                          </span>
+                        </div>
+
+                        <button v-if="batch.operations.length > 3" class="btn btn-ghost btn-sm" @click="toggleExpandBatch(batch.batch_id)" style="font-size:0.72rem;padding:2px 8px;margin-top:2px;align-self:flex-start">
+                          {{ organizerExpandedBatches.has(batch.batch_id) ? 'Show Less' : ('+ Show ' + (batch.operations.length - 3) + ' more file(s)') }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="organizer-history-footer">
+                  <div class="organizer-history-note">
+                    <i class="ph ph-info" style="color:var(--accent)"></i>
+                    <span>Hardlinks delete created links without touching downloads. Moves restore files to Incoming.</span>
+                  </div>
+                  <button class="btn btn-secondary btn-sm" @click="organizerHistoryOpen = false">Close</button>
+                </div>
+              </div>
+            </div>
+          </teleport>
+        </div>
+
         <!-- ══════ System Health Center ══════ -->
         <section class="settings-section settings-desktop-only" id="settings-health-center" v-if="isAdmin && !isMobileScreen" aria-labelledby="settings-health-title">
           <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
@@ -9510,6 +10196,26 @@ const SettingsPage = {
             <span>Appearance & Theme Presets</span>
           </div>
           <div class="settings-group">
+            <!-- New UI 2.0 Opt-In Toggle -->
+            <div class="settings-card-container" id="setting-ui2-toggle" style="margin-bottom: 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-inner, 10px); overflow: hidden;">
+              <div class="settings-row" style="align-items: center; padding: 14px 18px; gap: 20px;">
+                <div class="settings-label-container" style="flex: 1; min-width: 0;">
+                  <div class="settings-label" style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.95rem;">
+                    <i class="ph-bold ph-sparkle" style="color: var(--accent); font-size: 1.15rem;"></i>
+                    <span>Enable New UI 2.0</span>
+                    <span style="font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; background: rgba(245, 158, 11, 0.16); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35);">Experimental</span>
+                  </div>
+                  <div class="settings-desc" style="margin-top: 4px; color: var(--text-muted); font-size: 0.82rem; line-height: 1.4;">
+                    Try the redesigned interface (Experimental — may be buggy or unstable; switch off anytime to restore classic UI).
+                  </div>
+                </div>
+                <label class="toggle-switch" style="flex-shrink: 0;">
+                  <input type="checkbox" :checked="store.ui2Enabled" @change="toggleUi2($event.target.checked)" id="toggle-ui2-enabled" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+
             <!-- Holiday & Special Event Banners Card -->
             <div class="settings-card-container" id="setting-seasonal-banners" style="margin-bottom: 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-inner, 10px); overflow: hidden;">
               <!-- Main Toggle Row -->
@@ -10930,690 +11636,6 @@ const SettingsPage = {
               </table>
             </div>
           </div>
-        </div>
-
-        <!-- ══════ Media Renamer & Organizer Section ══════ -->
-        <div class="settings-section settings-desktop-only" id="settings-organizer-section" v-if="isAdmin && !isMobileScreen">
-          <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-            <div style="display:flex;align-items:center;gap:8px">
-              <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
-              <span>Automated Media Renamer &amp; File Organizer</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <button class="btn btn-secondary btn-sm" @click="openOrganizerHistory" :disabled="organizerHistoryLoading" id="btn-organizer-history">
-                <i class="ph ph-clock-counter-clockwise" style="margin-right:4px"></i> History &amp; Rollback
-              </button>
-              <button class="btn btn-primary btn-sm" @click="runOrganizerPreview" :disabled="organizerScanning || organizerExecuting" id="btn-organizer-preview">
-                <i :class="organizerScanning ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="organizerScanning ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
-                {{ organizerScanning ? 'Scanning Incoming...' : 'Scan &amp; Preview Incoming' }}
-              </button>
-            </div>
-          </div>
-
-          <div class="settings-group">
-            <div class="settings-desc" style="margin-bottom:1rem">
-              Automatically cleans release scene clutter, normalizes titles to standard Plex/CapsStream formats (<code>Movies/Title (Year)</code> and <code>TV Shows/Title/Season SS/Title - SxxExx</code>), and organizes files into your library using zero-cost NTFS hardlinks.
-            </div>
-
-            <!-- Configuration Rows -->
-            <div class="settings-row" id="setting-organizer-folder">
-              <div class="settings-label-container">
-                <div class="settings-label">Incoming / Downloads Drop Folder</div>
-                <div class="settings-desc">Source directory where completed downloads, torrents, or unorganized media arrive.</div>
-              </div>
-              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
-                <input type="text" v-model="organizerConfig.incoming_dir" class="form-input" placeholder="e.g. D:/Downloads or data/incoming" style="flex:1" />
-                <button class="btn btn-secondary btn-sm" @click="saveOrganizerConfig" :disabled="organizerSaving">
-                  {{ organizerSaving ? 'Saving...' : 'Save' }}
-                </button>
-              </div>
-            </div>
-
-            <!-- Destination Target Folders -->
-            <div class="settings-row" id="setting-organizer-target-movies">
-              <div class="settings-label-container">
-                <div class="settings-label">Target Movies Folder</div>
-                <div class="settings-desc">Destination library folder for organized Movies. Selected from configured Media Scanner paths.</div>
-              </div>
-              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
-                <select v-if="(form.media_paths?.movies || organizerConfig.available_paths?.movies || []).length" v-model="organizerConfig.target_movies_path" @change="saveOrganizerConfig" class="form-input" style="flex:1">
-                  <option v-for="p in (form.media_paths?.movies || organizerConfig.available_paths?.movies || [])" :key="p" :value="p">{{ p }}</option>
-                  <option v-if="organizerConfig.target_movies_path && !(form.media_paths?.movies || organizerConfig.available_paths?.movies || []).includes(organizerConfig.target_movies_path)" :value="organizerConfig.target_movies_path">{{ organizerConfig.target_movies_path }}</option>
-                </select>
-                <input v-else type="text" v-model="organizerConfig.target_movies_path" class="form-input" placeholder="e.g. data/media/Movies" style="flex:1" @change="saveOrganizerConfig" />
-              </div>
-            </div>
-
-            <div class="settings-row" id="setting-organizer-target-series">
-              <div class="settings-label-container">
-                <div class="settings-label">Target TV Series Folder</div>
-                <div class="settings-desc">Destination library folder for organized TV Shows. Selected from configured Media Scanner paths.</div>
-              </div>
-              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
-                <select v-if="(form.media_paths?.series || organizerConfig.available_paths?.series || []).length" v-model="organizerConfig.target_series_path" @change="saveOrganizerConfig" class="form-input" style="flex:1">
-                  <option v-for="p in (form.media_paths?.series || organizerConfig.available_paths?.series || [])" :key="p" :value="p">{{ p }}</option>
-                  <option v-if="organizerConfig.target_series_path && !(form.media_paths?.series || organizerConfig.available_paths?.series || []).includes(organizerConfig.target_series_path)" :value="organizerConfig.target_series_path">{{ organizerConfig.target_series_path }}</option>
-                </select>
-                <input v-else type="text" v-model="organizerConfig.target_series_path" class="form-input" placeholder="e.g. data/media/TV Shows" style="flex:1" @change="saveOrganizerConfig" />
-              </div>
-            </div>
-
-            <div class="settings-row" id="setting-organizer-target-anime">
-              <div class="settings-label-container">
-                <div class="settings-label">Target Anime Folder</div>
-                <div class="settings-desc">Destination library folder for organized Anime series and films.</div>
-              </div>
-              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
-                <select v-if="(form.media_paths?.anime || organizerConfig.available_paths?.anime || []).length" v-model="organizerConfig.target_anime_path" @change="saveOrganizerConfig" class="form-input" style="flex:1">
-                  <option v-for="p in (form.media_paths?.anime || organizerConfig.available_paths?.anime || [])" :key="p" :value="p">{{ p }}</option>
-                  <option v-if="organizerConfig.target_anime_path && !(form.media_paths?.anime || organizerConfig.available_paths?.anime || []).includes(organizerConfig.target_anime_path)" :value="organizerConfig.target_anime_path">{{ organizerConfig.target_anime_path }}</option>
-                </select>
-                <input v-else type="text" v-model="organizerConfig.target_anime_path" class="form-input" placeholder="e.g. data/media/Anime" style="flex:1" @change="saveOrganizerConfig" />
-              </div>
-            </div>
-
-            <div class="settings-row" id="setting-organizer-local-region">
-              <div class="settings-label-container">
-                <div class="settings-label">Local Region Routing</div>
-                <div class="settings-desc">Route media originating from a specific country to designated local library folders instead of standard roots. Anime always uses the anime root.</div>
-              </div>
-              <select v-model="organizerConfig.local_region" @change="saveOrganizerConfig" class="form-input" style="width:260px">
-                <option value="">Disabled (None)</option>
-                <option v-for="(name, code) in (organizerConfig.regions || {})" :key="code" :value="code">{{ name }} ({{ code }})</option>
-              </select>
-            </div>
-
-            <!-- Target Local Folders (Visible when Local Region is enabled) -->
-            <div v-if="organizerConfig.local_region" class="settings-row" id="setting-organizer-target-local-movies">
-              <div class="settings-label-container">
-                <div class="settings-label">Target Local Movies Folder</div>
-                <div class="settings-desc">Destination library folder for localized Movies (e.g. T:/Local/Movie).</div>
-              </div>
-              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
-                <input type="text" v-model="organizerConfig.target_local_movies_path" class="form-input" placeholder="e.g. T:/Local/Movie" style="flex:1" @change="saveOrganizerConfig" />
-              </div>
-            </div>
-
-            <div v-if="organizerConfig.local_region" class="settings-row" id="setting-organizer-target-local-series">
-              <div class="settings-label-container">
-                <div class="settings-label">Target Local TV Series Folder</div>
-                <div class="settings-desc">Destination library folder for localized TV Shows (e.g. T:/Local/Series).</div>
-              </div>
-              <div style="display:flex;gap:8px;align-items:center;width:min(100%, 460px)">
-                <input type="text" v-model="organizerConfig.target_local_series_path" class="form-input" placeholder="e.g. T:/Local/Series" style="flex:1" @change="saveOrganizerConfig" />
-              </div>
-            </div>
-
-            <div class="settings-row" id="setting-organizer-collision-policy">
-              <div class="settings-label-container">
-                <div class="settings-label">Video Collision Policy</div>
-                <div class="settings-desc">Action when destination media file already exists. Subtitles always disambiguate with numeric suffixes without overwriting.</div>
-              </div>
-              <select v-model="organizerConfig.collision_policy" @change="saveOrganizerConfig" class="form-input" style="width:260px">
-                <option value="skip">Skip Existing (Do not overwrite)</option>
-                <option value="suffix">Auto-Suffix Duplicates (2, 3)</option>
-              </select>
-            </div>
-
-            <div class="settings-row" id="setting-organizer-mode">
-              <div class="settings-label-container">
-                <div class="settings-label">File Organization Mode</div>
-                <div class="settings-desc">Smart Mode creates NTFS hardlinks on the same drive (preserves torrent seeding with 0 extra disk space), falling back to Move across drives.</div>
-              </div>
-              <select v-model="organizerConfig.mode" @change="saveOrganizerConfig" class="form-input" style="width:260px">
-                <option value="smart">Smart Mode (Hardlink / Move)</option>
-                <option value="move">Move Only (Relocates files)</option>
-                <option value="copy">Copy Only (Duplicates files)</option>
-              </select>
-            </div>
-
-            <div class="settings-row" id="setting-organizer-autowatch">
-              <div class="settings-label-container">
-                <div class="settings-label">Background Folder Watcher</div>
-                <div class="settings-desc">Periodically checks the incoming folder in the background. Complete, settled downloads without locks are organized automatically.</div>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" v-model="organizerConfig.auto_watch" @change="saveOrganizerConfig" />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <!-- Ready Items Banner in Settings -->
-            <div v-if="organizerPreviewItems.length > 0 && organizerUnmatchedItems.length === 0" style="margin-top:1.5rem">
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.25);border-radius:12px;flex-wrap:wrap;gap:10px">
-                <div style="display:flex;align-items:center;gap:10px">
-                  <i class="ph-bold ph-check-circle" style="color:#38bdf8;font-size:1.3rem"></i>
-                  <div>
-                    <div style="font-weight:700;color:var(--text-primary);font-size:0.92rem">
-                      {{ organizerPreviewItems.length }} Item{{ organizerPreviewItems.length === 1 ? '' : 's' }} Ready to Organize
-                    </div>
-                    <div style="font-size:0.78rem;color:var(--text-secondary)">
-                      All media matches verified with high confidence. Click to link and organize into your library.
-                    </div>
-                  </div>
-                </div>
-                <div style="display:flex;gap:8px">
-                  <button class="btn btn-secondary btn-sm" @click="organizerPreviewItems = []">
-                    Dismiss
-                  </button>
-                  <button class="btn btn-primary btn-sm" @click="executeBatchOrganizer(organizerPreviewItems)" :disabled="organizerExecuting">
-                    <i :class="organizerExecuting ? 'ph ph-circle-notch' : 'ph ph-check-circle'" :style="organizerExecuting ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
-                    {{ organizerExecuting ? 'Organizing...' : 'Organize All (' + organizerPreviewItems.length + ')' }}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Unmatched Items Alert Banner in Settings (Opens Modal) -->
-            <div v-if="organizerUnmatchedItems.length > 0" style="margin-top:1.5rem">
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.25);border-radius:12px;flex-wrap:wrap;gap:10px">
-                <div style="display:flex;align-items:center;gap:10px">
-                  <i class="ph-bold ph-warning-circle" style="color:#facc15;font-size:1.3rem"></i>
-                  <div>
-                    <div style="font-weight:700;color:var(--text-primary);font-size:0.92rem">
-                      {{ organizerUnmatchedItems.length }} Item{{ organizerUnmatchedItems.length === 1 ? '' : 's' }} Require Review
-                    </div>
-                    <div style="font-size:0.78rem;color:var(--text-secondary)">
-                      Low match confidence or locked files detected. Review or edit before organizing.
-                    </div>
-                  </div>
-                </div>
-                <div style="display:flex;gap:8px">
-                  <button class="btn btn-secondary btn-sm" @click="organizerUnmatchedItems = []">
-                    Dismiss
-                  </button>
-                  <button class="btn btn-primary btn-sm" @click="organizerUnmatchedModal.show = true" style="background:#eab308;color:#000;border-color:#ca8a04">
-                    <i class="ph ph-cards" style="margin-right:4px"></i>
-                    Review Unmatched Items ({{ organizerUnmatchedItems.length }})
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Dedicated Review & Preview Modal (Teleported to Body) -->
-          <teleport to="body">
-            <div class="organizer-review-modal-backdrop" v-if="organizerUnmatchedModal.show" @click.self="organizerUnmatchedModal.show = false">
-              <div class="organizer-review-modal-card" @click.stop>
-                <div class="organizer-review-modal-header">
-                  <div class="organizer-review-modal-title-row">
-                    <div class="organizer-progress-icon-wrap" :class="organizerReviewActiveTab === 'unmatched' && organizerUnmatchedItems.length > 0 ? 'warning' : 'detecting'" style="width:38px;height:38px;font-size:1.1rem;margin:0">
-                      <i :class="organizerReviewActiveTab === 'unmatched' && organizerUnmatchedItems.length > 0 ? 'ph-bold ph-warning' : 'ph-bold ph-film-slate'"></i>
-                    </div>
-                    <div>
-                      <h3 class="organizer-review-modal-title">Review Scanned Media</h3>
-                      <div class="organizer-review-modal-sub">
-                        Verify matched titles, fix unrecognized items with TMDb, and confirm before organizing.
-                      </div>
-                    </div>
-                  </div>
-                  <button class="modal-close-btn" @click="organizerUnmatchedModal.show = false" title="Close">
-                    <i class="ph ph-x"></i>
-                  </button>
-                </div>
-
-                <!-- Tabs: Unmatched / Issues vs Matched (Ready) -->
-                <div class="organizer-review-tabs">
-                  <button
-                    class="organizer-review-tab-btn"
-                    :class="{ active: organizerReviewActiveTab === 'unmatched' }"
-                    @click="organizerReviewActiveTab = 'unmatched'"
-                  >
-                    <i class="ph ph-warning-circle" style="color:#facc15"></i>
-                    <span>Unmatched / Issues</span>
-                    <span class="organizer-review-tab-badge warning">{{ organizerUnmatchedItems.length }}</span>
-                  </button>
-                  <button
-                    class="organizer-review-tab-btn"
-                    :class="{ active: organizerReviewActiveTab === 'ready' }"
-                    @click="organizerReviewActiveTab = 'ready'"
-                  >
-                    <i class="ph ph-check-circle" style="color:#4ade80"></i>
-                    <span>Matched (Ready)</span>
-                    <span class="organizer-review-tab-badge success">{{ organizerReadyItems.length }}</span>
-                  </button>
-                </div>
-
-                <!-- Controls: Select All & Count -->
-                <div class="organizer-review-modal-controls">
-                  <div style="display:flex;align-items:center;gap:8px">
-                    <button class="btn btn-ghost btn-sm" @click="toggleSelectAllActiveReviewTab" style="font-size:0.78rem">
-                      {{ (organizerReviewActiveTab === 'unmatched' ? organizerSelectedUnmatchedIndices.size === organizerUnmatchedItems.length : organizerSelectedReadyIndices.size === organizerReadyItems.length) ? 'Deselect All' : 'Select All' }}
-                    </button>
-                    <span style="font-size:0.75rem;color:var(--text-muted)">
-                      {{ organizerReviewActiveTab === 'unmatched' ? organizerSelectedUnmatchedIndices.size + ' of ' + organizerUnmatchedItems.length + ' selected' : organizerSelectedReadyIndices.size + ' of ' + organizerReadyItems.length + ' selected' }}
-                    </span>
-                  </div>
-                  <div style="font-size:0.75rem;color:var(--text-muted)">
-                    Showing 5 items max (scrollable)
-                  </div>
-                </div>
-
-                <!-- Cards Container (5 items max visible, rest scrollable) -->
-                <div class="organizer-unmatched-cards-container">
-                  <!-- Empty Tab State -->
-                  <div v-if="(organizerReviewActiveTab === 'unmatched' ? organizerUnmatchedItems.length : organizerReadyItems.length) === 0" style="padding:2.5rem 1rem;text-align:center;color:var(--text-muted)">
-                    <i :class="organizerReviewActiveTab === 'unmatched' ? 'ph ph-check-circle' : 'ph ph-folder-open'" style="font-size:2rem;color:var(--accent);margin-bottom:8px"></i>
-                    <div style="font-weight:600;color:var(--text-primary);font-size:0.9rem">
-                      {{ organizerReviewActiveTab === 'unmatched' ? 'No unmatched or failed items!' : 'No matched items yet.' }}
-                    </div>
-                    <div style="font-size:0.78rem;margin-top:2px">
-                      {{ organizerReviewActiveTab === 'unmatched' ? 'All candidate files have high-confidence matches.' : 'Check the Unmatched tab to review or fix files.' }}
-                    </div>
-                  </div>
-
-                  <!-- Cards List for Active Tab -->
-                  <div
-                    v-for="(item, idx) in (organizerReviewActiveTab === 'unmatched' ? organizerUnmatchedItems : organizerReadyItems)"
-                    :key="item.source_path"
-                    class="organizer-unmatched-card"
-                    :class="{ selected: (organizerReviewActiveTab === 'unmatched' ? organizerSelectedUnmatchedIndices.has(idx) : organizerSelectedReadyIndices.has(idx)) }"
-                  >
-                    <!-- Card Header: Checkbox, Filename, Size, Reason Pill -->
-                    <div class="organizer-card-header">
-                      <input
-                        type="checkbox"
-                        :checked="(organizerReviewActiveTab === 'unmatched' ? organizerSelectedUnmatchedIndices.has(idx) : organizerSelectedReadyIndices.has(idx))"
-                        @change="toggleReviewItemCheckbox(idx)"
-                        style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;flex-shrink:0"
-                      />
-                      <div class="organizer-card-title-group">
-                        <div class="organizer-card-filename" :title="item.filename">
-                          {{ item.filename }}
-                        </div>
-                        <div class="organizer-card-filesize">
-                          {{ formatFileSize(item.file_size || 0) }}
-                        </div>
-                      </div>
-
-                      <!-- Reason / Status badge -->
-                      <div style="flex-shrink:0">
-                        <span v-if="item.is_manually_matched" class="server-status-pill success" style="font-size:0.7rem;padding:2px 7px" title="Manually matched with TMDb">
-                          <i class="ph-bold ph-check" style="margin-right:2px"></i>Matched
-                        </span>
-                        <span v-else-if="item.confidence === 'low'" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 7px" title="Match confidence <70%">
-                          <i class="ph ph-warning" style="margin-right:2px"></i>Unrecognized
-                        </span>
-                        <span v-else-if="item.is_locked" class="server-status-pill error" style="font-size:0.7rem;padding:2px 7px" title="File in use or downloading">
-                          <i class="ph ph-lock" style="margin-right:2px"></i>Locked
-                        </span>
-                        <span v-else-if="item.destination_exists" class="server-status-pill warning" style="font-size:0.7rem;padding:2px 7px" title="Destination already exists">
-                          <i class="ph ph-arrows-clockwise" style="margin-right:2px"></i>Exists
-                        </span>
-                        <span v-else class="server-status-pill success" style="font-size:0.7rem;padding:2px 7px" title="High confidence match">
-                          <i class="ph ph-check" style="margin-right:2px"></i>Ready
-                        </span>
-                      </div>
-                    </div>
-
-                    <!-- Card Body: Editable Title, Year, Type Toggle, and TMDb Search button -->
-                    <div class="organizer-card-inputs-row">
-                      <button
-                        class="btn btn-ghost btn-sm"
-                        @click="changeItemMediaType(item)"
-                        style="font-size:0.75rem;padding:3px 8px;border-radius:6px;flex-shrink:0"
-                        :style="item.editType === 'movie' ? 'background:rgba(56,189,248,0.15);color:#38bdf8' : (item.editType === 'anime' ? 'background:rgba(236,72,153,0.15);color:#f472b6' : 'background:rgba(168,85,247,0.15);color:#c084fc')"
-                      >
-                        <i :class="item.editType === 'movie' ? 'ph ph-film-strip' : (item.editType === 'anime' ? 'ph ph-sparkle' : 'ph ph-television')" style="margin-right:4px"></i>
-                        {{ item.editType === 'movie' ? 'Movie' : (item.editType === 'anime' ? 'Anime' : 'TV Show') }}
-                      </button>
-
-                      <input
-                        type="text"
-                        v-model="item.editTitle"
-                        @change="updateItemDestinationPreview(item)"
-                        class="form-input"
-                        placeholder="Title"
-                        style="font-size:0.8rem;padding:4px 8px;flex:1;min-width:130px"
-                      />
-
-                      <input
-                        type="text"
-                        v-model="item.editYear"
-                        @change="updateItemDestinationPreview(item)"
-                        class="form-input"
-                        placeholder="Year"
-                        style="font-size:0.8rem;padding:4px 8px;width:64px;flex-shrink:0"
-                      />
-
-                      <!-- Search TMDb Button -->
-                      <button
-                        class="btn btn-secondary btn-sm"
-                        @click="openTmdbSearchForCard(item)"
-                        title="Search TMDb for exact metadata"
-                        style="font-size:0.75rem;padding:4px 8px;flex-shrink:0;gap:4px"
-                      >
-                        <i class="ph ph-magnifying-glass"></i>
-                        <span>Search TMDb</span>
-                      </button>
-                    </div>
-
-                    <!-- Destination Path Preview -->
-                    <div class="organizer-card-dest-row">
-                      <i class="ph ph-arrow-bend-down-right" style="color:var(--text-muted);flex-shrink:0"></i>
-                      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" :title="item.destination_path">
-                        {{ item.destination_path }}
-                      </span>
-                      <span v-if="item.subtitles?.length" class="tag" style="font-size:0.65rem;padding:1px 5px;background:rgba(34,197,94,0.15);color:#4ade80;flex-shrink:0">
-                        +{{ item.subtitles.length }} Sub
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Modal Footer -->
-                <div class="organizer-review-modal-footer">
-                  <button class="btn btn-secondary btn-sm" @click="organizerUnmatchedModal.show = false">
-                    Close
-                  </button>
-                  <div style="display:flex;gap:8px">
-                    <button
-                      class="btn btn-secondary btn-sm"
-                      @click="executeSelectedReviewItems"
-                      :disabled="organizerExecuting || getSelectedReviewItemsCount() === 0"
-                    >
-                      <i :class="organizerExecuting ? 'ph ph-circle-notch' : 'ph ph-check'" :style="organizerExecuting ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
-                      Organize Selected ({{ getSelectedReviewItemsCount() }})
-                    </button>
-                    <button
-                      class="btn btn-primary btn-sm"
-                      @click="executeAllReviewItems"
-                      :disabled="organizerExecuting || (organizerUnmatchedItems.length + organizerReadyItems.length) === 0"
-                    >
-                      <i :class="organizerExecuting ? 'ph ph-circle-notch' : 'ph ph-check-circle'" :style="organizerExecuting ? 'animation:spin 1s linear infinite' : ''" style="margin-right:4px"></i>
-                      Organize All ({{ organizerUnmatchedItems.length + organizerReadyItems.length }})
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- TMDb Search & Pick Modal for Organizer Card -->
-            <div class="organizer-tmdb-search-backdrop" v-if="organizerTmdbModal.show" @click.self="organizerTmdbModal.show = false">
-              <div class="organizer-tmdb-search-card" @click.stop>
-                <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:10px">
-                  <div style="display:flex;align-items:center;gap:8px">
-                    <i class="ph ph-magnifying-glass" style="color:var(--accent);font-size:1.2rem"></i>
-                    <h3 style="margin:0;font-size:1.05rem;font-weight:700">Search TMDb</h3>
-                  </div>
-                  <button class="modal-close-btn" @click="organizerTmdbModal.show = false">
-                    <i class="ph ph-x"></i>
-                  </button>
-                </div>
-
-                <div style="display:flex;gap:8px;align-items:center">
-                  <input
-                    type="text"
-                    v-model="organizerTmdbModal.query"
-                    @keyup.enter="searchTmdbForCard"
-                    class="form-input"
-                    placeholder="Search movie or TV show title..."
-                    style="flex:1"
-                  />
-                  <select v-model="organizerTmdbModal.type" class="form-input" style="width:110px">
-                    <option value="movie">Movie</option>
-                    <option value="tv">TV Show</option>
-                  </select>
-                  <button class="btn btn-primary btn-sm" @click="searchTmdbForCard" :disabled="organizerTmdbModal.loading">
-                    <i :class="organizerTmdbModal.loading ? 'ph ph-circle-notch' : 'ph ph-magnifying-glass'" :style="organizerTmdbModal.loading ? 'animation:spin 1s linear infinite' : ''"></i>
-                  </button>
-                </div>
-
-                <!-- Results list -->
-                <div style="max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:2px">
-                  <div v-if="organizerTmdbModal.loading" style="padding:2rem;text-align:center;color:var(--text-muted)">
-                    <div class="loading-spinner" style="margin:0 auto 8px auto"></div>
-                    <span>Searching TMDb...</span>
-                  </div>
-
-                  <div v-else-if="organizerTmdbModal.searched && organizerTmdbModal.results.length === 0" style="padding:2rem;text-align:center;color:var(--text-muted)">
-                    <i class="ph ph-warning-circle" style="font-size:1.8rem;margin-bottom:6px"></i>
-                    <div>No results found on TMDb for "{{ organizerTmdbModal.query }}"</div>
-                  </div>
-
-                  <div
-                    v-for="res in organizerTmdbModal.results"
-                    :key="res.id"
-                    @click="applyTmdbMatchToCard(res)"
-                    style="display:flex;gap:12px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);cursor:pointer;transition:all 0.15s ease"
-                    onmouseover="this.style.background='rgba(255,255,255,0.08)';this.style.borderColor='rgba(255,255,255,0.2)'"
-                    onmouseout="this.style.background='rgba(255,255,255,0.03)';this.style.borderColor='rgba(255,255,255,0.08)'"
-                  >
-                    <img
-                      v-if="res.poster_path"
-                      :src="'https://image.tmdb.org/t/p/w92' + res.poster_path"
-                      style="width:40px;height:58px;object-fit:cover;border-radius:6px;flex-shrink:0"
-                    />
-                    <div v-else style="width:40px;height:58px;background:rgba(255,255,255,0.05);border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-                      <i class="ph ph-film-strip" style="color:var(--text-muted)"></i>
-                    </div>
-
-                    <div style="display:flex;flex-direction:column;justify-content:center;overflow:hidden;flex:1">
-                      <div style="font-weight:600;font-size:0.88rem;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-                        {{ res.title || res.name }}
-                      </div>
-                      <div style="font-size:0.75rem;color:var(--text-muted);display:flex;gap:8px;margin-top:2px">
-                        <span>{{ (res.release_date || res.first_air_date || '').slice(0, 4) || 'Unknown year' }}</span>
-                        <span>&bull;</span>
-                        <span style="text-transform:capitalize">{{ res.media_type || organizerTmdbModal.type }}</span>
-                        <span v-if="res.vote_average">&bull; &star; {{ res.vote_average.toFixed(1) }}</span>
-                      </div>
-                    </div>
-
-                    <div style="display:flex;align-items:center">
-                      <span class="btn btn-primary btn-sm" style="font-size:0.72rem;padding:3px 8px">Select</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </teleport>
-
-          <!-- Organizer Detecting & Processing Status Modal (Teleported to Body for Global Overlay) -->
-          <teleport to="body">
-            <div class="organizer-progress-modal-backdrop" v-if="organizerProgressModal.show" @click.self="organizerProgressModal.type === 'success' || organizerProgressModal.type === 'error' ? (organizerProgressModal.show = false) : null">
-              <div class="organizer-progress-modal-card" @click.stop>
-                <div class="organizer-progress-icon-wrap" :class="organizerProgressModal.type">
-                  <i v-if="organizerProgressModal.type === 'detecting'" class="ph ph-magnifying-glass" style="animation:spin 1.8s linear infinite"></i>
-                  <i v-else-if="organizerProgressModal.type === 'processing'" class="ph ph-arrows-clockwise" style="animation:spin 1.2s linear infinite"></i>
-                  <i v-else-if="organizerProgressModal.type === 'success'" class="ph-bold ph-check"></i>
-                  <i v-else-if="organizerProgressModal.type === 'error'" class="ph-bold ph-warning"></i>
-                </div>
-
-                <div class="organizer-progress-badge" :class="organizerProgressModal.type">
-                  <span v-if="organizerProgressModal.type === 'detecting'">Detecting &amp; Matching Media</span>
-                  <span v-else-if="organizerProgressModal.type === 'processing'">
-                    Processing {{ organizerProgressModal.current || 0 }} of {{ organizerProgressModal.total || organizerProgressModal.count }} Item{{ (organizerProgressModal.total || organizerProgressModal.count) === 1 ? '' : 's' }} ({{ organizerProgressModal.percent || 0 }}%)
-                  </span>
-                  <span v-else-if="organizerProgressModal.type === 'success'">Completed Successfully</span>
-                  <span v-else-if="organizerProgressModal.type === 'error'">Operation Encountered Errors</span>
-                </div>
-
-                <h3 class="organizer-progress-title">{{ organizerProgressModal.title }}</h3>
-                <p class="organizer-progress-subtitle">{{ organizerProgressModal.subtitle }}</p>
-
-                <!-- Progress Bar when processing or detecting -->
-                <div class="organizer-modal-progress-wrap" v-if="organizerProgressModal.type === 'processing' || (organizerProgressModal.type === 'detecting' && organizerProgressModal.total > 0) || (organizerProgressModal.type === 'success' && organizerProgressModal.total)">
-                  <div class="organizer-modal-progress-bar" :style="{ width: (organizerProgressModal.percent || 0) + '%' }"></div>
-                </div>
-
-                <!-- Active Inspecting/Matching Card when detecting -->
-                <div class="organizer-detecting-active-card" v-if="organizerProgressModal.type === 'detecting' && organizerProgressModal.currentFile">
-                  <div class="organizer-detecting-file-row">
-                    <i class="ph ph-film-slate" style="color:var(--accent);font-size:1.1rem;flex-shrink:0"></i>
-                    <span class="organizer-detecting-filename" :title="organizerProgressModal.currentFile">{{ organizerProgressModal.currentFile }}</span>
-                    <span class="organizer-detecting-count-badge" v-if="organizerProgressModal.total > 0">
-                      {{ organizerProgressModal.current }} / {{ organizerProgressModal.total }}
-                    </span>
-                  </div>
-                  <div class="organizer-detecting-status-line">
-                    <i class="ph ph-magnifying-glass" style="color:#38bdf8;animation:spin 2s linear infinite"></i>
-                    <span>{{ organizerProgressModal.currentStatus || 'Inspecting tokens & metadata...' }}</span>
-                  </div>
-                </div>
-
-                <!-- Active Item Card when processing -->
-                <div class="organizer-active-item-card" v-if="organizerProgressModal.type === 'processing' && organizerProgressModal.currentItem">
-                  <div class="organizer-active-item-title">
-                    <i class="ph ph-film-slate" style="color:var(--accent)"></i>
-                    <span>Currently Organizing: <strong>{{ organizerProgressModal.currentItem.canonical_title || organizerProgressModal.currentItem.original_filename }}</strong></span>
-                    <span v-if="organizerProgressModal.currentItem.year" style="color:var(--text-muted);font-size:0.75rem">({{ organizerProgressModal.currentItem.year }})</span>
-                  </div>
-
-                  <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:3px;display:flex;align-items:center;gap:4px">
-                    <i class="ph ph-file-arrow-up"></i>
-                    <span>Source:</span>
-                    <span class="organizer-path-code" :title="organizerProgressModal.currentItem.source_path">{{ getFileBasename(organizerProgressModal.currentItem.source_path) }}</span>
-                    <span v-if="organizerProgressModal.currentItem.file_size" style="margin-left:auto;color:var(--text-secondary)">{{ (organizerProgressModal.currentItem.file_size / (1024*1024*1024)).toFixed(2) }} GB</span>
-                  </div>
-
-                  <div style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:4px">
-                    <i class="ph ph-folder-notch-open" style="color:var(--accent)"></i>
-                    <span>Destination:</span>
-                    <span class="organizer-path-code" :title="organizerProgressModal.currentItem.destination_path">{{ organizerProgressModal.currentItem.destination_path }}</span>
-                  </div>
-
-                  <div v-if="organizerProgressModal.currentItem.subtitles?.length || organizerProgressModal.currentItem.extras?.length" style="display:flex;align-items:center;gap:6px;margin-top:6px">
-                    <span v-if="organizerProgressModal.currentItem.subtitles?.length" class="tag" style="font-size:0.68rem;padding:1px 5px;background:rgba(34,197,94,0.15);color:#4ade80">
-                      +{{ organizerProgressModal.currentItem.subtitles.length }} companion subtitle(s)
-                    </span>
-                    <span v-if="organizerProgressModal.currentItem.extras?.length" class="tag" style="font-size:0.68rem;padding:1px 5px;background:rgba(59,130,246,0.15);color:#60a5fa">
-                      +{{ organizerProgressModal.currentItem.extras.length }} theme/extra(s)
-                    </span>
-                  </div>
-                </div>
-
-                <!-- Processed Activity Log (Dedicated scrollable container) -->
-                <div class="organizer-modal-items-log" v-if="organizerProgressModal.processedItems && organizerProgressModal.processedItems.length > 0">
-                  <div style="font-size:0.7rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">
-                    Activity Log ({{ organizerProgressModal.processedItems.length }})
-                  </div>
-                  <div class="organizer-items-log-scroll">
-                    <div v-for="(pItem, pIdx) in organizerProgressModal.processedItems.slice().reverse()" :key="pIdx" class="organizer-log-entry" :class="{ failed: pItem.status !== 'ok' }">
-                      <i :class="pItem.status === 'ok' ? 'ph-bold ph-check' : 'ph-bold ph-warning'" :style="{ color: pItem.status === 'ok' ? '#4ade80' : '#f87171' }"></i>
-                      <span style="font-weight:600;color:var(--text-primary)">{{ pItem.title }}</span>
-                      <span class="organizer-path-code" style="max-width:180px" :title="pItem.destination">{{ getFileBasename(pItem.destination) }}</span>
-                      <span style="margin-left:auto;font-size:0.68rem;color:var(--text-muted)">{{ pItem.action }}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="organizer-progress-details" v-if="organizerProgressModal.detail">
-                  <div style="display:flex;align-items:center;gap:6px">
-                    <i class="ph ph-info" style="color:var(--accent)"></i>
-                    <span style="font-weight:600;color:var(--text-primary)">{{ organizerProgressModal.type === 'detecting' ? 'Target Folder:' : 'Operation Details:' }}</span>
-                  </div>
-                  <div style="word-break:break-all;color:var(--text-secondary)">{{ organizerProgressModal.detail }}</div>
-                </div>
-
-                <div v-if="organizerProgressModal.type === 'detecting'" style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin-top:2px">
-                  <i class="ph ph-shield-check" style="color:#4ade80"></i>
-                  <span>Read-only inspection. Files remain untouched until confirmed.</span>
-                </div>
-
-                <div v-else-if="organizerProgressModal.type === 'processing'" style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin-top:2px">
-                  <i class="ph ph-warning-circle" style="color:#fbbf24"></i>
-                  <span>Please keep server running while links/moves are executed.</span>
-                </div>
-
-                <button v-if="organizerProgressModal.type === 'success' || organizerProgressModal.type === 'error'" class="btn btn-primary btn-sm" @click="organizerProgressModal.show = false" style="margin-top:6px;width:100%">
-                  Done
-                </button>
-              </div>
-            </div>
-
-            <!-- History & Rollback Modal (Teleported to Body for Global Overlay) -->
-            <div class="organizer-history-modal-backdrop" v-if="organizerHistoryOpen" @click.self="organizerHistoryOpen = false">
-              <div class="organizer-history-modal-card" @click.stop>
-                <div class="organizer-history-header">
-                  <div class="organizer-history-header-left">
-                    <div class="organizer-history-icon-badge">
-                      <i class="ph ph-clock-counter-clockwise"></i>
-                    </div>
-                    <div class="organizer-history-title-wrap">
-                      <h3>Organizer History &amp; Rollback</h3>
-                      <div class="organizer-history-subtitle">Review past runs or revert organized files to their original state</div>
-                    </div>
-                  </div>
-                  <button class="modal-close-btn" @click="organizerHistoryOpen = false" title="Close">
-                    <i class="ph ph-x"></i>
-                  </button>
-                </div>
-
-                <div class="organizer-history-body">
-                  <div v-if="organizerHistoryLoading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3rem 1.5rem;gap:12px">
-                    <div class="loading-spinner"></div>
-                    <span style="font-size:0.85rem;color:var(--text-muted)">Loading organization history...</span>
-                  </div>
-
-                  <div v-else-if="organizerHistory.length === 0" class="organizer-history-empty">
-                    <div class="organizer-history-empty-icon">
-                      <i class="ph ph-tray"></i>
-                    </div>
-                    <div style="font-weight:700;font-size:0.95rem;color:var(--text-primary);margin-bottom:4px">No Past Batches Recorded</div>
-                    <div style="font-size:0.8rem;color:var(--text-muted);max-width:380px;margin:0 auto">
-                      Files processed automatically or organized from preview will appear here with one-click rollback.
-                    </div>
-                  </div>
-
-                  <div v-else style="display:flex;flex-direction:column;gap:12px">
-                    <div v-for="batch in organizerHistory" :key="batch.batch_id" class="organizer-batch-card">
-                      <div class="organizer-batch-top">
-                        <div class="organizer-batch-meta">
-                          <span class="organizer-batch-id-pill" :title="batch.batch_id">{{ batch.batch_id }}</span>
-                          <span class="organizer-batch-date">
-                            <i class="ph ph-calendar-blank"></i>
-                            {{ new Date(batch.timestamp).toLocaleString() }}
-                          </span>
-                          <span class="organizer-batch-count">
-                            <i class="ph ph-files" style="margin-right:2px"></i>
-                            {{ batch.count }} file{{ batch.count === 1 ? '' : 's' }}
-                          </span>
-                        </div>
-
-                        <button class="organizer-batch-btn-revert" @click="undoOrganizerBatch(batch.batch_id)" :disabled="organizerRevertingBatch === batch.batch_id" title="Revert files in this batch">
-                          <i :class="organizerRevertingBatch === batch.batch_id ? 'ph ph-circle-notch' : 'ph ph-arrow-u-up-left'" :style="organizerRevertingBatch === batch.batch_id ? 'animation:spin 1s linear infinite' : ''"></i>
-                          <span>{{ organizerRevertingBatch === batch.batch_id ? 'Reverting...' : 'Revert Batch' }}</span>
-                        </button>
-                      </div>
-
-                      <!-- Operation details -->
-                      <div v-if="batch.operations && batch.operations.length > 0" class="organizer-batch-ops">
-                        <div v-for="(op, opIdx) in batch.operations.slice(0, organizerExpandedBatches.has(batch.batch_id) ? undefined : 3)" :key="opIdx" class="organizer-op-row">
-                          <div class="organizer-op-file-flow">
-                            <span class="organizer-op-src" :title="op.source">
-                              <i class="ph ph-file-arrow-up" style="margin-right:3px"></i>
-                              {{ getFileBasename(op.source) }}
-                            </span>
-                            <i class="ph ph-arrow-right organizer-op-arrow"></i>
-                            <span class="organizer-op-dst" :title="op.destination">
-                              <i class="ph ph-folder" style="margin-right:3px;color:var(--accent)"></i>
-                              {{ op.destination }}
-                            </span>
-                          </div>
-                          <span class="organizer-op-badge" :class="op.action || 'smart'">
-                            {{ op.action || 'smart' }}
-                          </span>
-                        </div>
-
-                        <button v-if="batch.operations.length > 3" class="btn btn-ghost btn-sm" @click="toggleExpandBatch(batch.batch_id)" style="font-size:0.72rem;padding:2px 8px;margin-top:2px;align-self:flex-start">
-                          {{ organizerExpandedBatches.has(batch.batch_id) ? 'Show Less' : ('+ Show ' + (batch.operations.length - 3) + ' more file(s)') }}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="organizer-history-footer">
-                  <div class="organizer-history-note">
-                    <i class="ph ph-info" style="color:var(--accent)"></i>
-                    <span>Hardlinks delete created links without touching downloads. Moves restore files to Incoming.</span>
-                  </div>
-                  <button class="btn btn-secondary btn-sm" @click="organizerHistoryOpen = false">Close</button>
-                </div>
-              </div>
-            </div>
-          </teleport>
         </div>
 
         <!-- ══════ Unified Web Browser & Server Configuration ══════ -->
@@ -15362,7 +15384,19 @@ const SettingsPage = {
       } catch (e) {}
     }
 
+    function toggleUi2(enabled) {
+      store.ui2Enabled = !!enabled;
+      try {
+        localStorage.setItem("cs_ui2_enabled", enabled ? "true" : "false");
+      } catch (e) {}
+      if (enabled && typeof window.__loadUi2Assets === "function") {
+        window.__loadUi2Assets();
+      }
+      addToast(enabled ? "New UI 2.0 enabled" : "Restored classic UI", "info");
+    }
+
     return {
+      toggleUi2,
       toggleSeasonalBanners,
       toggleSeasonalEffects,
       setSeasonalBannerPreview,
@@ -29651,6 +29685,8 @@ const App = {
     </div>
 
     <template v-else>
+      <ui2-shell v-if="store.ui2Enabled && store.ui2Loaded" />
+      <template v-else>
       <!-- TV Layout Navbar (TV Pill Header) -->
       <nav class="navbar-tv" :class="{ scrolled: navScrolled }" v-if="showNav && isTvLayout" id="navbar-tv">
         <div class="tv-navbar-inner">
@@ -30605,6 +30641,8 @@ const App = {
           </div>
         </div>
       </div>
+      </template>
+    </template>
 
       <!-- Global Trailer Modal -->
       <div
@@ -31100,6 +31138,15 @@ const App = {
     watch(() => store.serverOnline, () => {
       updateConnectionState();
     });
+
+    watch(() => store.ui2Enabled, (enabled) => {
+      if (typeof document !== "undefined" && document.body) {
+        document.body.classList.toggle("ui2-active", !!enabled);
+      }
+      if (enabled && typeof window.__loadUi2Assets === "function") {
+        window.__loadUi2Assets();
+      }
+    }, { immediate: true });
 
     // Profile presence heartbeat watchdog & session eviction detection
     const showSessionEvictedModal = ref(false);
@@ -33241,6 +33288,27 @@ const SkipTimestampsModal = {
 // ─── Mount App ────────────────────────────────────────────────
 
 const app = createApp(App);
+window.__capsApp = app;
+window.__capsRouter = router;
+window.__loadUi2Assets = function () {
+  if (typeof document === "undefined") return;
+  if (!document.getElementById("ui2-css")) {
+    const link = document.createElement("link");
+    link.id = "ui2-css";
+    link.rel = "stylesheet";
+    link.href = "/static/ui2/ui2.css?t=" + Date.now();
+    document.head.appendChild(link);
+  }
+  if (!document.getElementById("ui2-js") && !store.ui2Loaded) {
+    const script = document.createElement("script");
+    script.id = "ui2-js";
+    script.src = "/static/ui2/ui2.js?t=" + Date.now();
+    document.head.appendChild(script);
+  }
+};
+if (store.ui2Enabled) {
+  window.__loadUi2Assets();
+}
 // Expose to ALL component templates — module-level helpers aren't visible
 // in template scope otherwise (this is why IMDb-link clicks did nothing).
 app.config.globalProperties.unlockAchievement = unlockAchievement;

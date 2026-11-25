@@ -8,6 +8,7 @@ Or double-click start.bat
 import os
 import re
 import sys
+import gzip
 import time
 import json
 import threading
@@ -158,6 +159,40 @@ except Exception as _wt_err:
 def _teardown_db_conn(exc):
     """Release the per-request SQLite connection stored in Flask g."""
     from backend.db import release_conn
+
+
+_COMPRESSIBLE_TYPES = frozenset({
+    "text/html",
+    "text/css",
+    "text/javascript",
+    "application/javascript",
+    "application/json",
+    "image/svg+xml",
+})
+
+
+@app.after_request
+def _compress_response(resp):
+    """Gzip-compress compressible text/JS/CSS/JSON responses when accepted by client."""
+    if (
+        not (200 <= resp.status_code < 300)
+        or "Content-Encoding" in resp.headers
+        or resp.mimetype not in _COMPRESSIBLE_TYPES
+        or "gzip" not in request.headers.get("Accept-Encoding", "").lower()
+    ):
+        return resp
+    resp.direct_passthrough = False
+    data = resp.get_data()
+    if len(data) < 512:
+        return resp
+    compressed = gzip.compress(data, compresslevel=5)
+    if len(compressed) >= len(data):
+        return resp
+    resp.set_data(compressed)
+    resp.headers["Content-Encoding"] = "gzip"
+    resp.headers["Content-Length"] = str(len(compressed))
+    resp.headers.add("Vary", "Accept-Encoding")
+    return resp
     release_conn()
 
 

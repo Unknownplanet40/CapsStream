@@ -1,0 +1,41 @@
+name: Build Desktop Rust Viewer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'clients/desktop-rust/**'
+      - '.github/workflows/build-desktop-rust.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'clients/desktop-rust/**'
+
+jobs:
+  build-viewer:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/desktop-rust
+
+      - name: Build Release Binary
+        working-directory: clients/desktop-rust
+        run: cargo build --release
+
+      - name: Upload Viewer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CapsStream-Desktop-Viewer-Windows
+          path: clients/desktop-rust/target/release/capsstream-viewer.exe

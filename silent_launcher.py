@@ -311,6 +311,18 @@ def start_server(cfg):
     return proc
 
 
+def find_rust_viewer_exe():
+    """Return path to compiled Rust wry viewer exe if present."""
+    candidates = [
+        os.path.join(BASE_DIR, "capsstream-viewer.exe"),
+        os.path.join(BASE_DIR, "clients", "desktop-rust", "target", "release", "capsstream-viewer.exe"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def find_browser_exe(choice):
     """Mirror launch_browser()'s Edge/Chrome path selection."""
     edge_paths = [
@@ -519,6 +531,15 @@ def launch_app_window(cfg, url):
         log(f"PWA detection notice: {e}")
 
     choice = str(cfg.get("browser", "edge")).lower().strip()
+    if choice != "system":
+        rust_exe = find_rust_viewer_exe()
+        if rust_exe:
+            log(f"Launching Rust WebView2 viewer for {url} ({os.path.basename(rust_exe)})")
+            return subprocess.Popen(
+                [rust_exe, "--url", url, "--title", "CapsStream"],
+                creationflags=CREATE_NO_WINDOW,
+                startupinfo=silent_startupinfo(),
+            )
     exe = find_browser_exe(choice)
     if not exe:
         log(f"Browser choice '{choice}' has no trackable app-mode exe — opening system default (untracked)")

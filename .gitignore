@@ -44,3 +44,5 @@ win11-theme-example/DESIGN.md
 win11-theme-example/example.html
 win11-theme-example/win11-theme.css
 opencode.json
+clients/desktop-rust/target/
+webview2_profile/
