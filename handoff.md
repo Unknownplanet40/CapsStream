@@ -5,9 +5,9 @@ Audit CapsStream UI with `antislop`, establish design direction (`DESIGN.md`), a
 
 ## 2. Current State
 - **Branch:** `main`
-- **Pushed Commit Hash:** `6eeacc7` (`fix(updater,ui): allow capsstream-viewer.exe in updates and fix classic/Rust logos`)
-- **Push Status:** Pushed to `origin/main` (`4c61da6..6eeacc7`).
-- **Release CI:** `Semantic Version Auto Release` (`v2.91.1.0` patch bump) triggered on push to `main`.
+- **Pushed Commit Hash:** `5d0459f` (`fix(player,ui): fix HEVC playback fallback, Back/Home hang, scroll snap, Low-Power toggle, and theme audio leak`)
+- **Push Status:** Pushed to `origin/main` (`b48ca5c..5d0459f`).
+- **Release CI:** `Semantic Version Auto Release` (`v2.91.2.0` patch bump) triggered on push to `main`.
 - **Server Running Status:** Server idle / ready.
 
 ## 3. Active Files

@@ -503,3 +503,16 @@ Added `"capsstream-viewer.exe"` to `ALLOWED_FILES` in `backend/updater.py`, upda
 - Committed `6eeacc7` and pushed to `origin/main` (next auto-release: `v2.91.1.0`).
 
 ---
+## November 25 at 10:09 PM
+### Asked
+Fix HEVC blank playback, Back/Home hang, rigid scroll-snap, WebView2 empty-space context menu, Classic Low-Power Mode toggle, and dangling theme music, then commit and push.
+
+### Decision
+Updated `isHevcDirect` and `zero_video_frames_rendered` fallback in `static/js/player.js`, made `saveProgressNow()` non-blocking in `goBack()`/`goHome()`, added `PlatformHEVCDecoderSupport` in `clients/desktop-rust/src/main.rs`, replaced CSS `scroll-snap-type` with eased `initSmoothRowSnap()`, suppressed empty-space `contextmenu`, added Low-Power Mode toggle to Classic Settings, and guarded `initThemeMusic()` against unmount/route changes in `static/js/app.js`.
+>why: Resolves black HEVC 10-bit playback in WebView2, prevents SQLite lock waits from freezing Back/Home buttons, eliminates rigid wheel snap and browser menu clutter, cuts idle/hover CPU on low-end PCs, and stops theme audio leaking onto Home.
+
+### Shipped
+- Updated `static/js/player.js`, `static/js/app.js`, `static/css/main.css`, and `clients/desktop-rust/src/main.rs`.
+- Committed `5d0459f` and pushed to `origin/main` (next auto-release: `v2.91.2.0`).
+
+---

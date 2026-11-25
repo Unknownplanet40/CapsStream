@@ -488,11 +488,16 @@ def api_media_detail(media_id):
                 dur = probe_video_duration(media["file_path"])
                 if dur > 0:
                     media["duration"] = dur
-                    from backend.db import get_conn
-                    conn = get_conn()
-                    conn.execute("UPDATE media SET duration=? WHERE id=?", (dur, media_id))
-                    conn.commit()
-                    conn.close()
+                    def _persist_dur(d=dur, mid=media_id):
+                        try:
+                            from backend.db import get_conn
+                            c = get_conn()
+                            c.execute("UPDATE media SET duration=? WHERE id=?", (d, mid))
+                            c.commit()
+                            c.close()
+                        except Exception:
+                            pass
+                    threading.Thread(target=_persist_dur, daemon=True).start()
             except Exception:
                 pass
 
@@ -501,14 +506,16 @@ def api_media_detail(media_id):
         imdb_id = fetch_imdb_id(media["tmdb_id"], media.get("type", "movie"))
         if imdb_id:
             media["imdb_id"] = imdb_id
-            try:
-                from backend.db import get_conn
-                conn = get_conn()
-                conn.execute("UPDATE media SET imdb_id=? WHERE tmdb_id=?", (imdb_id, media["tmdb_id"]))
-                conn.commit()
-                conn.close()
-            except Exception:
-                pass
+            def _persist_imdb(iid=imdb_id, tid=media["tmdb_id"]):
+                try:
+                    from backend.db import get_conn
+                    c = get_conn()
+                    c.execute("UPDATE media SET imdb_id=? WHERE tmdb_id=?", (iid, tid))
+                    c.commit()
+                    c.close()
+                except Exception:
+                    pass
+            threading.Thread(target=_persist_imdb, daemon=True).start()
 
     if media.get("tmdb_id"):
         from backend.matcher import fetch_media_backdrops
