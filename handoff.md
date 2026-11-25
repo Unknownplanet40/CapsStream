@@ -1,38 +1,37 @@
 # Handoff
 
 ## 1. Goal
-Automatically trigger background library scan and refresh home rows when media organization batches are executed or undone so newly organized media appears instantly without manual scan intervention.
+Audit CapsStream UI with `antislop`, establish design direction (`DESIGN.md`), add low-end performance optimizations (Low-Power Mode, gzip compression, Phosphor icon trim, non-blocking scripts), and provide a lightweight Rust WebView2 desktop viewer built via GitHub Actions CI.
 
 ## 2. Current State
-- **Branch:** `main` (ahead of `origin/main` by 1 commit)
-- **Pushed Commit Hash:** `40a32a7` (`feat(organizer): trigger automatic library scan and home refresh on media organization`)
-- **Push Status:** Unpushed.
-- **Release CI:** Auto-release workflow ready on push to `main`.
+- **Branch:** `main`
+- **Pushed Commit Hash:** `d162970` (`feat(ui): add Low-Power Mode, gzip compression, Rust desktop viewer, and accessibility fixes`)
+- **Push Status:** Pushed to `origin/main`.
+- **Release CI:** `Semantic Version Auto Release` (`v2.90.0.0`), `Build Desktop Rust Viewer`, and `CI` triggered on push.
 - **Server Running Status:** Server idle / ready.
-- **Tests:** 8/8 passed in `backend/tests/test_route_organizer.py`.
 
 ## 3. Active Files
-- `backend/organizer.py` (timestamp tracking and direct post-organize scan trigger)
-- `backend/routes/admin.py` (`/api/scan/status` endpoint surfacing `last_organizer_completed`)
-- `backend/tests/test_route_organizer.py` (test coverage for post-organize scan and timestamp)
-- `static/js/app.js` (`HomePage` scan check polling, `SettingsPage` organizer toast and refresh trigger, `App` reconnect scan status polling)
-- `PROJECT-LOG.md` (append-only log updated)
-- `handoff.md` (active context snapshot)
+- `DESIGN.md` (brand identity, palette, typography, and `ENERGY 2 / RHYTHM 2 / MOTION 1` dials)
+- `app.py` (stdlib `gzip` `@app.after_request` response compression)
+- `templates/index.html` (zoom-enabled viewport, `defer` on `driver.min.js`, `cs_low_power` early class, `__CAPS_VER__`)
+- `static/css/main.css` (local fonts only, `#8a8aa6` muted text, global `:focus-visible`, `html.cs-low-power` rules)
+- `static/ui2/ui2.css`, `static/ui2/ui2.js`, `static/ui2/ui2-shared.js`, `static/ui2/ui2-settings.js`, `static/ui2/ui2-details.js`, `static/ui2/ui2-views.js`
+- `static/vendor/phosphor/icons.css` (trimmed unused `thin`, `light`, `duotone` weights)
+- `silent_launcher.py` (prefers `capsstream-viewer.exe`, falls back to Edge/Chrome)
+- `clients/desktop-rust/Cargo.toml`, `clients/desktop-rust/src/main.rs`
+- `.github/workflows/build-desktop-rust.yml`
 
 ## 4. Changes Made
-- Added `_LAST_ORGANIZER_COMPLETED_AT` timestamp in `backend/organizer.py` and getter `get_last_organizer_completed()`.
-- Updated `trigger_post_processing` in `backend/organizer.py` to trigger a direct background thread running `scan_library()`, `bust_home_cache()`, and `start_background_enrichment()`.
-- Exposed `last_organizer_completed` in `/api/scan/status` within `backend/routes/admin.py`.
-- Updated `SettingsPage` in `static/js/app.js` to dispatch library scan, toast user that media is refreshing, and flag pending refresh on batch execute and revert.
-- Added 6-second polling check on `HomePage` in `static/js/app.js` to detect organizer completion and automatically trigger scans and row reloads.
-- Updated `App` reconnect logic to resume scan status polling if server is running a scan.
-- Added `test_post_organize_triggers_scan_and_timestamp` in `backend/tests/test_route_organizer.py`.
+- Audited UI against `antislop` rules and fixed `R-02` (em dashes), `R-25` (WCAG AA contrast), `R-26` (removed placeholder `API Docs`/`Discord` buttons), `R-32` (`:focus-visible` outlines), `R-37` (`DESIGN.md`), `R-39` (removed `user-scalable=no`, added `alt`), and `R-40` (removed external Google Fonts `@import`, added `defer`, added image dimensions).
+- Added stdlib `gzip` compression in `app.py` (measured: `main.css` 923 KB -> 145 KB, `app.js` 1.44 MB -> 295 KB).
+- Trimmed unused Phosphor weights in `static/vendor/phosphor/icons.css` and replaced `Date.now()` cache-busting in `static/ui2/ui2.js`.
+- Added Low-Power Mode (`cs_low_power`) toggle in `ui2-settings.js` and `html.cs-low-power` CSS overrides in `static/css/main.css`.
+- Scaffolded `clients/desktop-rust/` (`tao` + `wry`), wired `silent_launcher.py`, and added `.github/workflows/build-desktop-rust.yml`.
 
 ## 5. Failed Attempts
-- None.
+- Local `cargo build --release` failed on this machine because `msvc` lacked Windows SDK (`kernel32.lib`), `gnu` lacked `libgcc.a`/`as.exe`, and `rustup toolchain install stable-x86_64-pc-windows-gnullvm` stalled downloading components. Resolved by adding `.github/workflows/build-desktop-rust.yml` (`windows-latest` MSVC).
 
 ## 6. Specific Next Steps
-- Commit changes with conventional changelog commit message.
-- Rebase onto `origin/main` (which has `b91e5b8 chore(release): minor bump to 2.88.0.0 [skip ci]`).
-- Request confirmation to push to `origin/main`.
-- Verify GitHub Actions auto-release workflow cuts new release.
+- Confirm `Build Desktop Rust Viewer` and `Semantic Version Auto Release` (`v2.90.0.0`) CI runs succeed.
+- Download `CapsStream-Desktop-Viewer-Windows` (`capsstream-viewer.exe`) from GitHub Actions artifact if testing the Rust viewer locally.
+- Run a live browser click-through (`R-35`) across `Home`, `Anime`, `Discover`, `Library`, and `Settings` (including `Low-Power Mode` toggle).

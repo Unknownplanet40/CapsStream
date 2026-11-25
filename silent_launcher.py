@@ -314,8 +314,8 @@ def start_server(cfg):
 def find_rust_viewer_exe():
     """Return path to compiled Rust wry viewer exe if present."""
     candidates = [
-        os.path.join(BASE_DIR, "capsstream-viewer.exe"),
-        os.path.join(BASE_DIR, "clients", "desktop-rust", "target", "release", "capsstream-viewer.exe"),
+        os.path.join(ROOT, "capsstream-viewer.exe"),
+        os.path.join(ROOT, "clients", "desktop-rust", "target", "release", "capsstream-viewer.exe"),
     ]
     for path in candidates:
         if os.path.exists(path):
