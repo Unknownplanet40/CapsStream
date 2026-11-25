@@ -382,6 +382,7 @@ def is_capsstream_title(title: str, pname: str, url_clean: str = "127.0.0.1:8000
     search engine queries, documentation, IDEs) mentioning 'CapsStream'.
     """
     known_browsers = (
+        "capsstream-viewer",
         "msedge", "chrome", "brave", "opera", "vivaldi",
         "firefox", "arc", "applicationframehost"
     )

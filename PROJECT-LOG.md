@@ -516,3 +516,16 @@ Updated `isHevcDirect` and `zero_video_frames_rendered` fallback in `static/js/p
 - Committed `5d0459f` and pushed to `origin/main` (next auto-release: `v2.91.2.0`).
 
 ---
+## November 25 at 10:31 PM
+### Asked
+Fix Drive T infinite loading on playback (`GET /api/media/<id>` stalling on external USB HDD SQLite write locks), commit, and push.
+
+### Decision
+Added `PRAGMA busy_timeout=30000` in `backend/db/connection.py` and moved `duration`/`imdb_id` `UPDATE`s in `api_media_detail()` (`backend/routes/media.py`) to background daemon threads, verified with `backend/tests/test_route_media.py` (`27 passed`).
+>why: External USB HDD background writes (`KidsFilter`/`save_progress`) locked SQLite and blocked synchronous `UPDATE`s inside `GET /api/media/<id>` before the player could set `video.src`.
+
+### Shipped
+- Updated `backend/db/connection.py` and `backend/routes/media.py`.
+- Committed `3c899e1` and pushed to `origin/main` (next auto-release: `v2.91.3.0`).
+
+---
