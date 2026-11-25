@@ -311,6 +311,24 @@ def start_server(cfg):
     return proc
 
 
+def _ensure_capsstream_protocol(fallback_url):
+    """Register user-scoped capsstream:// protocol so toast clicks reopen the standalone viewer."""
+    if os.name != "nt":
+        return fallback_url
+    try:
+        import winreg
+        py_exe = PYTHONW if os.path.isfile(PYTHONW) else sys.executable
+        cmd = f'"{py_exe}" "{os.path.abspath(__file__)}" "%1"'
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\capsstream") as k:
+            winreg.SetValueEx(k, "", 0, winreg.REG_SZ, "URL:CapsStream Protocol")
+            winreg.SetValueEx(k, "URL Protocol", 0, winreg.REG_SZ, "")
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\capsstream\shell\open\command") as k:
+            winreg.SetValueEx(k, "", 0, winreg.REG_SZ, cmd)
+        return "capsstream://open"
+    except Exception:
+        return fallback_url
+
+
 def find_rust_viewer_exe():
     """Return path to compiled Rust wry viewer exe if present."""
     candidates = [
@@ -704,13 +722,14 @@ def main():
             is_lan = raw_host in ("0.0.0.0", "::")
             restart_label = f"Serving on LAN: {lan_url} (Local: {url})" if is_lan else f"Serving at {url}"
             log(f"Server restarted successfully — {restart_label}")
+            open_uri = _ensure_capsstream_protocol(url)
             actions = [
-                {"content": "Open CapsStream", "arguments": url, "activationType": "protocol"},
+                {"content": "Open CapsStream", "arguments": open_uri, "activationType": "protocol"},
             ]
             if is_lan and lan_url and lan_url != url:
                 actions.append({"content": "Open LAN Stream", "arguments": lan_url, "activationType": "protocol"})
             actions.append({"content": "Dismiss", "arguments": "dismiss", "activationType": "system"})
-            send_toast("CapsStream Ready", f"Server restarted: {restart_label}", actions=actions, launch_url=url)
+            send_toast("CapsStream Ready", f"Server restarted: {restart_label}", actions=actions, launch_url=open_uri)
         else:
             log("Server failed to respond after restart")
             actions = [
@@ -747,8 +766,9 @@ def main():
     is_lan = raw_host in ("0.0.0.0", "::")
     serving_label = f"Serving on LAN: {lan_url} (Local: {url})" if is_lan else f"Serving at {url}"
 
+    open_uri = _ensure_capsstream_protocol(url)
     std_actions = [
-        {"content": "Open CapsStream", "arguments": url, "activationType": "protocol"},
+        {"content": "Open CapsStream", "arguments": open_uri, "activationType": "protocol"},
     ]
     if is_lan and lan_url and lan_url != url:
         std_actions.append({"content": "Open LAN Stream", "arguments": lan_url, "activationType": "protocol"})
@@ -805,14 +825,14 @@ def main():
             if not is_visible and not notified_background:
                 log("CapsStream window closed — continuing in background system tray mode")
                 tray_actions = [
-                    {"content": "Open CapsStream", "arguments": url, "activationType": "protocol"},
+                    {"content": "Open CapsStream", "arguments": open_uri, "activationType": "protocol"},
                     {"content": "Dismiss", "arguments": "dismiss", "activationType": "system"},
                 ]
                 send_toast(
                     "CapsStream Running in Tray",
                     "CapsStream is still running. Right-click the tray icon to reopen or exit.",
                     actions=tray_actions,
-                    launch_url=url,
+                    launch_url=open_uri,
                 )
                 notified_background = True
             elif is_visible:

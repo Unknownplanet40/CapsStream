@@ -55,7 +55,7 @@ class _RequestConnProxy:
 
     # commit() is also a no-op inside request context; release_conn() commits
     def commit(self):
-        pass
+        object.__getattribute__(self, "_conn").commit()
 
     # Context-manager support (used by `with get_conn() as conn:` patterns)
     def __enter__(self):

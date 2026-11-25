@@ -159,6 +159,7 @@ except Exception as _wt_err:
 def _teardown_db_conn(exc):
     """Release the per-request SQLite connection stored in Flask g."""
     from backend.db import release_conn
+    release_conn(exc)
 
 
 _COMPRESSIBLE_TYPES = frozenset({

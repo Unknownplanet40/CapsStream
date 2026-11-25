@@ -19872,8 +19872,9 @@ const ProfilesPage = {
             <div
               class="netflix-avatar-wrap"
               :style="{
-                background: profile.color ? profile.color + '44' : 'rgba(255,255,255,0.08)',
-                border: profile.color ? '3px solid ' + profile.color + '88' : '3px solid transparent'
+                background: (profile.color && profile.color !== 'transparent') ? profile.color + '44' : 'transparent',
+                border: (profile.color && profile.color !== 'transparent') ? '3px solid ' + profile.color + '88' : '3px solid transparent',
+                boxShadow: profile.color === 'transparent' ? 'none' : undefined
               }"
             >
               <img v-if="profile.custom_avatar_url" :src="imgUrl(profile.custom_avatar_url)" class="netflix-avatar-img" :alt="profile.name" />
@@ -19978,8 +19979,9 @@ const ProfilesPage = {
             <div
               class="netflix-form-avatar-preview"
               :style="{
-                background: editProfile.color ? editProfile.color + '44' : 'rgba(255,255,255,0.08)',
-                border: '3px solid ' + editProfile.color
+                background: (editProfile.color && editProfile.color !== 'transparent') ? editProfile.color + '44' : 'transparent',
+                border: (editProfile.color && editProfile.color !== 'transparent') ? '3px solid ' + editProfile.color : '3px solid transparent',
+                boxShadow: editProfile.color === 'transparent' ? 'none' : undefined
               }"
             >
               <img v-if="editProfile.custom_avatar_url" :src="imgUrl(editProfile.custom_avatar_url)" class="netflix-avatar-img" style="border-radius:4px" />
@@ -20053,15 +20055,16 @@ const ProfilesPage = {
             <!-- Color Palette -->
             <div style="margin-top:14px;width:210px;max-width:100%">
               <div style="font-size:0.75rem;color:#808080;margin-bottom:6px;font-weight:600">COLOR</div>
-              <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
+              <div style="display:grid;grid-template-columns:repeat(5, 1fr);gap:6px">
                 <div
                   v-for="c in colors"
                   :key="c"
+                  :title="c === 'transparent' ? 'Transparent' : c"
                   @click="editProfile.color = c"
                   style="width:22px;height:22px;border-radius:50%;cursor:pointer;box-sizing:border-box"
                   :style="{
-                    background: c,
-                    border: editProfile.color === c ? '2px solid #ffffff' : 'none',
+                    background: c === 'transparent' ? 'repeating-conic-gradient(#555 0% 25%, #222 0% 50%) 50% / 10px 10px' : c,
+                    border: editProfile.color === c ? '2px solid #ffffff' : (c === 'transparent' ? '1px dashed rgba(255,255,255,0.5)' : 'none'),
                     transform: editProfile.color === c ? 'scale(1.15)' : 'scale(1)'
                   }"
                 ></div>
@@ -20339,8 +20342,9 @@ const ProfilesPage = {
             <div
               class="netflix-form-avatar-preview"
               :style="{
-                background: newProfile.color ? newProfile.color + '44' : 'rgba(255,255,255,0.08)',
-                border: '3px solid ' + newProfile.color
+                background: (newProfile.color && newProfile.color !== 'transparent') ? newProfile.color + '44' : 'transparent',
+                border: (newProfile.color && newProfile.color !== 'transparent') ? '3px solid ' + newProfile.color : '3px solid transparent',
+                boxShadow: newProfile.color === 'transparent' ? 'none' : undefined
               }"
             >
               <img v-if="newProfile.custom_avatar_url" :src="imgUrl(newProfile.custom_avatar_url)" class="netflix-avatar-img" style="border-radius:4px" />
@@ -20414,15 +20418,16 @@ const ProfilesPage = {
             <!-- Color Palette -->
             <div style="margin-top:14px;width:210px;max-width:100%">
               <div style="font-size:0.75rem;color:#808080;margin-bottom:6px;font-weight:600">COLOR</div>
-              <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px">
+              <div style="display:grid;grid-template-columns:repeat(5, 1fr);gap:6px">
                 <div
                   v-for="c in colors"
                   :key="c"
+                  :title="c === 'transparent' ? 'Transparent' : c"
                   @click="newProfile.color = c"
                   style="width:22px;height:22px;border-radius:50%;cursor:pointer;box-sizing:border-box"
                   :style="{
-                    background: c,
-                    border: newProfile.color === c ? '2px solid #ffffff' : 'none',
+                    background: c === 'transparent' ? 'repeating-conic-gradient(#555 0% 25%, #222 0% 50%) 50% / 10px 10px' : c,
+                    border: newProfile.color === c ? '2px solid #ffffff' : (c === 'transparent' ? '1px dashed rgba(255,255,255,0.5)' : 'none'),
                     transform: newProfile.color === c ? 'scale(1.15)' : 'scale(1)'
                   }"
                 ></div>
@@ -20989,7 +20994,7 @@ const ProfilesPage = {
     });
 
     const avatars = ["ph-film-strip", "ph-mask-happy", "ph-popcorn", "ph-game-controller", "ph-rocket", "ph-star", "ph-sparkle", "ph-fire", "ph-crown", "ph-lightning", "ph-music-notes", "ph-trophy"];
-    const colors = ["#e50914", "#6c5ce7", "#0984e3", "#00b894", "#fdcb6e", "#e17055", "#fd79a8", "#a29bfe"];
+    const colors = ["#e50914", "#6c5ce7", "#0984e3", "#00b894", "#fdcb6e", "#e17055", "#fd79a8", "#a29bfe", "transparent"];
 
     const newProfile = reactive({
       name: "",
@@ -30022,7 +30027,7 @@ const App = {
         <div class="tv-navbar-inner">
           <!-- Profile Avatar with dropdown -->
           <div class="tv-nav-profile" @click.stop="toggleProfileMenu" id="tv-nav-profile" tabindex="0" title="Profile Menu">
-            <div class="tv-avatar-badge" :style="{ background: store.profile?.color || '#e50914' }">
+            <div class="tv-avatar-badge" :style="{ background: store.profile?.color === 'transparent' ? 'transparent' : (store.profile?.color || '#e50914') }">
               <img v-if="store.profile?.custom_avatar_url" :src="imgUrl(store.profile.custom_avatar_url)" class="tv-avatar-img" :alt="store.profile?.name" />
               <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar"></i>
               <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
@@ -30034,7 +30039,7 @@ const App = {
               <!-- Profile Header Card -->
               <div v-if="store?.profile" class="profile-dropdown-header">
                 <div class="profile-dropdown-user">
-                  <div class="profile-dropdown-avatar-wrap" :style="{ borderColor: store.profile?.color || 'var(--accent)' }">
+                  <div class="profile-dropdown-avatar-wrap" :style="{ borderColor: store.profile?.color === 'transparent' ? 'transparent' : (store.profile?.color || 'var(--accent)') }">
                     <img v-if="store.profile?.custom_avatar_url" :src="imgUrl(store.profile.custom_avatar_url)" class="dropdown-profile-avatar-img" />
                     <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar"></i>
                     <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
@@ -30216,7 +30221,7 @@ const App = {
 
             <!-- Profile -->
             <div class="nav-profile" @click.stop="toggleProfileMenu" id="nav-profile" data-tooltip="Profile Menu"
-              :style="{ background: store.profile?.color ? store.profile.color + '33' : 'var(--bg-card)', borderColor: store.profile?.color ? store.profile.color + '88' : 'transparent' }">
+              :style="{ background: (store.profile?.color && store.profile.color !== 'transparent') ? store.profile.color + '33' : 'transparent', borderColor: (store.profile?.color && store.profile.color !== 'transparent') ? store.profile.color + '88' : 'transparent', boxShadow: store.profile?.color === 'transparent' ? 'none' : undefined }">
               <img v-if="store.profile?.custom_avatar_url" :src="imgUrl(store.profile.custom_avatar_url)" class="nav-profile-avatar-img" :alt="store.profile?.name" />
               <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar"></i>
               <span v-else>{{ store.profile?.avatar || '🎬' }}</span>
@@ -30224,7 +30229,7 @@ const App = {
                 <!-- Profile Header Card -->
                 <div v-if="store?.profile" class="profile-dropdown-header">
                   <div class="profile-dropdown-user">
-                    <div class="profile-dropdown-avatar-wrap" :style="{ borderColor: store.profile?.color || 'var(--accent)' }">
+                    <div class="profile-dropdown-avatar-wrap" :style="{ borderColor: store.profile?.color === 'transparent' ? 'transparent' : (store.profile?.color || 'var(--accent)') }">
                       <img v-if="store.profile?.custom_avatar_url" :src="imgUrl(store.profile.custom_avatar_url)" class="dropdown-profile-avatar-img" />
                       <i v-else-if="store.profile?.avatar && store.profile.avatar.startsWith('ph-')" :class="'ph-bold ' + store.profile.avatar"></i>
                       <span v-else>{{ store.profile?.avatar || '🎬' }}</span>

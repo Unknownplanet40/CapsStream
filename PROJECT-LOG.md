@@ -541,3 +541,17 @@ Added `"capsstream-viewer"` to `known_browsers` inside `is_capsstream_title()` i
 - Updated `silent_launcher.py` (`7bb7655`) and pushed to `origin/main` (next auto-release: `v2.91.4.0`).
 
 ---
+## November 26 at 12:22 AM
+### Asked
+Add per-profile 6-category Content Warning Gate, External Drive Keep-Alive, and Smart Codec Badges (`Direct Play` vs `Transcode`), commit, and push.
+
+### Decision
+Added `explicit_gate_enabled` and `content_warning_categories` (`explicit`, `violence`, `flashing`, `self_harm`, `substance`, `profanity`) to `profiles` and `is_explicit` to `media`, wired `DetailPage` and `PlayerPage` warning modals with single-prompt handoff and loop-safe `Go Back`, added `POST /api/system/drives-keepalive` + 4-minute client ping, and added `getCodecPlaybackBadge()` on `DetailPage` and Episode rows.
+>why: Gives each profile configurable content warnings without double-prompting from Details to Playback, prevents external USB HDDs from spinning down, and surfaces codec transcode expectations before playback.
+
+### Shipped
+- Updated `backend/db/schema.py`, `backend/db/profiles.py`, `backend/db/__init__.py`, `backend/routes/middleware.py`, `backend/routes/profiles.py`, `backend/routes/media.py`, `backend/routes/admin.py`, `static/js/app.js`, `static/js/player.js`, and `static/ui2/ui2-settings.js`.
+- Verified `36 passed` (`test_route_media.py` + `test_route_profiles.py`), `32 passed` (`test_route_admin.py`), and `node --check`.
+- Committed `bcad686` and pushed to `origin/main` (next auto-release: `v2.92.0.0`).
+
+---
