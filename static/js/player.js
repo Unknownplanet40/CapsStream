@@ -6720,8 +6720,11 @@ const PlayerPage = {
         const vInfo = media.value?.video_info || {};
         const codecTag = (vInfo.codec || "").toLowerCase();
         const filePath = (media.value?.file_path || "").toLowerCase();
+        const curOpt = (media.value?.quality_options || []).find((q) => q.is_current) || {};
+        const optLabel = ((curOpt.resolution || "") + " " + (curOpt.display_label || "")).toLowerCase();
         const isHevcDirect = !streamState.transcode && (
           codecTag.includes("265") || codecTag.includes("hevc") ||
+          optLabel.includes("265") || optLabel.includes("hevc") ||
           filePath.includes("x265") || filePath.includes("hevc") || filePath.includes("h.265") ||
           filePath.includes("10bit") || filePath.includes("10-bit")
         );
@@ -6739,13 +6742,24 @@ const PlayerPage = {
             showHevcConvertModal.value = true;
             return;
           } else if (autoConvertMode === "auto") {
-            const sourceHeight = Number(vInfo.height || media.value?.height || 0);
+            const sourceHeight = Number(vInfo.height || media.value?.height || curOpt.target_height || 0);
             console.warn("[Player FreezeGuard] HEVC/10-bit decoder stall detected. Switching to compatible playback automatically...");
             await saveProgressForRecovery();
             addToast("Switching to compatible playback at the current quality...", "info", 3000);
             await enableCompatPlayback(true, { forceSoftware: false, maxHeight: sourceHeight });
             return;
           }
+        }
+
+        // If audio plays with 0 rendered video frames on direct play (non-HEVC or unknown codec),
+        // skip useless micro-seeks and switch straight to compatible H.264 transcoding.
+        if (reason === "zero_video_frames_rendered" && !streamState.transcode) {
+          const sourceHeight = Number(vInfo.height || media.value?.height || curOpt.target_height || 0);
+          console.warn("[Player FreezeGuard] Zero video frames rendered on direct stream; switching to compatible transcoding...");
+          await saveProgressForRecovery();
+          addToast("Switching to compatible playback...", "info", 3000);
+          await enableCompatPlayback(true, { forceSoftware: false, maxHeight: sourceHeight });
+          return;
         }
 
         // ─── Tier 1: Soft Recovery (Attempt 1 for non-fatal stalls) ──────────────────────
@@ -8020,7 +8034,8 @@ const PlayerPage = {
     }
 
     async function goBack() {
-      await saveProgressNow();
+      // Fire-and-forget (uses keepalive: true) so DB locks never block navigation
+      saveProgressNow().catch(() => {});
       cleanupPlayback();
       if (media.value) {
         if (media.value.type === "movie" && media.value.id) {
@@ -8038,7 +8053,7 @@ const PlayerPage = {
     }
 
     async function goHome() {
-      await saveProgressNow();
+      saveProgressNow().catch(() => {});
       cleanupPlayback();
       router.push("/");
     }

@@ -490,3 +490,16 @@ Added `winresource` (`clients/desktop-rust/Cargo.toml`, `clients/desktop-rust/bu
 - Committed `51f76f4` and pushed to `origin/main` (triggering `v2.91.0.0`).
 
 ---
+## November 25 at 9:09 PM
+### Asked
+Fix classic UI navbar logo (`new-logo.png`), fix Rust window titlebar/taskbar icon, and allow in-app updater to extract `capsstream-viewer.exe`.
+
+### Decision
+Added `"capsstream-viewer.exe"` to `ALLOWED_FILES` in `backend/updater.py`, updated `#nav-logo` in `static/js/app.js` to `/static/img/new-logo.png` with `?v={{ version }}` on `favicon.png` in `templates/index.html`, embedded `clients/desktop-rust/src/icon_32.rgba` via `.with_window_icon(...)` in `clients/desktop-rust/src/main.rs`, and ignored local `capsstream-viewer.exe` in `.gitignore`.
+>why: `backend/updater.py` previously skipped `.exe` files not in `ALLOWED_FILES`, classic UI `#nav-logo` used cached `favicon.png`, and `tao` needed an explicit `WindowBuilder` icon for the live window titlebar.
+
+### Shipped
+- Updated `backend/updater.py`, `static/js/app.js`, `templates/index.html`, `clients/desktop-rust/src/main.rs`, `clients/desktop-rust/src/icon_32.rgba`, and `.gitignore`.
+- Committed `6eeacc7` and pushed to `origin/main` (next auto-release: `v2.91.1.0`).
+
+---

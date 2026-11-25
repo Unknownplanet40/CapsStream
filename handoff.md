@@ -5,9 +5,9 @@ Audit CapsStream UI with `antislop`, establish design direction (`DESIGN.md`), a
 
 ## 2. Current State
 - **Branch:** `main`
-- **Pushed Commit Hash:** `51f76f4` (`feat(release): bundle Rust viewer with icon in releases and update all logos`)
-- **Push Status:** Pushed to `origin/main` (`698634e..51f76f4`).
-- **Release CI:** `Semantic Version Auto Release` (`v2.91.0.0` minor bump) building `capsstream-viewer.exe` (with embedded icon) and bundling it into `CapsStream-update-2.91.0.0.zip`.
+- **Pushed Commit Hash:** `6eeacc7` (`fix(updater,ui): allow capsstream-viewer.exe in updates and fix classic/Rust logos`)
+- **Push Status:** Pushed to `origin/main` (`4c61da6..6eeacc7`).
+- **Release CI:** `Semantic Version Auto Release` (`v2.91.1.0` patch bump) triggered on push to `main`.
 - **Server Running Status:** Server idle / ready.
 
 ## 3. Active Files

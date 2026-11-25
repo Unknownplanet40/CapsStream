@@ -2738,7 +2738,12 @@ const MediaCard = {
           clearTimeout(trailerTimer);
           if (store.playback?.enable_trailers === false) return;
           trailerTimer = setTimeout(async () => {
-            if (!isPopoutActive.value || store.playback?.enable_trailers === false) return;
+            if (
+              !isPopoutActive.value ||
+              store.playback?.enable_trailers === false ||
+              store.perfLiteMode ||
+              document.documentElement.classList.contains("cs-low-power")
+            ) return;
             const item = cardItem.value;
             const id = item.id || item.tmdb_id;
 
@@ -7353,6 +7358,7 @@ const DetailPage = {
     // ── Theme Music Audio Previews ─────────────────────────────
     let themeAudioEl = null;
     let themeFadeTimer = null;
+    let isDetailUnmounted = false;
     const isThemeMusicPlaying = ref(false);
     const isThemeMusicMuted = ref(localStorage.getItem("capsstream_theme_music_muted") === "true");
 
@@ -7369,19 +7375,33 @@ const DetailPage = {
         } catch (e) {}
         themeAudioEl = null;
       }
+      if (window.__activeThemeAudio && window.__activeThemeAudio !== themeAudioEl) {
+        try {
+          window.__activeThemeAudio.pause();
+          window.__activeThemeAudio.src = "";
+        } catch (e) {}
+      }
+      window.__activeThemeAudio = null;
       isThemeMusicPlaying.value = false;
     }
 
     function initThemeMusic(url) {
       stopThemeMusic();
+      if (isDetailUnmounted || !route.path.startsWith("/title")) return;
       if (!url || store.playback?.enable_theme_music === false) return;
 
-      themeAudioEl = new Audio(url);
-      themeAudioEl.loop = true;
-      themeAudioEl.volume = 0;
-      themeAudioEl.muted = isThemeMusicMuted.value;
+      const el = new Audio(url);
+      themeAudioEl = el;
+      window.__activeThemeAudio = el;
+      el.loop = true;
+      el.volume = 0;
+      el.muted = isThemeMusicMuted.value;
 
-      themeAudioEl.play().then(() => {
+      el.play().then(() => {
+        if (isDetailUnmounted || themeAudioEl !== el || !route.path.startsWith("/title")) {
+          try { el.pause(); el.src = ""; el.load(); } catch (e) {}
+          return;
+        }
         isThemeMusicPlaying.value = true;
         if (!isThemeMusicMuted.value) {
           // Smooth fade-in from 0 to 0.15 over 1.5s (15 steps)
@@ -7389,21 +7409,21 @@ const DetailPage = {
           const targetVol = 0.15;
           const step = targetVol / 15;
           themeFadeTimer = setInterval(() => {
-            if (!themeAudioEl) {
+            if (isDetailUnmounted || themeAudioEl !== el) {
               clearInterval(themeFadeTimer);
               return;
             }
             currentVol = Math.min(targetVol, currentVol + step);
-            themeAudioEl.volume = currentVol;
+            el.volume = currentVol;
             if (currentVol >= targetVol) {
               clearInterval(themeFadeTimer);
               themeFadeTimer = null;
             }
           }, 100);
         }
-      }).catch((e) => {
+      }).catch(() => {
         // Autoplay may be blocked by browser policy until user interacts
-        isThemeMusicPlaying.value = false;
+        if (themeAudioEl === el) isThemeMusicPlaying.value = false;
       });
     }
 
@@ -7797,10 +7817,12 @@ const DetailPage = {
     }
 
     onMounted(() => {
+      isDetailUnmounted = false;
       load();
       window.addEventListener("scroll", onScroll, { passive: true });
     });
     onUnmounted(() => {
+      isDetailUnmounted = true;
       clearLoadingTimers();
       stopThemeMusic();
       if (backdropCycleTimer) clearInterval(backdropCycleTimer);
@@ -10197,6 +10219,25 @@ const SettingsPage = {
           </div>
           <div class="settings-group">
             <!-- New UI 2.0 Opt-In Toggle -->
+            <!-- Low-Power Mode Toggle -->
+            <div class="settings-card-container" id="setting-low-power-toggle" style="margin-bottom: 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-inner, 10px); overflow: hidden;">
+              <div class="settings-row" style="align-items: center; padding: 14px 18px; gap: 20px;">
+                <div class="settings-label-container" style="flex: 1; min-width: 0;">
+                  <div class="settings-label" style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.95rem;">
+                    <i class="ph-bold ph-gauge" style="color: #22c55e; font-size: 1.15rem;"></i>
+                    <span>Low-Power Mode</span>
+                  </div>
+                  <div class="settings-desc" style="margin-top: 4px; color: var(--text-muted); font-size: 0.82rem; line-height: 1.4;">
+                    Disables blur effects, ambient animations, and hover video transcodes to reduce CPU/GPU usage on low-end devices.
+                  </div>
+                </div>
+                <label class="toggle-switch" style="flex-shrink: 0;">
+                  <input type="checkbox" :checked="lowPowerEnabled" @change="toggleLowPower($event.target.checked)" id="toggle-low-power-enabled" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+
             <div class="settings-card-container" id="setting-ui2-toggle" style="margin-bottom: 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-inner, 10px); overflow: hidden;">
               <div class="settings-row" style="align-items: center; padding: 14px 18px; gap: 20px;">
                 <div class="settings-label-container" style="flex: 1; min-width: 0;">
@@ -15384,6 +15425,22 @@ const SettingsPage = {
       } catch (e) {}
     }
 
+    const lowPowerEnabled = ref(
+      typeof localStorage !== "undefined" && localStorage.getItem("cs_low_power") === "true"
+    );
+
+    function toggleLowPower(enabled) {
+      const val = !!enabled;
+      lowPowerEnabled.value = val;
+      store.perfLiteMode = val;
+      document.documentElement.classList.toggle("cs-low-power", val);
+      try {
+        localStorage.setItem("cs_low_power", val ? "true" : "false");
+        localStorage.setItem("cs_perf_mode", val ? "true" : "false");
+      } catch (e) {}
+      addToast(val ? "Low-Power Mode enabled" : "Low-Power Mode disabled", "info");
+    }
+
     function toggleUi2(enabled) {
       store.ui2Enabled = !!enabled;
       try {
@@ -15396,6 +15453,8 @@ const SettingsPage = {
     }
 
     return {
+      lowPowerEnabled,
+      toggleLowPower,
       toggleUi2,
       toggleSeasonalBanners,
       toggleSeasonalEffects,
@@ -33320,3 +33379,70 @@ app.component("fix-match-modal", FixMatchModal);
 app.component("wrapped-story-modal", WrappedStoryModal);
 app.use(router);
 app.mount("#app");
+
+// Smooth proximity snap between .content-row sections without rigid native CSS snap hitching
+(function initSmoothRowSnap() {
+  let timer = null;
+  let rafId = 0;
+
+  function cancelAnim() {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    if (timer) { clearTimeout(timer); timer = null; }
+  }
+
+  function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function smoothScrollToY(targetY, duration = 340) {
+    const startY = window.scrollY;
+    const diff = targetY - startY;
+    if (Math.abs(diff) < 3) return;
+    const startTime = performance.now();
+    function step(now) {
+      const p = Math.min(1, (now - startTime) / duration);
+      window.scrollTo({ top: startY + diff * easeOutCubic(p), behavior: "instant" });
+      if (p < 1) rafId = requestAnimationFrame(step);
+      else rafId = 0;
+    }
+    rafId = requestAnimationFrame(step);
+  }
+
+  function snapNearestRow() {
+    if (document.documentElement.classList.contains("cs-low-power")) return;
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const rows = document.querySelectorAll(".content-row");
+    if (!rows.length) return;
+    const navH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--nav-height")) || 76;
+    const anchor = navH + 12;
+    let bestTop = null;
+    let bestDist = 140; // proximity threshold in px
+    for (const row of rows) {
+      const rect = row.getBoundingClientRect();
+      const dist = Math.abs(rect.top - anchor);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestTop = window.scrollY + rect.top - anchor;
+      }
+    }
+    if (bestTop !== null && bestTop >= 0) {
+      smoothScrollToY(bestTop);
+    }
+  }
+
+  window.addEventListener("wheel", cancelAnim, { passive: true });
+  window.addEventListener("touchstart", cancelAnim, { passive: true });
+  window.addEventListener("scroll", () => {
+    if (rafId) return;
+    clearTimeout(timer);
+    timer = setTimeout(snapNearestRow, 140);
+  }, { passive: true });
+})();
+
+// Suppress default browser/WebView2 context menu on empty space while preserving text input copy/paste
+document.addEventListener("contextmenu", (e) => {
+  if (e.defaultPrevented) return;
+  if (e.target && e.target.closest && e.target.closest("input, textarea, [contenteditable]")) return;
+  e.preventDefault();
+  if (typeof closeGlobalContextMenu === "function") closeGlobalContextMenu();
+});

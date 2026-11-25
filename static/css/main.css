@@ -536,7 +536,7 @@
 html {
   scroll-behavior: smooth;
   overflow-x: hidden;
-  scroll-snap-type: y proximity;
+  scroll-padding-top: calc(var(--nav-height) + 12px);
 }
 
 body {

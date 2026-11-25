@@ -9,6 +9,8 @@ use tao::{
     window::{Fullscreen, Icon, WindowBuilder},
 };
 use wry::{WebContext, WebViewBuilder};
+#[cfg(target_os = "windows")]
+use wry::WebViewBuilderExtWindows;
 
 fn parse_arg(args: &[String], flag: &str, default: &str) -> String {
     args.windows(2)
@@ -51,7 +53,7 @@ fn main() -> wry::Result<()> {
         .expect("Failed to create CapsStream window");
 
     let mut web_context = WebContext::new(Some(data_dir()));
-    let _webview = WebViewBuilder::with_web_context(&mut web_context)
+    let builder = WebViewBuilder::with_web_context(&mut web_context)
         .with_url(&url)
         .with_background_color((5, 5, 8, 255))
         .with_autoplay(true)
@@ -65,8 +67,12 @@ fn main() -> wry::Result<()> {
                     .spawn();
                 false
             }
-        })
-        .build(&window)?;
+        });
+    #[cfg(target_os = "windows")]
+    let builder = builder.with_additional_browser_args(
+        "--enable-features=PlatformHEVCDecoderSupport --autoplay-policy=no-user-gesture-required",
+    );
+    let _webview = builder.build(&window)?;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
