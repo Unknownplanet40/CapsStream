@@ -51,7 +51,7 @@
           <!-- Floating Pill Nav -->
           <header class="ui2-nav-wrap" v-if="!isSystemRoute">
             <a class="ui2-brand" href="#/" @click.prevent="navigate('home')">
-              <span class="ui2-brand-mark">C</span>
+              <img src="/static/img/new-logo.png" alt="" width="24" height="24" style="width:24px;height:24px;border-radius:7px;object-fit:cover" />
               <span class="ui2-brand-word">CapsStream</span>
             </a>
 

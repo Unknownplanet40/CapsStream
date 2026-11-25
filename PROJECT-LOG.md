@@ -465,3 +465,15 @@ Fixed `antislop` hard gates across `templates/index.html`, `static/css/main.css`
 - Committed `d162970` and pushed to `origin/main` (triggering `v2.90.0.0` auto-release and `Build Desktop Rust Viewer`).
 
 ---
+## November 25 at 8:19 PM
+### Asked
+Fix `BASE_DIR` `NameError` in `silent_launcher.py`, commit, and push to `origin/main`.
+
+### Decision
+Replaced undefined `BASE_DIR` with `ROOT` in `find_rust_viewer_exe()` within `silent_launcher.py`, rebased onto `origin/main` (`3d0cba7`, `v2.90.0.0`), and pushed `8009009`.
+>why: `silent_launcher.py` defines `ROOT` for the application directory rather than `BASE_DIR`.
+
+### Shipped
+- Fixed `find_rust_viewer_exe()` in `silent_launcher.py` (`8009009`), rebased onto `v2.90.0.0`, and pushed to `origin/main` (next auto-release: `v2.90.1.0`).
+
+---

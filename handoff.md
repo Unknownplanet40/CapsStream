@@ -5,9 +5,9 @@ Audit CapsStream UI with `antislop`, establish design direction (`DESIGN.md`), a
 
 ## 2. Current State
 - **Branch:** `main`
-- **Pushed Commit Hash:** `d162970` (`feat(ui): add Low-Power Mode, gzip compression, Rust desktop viewer, and accessibility fixes`)
-- **Push Status:** Pushed to `origin/main`.
-- **Release CI:** `Semantic Version Auto Release` (`v2.90.0.0`), `Build Desktop Rust Viewer`, and `CI` triggered on push.
+- **Pushed Commit Hash:** `8009009` (`fix(launcher): use ROOT instead of undefined BASE_DIR in find_rust_viewer_exe`)
+- **Push Status:** Pushed to `origin/main` (`3d0cba7..8009009`).
+- **Release CI:** `Semantic Version Auto Release` (`v2.90.1.0` patch bump) triggered on push to `main`.
 - **Server Running Status:** Server idle / ready.
 
 ## 3. Active Files

@@ -190,11 +190,40 @@ jobs:
           git tag "v${NEW_VER}"
           git push origin "v${NEW_VER}"
 
-  # ── Job 2: build the code-only zip and publish the GitHub Release.
+  # ── Job 2: build the Windows Rust WebView2 desktop viewer.
+  build-desktop-viewer:
+    needs: semantic-bump
+    if: needs.semantic-bump.outputs.skip != 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.semantic-bump.outputs.new_version }}
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/desktop-rust
+
+      - name: Build Desktop Viewer
+        working-directory: clients/desktop-rust
+        run: cargo build --release
+
+      - name: Upload Viewer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: capsstream-viewer-exe
+          path: clients/desktop-rust/target/release/capsstream-viewer.exe
+
+  # ── Job 3: build the code-only zip and publish the GitHub Release.
   #           Runs in the SAME workflow (GITHUB_TOKEN tag pushes can't
   #           trigger other workflows, so this must live here).
   release:
-    needs: semantic-bump
+    needs: [semantic-bump, build-desktop-viewer]
     if: needs.semantic-bump.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
@@ -202,6 +231,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: v${{ needs.semantic-bump.outputs.new_version }}
+
+      - name: Download Desktop Viewer Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: capsstream-viewer-exe
+          path: .
 
       - name: Verify VERSION matches the tag
         shell: bash
@@ -228,6 +263,7 @@ jobs:
             update.bat \
             silent_launcher.py \
             "Start CapsStream Silent.vbs" \
+            capsstream-viewer.exe \
             VERSION \
             backend \
             routes \
@@ -312,5 +348,6 @@ jobs:
           generate_release_notes: true
           files: |
             ${{ env.ZIP }}
+            capsstream-viewer.exe
             CapsStream-AndroidTV*.apk
             sha256sums.txt

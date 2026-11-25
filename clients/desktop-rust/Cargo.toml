@@ -7,6 +7,9 @@ edition = "2021"
 tao = "0.30"
 wry = "0.47"
 
+[build-dependencies]
+winresource = "0.1"
+
 [profile.release]
 opt-level = "z"
 lto = true
