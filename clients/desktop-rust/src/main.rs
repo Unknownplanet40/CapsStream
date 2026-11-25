@@ -6,7 +6,7 @@ use tao::{
     event::{Event, KeyEvent, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     keyboard::KeyCode,
-    window::{Fullscreen, WindowBuilder},
+    window::{Fullscreen, Icon, WindowBuilder},
 };
 use wry::{WebContext, WebViewBuilder};
 
@@ -42,8 +42,10 @@ fn main() -> wry::Result<()> {
     let title = parse_arg(&args, "--title", "CapsStream");
 
     let event_loop = EventLoop::new();
+    let window_icon = Icon::from_rgba(include_bytes!("icon_32.rgba").to_vec(), 32, 32).ok();
     let window = WindowBuilder::new()
         .with_title(&title)
+        .with_window_icon(window_icon)
         .with_maximized(true)
         .build(&event_loop)
         .expect("Failed to create CapsStream window");

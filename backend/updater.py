@@ -66,7 +66,7 @@ RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 # Top-level entries an update package may contain
 ALLOWED_FILES = {
     "app.py", "requirements.txt", "start.bat", "update.bat", "VERSION",
-    "silent_launcher.py", "Start CapsStream Silent.vbs",
+    "silent_launcher.py", "Start CapsStream Silent.vbs", "capsstream-viewer.exe",
 }
 ALLOWED_DIRS = ("backend", "routes", "static", "templates")
 

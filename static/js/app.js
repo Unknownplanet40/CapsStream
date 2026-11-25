@@ -29832,7 +29832,7 @@ const App = {
       <nav class="navbar" :class="{ scrolled: navScrolled }" v-if="showNav && !isTvLayout" id="navbar">
         <div class="navbar-island">
           <div class="nav-logo" @click="router.push('/')" id="nav-logo">
-            <img src="/static/img/favicon.png" alt="CapsStream Logo" class="app-logo-img">
+            <img src="/static/img/new-logo.png" alt="CapsStream Logo" class="app-logo-img">
             <span>CapsStream</span>
           </div>
 

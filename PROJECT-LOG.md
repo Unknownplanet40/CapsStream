@@ -477,3 +477,16 @@ Replaced undefined `BASE_DIR` with `ROOT` in `find_rust_viewer_exe()` within `si
 - Fixed `find_rust_viewer_exe()` in `silent_launcher.py` (`8009009`), rebased onto `v2.90.0.0`, and pushed to `origin/main` (next auto-release: `v2.90.1.0`).
 
 ---
+## November 25 at 8:37 PM
+### Asked
+Embed CapsStream icon into `capsstream-viewer.exe`, bundle it in auto-release update zips, regenerate all icons from `static/img/new-logo.png`, commit, and push.
+
+### Decision
+Added `winresource` (`clients/desktop-rust/Cargo.toml`, `clients/desktop-rust/build.rs`) to embed `static/img/favicon.ico`, added a `build-desktop-viewer` job to `.github/workflows/auto-release.yml` that bundles `capsstream-viewer.exe` inside `CapsStream-update-${NEW_VER}.zip` and release assets, regenerated all PNG/ICO icons from `static/img/new-logo.png`, and updated `static/ui2/ui2.js`.
+>why: Ensures existing installs receive `capsstream-viewer.exe` automatically via in-app updates with the new CapsStream icon across Explorer, taskbar, PWA, and UI 2.0.
+
+### Shipped
+- Updated `clients/desktop-rust/Cargo.toml`, `clients/desktop-rust/build.rs`, `.github/workflows/auto-release.yml`, `static/ui2/ui2.js`, and all derived icons under `static/img/`.
+- Committed `51f76f4` and pushed to `origin/main` (triggering `v2.91.0.0`).
+
+---
