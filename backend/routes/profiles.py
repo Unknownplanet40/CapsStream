@@ -23,6 +23,7 @@ from backend.db import (
     delete_profile, reorder_profiles, verify_pin_raw, hash_pin,
     get_totp_state, save_totp_secret, activate_totp, clear_totp_secret,
     accept_totp_step, replace_totp_recovery_codes, consume_totp_recovery_code,
+    set_profile_explicit_gate,
 )
 
 profiles_bp = Blueprint("profiles", __name__)
@@ -137,6 +138,27 @@ def api_create_profile():
         "default_speed": default_speed
     }), 201
 
+
+
+@profiles_bp.route("/api/profiles/<int:profile_id>/explicit-gate", methods=["POST"])
+def api_set_explicit_gate(profile_id):
+    active_pid = current_profile()
+    if not is_admin() and active_pid != profile_id:
+        return jsonify({"error": "Permission denied"}), 403
+    data = request.json or {}
+    enabled = bool(data["enabled"]) if "enabled" in data else None
+    categories = data.get("categories") if isinstance(data.get("categories"), list) else None
+    set_profile_explicit_gate(profile_id, enabled=enabled, categories=categories)
+    prof = get_profile(profile_id)
+    if not prof:
+        return jsonify({"error": "Profile not found"}), 404
+    san = sanitize_profile(prof)
+    return jsonify({
+        "ok": True,
+        "explicit_gate_enabled": san["explicit_gate_enabled"],
+        "content_warning_categories": san["content_warning_categories"],
+        "profile": san,
+    })
 
 
 @profiles_bp.route("/api/profiles/<int:profile_id>", methods=["PUT"])

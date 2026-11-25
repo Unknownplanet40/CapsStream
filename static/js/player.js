@@ -1288,6 +1288,32 @@ const PlayerPage = {
         </div>
       </div>
 
+      <!-- Explicit / Sexual Content Gate Modal -->
+      <div v-if="showExplicitGateModal" class="modal-backdrop" style="z-index:2000;backdrop-filter:blur(22px);background:rgba(5,5,8,0.92)" @click.stop>
+        <div class="resume-modal-card" role="dialog" aria-modal="true" aria-label="Explicit Content Warning" style="max-width:460px;text-align:center" @click.stop>
+          <div class="resume-badge" style="background:rgba(239,68,68,0.16);color:#f87171;border-color:rgba(239,68,68,0.35);margin-bottom:12px">
+            <i class="ph-bold ph-warning"></i> CONTENT WARNING
+          </div>
+          <div class="resume-card-heading">Viewer Discretion Advised</div>
+          <p class="resume-card-sub" style="margin-bottom:1rem">
+            This media may contain explicit, violent, flashing, or mature content.
+          </p>
+          <div v-if="explicitGateReasons.length" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:1.25rem">
+            <span v-for="(r, idx) in explicitGateReasons" :key="idx" style="font-size:0.76rem;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.14);color:#fff">
+              {{ r }}
+            </span>
+          </div>
+          <div class="resume-card-actions">
+            <button class="btn btn-primary btn-full" @click="confirmExplicitGate" id="btn-player-explicit-continue" autoFocus>
+              I Understand, Continue
+            </button>
+            <button class="btn btn-secondary btn-full" @click="cancelExplicitGate" id="btn-player-explicit-back">
+              Go Back
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Netflix-Style Floating Bottom-Right Next Episode / Sequel Card -->
       <transition name="fade">
         <div v-if="(showCreditsShrink || isEnded) && hasNextEp && !creditsShrinkDismissed" class="next-ep-floating-card" :class="{ 'controls-hidden': controlsHidden }" @click.stop>
@@ -7694,6 +7720,23 @@ const PlayerPage = {
           return;
         }
 
+        // Explicit / Sexual Content Gate (skip only if already acknowledged on Media Details)
+        const ack = window.__csExplicitAck;
+        const ackedFromDetails = ack && (Date.now() - ack.ts < 15000) && (
+          String(ack.id) === String(mediaId) ||
+          (ack.tmdb_id && String(ack.tmdb_id) === String(media.value?.tmdb_id))
+        );
+        if (ack) window.__csExplicitAck = null;
+        if (store.profile?.explicit_gate_enabled !== false && media.value?.explicit_warning?.is_explicit && !ackedFromDetails) {
+          explicitGateApproved = false;
+          explicitGateReasons.value = media.value.explicit_warning.reasons || [];
+          await new Promise((resolve) => {
+            explicitGateResolve = resolve;
+            showExplicitGateModal.value = true;
+          });
+          if (!explicitGateApproved) return;
+        }
+
         // Wait for quality options to finish loading so fallback options are available
         try { await qualityOptionsPromise; } catch (e) {}
 
@@ -8240,6 +8283,24 @@ const PlayerPage = {
       },
     );
 
+    const showExplicitGateModal = ref(false);
+    const explicitGateReasons = ref([]);
+    let explicitGateResolve = null;
+    let explicitGateApproved = false;
+
+    function confirmExplicitGate() {
+      explicitGateApproved = true;
+      showExplicitGateModal.value = false;
+      if (explicitGateResolve) { const r = explicitGateResolve; explicitGateResolve = null; r(); }
+    }
+
+    function cancelExplicitGate() {
+      explicitGateApproved = false;
+      showExplicitGateModal.value = false;
+      if (explicitGateResolve) { const r = explicitGateResolve; explicitGateResolve = null; r(); }
+      goBack();
+    }
+
     return {
       store,
       videoRef,
@@ -8374,6 +8435,10 @@ const PlayerPage = {
       goHome,
       playNext,
       showResumeModal,
+      showExplicitGateModal,
+      explicitGateReasons,
+      confirmExplicitGate,
+      cancelExplicitGate,
       showHevcConvertModal,
       confirmHevcConversion,
       retryHevcOriginal,

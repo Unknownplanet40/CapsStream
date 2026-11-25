@@ -296,6 +296,17 @@ def init_db():
         if "totp_last_step" not in pcols:
             conn.execute("ALTER TABLE profiles ADD COLUMN totp_last_step INTEGER DEFAULT -1")
             print("[DB] Migrated: added totp_last_step column to profiles")
+        if "explicit_gate_enabled" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN explicit_gate_enabled INTEGER DEFAULT 1")
+            print("[DB] Migrated: added explicit_gate_enabled column to profiles")
+        if "content_warning_categories" not in pcols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN content_warning_categories TEXT DEFAULT '[\"explicit\",\"violence\",\"flashing\",\"self_harm\",\"substance\",\"profanity\"]'")
+            print("[DB] Migrated: added content_warning_categories column to profiles")
+
+        mcols = [r["name"] for r in conn.execute("PRAGMA table_info(media)").fetchall()]
+        if "is_explicit" not in mcols:
+            conn.execute("ALTER TABLE media ADD COLUMN is_explicit INTEGER DEFAULT 0")
+            print("[DB] Migrated: added is_explicit column to media")
 
         # Guarantee at least one admin profile exists if profiles exist
         conn.execute("""

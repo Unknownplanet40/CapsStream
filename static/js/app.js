@@ -5829,6 +5829,32 @@ const DetailPage = {
   components: { MediaCard, TrailerModal },
   template: `
     <div class="detail-page" v-if="media" @mousemove="onMouseMove">
+      <!-- Explicit / Sexual Content Gate Modal -->
+      <div v-if="showExplicitGate" class="modal-backdrop" style="z-index:2000;backdrop-filter:blur(22px);background:rgba(5,5,8,0.9)" @click.stop>
+        <div class="resume-modal-card" role="dialog" aria-modal="true" aria-label="Explicit Content Warning" style="max-width:460px;text-align:center" @click.stop>
+          <div class="resume-badge" style="background:rgba(239,68,68,0.16);color:#f87171;border-color:rgba(239,68,68,0.35);margin-bottom:12px">
+            <i class="ph-bold ph-warning"></i> CONTENT WARNING
+          </div>
+          <h2 style="margin:0 0 10px;font-size:1.35rem;font-weight:800">Viewer Discretion Advised</h2>
+          <p style="color:var(--text-secondary);font-size:0.92rem;line-height:1.55;margin:0 0 14px">
+            This media may contain explicit, violent, flashing, or mature content.
+          </p>
+          <div v-if="explicitGateReasons.length" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:18px">
+            <span v-for="(r, idx) in explicitGateReasons" :key="idx" style="font-size:0.76rem;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.14);color:var(--text-primary)">
+              {{ r }}
+            </span>
+          </div>
+          <div class="resume-card-actions">
+            <button class="btn btn-primary btn-full" @click="confirmExplicitGate" id="btn-detail-explicit-continue">
+              I Understand, Continue
+            </button>
+            <button class="btn btn-secondary btn-full" @click="cancelExplicitGate" id="btn-detail-explicit-back">
+              Go Back
+            </button>
+          </div>
+        </div>
+      </div>
+
       <trailer-modal
         v-if="trailerModalUrl"
         :url="trailerModalUrl"
@@ -5937,6 +5963,18 @@ const DetailPage = {
               Multi-Audio
             </span>
             <span
+              v-if="mediaCodecBadge"
+              :title="mediaCodecBadge.title"
+              style="font-size:0.75rem;font-weight:700;padding:3px 10px;border-radius:999px;border:1px solid;"
+              :style="{
+                background: mediaCodecBadge.isTranscode ? 'rgba(245,158,11,0.16)' : 'rgba(34,197,94,0.16)',
+                borderColor: mediaCodecBadge.isTranscode ? 'rgba(245,158,11,0.4)' : 'rgba(34,197,94,0.4)',
+                color: mediaCodecBadge.isTranscode ? '#fbbf24' : '#4ade80'
+              }"
+            >
+              {{ mediaCodecBadge.label }}
+            </span>
+            <span
               class="subtitles-meta-badge"
               :class="{ 'has-subs': hasSubtitlesAvailable, 'no-subs': !hasSubtitlesAvailable }"
               @click="openSubtitlesModal(media)"
@@ -6036,6 +6074,10 @@ const DetailPage = {
               <button class="detail-action-circle" @click="openWatchTogetherModal" id="detail-wt-btn" title="Watch Together">
                 <div class="detail-action-icon"><i class="ph-fill ph-users-three" style="color:#c4b5fd"></i></div>
                 <span class="detail-action-label" style="color:#c4b5fd">Watch Together</span>
+              </button>
+              <button v-if="!store.profile?.is_kids" class="detail-action-circle" @click="toggleExplicitFlag" id="detail-explicit-btn" :title="media.explicit_warning?.is_explicit ? 'Marked Explicit (click to toggle)' : 'Mark as Explicit Content'">
+                <div class="detail-action-icon"><i :class="media.is_explicit ? 'ph-fill ph-warning-circle' : 'ph ph-warning-circle'" :style="{ color: media.is_explicit ? '#f87171' : 'inherit' }"></i></div>
+                <span class="detail-action-label">{{ media.is_explicit ? 'Explicit' : 'Flag 18+' }}</span>
               </button>
               <button v-if="!store.profile?.is_kids" class="detail-action-circle" @click="recacheInfo" :disabled="recaching" id="detail-recache-btn" :title="recaching ? 'Re-caching...' : 'Re-cache'">
                 <div class="detail-action-icon"><i :class="recaching ? 'ph ph-circle-notch' : 'ph ph-database'" :style="{ animation: recaching ? 'spin 1s linear infinite' : 'none' }"></i></div>
@@ -6685,6 +6727,18 @@ const DetailPage = {
                       </span>
                     </div>
                     <div class="episode-card-actions">
+                      <span
+                        v-if="ep.is_local !== false && ep.file_path"
+                        :title="getCodecPlaybackBadge(ep).title"
+                        style="font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid;"
+                        :style="{
+                          background: getCodecPlaybackBadge(ep).isTranscode ? 'rgba(245,158,11,0.14)' : 'rgba(34,197,94,0.14)',
+                          borderColor: getCodecPlaybackBadge(ep).isTranscode ? 'rgba(245,158,11,0.35)' : 'rgba(34,197,94,0.35)',
+                          color: getCodecPlaybackBadge(ep).isTranscode ? '#fbbf24' : '#4ade80'
+                        }"
+                      >
+                        {{ getCodecPlaybackBadge(ep).isTranscode ? 'Transcode' : 'Direct' }}
+                      </span>
                       <div class="episode-card-runtime" v-if="ep.duration">
                         {{ formatDuration(ep.duration) }}
                       </div>
@@ -7549,6 +7603,15 @@ const DetailPage = {
 
         // Check if user was navigated back due to repeated player recovery failures
         checkPlaybackRecoveryFailure(loadedMedia);
+
+        // Explicit / Sexual Content Gate (ask on each Detail visit if enabled for profile)
+        explicitGateDismissed.value = false;
+        if (store.profile?.explicit_gate_enabled !== false && loadedMedia?.explicit_warning?.is_explicit) {
+          explicitGateReasons.value = loadedMedia.explicit_warning.reasons || [];
+          showExplicitGate.value = true;
+        } else {
+          showExplicitGate.value = false;
+        }
       } catch (e) {
         if (!media.value) {
           media.value = null;
@@ -7874,6 +7937,79 @@ const DetailPage = {
       return parts[parts.length - 1].toUpperCase();
     }
 
+    const showExplicitGate = ref(false);
+    const explicitGateReasons = ref([]);
+    const explicitGateDismissed = ref(false);
+
+    function confirmExplicitGate() {
+      explicitGateDismissed.value = true;
+      showExplicitGate.value = false;
+    }
+
+    function cancelExplicitGate() {
+      showExplicitGate.value = false;
+      const prev = router.options?.history?.state?.back || "";
+      if (typeof prev === "string" && prev.startsWith("/watch")) {
+        router.push("/");
+      } else {
+        router.back();
+      }
+    }
+
+    async function toggleExplicitFlag() {
+      if (!media.value) return;
+      const targetId = media.value.id || media.value.seasons?.[sortedSeasons.value[0]]?.[0]?.id;
+      if (!targetId) return;
+      const nextVal = !media.value.is_explicit;
+      try {
+        const res = await API.post(`/api/media/${targetId}/explicit`, { is_explicit: nextVal });
+        media.value.is_explicit = res.is_explicit ? 1 : 0;
+        media.value.explicit_warning = res.explicit_warning;
+        addToast(res.is_explicit ? "Marked as explicit content" : "Removed manual explicit flag", "info");
+      } catch (e) {
+        addToast("Failed to update explicit content flag", "error");
+      }
+    }
+
+    let _hevcSupportedCache = null;
+    function browserSupportsHevc() {
+      if (_hevcSupportedCache !== null) return _hevcSupportedCache;
+      try {
+        const v = document.createElement("video");
+        _hevcSupportedCache = !!(
+          v.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"') ||
+          v.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"')
+        );
+      } catch (e) {
+        _hevcSupportedCache = false;
+      }
+      return _hevcSupportedCache;
+    }
+
+    function getCodecPlaybackBadge(item) {
+      if (!item) return { label: "Direct Play", isTranscode: false, title: "Plays natively without transcoding" };
+      const curOpt = (item.quality_options || []).find((q) => q.is_current) || {};
+      const str = `${curOpt.resolution || ""} ${curOpt.display_label || ""} ${item.file_path || ""}`.toLowerCase();
+      if (/\.(avi|wmv|flv|ts|vob|m2ts)$/i.test(item.file_path || "")) {
+        return { label: "Transcode", isTranscode: true, title: "Container requires server transcoding" };
+      }
+      if (/x265|hevc|h\.265|10bit|10-bit/.test(str) && !browserSupportsHevc()) {
+        return { label: "Transcode (HEVC)", isTranscode: true, title: "HEVC/x265 may require transcoding in this browser" };
+      }
+      if (/4k|2160p|uhd/.test(str)) {
+        return { label: "4K Direct", isTranscode: false, title: "4K stream (auto-switches if hardware unsupported)" };
+      }
+      return { label: "Direct Play", isTranscode: false, title: "Plays natively without server transcoding" };
+    }
+
+    const mediaCodecBadge = computed(() => {
+      if (!media.value) return null;
+      if (media.value.type === "movie") return getCodecPlaybackBadge(media.value);
+      const seasonEps = media.value.seasons?.[activeSeason.value] || [];
+      const firstLocal = seasonEps.find((e) => e.is_local !== false && e.file_path);
+      return firstLocal ? getCodecPlaybackBadge(firstLocal) : null;
+    });
+
     function playMedia() {
       if (!media.value) return;
       if (media.value.is_mounted === false) {
@@ -7882,11 +8018,17 @@ const DetailPage = {
         return;
       }
       if (media.value.type === "movie") {
+        if (explicitGateDismissed.value) {
+          window.__csExplicitAck = { id: media.value.id, tmdb_id: media.value.tmdb_id, ts: Date.now() };
+        }
         playWith4KCheck(media.value, `/watch/${media.value.id}`, router);
       } else {
         const seasonEps = media.value.seasons?.[activeSeason.value] || [];
         const playableEp = seasonEps.find((e) => e.is_local !== false && e.is_mounted !== false);
         if (playableEp) {
+          if (explicitGateDismissed.value) {
+            window.__csExplicitAck = { id: playableEp.id, tmdb_id: media.value.tmdb_id, ts: Date.now() };
+          }
           playWith4KCheck(playableEp, `/watch/${playableEp.id}`, router);
         } else {
           const d = media.value.drive_letter ? `[${media.value.drive_letter}] ` : "";
@@ -7941,6 +8083,9 @@ const DetailPage = {
         const d = ep.drive_letter ? `[${ep.drive_letter}] ` : "";
         addToast(`Source drive ${d}is not connected. Reconnect drive to play this episode.`, "warning");
         return;
+      }
+      if (explicitGateDismissed.value) {
+        window.__csExplicitAck = { id: ep.id, tmdb_id: media.value?.tmdb_id, ts: Date.now() };
       }
       playWith4KCheck(ep, `/watch/${ep.id}`, router);
     }
@@ -8429,6 +8574,13 @@ const DetailPage = {
       calcProgressPercent,
       playMedia,
       playEpisode,
+      getCodecPlaybackBadge,
+      mediaCodecBadge,
+      showExplicitGate,
+      explicitGateReasons,
+      confirmExplicitGate,
+      cancelExplicitGate,
+      toggleExplicitFlag,
       toggleFav,
       browseGenre,
       inCollection,
@@ -10219,6 +10371,41 @@ const SettingsPage = {
           </div>
           <div class="settings-group">
             <!-- New UI 2.0 Opt-In Toggle -->
+            <!-- Content Warning Gate Toggle (Per Profile) -->
+            <div v-if="store.profile" class="settings-card-container" id="setting-explicit-gate-toggle" style="margin-bottom: 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-inner, 10px); overflow: hidden;">
+              <div class="settings-row" style="align-items: center; padding: 14px 18px; gap: 20px;">
+                <div class="settings-label-container" style="flex: 1; min-width: 0;">
+                  <div class="settings-label" style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.95rem;">
+                    <i class="ph-bold ph-warning-circle" style="color: #f87171; font-size: 1.15rem;"></i>
+                    <span>Content Warning Gate</span>
+                  </div>
+                  <div class="settings-desc" style="margin-top: 4px; color: var(--text-muted); font-size: 0.82rem; line-height: 1.4;">
+                    Show a warning before viewing details or playing flagged titles (for this profile).
+                  </div>
+                </div>
+                <label class="toggle-switch" style="flex-shrink: 0;">
+                  <input type="checkbox" :checked="store.profile?.explicit_gate_enabled !== false" @change="toggleExplicitGate($event.target.checked)" id="toggle-explicit-gate-enabled" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div v-if="store.profile?.explicit_gate_enabled !== false" style="padding: 0 18px 14px; display: flex; flex-wrap: wrap; gap: 8px;">
+                <button
+                  v-for="cat in warningCategoryOptions"
+                  :key="cat.id"
+                  type="button"
+                  @click="toggleWarningCategory(cat.id)"
+                  style="font-size: 0.78rem; font-weight: 600; padding: 5px 12px; border-radius: 999px; cursor: pointer; border: 1px solid;"
+                  :style="{
+                    background: isWarningCatEnabled(cat.id) ? 'rgba(229, 9, 20, 0.22)' : 'rgba(255, 255, 255, 0.04)',
+                    borderColor: isWarningCatEnabled(cat.id) ? 'rgba(229, 9, 20, 0.65)' : 'rgba(255, 255, 255, 0.14)',
+                    color: isWarningCatEnabled(cat.id) ? '#fff' : 'var(--text-muted)'
+                  }"
+                >
+                  {{ cat.label }}
+                </button>
+              </div>
+            </div>
+
             <!-- Low-Power Mode Toggle -->
             <div class="settings-card-container" id="setting-low-power-toggle" style="margin-bottom: 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-inner, 10px); overflow: hidden;">
               <div class="settings-row" style="align-items: center; padding: 14px 18px; gap: 20px;">
@@ -10233,6 +10420,25 @@ const SettingsPage = {
                 </div>
                 <label class="toggle-switch" style="flex-shrink: 0;">
                   <input type="checkbox" :checked="lowPowerEnabled" @change="toggleLowPower($event.target.checked)" id="toggle-low-power-enabled" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <!-- External Drive Keep-Alive Toggle -->
+            <div class="settings-card-container" id="setting-drive-keepalive-toggle" style="margin-bottom: 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-inner, 10px); overflow: hidden;">
+              <div class="settings-row" style="align-items: center; padding: 14px 18px; gap: 20px;">
+                <div class="settings-label-container" style="flex: 1; min-width: 0;">
+                  <div class="settings-label" style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.95rem;">
+                    <i class="ph-bold ph-hard-drive" style="color: #38bdf8; font-size: 1.15rem;"></i>
+                    <span>External Drive Keep-Alive</span>
+                  </div>
+                  <div class="settings-desc" style="margin-top: 4px; color: var(--text-muted); font-size: 0.82rem; line-height: 1.4;">
+                    Lightly pings external USB media drives every 4 minutes while CapsStream is open to prevent drive spin-down delays.
+                  </div>
+                </div>
+                <label class="toggle-switch" style="flex-shrink: 0;">
+                  <input type="checkbox" :checked="driveKeepAliveEnabled" @change="toggleDriveKeepAlive($event.target.checked)" id="toggle-drive-keepalive-enabled" />
                   <span class="toggle-slider"></span>
                 </label>
               </div>
@@ -15425,6 +15631,65 @@ const SettingsPage = {
       } catch (e) {}
     }
 
+    const warningCategoryOptions = [
+      { id: "explicit", label: "Explicit / Sexual" },
+      { id: "violence", label: "Violence & Gore" },
+      { id: "flashing", label: "Flashing Lights" },
+      { id: "self_harm", label: "Self-Harm" },
+      { id: "substance", label: "Substance Abuse" },
+      { id: "profanity", label: "Strong Language" },
+    ];
+
+    function isWarningCatEnabled(catId) {
+      const cats = store.profile?.content_warning_categories;
+      if (!Array.isArray(cats)) return true;
+      return cats.includes(catId);
+    }
+
+    async function toggleWarningCategory(catId) {
+      if (!store.profile) return;
+      const cur = Array.isArray(store.profile.content_warning_categories)
+        ? [...store.profile.content_warning_categories]
+        : warningCategoryOptions.map((c) => c.id);
+      const idx = cur.indexOf(catId);
+      if (idx >= 0) cur.splice(idx, 1);
+      else cur.push(catId);
+      try {
+        const res = await API.post(`/api/profiles/${store.profile.id}/explicit-gate`, { categories: cur });
+        if (res && res.profile) store.profile = { ...store.profile, ...res.profile };
+        else store.profile.content_warning_categories = cur;
+      } catch (e) {
+        addToast("Failed to update warning categories", "error");
+      }
+    }
+
+    async function toggleExplicitGate(enabled) {
+      if (!store.profile) return;
+      const val = !!enabled;
+      try {
+        const res = await API.post(`/api/profiles/${store.profile.id}/explicit-gate`, { enabled: val });
+        if (res && res.profile) {
+          store.profile = { ...store.profile, ...res.profile };
+        } else {
+          store.profile.explicit_gate_enabled = val;
+        }
+        addToast(val ? "Explicit content gate enabled for this profile" : "Explicit content gate disabled for this profile", "info");
+      } catch (e) {
+        addToast("Failed to update explicit content gate setting", "error");
+      }
+    }
+
+    const driveKeepAliveEnabled = ref(
+      typeof localStorage === "undefined" || localStorage.getItem("cs_drive_keepalive") !== "false"
+    );
+
+    function toggleDriveKeepAlive(enabled) {
+      const val = !!enabled;
+      driveKeepAliveEnabled.value = val;
+      try { localStorage.setItem("cs_drive_keepalive", val ? "true" : "false"); } catch (e) {}
+      addToast(val ? "External Drive Keep-Alive enabled" : "External Drive Keep-Alive disabled", "info");
+    }
+
     const lowPowerEnabled = ref(
       typeof localStorage !== "undefined" && localStorage.getItem("cs_low_power") === "true"
     );
@@ -15453,6 +15718,12 @@ const SettingsPage = {
     }
 
     return {
+      driveKeepAliveEnabled,
+      toggleDriveKeepAlive,
+      warningCategoryOptions,
+      isWarningCatEnabled,
+      toggleWarningCategory,
+      toggleExplicitGate,
       lowPowerEnabled,
       toggleLowPower,
       toggleUi2,
@@ -33446,3 +33717,16 @@ document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
   if (typeof closeGlobalContextMenu === "function") closeGlobalContextMenu();
 });
+
+// External Drive Keep-Alive: ping external media roots every 4 minutes while app is open
+(function initExternalDriveKeepAlive() {
+  function pingDrives() {
+    try {
+      if (localStorage.getItem("cs_drive_keepalive") === "false") return;
+      if (document.visibilityState === "hidden") return;
+      fetch("/api/system/drives-keepalive", { method: "POST" }).catch(() => {});
+    } catch (e) {}
+  }
+  setTimeout(pingDrives, 5000);
+  setInterval(pingDrives, 4 * 60 * 1000);
+})();

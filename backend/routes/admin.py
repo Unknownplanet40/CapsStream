@@ -1060,6 +1060,33 @@ def api_system_validate_paths():
     return jsonify(results)
 
 
+@admin_bp.route("/api/system/drives-keepalive", methods=["POST"])
+def api_system_drives_keepalive():
+    """Lightweight read-only stat ping on mounted external media roots to prevent USB HDD spin-down."""
+    from backend.settings import load_config
+    cfg = load_config()
+    media_paths = cfg.get("media_paths", {})
+    seen_drives = set()
+    pinged = []
+    for paths in media_paths.values():
+        if not isinstance(paths, list):
+            continue
+        for p in paths:
+            if not p or not os.path.isdir(p):
+                continue
+            drive = os.path.splitdrive(os.path.abspath(p))[0].upper()
+            if not drive or drive == "C:" or drive in seen_drives:
+                continue
+            seen_drives.add(drive)
+            try:
+                with os.scandir(p) as it:
+                    next(it, None)
+                pinged.append(drive)
+            except Exception:
+                pass
+    return jsonify({"ok": True, "pinged_drives": pinged})
+
+
 @admin_bp.route("/api/system/drives-status", methods=["GET"])
 def api_system_drives_status():
     """

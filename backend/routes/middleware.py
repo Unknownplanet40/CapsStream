@@ -312,6 +312,20 @@ def kids_guard_media(media, deep=True):
     return None
 
 
+def _parse_warning_categories(raw):
+    default = ["explicit", "violence", "flashing", "self_harm", "substance", "profanity"]
+    if not raw:
+        return default
+    if isinstance(raw, list):
+        return raw
+    try:
+        import json as _json
+        parsed = _json.loads(raw)
+        return parsed if isinstance(parsed, list) else default
+    except Exception:
+        return default
+
+
 def sanitize_profile(profile):
     if not profile:
         return None
@@ -336,4 +350,6 @@ def sanitize_profile(profile):
         "totp_enabled": bool(profile.get("totp_secret")),
         "has_completed_tour": bool(profile.get("has_completed_tour", 0)),
         "default_speed": float(profile.get("default_speed", 1.0) or 1.0),
+        "explicit_gate_enabled": bool(profile.get("explicit_gate_enabled", 1) if profile.get("explicit_gate_enabled") is not None else True),
+        "content_warning_categories": _parse_warning_categories(profile.get("content_warning_categories")),
     }

@@ -98,6 +98,30 @@
                   </label>
                 </div>
 
+                <div v-if="store.profile" style="padding:12px 0;border-top:1px solid var(--ui2-border)">
+                  <div style="display:flex;align-items:center;justify-content:space-between">
+                    <div>
+                      <div>Content Warning Gate</div>
+                      <div style="font-size:0.78rem;color:var(--ui2-text-muted)">Warn before viewing or playing flagged titles (per profile)</div>
+                    </div>
+                    <label class="toggle-switch">
+                      <input type="checkbox" :checked="store.profile?.explicit_gate_enabled !== false" @change="setExplicitGate($event.target.checked)" />
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                  <div v-if="store.profile?.explicit_gate_enabled !== false" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+                    <button
+                      v-for="cat in warningCategories"
+                      :key="cat.id"
+                      class="ui2-chip"
+                      :class="{ active: isWarningCatActive(cat.id) }"
+                      @click="toggleWarningCat(cat.id)"
+                    >
+                      {{ cat.label }}
+                    </button>
+                  </div>
+                </div>
+
                 <div style="padding:12px 0;border-top:1px solid var(--ui2-border)">
                   <div style="display:flex;justify-content:space-between;margin-bottom:8px">
                     <span>Background intensity</span>
@@ -189,10 +213,53 @@
         ui2State.ambientEnabled = !!val;
         try { localStorage.setItem("cs_ui2_bg_show", val ? "true" : "false"); } catch (e) {}
       }
+      const warningCategories = [
+        { id: "explicit", label: "Explicit / Sexual" },
+        { id: "violence", label: "Violence & Gore" },
+        { id: "flashing", label: "Flashing Lights" },
+        { id: "self_harm", label: "Self-Harm" },
+        { id: "substance", label: "Substance Abuse" },
+        { id: "profanity", label: "Strong Language" },
+      ];
+      function isWarningCatActive(id) {
+        const cats = store.profile?.content_warning_categories;
+        return !Array.isArray(cats) || cats.includes(id);
+      }
+      async function toggleWarningCat(id) {
+        if (!store.profile) return;
+        const cur = Array.isArray(store.profile.content_warning_categories)
+          ? [...store.profile.content_warning_categories]
+          : warningCategories.map((c) => c.id);
+        const idx = cur.indexOf(id);
+        if (idx >= 0) cur.splice(idx, 1);
+        else cur.push(id);
+        try {
+          const res = await fetch(`/api/profiles/${store.profile.id}/explicit-gate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ categories: cur }),
+          }).then((r) => r.json());
+          if (res && res.profile) store.profile = { ...store.profile, ...res.profile };
+          else store.profile.content_warning_categories = cur;
+        } catch (e) {}
+      }
+
       function setLowPower(val) {
         ui2State.lowPower = !!val;
         document.documentElement.classList.toggle("cs-low-power", !!val);
         try { localStorage.setItem("cs_low_power", val ? "true" : "false"); } catch (e) {}
+      }
+      async function setExplicitGate(val) {
+        if (!store.profile) return;
+        try {
+          const res = await fetch(`/api/profiles/${store.profile.id}/explicit-gate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled: !!val }),
+          }).then((r) => r.json());
+          if (res && res.profile) store.profile = { ...store.profile, ...res.profile };
+          else store.profile.explicit_gate_enabled = !!val;
+        } catch (e) {}
       }
       function setIntensity(val) {
         ui2State.ambientIntensity = Number(val);
@@ -206,7 +273,7 @@
 
       return {
         ui2State, store, activeSection, selectedTheme, quality, accentColor,
-        sections, themes, backgrounds, toggleUi2, setBgPreset, setShowBg, setLowPower, setIntensity, openClassicSettings,
+        sections, themes, backgrounds, warningCategories, isWarningCatActive, toggleWarningCat, toggleUi2, setBgPreset, setShowBg, setLowPower, setExplicitGate, setIntensity, openClassicSettings,
       };
     },
   };

@@ -3,6 +3,7 @@
 routes/media.py — Home, library, media detail, search, genres, kids overrides.
 """
 import json
+import re
 import threading
 import os
 import base64
@@ -645,6 +646,7 @@ def api_media_detail(media_id):
         media["has_theme_music"] = False
         media["theme_music_url"] = None
 
+    media["explicit_warning"] = evaluate_explicit_content(media)
     return jsonify(media)
 
 
@@ -950,7 +952,147 @@ def api_show_detail(tmdb_id):
         show["has_theme_music"] = False
         show["theme_music_url"] = None
 
+    show["explicit_warning"] = evaluate_explicit_content(show)
     return jsonify(show)
+
+
+_EXPLICIT_CERTIFICATIONS = frozenset({"NC-17", "TV-MA", "X", "XXX", "R", "18", "18+", "MA15+"})
+_EXPLICIT_KEYWORDS_RE = re.compile(
+    r"\b(erotic|erotica|nudity|nude|sexual|sexuality|explicit|nsfw|porn|hentai|ecchi|uncensored)\b",
+    re.IGNORECASE,
+)
+_VIOLENCE_KEYWORDS_RE = re.compile(
+    r"\b(gore|bloodshed|torture|brutal|graphic violence|slaughter|dismemberment|massacre)\b",
+    re.IGNORECASE,
+)
+_FLASHING_KEYWORDS_RE = re.compile(
+    r"\b(strobe|flashing lights|epilepsy|photosensitive|seizure)\b",
+    re.IGNORECASE,
+)
+_SELF_HARM_KEYWORDS_RE = re.compile(
+    r"\b(suicide|self-harm|self harm|suicidal)\b",
+    re.IGNORECASE,
+)
+_SUBSTANCE_KEYWORDS_RE = re.compile(
+    r"\b(drug abuse|drugs|narcotics|cocaine|heroin|meth|addiction|overdose|alcoholism)\b",
+    re.IGNORECASE,
+)
+_PROFANITY_KEYWORDS_RE = re.compile(
+    r"\b(profanity|strong language|vulgar|explicit language)\b",
+    re.IGNORECASE,
+)
+_DEFAULT_WARNING_CATEGORIES = ("explicit", "violence", "flashing", "self_harm", "substance", "profanity")
+
+
+def _active_warning_categories():
+    try:
+        pid = current_profile()
+        if pid:
+            from backend.db import get_profile
+            from .middleware import _parse_warning_categories
+            prof = get_profile(pid)
+            if prof:
+                return set(_parse_warning_categories(prof.get("content_warning_categories")))
+    except Exception:
+        pass
+    return set(_DEFAULT_WARNING_CATEGORIES)
+
+
+def evaluate_explicit_content(media, enabled_categories=None):
+    """Evaluate whether a media item should trigger the content warning gate."""
+    if not media:
+        return {"is_explicit": False, "reasons": [], "categories": []}
+    enabled = set(enabled_categories) if enabled_categories is not None else _active_warning_categories()
+    reasons = []
+    categories = []
+
+    cert = str(media.get("certification") or "").strip().upper()
+    blob = " ".join(
+        str(media.get(k) or "")
+        for k in ("genres", "title", "overview", "tagline", "file_path")
+    )
+
+    if "explicit" in enabled:
+        exp_hit = False
+        if media.get("is_explicit"):
+            reasons.append("Marked as explicit")
+            exp_hit = True
+        is_adult = bool(media.get("adult"))
+        if not is_adult and media.get("tmdb_id"):
+            try:
+                from backend.matcher import _load_cache
+                kind = "tv" if media.get("type") in ("series", "anime", "tv") else "movie"
+                cached = _load_cache(kind, media["tmdb_id"])
+                if cached and cached.get("adult"):
+                    is_adult = True
+            except Exception:
+                pass
+        if is_adult:
+            reasons.append("Adult content (18+)")
+            exp_hit = True
+        if cert in _EXPLICIT_CERTIFICATIONS:
+            reasons.append(f"Rated {cert}")
+            exp_hit = True
+        if _EXPLICIT_KEYWORDS_RE.search(blob):
+            reasons.append("Sexual or explicit themes")
+            exp_hit = True
+        if exp_hit:
+            categories.append("explicit")
+
+    if "violence" in enabled:
+        genres_low = str(media.get("genres") or "").lower()
+        mature_violence = cert in _EXPLICIT_CERTIFICATIONS and any(
+            g in genres_low for g in ("horror", "war", "crime", "thriller")
+        )
+        if mature_violence or _VIOLENCE_KEYWORDS_RE.search(blob):
+            reasons.append("Violence & Gore")
+            categories.append("violence")
+
+    if "flashing" in enabled and _FLASHING_KEYWORDS_RE.search(blob):
+        reasons.append("Flashing Lights")
+        categories.append("flashing")
+
+    if "self_harm" in enabled and _SELF_HARM_KEYWORDS_RE.search(blob):
+        reasons.append("Self-Harm / Mental Health")
+        categories.append("self_harm")
+
+    if "substance" in enabled and _SUBSTANCE_KEYWORDS_RE.search(blob):
+        reasons.append("Substance Abuse")
+        categories.append("substance")
+
+    if "profanity" in enabled and (_PROFANITY_KEYWORDS_RE.search(blob) or cert in ("TV-MA", "R", "NC-17")):
+        reasons.append("Strong Language")
+        categories.append("profanity")
+
+    return {"is_explicit": len(reasons) > 0, "reasons": reasons, "categories": categories}
+
+
+@media_bp.route("/api/media/<int:media_id>/explicit", methods=["POST"])
+def api_set_media_explicit(media_id):
+    media = get_media_by_id(media_id)
+    if not media:
+        return jsonify({"error": "Not found"}), 404
+    data = request.json or {}
+    val = 1 if data.get("is_explicit") else 0
+    from backend.db import get_conn
+    conn = get_conn()
+    try:
+        if media.get("tmdb_id"):
+            conn.execute(
+                "UPDATE media SET is_explicit=? WHERE tmdb_id=? AND type=?",
+                (val, media["tmdb_id"], media.get("type", "movie")),
+            )
+        else:
+            conn.execute("UPDATE media SET is_explicit=? WHERE id=?", (val, media_id))
+        conn.commit()
+    finally:
+        conn.close()
+    media["is_explicit"] = val
+    return jsonify({
+        "ok": True,
+        "is_explicit": bool(val),
+        "explicit_warning": evaluate_explicit_content(media),
+    })
 
 
 @media_bp.route("/api/search", methods=["GET"])

@@ -529,3 +529,15 @@ Added `PRAGMA busy_timeout=30000` in `backend/db/connection.py` and moved `durat
 - Committed `3c899e1` and pushed to `origin/main` (next auto-release: `v2.91.3.0`).
 
 ---
+## November 25 at 10:49 PM
+### Asked
+Prevent `silent_launcher.py` from opening a second `capsstream-viewer.exe` window after an in-app update restart, commit, and push.
+
+### Decision
+Added `"capsstream-viewer"` to `known_browsers` inside `is_capsstream_title()` in `silent_launcher.py`, verified with `py_compile` and unit assertion, rebased onto `origin/main` (`55bba21`, `v2.91.3.0`), and pushed `7bb7655`.
+>why: `is_capsstream_title()` previously only matched Edge/Chrome/Firefox/etc., so `--restarted` failed to detect an already-open `capsstream-viewer.exe` window and spawned a duplicate.
+
+### Shipped
+- Updated `silent_launcher.py` (`7bb7655`) and pushed to `origin/main` (next auto-release: `v2.91.4.0`).
+
+---

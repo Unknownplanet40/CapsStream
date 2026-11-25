@@ -16,6 +16,8 @@ def get_all_profiles():
             "maturity_rating, blocked_genres, default_audio_lang, default_sub_lang, position, auto_lock_minutes, "
             "daily_limit_minutes, bedtime_curfew, COALESCE(has_completed_tour, 0) as has_completed_tour, "
             "COALESCE(default_speed, 1.0) as default_speed, "
+            "COALESCE(explicit_gate_enabled, 1) as explicit_gate_enabled, "
+            "COALESCE(content_warning_categories, '[\"explicit\",\"violence\",\"flashing\",\"self_harm\",\"substance\",\"profanity\"]') as content_warning_categories, "
             "(CASE WHEN totp_secret IS NOT NULL AND totp_secret != '' THEN 1 ELSE 0 END) as totp_enabled, "
             "(CASE WHEN pin_hash IS NOT NULL AND pin_hash != '' THEN 1 ELSE 0 END) as has_pin, created_at "
             "FROM profiles ORDER BY position ASC, id ASC"
@@ -59,6 +61,8 @@ def get_all_profiles():
         d.setdefault("totp_enabled", 0)
         d.setdefault("has_completed_tour", 0)
         d.setdefault("default_speed", 1.0)
+        d.setdefault("explicit_gate_enabled", 1)
+        d.setdefault("content_warning_categories", '["explicit","violence","flashing","self_harm","substance","profanity"]')
         d.setdefault("position", 0)
         d.setdefault("auto_lock_minutes", 0)
         d.setdefault("daily_limit_minutes", 0)
@@ -77,6 +81,24 @@ def get_profile(profile_id):
     row = conn.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def set_profile_explicit_gate(profile_id, enabled=None, categories=None):
+    conn = get_conn()
+    try:
+        if enabled is not None:
+            conn.execute(
+                "UPDATE profiles SET explicit_gate_enabled=? WHERE id=?",
+                (1 if enabled else 0, profile_id),
+            )
+        if categories is not None:
+            conn.execute(
+                "UPDATE profiles SET content_warning_categories=? WHERE id=?",
+                (json.dumps(list(categories)), profile_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_totp_state(profile_id):

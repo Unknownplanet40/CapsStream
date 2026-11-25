@@ -57,6 +57,7 @@ from .media import (
 from .profiles import (
     get_all_profiles,
     get_profile,
+    set_profile_explicit_gate,
     create_profile,
     update_profile,
     reorder_profiles,
@@ -190,6 +191,7 @@ __all__ = [
     "get_media_needing_recache",
     "get_all_profiles",
     "get_profile",
+    "set_profile_explicit_gate",
     "create_profile",
     "update_profile",
     "reorder_profiles",

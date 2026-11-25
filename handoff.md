@@ -5,9 +5,9 @@ Audit CapsStream UI with `antislop`, establish design direction (`DESIGN.md`), a
 
 ## 2. Current State
 - **Branch:** `main`
-- **Pushed Commit Hash:** `3c899e1` (`fix(db,media): prevent SQLite lock stalls on GET /api/media/<id>`)
-- **Push Status:** Pushed to `origin/main` (`2b4c715..3c899e1`).
-- **Release CI:** `Semantic Version Auto Release` (`v2.91.3.0` patch bump) triggered on push to `main`.
+- **Pushed Commit Hash:** `7bb7655` (`fix(launcher): recognize capsstream-viewer to prevent duplicate windows on restart`)
+- **Push Status:** Pushed to `origin/main` (`55bba21..7bb7655`).
+- **Release CI:** `Semantic Version Auto Release` (`v2.91.4.0` patch bump) triggered on push to `main`.
 - **Server Running Status:** Server idle / ready.
 
 ## 3. Active Files
