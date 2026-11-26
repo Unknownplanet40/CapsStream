@@ -4,13 +4,36 @@ use std::env;
 use std::path::PathBuf;
 use tao::{
     event::{Event, KeyEvent, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event_loop::{ControlFlow, EventLoopBuilder},
     keyboard::KeyCode,
-    window::{Fullscreen, Icon, WindowBuilder},
+    window::{Fullscreen, Icon, Window, WindowBuilder},
 };
 use wry::{WebContext, WebViewBuilder};
 #[cfg(target_os = "windows")]
 use wry::WebViewBuilderExtWindows;
+
+#[derive(Debug, Clone, Copy)]
+enum UserEvent {
+    SetFullscreen(bool),
+}
+
+fn apply_fullscreen(window: &Window, enter: bool, was_maximized: &mut bool) {
+    let currently_fs = window.fullscreen().is_some();
+    if enter == currently_fs {
+        return;
+    }
+    if enter {
+        *was_maximized = window.is_maximized();
+        window.set_decorations(false);
+        window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+    } else {
+        window.set_fullscreen(None);
+        window.set_decorations(true);
+        if *was_maximized {
+            window.set_maximized(true);
+        }
+    }
+}
 
 fn parse_arg(args: &[String], flag: &str, default: &str) -> String {
     args.windows(2)
@@ -43,7 +66,8 @@ fn main() -> wry::Result<()> {
     let url = parse_arg(&args, "--url", "http://127.0.0.1:8000");
     let title = parse_arg(&args, "--title", "CapsStream");
 
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+    let proxy = event_loop.create_proxy();
     let window_icon = Icon::from_rgba(include_bytes!("icon_32.rgba").to_vec(), 32, 32).ok();
     let window = WindowBuilder::new()
         .with_title(&title)
@@ -57,6 +81,21 @@ fn main() -> wry::Result<()> {
         .with_url(&url)
         .with_background_color((5, 5, 8, 255))
         .with_autoplay(true)
+        .with_initialization_script(
+            "document.addEventListener('fullscreenchange', function () {\
+                if (window.ipc && window.ipc.postMessage) {\
+                    window.ipc.postMessage(document.fullscreenElement ? 'fs:1' : 'fs:0');\
+                }\
+            });",
+        )
+        .with_ipc_handler(move |req| {
+            let body = req.body().as_str();
+            if body == "fs:1" {
+                let _ = proxy.send_event(UserEvent::SetFullscreen(true));
+            } else if body == "fs:0" {
+                let _ = proxy.send_event(UserEvent::SetFullscreen(false));
+            }
+        })
         .with_navigation_handler(|nav_url| {
             if is_local_url(&nav_url) || nav_url.starts_with("blob:") || nav_url.starts_with("data:") {
                 true
@@ -74,20 +113,25 @@ fn main() -> wry::Result<()> {
     );
     let _webview = builder.build(&window)?;
 
+    let mut was_maximized = true;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
-        if let Event::WindowEvent { event, .. } = event {
-            match event {
+        match event {
+            Event::UserEvent(UserEvent::SetFullscreen(enter)) => {
+                apply_fullscreen(&window, enter, &mut was_maximized);
+            }
+            Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 WindowEvent::KeyboardInput {
                     event: KeyEvent { physical_key: KeyCode::F11, state: tao::event::ElementState::Pressed, repeat: false, .. },
                     ..
                 } => {
-                    let is_fs = window.fullscreen().is_some();
-                    window.set_fullscreen(if is_fs { None } else { Some(Fullscreen::Borderless(None)) });
+                    let enter = window.fullscreen().is_none();
+                    apply_fullscreen(&window, enter, &mut was_maximized);
                 }
                 _ => {}
-            }
+            },
+            _ => {}
         }
     });
 }
