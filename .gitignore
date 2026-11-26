@@ -47,3 +47,11 @@ opencode.json
 clients/desktop-rust/target/
 webview2_profile/
 capsstream-viewer.exe
+GEMINI.md
+handoff.md
+PROJECT-LOG.md
+DESIGN.md
+.gemini/
+docs/bug-fix-workflow.md
+docs/feature-workflow.md
+docs/ui-workflow.md
