@@ -622,7 +622,7 @@ def build_destination_path(resolved_item: Dict[str, Any], library_roots: Dict[st
     Supports local region destination routing for Movies and TV (Anime is always untouched).
     """
     media_type = resolved_item["media_type"]
-    title = resolved_item["canonical_title"]
+    title = sanitize_filename(resolved_item["canonical_title"])
     year = resolved_item.get("year")
     ext = resolved_item["extension"]
     is_local = bool(resolved_item.get("is_local"))

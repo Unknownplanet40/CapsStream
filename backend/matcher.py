@@ -73,8 +73,10 @@ def _clean_name(name):
     # Strip bracketed metadata like [Multi-audio] or [TGx]
     clean = re.sub(r'\[.*?\]', '', clean)
 
-    # Strip S01, S02, S1, S2, Season 1, Season.01, 1x02, Complete series indicators from folder/filenames
-    clean = re.sub(r'[\.\[\(\s_\-](?:[Ss]eason[\. _\-]?(?:\d{1,2}|[Cc]omplete)|[Ss]\d{1,2}(?:[\s._-]*[Ee]\d{1,3})?|\d{1,2}[xX]\d{1,3}|[Ee][Pp]?\d{1,3}|[Cc]omplete(?:\.?[Ss]eries)?).*$', '', clean, flags=re.IGNORECASE)
+    # Strip S01, S02, S1, S2, Season 1, Season.01, 1x02, Episode 01, Complete series indicators from folder/filenames
+    clean = re.sub(r'[\.\[\(\s_\-](?:[Ss]eason[\. _\-]?(?:\d{1,2}|[Cc]omplete)|[Ss]\d{1,2}(?:[\s._-]*[Ee]\d{1,3})?|\d{1,2}[xX]\d{1,3}|[Ee][Pp][\s._-]*\d{1,3}|[Ee]\d{1,3}|[Cc]omplete(?:\.?[Ss]eries)?).*$', '', clean, flags=re.IGNORECASE)
+    if not re.search(r'\bstar[\s._-]*wars.*?episode', clean, re.IGNORECASE):
+        clean = re.sub(r'[\.\[\(\s_\-][Ee]pisode[\s._-]*\d{1,3}.*$', '', clean, flags=re.IGNORECASE)
 
     # Strip year and everything after
     clean = re.sub(r'[\.\[\(\s_\-](19|20)\d{2}.*$', '', clean, flags=re.IGNORECASE)
@@ -639,10 +641,19 @@ def match_show(folder_name, media_type="series"):
     best = None
     best_score = 0
 
+    norm_title = re.sub(r'[^\w\s]', '', title).strip()
     for r in results[:5]:
         r_title = r.get("name", "")
         r_orig  = r.get("original_name", "")
-        score = max(_similarity(title, r_title), _similarity(title, r_orig))
+        sim = max(
+            _similarity(title, r_title),
+            _similarity(title, r_orig),
+            _similarity(norm_title, re.sub(r'[^\w\s]', '', r_title).strip()),
+            _similarity(norm_title, re.sub(r'[^\w\s]', '', r_orig).strip()),
+        )
+        # Prefer well-known shows when titles are effectively identical after punctuation
+        votes = r.get("vote_count") or 0
+        score = sim + min(0.10, votes / 5000.0 * 0.10)
         if score > best_score:
             best_score = score
             best = r

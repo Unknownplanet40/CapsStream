@@ -5,9 +5,9 @@ Audit CapsStream UI with `antislop`, establish design direction (`DESIGN.md`), a
 
 ## 2. Current State
 - **Branch:** `main`
-- **Pushed Commit Hash:** `bcad686` (`feat(ui,media,admin): add Content Warning Gate, Drive Keep-Alive, and Smart Codec Badges`)
-- **Push Status:** Pushed to `origin/main` (`41da27c..bcad686`).
-- **Release CI:** `Semantic Version Auto Release` (`v2.92.0.0` minor bump) triggered on push to `main`.
+- **Pushed Commit Hash:** `581992f` (`fix(db,ui,launcher): fix SQLite request teardown/commit, add transparent profile color, and fix toast launch`)
+- **Push Status:** Pushed to `origin/main` (`d1bd431..581992f`).
+- **Release CI:** `Semantic Version Auto Release` (`v2.92.1.0` patch bump) triggered on push to `main`.
 - **Server Running Status:** Server idle / ready.
 
 ## 3. Active Files

@@ -239,6 +239,25 @@ class TestOrganizer(unittest.TestCase):
         self.assertEqual(res_anime["media_type"], "anime")
         self.assertEqual(res_anime["episode"], 28)
 
+        # Explicit "Episode N" naming should strip episode suffix from show title
+        res_ep = classify_media_file(os.path.join(self.incoming_dir, "She Hulk Attorney at Law Episode 1.mp4"))
+        self.assertEqual(res_ep["media_type"], "tv")
+        self.assertEqual(res_ep["title"], "She Hulk Attorney at Law")
+        self.assertEqual(res_ep["season"], 1)
+        self.assertEqual(res_ep["episode"], 1)
+
+        # build_destination_path must sanitize illegal Windows characters like '?' from manual overrides
+        dst = build_destination_path({
+            "media_type": "tv",
+            "canonical_title": "What If...?",
+            "year": 2021,
+            "season": 3,
+            "episode": 8,
+            "extension": ".mkv",
+        }, self.lib_roots)
+        self.assertNotIn("?", dst)
+        self.assertIn("What If...", dst)
+
     def test_tmdb_multi_search_disambiguation(self):
         """Verify resolve_canonical_item uses TMDb search/multi to accurately resolve titles and types."""
         from unittest.mock import patch, MagicMock

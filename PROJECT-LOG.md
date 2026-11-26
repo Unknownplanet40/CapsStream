@@ -555,3 +555,17 @@ Added `explicit_gate_enabled` and `content_warning_categories` (`explicit`, `vio
 - Committed `bcad686` and pushed to `origin/main` (next auto-release: `v2.92.0.0`).
 
 ---
+## November 26 at 1:07 AM
+### Asked
+Add `transparent` profile color swatch (and hide outlines), fix profile edit not persisting, and make toast `Open CapsStream` launch the standalone viewer, commit, and push.
+
+### Decision
+Added `release_conn(exc)` in `_teardown_db_conn()` (`app.py`) and wired `_RequestConnProxy.commit()` (`backend/db/connection.py`) so per-request SQLite writes commit and release cleanly; added `"transparent"` swatch and outline-free avatar styles in `static/js/app.js`; registered `capsstream://open` protocol in `silent_launcher.py`.
+>why: `_teardown_db_conn` previously imported `release_conn` without calling it and `_RequestConnProxy.commit` was a no-op, dropping profile edits and causing SQLite write-lock contention.
+
+### Shipped
+- Updated `app.py`, `backend/db/connection.py`, `static/js/app.js`, and `silent_launcher.py`.
+- Verified `9 passed` (`test_route_profiles.py`), `Persisted transparent OK!`, `app.js syntax OK`, and `protocol uri: capsstream://open`.
+- Committed `581992f` and pushed to `origin/main` (next auto-release: `v2.92.1.0`).
+
+---
